@@ -19,18 +19,10 @@
 			IClasspathEntry rawEntry = classpathEntries[i];
 
 			/* validation if needed */
-			IMarker marker = null;
-			if (generateMarkerOnError) {
-				IJavaModelStatus status =
-					JavaConventions.validateClasspathEntry(this, rawEntry, false);
-				if (!status.isOK()) {
-					String incompleteCPOption = this.getOption(JavaCore.CORE_INCOMPLETE_CLASSPATH, true);
-					marker = createClasspathProblemMarker(
-						status.getMessage(), 
-						JavaCore.ERROR.equals(incompleteCPOption) ? IMarker.SEVERITY_ERROR : IMarker.SEVERITY_WARNING,
-						false,
-						false);
-				}
+			IJavaModelStatus status = null;
+			if (generateMarkerOnError || !ignoreUnresolvedEntry) {
+				status = JavaConventions.validateClasspathEntry(this, rawEntry, false);
+				if (generateMarkerOnError && !status.isOK()) createClasspathProblemMarker(status);
 			}
 
 			switch (rawEntry.getEntryKind()){
@@ -39,18 +31,7 @@
 				
 					IClasspathEntry resolvedEntry = JavaCore.getResolvedClasspathEntry(rawEntry);
 					if (resolvedEntry == null) {
-						if (marker != null) {
-							try {
-								marker.setAttribute(IJavaModelMarker.UNBOUND_VARIABLE, rawEntry.getPath().segment(0));
-							} catch(CoreException e) {
-							}
-						}
-						if (!ignoreUnresolvedEntry) {
-							throw new JavaModelException(
-								new JavaModelStatus(
-									IJavaModelStatusConstants.CP_VARIABLE_PATH_UNBOUND,
-									rawEntry.getPath().toString()));
-						}
+						if (!ignoreUnresolvedEntry) throw new JavaModelException(status);
 					} else {
 						resolvedEntries.add(resolvedEntry);
 					}
@@ -60,19 +41,7 @@
 				
 					IClasspathContainer container = JavaCore.getClasspathContainer(rawEntry.getPath(), this);
 					if (container == null){
-						// unbound container
-						if (marker != null) {
-							try {
-								marker.setAttribute(IJavaModelMarker.UNBOUND_CONTAINER, rawEntry.getPath().makeRelative().toString());
-							} catch(CoreException e) {
-							}
-						}
-						if (!ignoreUnresolvedEntry) {
-							throw new JavaModelException(
-								new JavaModelStatus(
-									IJavaModelStatusConstants.CP_CONTAINER_PATH_UNBOUND,
-									rawEntry.getPath().toString()));
-						}
+						if (!ignoreUnresolvedEntry) throw new JavaModelException(status);
 						break;
 					}
 
@@ -81,33 +50,21 @@
 
 					// container was bound
 					for (int j = 0, containerLength = containerEntries.length; j < containerLength; j++){
-						IClasspathEntry containerRawEntry = containerEntries[j];
+						IClasspathEntry cEntry = containerEntries[j];
 						
 						if (generateMarkerOnError) {
-							IJavaModelStatus status =
-								JavaConventions.validateClasspathEntry(this, containerRawEntry, false);
-							if (!status.isOK()) {
-								String incompleteCPOption = this.getOption(JavaCore.CORE_INCOMPLETE_CLASSPATH, true);
-								createClasspathProblemMarker(
-									status.getMessage(), 
-									JavaCore.ERROR.equals(incompleteCPOption) ? IMarker.SEVERITY_ERROR : IMarker.SEVERITY_WARNING,
-									false,
-									false);
-						}
+							IJavaModelStatus containerStatus = JavaConventions.validateClasspathEntry(this, cEntry, false);
+							if (!containerStatus.isOK()) createClasspathProblemMarker(containerStatus);
 						}
 						// if container is exported, then its nested entries must in turn be exported  (21749)
 						if (rawEntry.isExported()){
-							containerRawEntry = new ClasspathEntry(
-								containerRawEntry.getContentKind(),
-								containerRawEntry.getEntryKind(), 
-								containerRawEntry.getPath(),
-								containerRawEntry.getExclusionPatterns(),
-								containerRawEntry.getSourceAttachmentPath(),
-								containerRawEntry.getSourceAttachmentRootPath(),
-								containerRawEntry.getOutputLocation(),
+							cEntry = new ClasspathEntry(cEntry.getContentKind(),
+								cEntry.getEntryKind(), cEntry.getPath(),
+								cEntry.getExclusionPatterns(), cEntry.getSourceAttachmentPath(),
+								cEntry.getSourceAttachmentRootPath(), cEntry.getOutputLocation(), 
 								true); // duplicate container entry for tagging it as exported
 						}
-						resolvedEntries.add(containerRawEntry);
+						resolvedEntries.add(cEntry);
 					}
 					break;
 										
