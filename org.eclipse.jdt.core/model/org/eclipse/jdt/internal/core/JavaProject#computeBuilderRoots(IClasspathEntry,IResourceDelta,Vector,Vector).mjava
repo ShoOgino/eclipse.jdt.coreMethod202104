@@ -1,0 +1,63 @@
+	private void computeBuilderRoots(IClasspathEntry entry, IResourceDelta delta, Vector visitedProjects, Vector accumulatedRoots)
+		throws JavaModelException {
+
+		IResource res;
+		IJavaProject project;
+
+		switch (entry.getEntryKind()) {
+
+			case IClasspathEntry.CPE_LIBRARY :
+				IPackageFragmentRoot[] roots = this.getPackageFragmentRoots(entry);
+				if (roots.length > 0)
+					accumulatedRoots.add(roots[0]);
+				break;
+
+			case IClasspathEntry.CPE_PROJECT :
+				// other project contributions are formed of their binary output, augmented
+				// with their exported classpath entries
+				res = retrieveResource(entry.getPath(), delta);
+				if (res != null) {
+					project = (IJavaProject) JavaCore.create(res);
+					if (project.isOpen()) {
+						
+						// output location comes first
+						res = retrieveResource(project.getOutputLocation(), delta);
+						if (res != null) {
+							PackageFragmentRoot root =
+								(PackageFragmentRoot) project.getPackageFragmentRoot(res);
+							root.setOccurrenceCount(root.getOccurrenceCount() + 1);
+							((PackageFragmentRootInfo) root.getElementInfo()).setRootKind(
+								IPackageFragmentRoot.K_BINARY);
+							root.refreshChildren();
+							accumulatedRoots.add(root);
+						}
+
+						// exported entries
+						((JavaProject)project).computeBuilderRoots(true, delta, visitedProjects, accumulatedRoots);
+					}
+				}
+				break;
+				
+			case IClasspathEntry.CPE_SOURCE :
+				if (getCorrespondingResource().getFullPath().isPrefixOf(entry.getPath())) {
+					res = retrieveResource(entry.getPath(), delta);
+					if (res != null)
+						accumulatedRoots.add(getPackageFragmentRoot(res));
+				} else {
+					IProject proj = (IProject) getWorkspace().getRoot().findMember(entry.getPath());
+					project = (IJavaProject) JavaCore.create(proj);
+					if (proj.isOpen()) {
+						res = retrieveResource(project.getOutputLocation(), delta);
+						PackageFragmentRoot root =
+							(PackageFragmentRoot) project.getPackageFragmentRoot(res);
+						root.setOccurrenceCount(root.getOccurrenceCount() + 1);
+						((PackageFragmentRootInfo) root.getElementInfo()).setRootKind(
+							IPackageFragmentRoot.K_BINARY);
+						root.refreshChildren();
+						accumulatedRoots.add(root);
+					}
+				}
+				break;
+		}
+	}
+

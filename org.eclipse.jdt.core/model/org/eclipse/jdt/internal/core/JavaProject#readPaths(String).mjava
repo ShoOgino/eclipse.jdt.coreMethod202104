@@ -5,54 +5,114 @@
 	 * @exception IOException if the stream cannot be read 
 	 */
 	protected IClasspathEntry[] readPaths(String xmlClasspath) throws IOException {
-		IPath projectPath= getProject().getFullPath();
+
+		IPath projectPath = getProject().getFullPath();
 		StringReader reader = new StringReader(xmlClasspath);
 		Element cpElement;
+
 		try {
-			DocumentBuilder parser = DocumentBuilderFactory.newInstance().newDocumentBuilder();
+			DocumentBuilder parser =
+				DocumentBuilderFactory.newInstance().newDocumentBuilder();
 			cpElement = parser.parse(new InputSource(reader)).getDocumentElement();
-		} catch(SAXException e) {
+		} catch (SAXException e) {
 			throw new IOException(Util.bind("file.badFormat")); //$NON-NLS-1$
-		} catch(ParserConfigurationException e){
+		} catch (ParserConfigurationException e) {
 			reader.close();
 			throw new IOException(Util.bind("file.badFormat")); //$NON-NLS-1$
 		} finally {
 			reader.close();
 		}
+
 		if (!cpElement.getNodeName().equalsIgnoreCase("classpath")) { //$NON-NLS-1$
 			throw new IOException(Util.bind("file.badFormat")); //$NON-NLS-1$
 		}
-		NodeList list= cpElement.getChildNodes();
-		Vector paths= new Vector();
-		int length= list.getLength();
-		for (int i= 0; i < length; ++i) {
-			Node node= list.item(i);
-			short type= node.getNodeType();
+		NodeList list = cpElement.getChildNodes();
+		Vector paths = new Vector();
+		int length = list.getLength();
+
+		for (int i = 0; i < length; ++i) {
+			Node node = list.item(i);
+			short type = node.getNodeType();
 			if (type == Node.ELEMENT_NODE) {
-				Element cpeElement= (Element) node;
-				if (cpeElement.getNodeName().equalsIgnoreCase("classpathentry")) { //$NON-NLS-1$
+				Element cpeElement = (Element) node;
+
+				if (cpeElement.getNodeName().equalsIgnoreCase("classpathentry")) {
+					//$NON-NLS-1$
 					String cpeElementKind = cpeElement.getAttribute("kind"); //$NON-NLS-1$
 					String pathStr = cpeElement.getAttribute("path"); //$NON-NLS-1$
 					// ensure path is absolute
-					IPath path= new Path(pathStr);
-					int kind= kindFromString(cpeElementKind);
+					IPath path = new Path(pathStr);
+					int kind = kindFromString(cpeElementKind);
 					if (kind != IClasspathEntry.CPE_VARIABLE && !path.isAbsolute()) {
-						path= projectPath.append(path);
+						path = projectPath.append(path);
 					}
 					// source attachment info (optional)
-					String sourceAttachmentPathStr = cpeElement.getAttribute("sourcepath"); //$NON-NLS-1$
-					IPath sourceAttachmentPath = sourceAttachmentPathStr.equals("") ? null : new Path(sourceAttachmentPathStr); //$NON-NLS-1$
+					String sourceAttachmentPathStr = cpeElement.getAttribute("sourcepath");	//$NON-NLS-1$
+					IPath sourceAttachmentPath =
+						sourceAttachmentPathStr.equals("") ? null : new Path(sourceAttachmentPathStr); //$NON-NLS-1$
 					String sourceAttachmentRootPathStr = cpeElement.getAttribute("rootpath"); //$NON-NLS-1$
-					IPath sourceAttachmentRootPath = sourceAttachmentRootPathStr.equals("") ? null : new Path(sourceAttachmentRootPathStr); //$NON-NLS-1$
+					IPath sourceAttachmentRootPath =
+						sourceAttachmentRootPathStr.equals("") //$NON-NLS-1$
+							? null
+							: new Path(sourceAttachmentRootPathStr);
 					
-					IClasspathEntry entry= createClasspathEntry(path, kind, sourceAttachmentPath, sourceAttachmentRootPath);
-					if (entry == null) return null;
-					paths.addElement(entry);
+					// exported flag
+					boolean isExported = cpeElement.getAttribute("exported").equals("true"); //$NON-NLS-1$ //$NON-NLS-2$
+
+					// recreate the CP entry
+					switch (kind) {
+			
+						case IClasspathEntry.CPE_PROJECT :
+							if (!path.isAbsolute()) return null;
+							paths.addElement(JavaCore.newProjectEntry(path, isExported));
+							break;
+							
+						case IClasspathEntry.CPE_LIBRARY :
+							if (!path.isAbsolute()) return null;
+							paths.addElement(JavaCore.newLibraryEntry(
+															path,
+															sourceAttachmentPath,
+															sourceAttachmentRootPath,
+															isExported));
+							break;
+							
+						case IClasspathEntry.CPE_SOURCE :
+							if (!path.isAbsolute()) return null;
+							// must be an entry in this project or specify another project
+							String projSegment = path.segment(0);
+							if (projSegment != null && projSegment.equals(getElementName())) {
+								// this project
+								paths.addElement(JavaCore.newSourceEntry(path));
+							} else {
+								// another project
+								paths.addElement(JavaCore.newProjectEntry(path, isExported));
+							}
+							break;
+			
+						case IClasspathEntry.CPE_VARIABLE :
+							paths.addElement(JavaCore.newVariableEntry(
+									path,
+									sourceAttachmentPath,
+									sourceAttachmentRootPath, 
+									isExported));
+							break;
+							
+						case ClasspathEntry.K_OUTPUT :
+							if (!path.isAbsolute()) return null;
+							paths.addElement(new ClasspathEntry(
+									ClasspathEntry.K_OUTPUT,
+									IClasspathEntry.CPE_LIBRARY,
+									path,
+									null,
+									null,
+									false));
+							break;
+					}
 				}
 			}
 		}
 		if (paths.size() > 0) {
-			IClasspathEntry[] ips= new IClasspathEntry[paths.size()];
+			IClasspathEntry[] ips = new IClasspathEntry[paths.size()];
 			paths.copyInto(ips);
 			return ips;
 		} else {
