@@ -1,0 +1,117 @@
+	private void computeAllRootPaths(IType type) {
+		IPackageFragmentRoot root = (IPackageFragmentRoot) type.getPackageFragment().getParent();
+		this.rootPaths = new HashSet();
+		long time = 0;
+		if (VERBOSE) {
+			System.out.println("compute all root paths for " + root.getElementName());
+			time = System.currentTimeMillis();
+		}
+		final HashSet firstLevelPackageNames = new HashSet();
+		boolean containsADefaultPackage = false;
+
+		if (root.isArchive()) {
+			JarPackageFragmentRoot jarPackageFragmentRoot = (JarPackageFragmentRoot) root;
+			JavaModelManager manager = JavaModelManager.getJavaModelManager();
+			ZipFile zip = null;
+			try {
+				zip = manager.getZipFile(jarPackageFragmentRoot.getPath());
+				for (Enumeration entries = zip.entries(); entries.hasMoreElements(); ) {
+					ZipEntry entry = (ZipEntry) entries.nextElement();
+					String entryName = entry.getName();
+					if (!entry.isDirectory()) {
+						int index = entryName.indexOf('/');
+						if (index != -1) {
+							String firstLevelPackageName = entryName.substring(0, index);
+							if (JavaConventions.validatePackageName(firstLevelPackageName).isOK()) {
+								firstLevelPackageNames.add(firstLevelPackageName);
+							}
+						} else if (Util.isClassFileName(entryName)) {
+							containsADefaultPackage = true;
+						}						
+					}
+				}
+			} catch (CoreException e) {
+			} finally {
+				manager.closeZipFile(zip); // handle null case
+			}
+		} else {
+			Object target = JavaModel.getTarget(ResourcesPlugin.getWorkspace().getRoot(), root.getPath(), true);
+			if (target instanceof IFolder) {
+				IResource resource = root.getResource();
+				if (resource.getType() == IResource.FOLDER) {
+					try {
+						IResource[] members = ((IFolder) resource).members();
+						for (int i = 0, max = members.length; i < max; i++) {
+							IResource member = members[i];
+							if (member.getType() == IResource.FOLDER) {
+								firstLevelPackageNames.add(member.getName());
+							} else if (Util.isClassFileName(member.getName())) {
+								containsADefaultPackage = true;
+							}
+						}
+					} catch (CoreException e) {
+					}
+				}
+			} else if (target instanceof File) {
+				File file = (File)target;
+				if (file.isDirectory()) {
+					File[] files = file.listFiles();
+					for (int i = 0, max = files.length; i < max; i++) {
+						File currentFile = files[i];
+						if (currentFile.isDirectory()) {
+							firstLevelPackageNames.add(currentFile.getName());
+						} else if (Util.isClassFileName(currentFile.getName())) {
+							containsADefaultPackage = true;
+						}
+					}
+				}
+			}
+		}
+
+		if (Util.isArchiveFileName(this.sourcePath.lastSegment())) {
+			JavaModelManager manager = JavaModelManager.getJavaModelManager();
+			ZipFile zip = null;
+			try {
+				zip = manager.getZipFile(this.sourcePath);
+				for (Enumeration entries = zip.entries(); entries.hasMoreElements(); ) {
+					ZipEntry entry = (ZipEntry) entries.nextElement();
+					if (!entry.isDirectory()) {
+						IPath path = new Path(entry.getName());
+						int segmentCount = path.segmentCount();
+						if (segmentCount > 1) {
+							loop: for (int i = 0, max = path.segmentCount() - 1; i < max; i++) {
+								if (firstLevelPackageNames.contains(path.segment(i))) {
+									this.rootPaths.add(path.uptoSegment(i).toString());
+									break loop;
+								}
+								if (i == max - 1 && containsADefaultPackage) {
+									this.rootPaths.add(path.uptoSegment(max).toString());
+								}
+							}
+						} else if (containsADefaultPackage) {
+							this.rootPaths.add(""); //$NON-NLS-1$
+						}
+					}
+				}
+			} catch (CoreException e) {
+			} finally {
+				manager.closeZipFile(zip); // handle null case
+			}
+		} else {
+			Object target = JavaModel.getTarget(ResourcesPlugin.getWorkspace().getRoot(), this.sourcePath, true);
+			if (target instanceof IFolder) {
+				computeRootPath((IFolder)target, firstLevelPackageNames, containsADefaultPackage);
+			} else if (target instanceof File) {
+				File file = (File)target;
+				if (file.isDirectory()) {
+					computeRootPath(file, firstLevelPackageNames, containsADefaultPackage);
+				}
+			}
+		}
+		if (VERBOSE) {
+			System.out.println("Found " + this.rootPaths.size() + " root paths");			
+			System.out.println("Spent " + (System.currentTimeMillis() - time) + "ms");
+		}
+		this.areRootPathsComputed = true;
+	}
+
