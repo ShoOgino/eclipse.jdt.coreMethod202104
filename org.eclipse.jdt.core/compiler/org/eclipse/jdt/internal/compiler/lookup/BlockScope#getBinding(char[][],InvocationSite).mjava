@@ -1,80 +1,95 @@
-public final Binding getBinding(char[][] compoundName, InvocationSite invocationSite) {
-	int currentIndex = 0;
-	int length = compoundName.length;
-	Binding binding = getBinding(compoundName[currentIndex++], VARIABLE | TYPE | PACKAGE, invocationSite);
-	if (!binding.isValidBinding())
-		return binding;
+	// Added for code assist... NOT Public API
+	public final Binding getBinding(
+		char[][] compoundName,
+		InvocationSite invocationSite) {
+		int currentIndex = 0;
+		int length = compoundName.length;
+		Binding binding =
+			getBinding(
+				compoundName[currentIndex++],
+				VARIABLE | TYPE | PACKAGE,
+				invocationSite);
+		if (!binding.isValidBinding())
+			return binding;
 
-	foundType: if (binding instanceof PackageBinding) {
-		while (currentIndex < length) {
-			PackageBinding packageBinding = (PackageBinding) binding;
-			binding = packageBinding.getTypeOrPackage(compoundName[currentIndex++]);
- 			if (binding == null) {
-	 			if (currentIndex == length) // must be a type if its the last name, otherwise we have no idea if its a package or type
-					return new ProblemReferenceBinding(CharOperation.subarray(compoundName, 0, currentIndex), NotFound);
-				else
-					return new ProblemBinding(CharOperation.subarray(compoundName, 0, currentIndex), NotFound);
- 			}
- 			if (binding instanceof ReferenceBinding) {
-	 			if (!binding.isValidBinding())
-					return new ProblemReferenceBinding(CharOperation.subarray(compoundName, 0, currentIndex), binding.problemId());
-	 			if (!((ReferenceBinding) binding).canBeSeenBy(this))
-					return new ProblemReferenceBinding(CharOperation.subarray(compoundName, 0, currentIndex), NotVisible);
-	 			break foundType;
- 			}
-		}
-		return binding;
-	}
-
-	foundField: if (binding instanceof ReferenceBinding) {
-		while (currentIndex < length) {
-			ReferenceBinding typeBinding = (ReferenceBinding) binding;
-			char[] nextName = compoundName[currentIndex++];
-			if ((binding = findField(typeBinding, nextName, invocationSite)) != null) {
-				if (!binding.isValidBinding())
-					return new ProblemFieldBinding(((FieldBinding) binding).declaringClass, CharOperation.subarray(compoundName, 0, currentIndex), binding.problemId());
-				if (!((FieldBinding) binding).isStatic())
-					return new ProblemFieldBinding(((FieldBinding) binding).declaringClass, CharOperation.subarray(compoundName, 0, currentIndex), NonStaticReferenceInStaticContext);
-				break foundField; // binding is now a field
+		foundType : if (binding instanceof PackageBinding) {
+			while (currentIndex < length) {
+				PackageBinding packageBinding = (PackageBinding) binding;
+				binding = packageBinding.getTypeOrPackage(compoundName[currentIndex++]);
+				if (binding == null) {
+					if (currentIndex == length)
+						// must be a type if its the last name, otherwise we have no idea if its a package or type
+						return new ProblemReferenceBinding(
+							CharOperation.subarray(compoundName, 0, currentIndex),
+							NotFound);
+					else
+						return new ProblemBinding(
+							CharOperation.subarray(compoundName, 0, currentIndex),
+							NotFound);
+				}
+				if (binding instanceof ReferenceBinding) {
+					if (!binding.isValidBinding())
+						return new ProblemReferenceBinding(
+							CharOperation.subarray(compoundName, 0, currentIndex),
+							binding.problemId());
+					if (!((ReferenceBinding) binding).canBeSeenBy(this))
+						return new ProblemReferenceBinding(
+							CharOperation.subarray(compoundName, 0, currentIndex),
+							NotVisible);
+					break foundType;
+				}
 			}
-			if ((binding = findMemberType(nextName, typeBinding)) == null)
-				return new ProblemBinding(CharOperation.subarray(compoundName, 0, currentIndex), typeBinding, NotFound);
-			 if (!binding.isValidBinding())
-				return new ProblemReferenceBinding(CharOperation.subarray(compoundName, 0, currentIndex), binding.problemId());
+			return binding;
 		}
-		return binding;
+
+		foundField : if (binding instanceof ReferenceBinding) {
+			while (currentIndex < length) {
+				ReferenceBinding typeBinding = (ReferenceBinding) binding;
+				char[] nextName = compoundName[currentIndex++];
+				if ((binding = findField(typeBinding, nextName, invocationSite)) != null) {
+					if (!binding.isValidBinding())
+						return new ProblemFieldBinding(
+							((FieldBinding) binding).declaringClass,
+							CharOperation.subarray(compoundName, 0, currentIndex),
+							binding.problemId());
+					if (!((FieldBinding) binding).isStatic())
+						return new ProblemFieldBinding(
+							((FieldBinding) binding).declaringClass,
+							CharOperation.subarray(compoundName, 0, currentIndex),
+							NonStaticReferenceInStaticContext);
+					break foundField; // binding is now a field
+				}
+				if ((binding = findMemberType(nextName, typeBinding)) == null)
+					return new ProblemBinding(
+						CharOperation.subarray(compoundName, 0, currentIndex),
+						typeBinding,
+						NotFound);
+				if (!binding.isValidBinding())
+					return new ProblemReferenceBinding(
+						CharOperation.subarray(compoundName, 0, currentIndex),
+						binding.problemId());
+			}
+			return binding;
+		}
+
+		VariableBinding variableBinding = (VariableBinding) binding;
+		while (currentIndex < length) {
+			TypeBinding typeBinding = variableBinding.type;
+			if (typeBinding == null)
+				return new ProblemFieldBinding(
+					null,
+					CharOperation.subarray(compoundName, 0, currentIndex + 1),
+					NotFound);
+			variableBinding =
+				findField(typeBinding, compoundName[currentIndex++], invocationSite);
+			if (variableBinding == null)
+				return new ProblemFieldBinding(
+					null,
+					CharOperation.subarray(compoundName, 0, currentIndex),
+					NotFound);
+			if (!variableBinding.isValidBinding())
+				return variableBinding;
+		}
+		return variableBinding;
 	}
-
-	VariableBinding variableBinding = (VariableBinding) binding;
-	while (currentIndex < length) {
-		TypeBinding typeBinding = variableBinding.type;
-		if (typeBinding == null)
-			return new ProblemFieldBinding(null, CharOperation.subarray(compoundName, 0, currentIndex+1), NotFound);
-		variableBinding = findField(typeBinding, compoundName[currentIndex++], invocationSite);
-		if (variableBinding == null)
-			return new ProblemFieldBinding(null, CharOperation.subarray(compoundName, 0, currentIndex), NotFound);
-		if (!variableBinding.isValidBinding())
-			return variableBinding;
-	}
-	return variableBinding;
-}
-/* API
-
-	Answer the binding that corresponds to the argument name.
-	flag is a mask of the following values VARIABLE (= FIELD or LOCAL), TYPE, PACKAGE.
-	Only bindings corresponding to the mask can be answered.
-
-	For example, getBinding("foo", VARIABLE, site) will answer
-	the binding for the field or local named "foo" (or an error binding if none exists).
-	If a type named "foo" exists, it will not be detected (and an error binding will be answered)
-
-	The VARIABLE mask has precedence over the TYPE mask.
-
-	If the VARIABLE mask is not set, neither fields nor locals will be looked for.
-
-	InvocationSite implements:
-		isSuperAccess(); this is used to determine if the discovered field is visible.
-
-	Limitations: cannot request FIELD independently of LOCAL, or vice versa
-*/
 
