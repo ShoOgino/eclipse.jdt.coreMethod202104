@@ -7,13 +7,69 @@
 	 *   <li>the binary roots for any jar/lib used by this project
 	 * </li>
 	 */
-	public IPackageFragmentRoot[] getBuilderRoots(IResourceDelta delta) throws JavaModelException {
+	public IPackageFragmentRoot[] getBuilderRoots(IResourceDelta delta)
+		throws JavaModelException {
 
-		Vector accumulatedRoots = new Vector();		
-		computeBuilderRoots(false, delta, new Vector(), accumulatedRoots);
-		
-		IPackageFragmentRoot[] result = new IPackageFragmentRoot[accumulatedRoots.size()];
-		accumulatedRoots.copyInto(result);
+		Vector builderRoots = new Vector();
+		IClasspathEntry[] classpath;
+		classpath = getExpandedClasspath(true);
+		IResource res;
+		IJavaProject project;
+
+		for (int i = 0; i < classpath.length; i++) {
+			IClasspathEntry entry = classpath[i];
+			switch (entry.getEntryKind()) {
+
+				case IClasspathEntry.CPE_LIBRARY :
+					IPackageFragmentRoot[] roots = this.getPackageFragmentRoots(entry);
+					if (roots.length > 0)
+						builderRoots.addElement(roots[0]);
+					break;
+
+				case IClasspathEntry.CPE_PROJECT :
+					// other project contributions are restrained to their binary output
+					res = retrieveResource(entry.getPath(), delta);
+					if (res != null) {
+						project = (IJavaProject) JavaCore.create(res);
+						if (project.isOpen()) {
+							res = retrieveResource(project.getOutputLocation(), delta);
+							if (res != null) {
+								PackageFragmentRoot root =
+									(PackageFragmentRoot) project.getPackageFragmentRoot(res);
+								root.setOccurrenceCount(root.getOccurrenceCount() + 1);
+								((PackageFragmentRootInfo) root.getElementInfo()).setRootKind(
+									IPackageFragmentRoot.K_BINARY);
+								root.refreshChildren();
+								builderRoots.addElement(root);
+							}
+						}
+					}
+					break;
+
+				case IClasspathEntry.CPE_SOURCE :
+					if (getCorrespondingResource().getFullPath().isPrefixOf(entry.getPath())) {
+						res = retrieveResource(entry.getPath(), delta);
+						if (res != null)
+							builderRoots.addElement(getPackageFragmentRoot(res));
+					} else {
+						IProject proj = (IProject) getWorkspace().getRoot().findMember(entry.getPath());
+						project = (IJavaProject) JavaCore.create(proj);
+						if (proj.isOpen()) {
+							res = retrieveResource(project.getOutputLocation(), delta);
+							PackageFragmentRoot root =
+								(PackageFragmentRoot) project.getPackageFragmentRoot(res);
+							root.setOccurrenceCount(root.getOccurrenceCount() + 1);
+							((PackageFragmentRootInfo) root.getElementInfo()).setRootKind(
+								IPackageFragmentRoot.K_BINARY);
+							root.refreshChildren();
+							builderRoots.addElement(root);
+						}
+					}
+					break;
+			}
+		}
+		IPackageFragmentRoot[] result = new IPackageFragmentRoot[builderRoots.size()];
+		builderRoots.copyInto(result);
 		return result;
 	}
 
