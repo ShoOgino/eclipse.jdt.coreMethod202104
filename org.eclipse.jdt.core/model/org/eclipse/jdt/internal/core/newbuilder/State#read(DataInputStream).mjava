@@ -1,0 +1,67 @@
+static State read(DataInputStream in) throws IOException {
+	if (VERSION != in.readByte())
+		throw new IOException(Util.bind("build.unhandledVersionFormat")); //$NON-NLS-1$
+
+	State newState = new State();
+	newState.javaProjectName = in.readUTF();
+	newState.buildNumber = in.readInt();
+	newState.lastStructuralBuildNumber = in.readInt();
+	newState.outputLocationString = in.readUTF();
+
+	int length = in.readInt();
+	newState.classpathLocations = new ClasspathLocation[length];
+	for (int i = 0; i < length; ++i) {
+		switch (in.readByte()) {
+			case 1 :
+				newState.classpathLocations[i] = ClasspathLocation.forSourceFolder(in.readUTF(), in.readUTF());
+				break;
+			case 2 :
+				newState.classpathLocations[i] = ClasspathLocation.forBinaryFolder(in.readUTF());
+				break;
+			case 3 :
+				newState.classpathLocations[i] = ClasspathLocation.forLibrary(in.readUTF());
+		}
+	}
+
+	length = in.readInt();
+	newState.structuralBuildNumbers = new SimpleLookupTable(length);
+	for (int i = 0; i < length; i++)
+		newState.structuralBuildNumbers.put(in.readUTF(), new Integer(in.readInt()));
+
+	length = in.readInt();
+	char[][][] internedQualifiedNames = new char[length][][];
+	for (int i = 0; i < length; i++)
+		internedQualifiedNames[i] = readNames(in);
+	internedQualifiedNames = ReferenceCollection.internQualifiedNames(internedQualifiedNames);
+	char[][] internedSimpleNames = ReferenceCollection.internSimpleNames(readNames(in), false);
+
+	length = in.readInt();
+	newState.references = new SimpleLookupTable(length);
+	for (int i = 0; i < length; i++) {
+		String location = in.readUTF();
+		ReferenceCollection collection = null;
+		switch (in.readByte()) {
+			case 1 :
+				char[][] additionalTypeNames = readNames(in);
+				char[][][] qualifiedNames = new char[in.readInt()][][];
+				for (int j = 0, qLength = qualifiedNames.length; j < qLength; j++)
+					qualifiedNames[j] = internedQualifiedNames[in.readInt()];
+				char[][] simpleNames = new char[in.readInt()][];
+				for (int j = 0, sLength = simpleNames.length; j < sLength; j++)
+					simpleNames[j] = internedSimpleNames[in.readInt()];
+				collection = new AdditionalTypeCollection(additionalTypeNames, qualifiedNames, simpleNames);
+				break;
+			case 2 :
+				char[][][] qNames = new char[in.readInt()][][];
+				for (int j = 0, qLength = qNames.length; j < qLength; j++)
+					qNames[j] = internedQualifiedNames[in.readInt()];
+				char[][] sNames = new char[in.readInt()][];
+				for (int j = 0, sLength = sNames.length; j < sLength; j++)
+					sNames[j] = internedSimpleNames[in.readInt()];
+				collection = new ReferenceCollection(qNames, sNames);
+		}
+		newState.references.put(location, collection);
+	}
+	return newState;
+}
+
