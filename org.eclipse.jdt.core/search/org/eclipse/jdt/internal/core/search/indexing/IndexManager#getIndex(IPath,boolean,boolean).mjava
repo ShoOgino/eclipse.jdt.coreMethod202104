@@ -1,0 +1,47 @@
+/**
+ * Returns the index for a given project, according to the following algorithm:
+ * - if index is already in memory: answers this one back
+ * - if (reuseExistingFile) then read it and return this index and record it in memory
+ * - if (createIfMissing) then create a new empty index and record it in memory
+ * 
+ * Warning: Does not check whether index is consistent (not being used)
+ */
+public synchronized IIndex getIndex(IPath path, boolean reuseExistingFile, boolean createIfMissing) {
+	// Path is already canonical per construction
+	IIndex index = (IIndex) indexes.get(path);
+	if (index == null) {
+		try {
+			String indexPath = null;
+			
+			// index isn't cached, consider reusing an existing index file
+			if (reuseExistingFile){
+				indexPath = computeIndexName(path);
+				File indexFile = new File(indexPath);
+				if (indexFile.exists()){ // check before creating index so as to avoid creating a new empty index if file is missing
+					index = new Index(indexPath, "Index for " + path.toOSString(), true /*reuse index file*/); //$NON-NLS-1$
+					if (index != null){
+						indexes.put(path, index);
+						monitors.put(index, new ReadWriteMonitor());
+						return index;
+					}
+				}
+			} 
+			// index wasn't found on disk, consider creating an empty new one
+			if (createIfMissing){
+				if (indexPath == null) indexPath = computeIndexName(path);
+				index = new Index(indexPath, "Index for " + path.toOSString(), false /*do not reuse index file*/); //$NON-NLS-1$
+				if (index != null){
+					indexes.put(path, index);
+					monitors.put(index, new ReadWriteMonitor());
+					return index;
+				}
+			}
+		} catch (IOException e) {
+			// The file could not be created. Possible reason: the project has been deleted.
+			return null;
+		}
+	}
+	//System.out.println(" index name: " + path.toOSString() + " <----> " + index.getIndexFile().getName());	
+	return index;
+}
+
