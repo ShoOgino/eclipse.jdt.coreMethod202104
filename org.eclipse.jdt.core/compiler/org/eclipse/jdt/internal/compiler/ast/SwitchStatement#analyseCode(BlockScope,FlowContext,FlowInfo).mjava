@@ -2,52 +2,58 @@
 			BlockScope currentScope,
 			FlowContext flowContext,
 			FlowInfo flowInfo) {
-			
-		flowInfo = expression.analyseCode(currentScope, flowContext, flowInfo);
-		SwitchFlowContext switchContext =
-			new SwitchFlowContext(flowContext, this, (breakLabel = new Label()));
 
-		// analyse the block by considering specially the case/default statements (need to bind them 
-		// to the entry point)
-		FlowInfo caseInits = FlowInfo.DEAD_END;
-		// in case of statements before the first case
-		preSwitchInitStateIndex =
-			currentScope.methodScope().recordInitializationStates(flowInfo);
-		int caseIndex = 0;
-		if (statements != null) {
-			boolean didAlreadyComplain = false;
-			for (int i = 0, max = statements.length; i < max; i++) {
-				Statement statement = statements[i];
-				if ((caseIndex < caseCount) && (statement == cases[caseIndex])) { // statement is a case
-					caseIndex++;
-					caseInits = caseInits.mergedWith(flowInfo.copy().unconditionalInits());
-					didAlreadyComplain = false; // reset complaint
-				} else if (statement == defaultCase) { // statement is the default case
-					caseInits = caseInits.mergedWith(flowInfo.copy().unconditionalInits());
-					didAlreadyComplain = false; // reset complaint
-				}
-				if (!statement.complainIfUnreachable(caseInits, scope, didAlreadyComplain)) {
-					caseInits = statement.analyseCode(scope, switchContext, caseInits);
-				} else {
-					didAlreadyComplain = true;
+	    try {
+			flowInfo = expression.analyseCode(currentScope, flowContext, flowInfo);
+			SwitchFlowContext switchContext =
+				new SwitchFlowContext(flowContext, this, (breakLabel = new Label()));
+	
+			// analyse the block by considering specially the case/default statements (need to bind them 
+			// to the entry point)
+			FlowInfo caseInits = FlowInfo.DEAD_END;
+			// in case of statements before the first case
+			preSwitchInitStateIndex =
+				currentScope.methodScope().recordInitializationStates(flowInfo);
+			int caseIndex = 0;
+			if (statements != null) {
+				boolean didAlreadyComplain = false;
+				for (int i = 0, max = statements.length; i < max; i++) {
+					Statement statement = statements[i];
+					if ((caseIndex < caseCount) && (statement == cases[caseIndex])) { // statement is a case
+						this.scope.switchCase = cases[caseIndex]; // record entering in a switch case block
+						caseIndex++;
+						caseInits = caseInits.mergedWith(flowInfo.copy().unconditionalInits());
+						didAlreadyComplain = false; // reset complaint
+					} else if (statement == defaultCase) { // statement is the default case
+						this.scope.switchCase = defaultCase; // record entering in a switch case block
+						caseInits = caseInits.mergedWith(flowInfo.copy().unconditionalInits());
+						didAlreadyComplain = false; // reset complaint
+					}
+					if (!statement.complainIfUnreachable(caseInits, scope, didAlreadyComplain)) {
+						caseInits = statement.analyseCode(scope, switchContext, caseInits);
+					} else {
+						didAlreadyComplain = true;
+					}
 				}
 			}
-		}
-
-		// if no default case, then record it may jump over the block directly to the end
-		if (defaultCase == null) {
-			// only retain the potential initializations
-			flowInfo.addPotentialInitializationsFrom(
-				caseInits.mergedWith(switchContext.initsOnBreak));
+	
+			// if no default case, then record it may jump over the block directly to the end
+			if (defaultCase == null) {
+				// only retain the potential initializations
+				flowInfo.addPotentialInitializationsFrom(
+					caseInits.mergedWith(switchContext.initsOnBreak));
+				mergedInitStateIndex =
+					currentScope.methodScope().recordInitializationStates(flowInfo);
+				return flowInfo;
+			}
+	
+			// merge all branches inits
+			FlowInfo mergedInfo = caseInits.mergedWith(switchContext.initsOnBreak);
 			mergedInitStateIndex =
-				currentScope.methodScope().recordInitializationStates(flowInfo);
-			return flowInfo;
-		}
-
-		// merge all branches inits
-		FlowInfo mergedInfo = caseInits.mergedWith(switchContext.initsOnBreak);
-		mergedInitStateIndex =
-			currentScope.methodScope().recordInitializationStates(mergedInfo);
-		return mergedInfo;
+				currentScope.methodScope().recordInitializationStates(mergedInfo);
+			return mergedInfo;
+	    } finally {
+	        if (this.scope != null) this.scope.switchCase = null; // no longer inside switch case block
+	    }
 	}
 
