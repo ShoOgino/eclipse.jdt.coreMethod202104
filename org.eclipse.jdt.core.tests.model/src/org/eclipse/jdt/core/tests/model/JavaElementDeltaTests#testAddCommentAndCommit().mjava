@@ -1,0 +1,36 @@
+/**
+ * Ensures that adding a comment to a working copy and commiting it triggers an empty fine grained
+ * delta with the kind set for PRE_AUTO_BUILD listeners.
+ * (regression test for bug 32937 Kind not set for empty fine-grained delta)
+ */
+public void testAddCommentAndCommit() throws CoreException {
+	DeltaListener listener = new DeltaListener(ElementChangedEvent.PRE_AUTO_BUILD);
+	ICompilationUnit copy = null;
+	try {
+		this.createJavaProject("P", new String[] {""}, "");
+		this.createFile("P/X.java",
+			"public class X {\n" +
+			"}");
+		ICompilationUnit unit = this.getCompilationUnit("P", "", "", "X.java");
+		copy = (ICompilationUnit)unit.getWorkingCopy(null, null, null);
+		
+		// add comment to working copy
+		copy.getBuffer().setContents(
+			"public class X {\n" +
+			"  // some comment\n" +
+			"}");
+
+		// commit working copy
+		JavaCore.addElementChangedListener(listener, ElementChangedEvent.PRE_AUTO_BUILD);
+		copy.commit(true, null);
+		assertEquals(
+			"Unexpected delta after committing working copy", 
+			"X.java[*]: {CONTENT | FINE GRAINED}",
+			listener.toString());
+	} finally {
+		JavaCore.removeElementChangedListener(listener);
+		if (copy != null) copy.destroy();
+		this.deleteProject("P");
+	}
+}
+
