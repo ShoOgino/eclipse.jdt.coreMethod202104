@@ -1,7 +1,7 @@
 	public Type convertType(TypeReference typeReference) {
 		if (typeReference instanceof Wildcard) {
-			Wildcard wildcard = (Wildcard) typeReference;
-			WildcardType wildcardType = this.ast.newWildcardType();
+			final Wildcard wildcard = (Wildcard) typeReference;
+			final WildcardType wildcardType = new WildcardType(this.ast);
 			if (wildcard.bound != null) {
 				wildcardType.setBound(convertType(wildcard.bound), wildcard.kind == Wildcard.EXTENDS);
 			}
@@ -28,11 +28,14 @@
 				if (end == -1) {
 					end = sourceStart + length - 1;
 				}					
-				type = this.ast.newPrimitiveType(getPrimitiveTypeCode(name));
-				type.setSourceRange(sourceStart, end - sourceStart + 1);
+				final PrimitiveType primitiveType = new PrimitiveType(this.ast);
+				primitiveType.setPrimitiveTypeCode(getPrimitiveTypeCode(name));
+				primitiveType.setSourceRange(sourceStart, end - sourceStart + 1);
+				type = primitiveType;
 			} else if (typeReference instanceof ParameterizedSingleTypeReference) {
 				ParameterizedSingleTypeReference parameterizedSingleTypeReference = (ParameterizedSingleTypeReference) typeReference;
-				SimpleName simpleName = this.ast.newSimpleName(new String(name));
+				final SimpleName simpleName = new SimpleName(this.ast);
+				simpleName.internalSetIdentifier(new String(name));
 				int end = retrieveEndOfElementTypeNamePosition(sourceStart, sourceStart + length);
 				if (end == -1) {
 					end = sourceStart + length - 1;
@@ -40,17 +43,22 @@
 				simpleName.setSourceRange(sourceStart, end - sourceStart + 1);
 				switch(this.ast.apiLevel) {
 					case AST.JLS2_INTERNAL :
-						type = this.ast.newSimpleType(simpleName);
-						type.setFlags(type.getFlags() | ASTNode.MALFORMED);
-						type.setSourceRange(sourceStart, end - sourceStart + 1);
+						SimpleType simpleType = new SimpleType(this.ast);
+						simpleType.setName(simpleName);
+						simpleType.setFlags(simpleType.getFlags() | ASTNode.MALFORMED);
+						simpleType.setSourceRange(sourceStart, end - sourceStart + 1);
+						type = simpleType;
 						if (this.resolveBindings) {
 							this.recordNodes(simpleName, typeReference);
 						}
 						break;
 					case AST.JLS3 :
-						SimpleType simpleType = this.ast.newSimpleType(simpleName);
+						simpleType = new SimpleType(this.ast);
+						simpleType.setName(simpleName);
 						simpleType.setSourceRange(simpleName.getStartPosition(), simpleName.getLength());
-						type = this.ast.newParameterizedType(simpleType);
+						final ParameterizedType parameterizedType = new ParameterizedType(this.ast);
+						parameterizedType.setType(simpleType);
+						type = parameterizedType;
 						TypeReference[] typeArguments = parameterizedSingleTypeReference.typeArguments;
 						if (typeArguments != null) {
 							Type type2 = null;
@@ -70,7 +78,8 @@
 						}
 				}
 			} else {
-				SimpleName simpleName = this.ast.newSimpleName(new String(name));
+				final SimpleName simpleName = new SimpleName(this.ast);
+				simpleName.internalSetIdentifier(new String(name));
 				// we need to search for the starting position of the first brace in order to set the proper length
 				// PR http://dev.eclipse.org/bugs/show_bug.cgi?id=10759
 				int end = retrieveEndOfElementTypeNamePosition(sourceStart, sourceStart + length);
@@ -78,8 +87,11 @@
 					end = sourceStart + length - 1;
 				}
 				simpleName.setSourceRange(sourceStart, end - sourceStart + 1);
-				type = this.ast.newSimpleType(simpleName);
+				final SimpleType simpleType = new SimpleType(this.ast);
+				simpleType.setName(simpleName);
+				type = simpleType;
 				type.setSourceRange(sourceStart, end - sourceStart + 1);
+				type = simpleType;
 				if (this.resolveBindings) {
 					this.recordNodes(simpleName, typeReference);
 				}
@@ -106,8 +118,10 @@
 							sourceStart = (int)(positions[0]>>>32);
 							length = (int)(positions[nameLength - 1] & 0xFFFFFFFF) - sourceStart + 1;
 							Name qualifiedName = this.setQualifiedNameNameAndSourceRanges(name, positions, typeReference);
-							type = this.ast.newSimpleType(qualifiedName);
-							type.setSourceRange(sourceStart, length);
+							final SimpleType simpleType = new SimpleType(this.ast);
+							simpleType.setName(qualifiedName);
+							simpleType.setSourceRange(sourceStart, length);
+							type = simpleType;
 						}
 						break;
 					case AST.JLS3 :
@@ -124,21 +138,27 @@
 							}
 							Name name = null;
 							if (endingIndex - startingIndex == 0) {
-								name = this.ast.newSimpleName(new String(tokens[startingIndex]));
-								recordPendingNameScopeResolution(name);
+								final SimpleName simpleName = new SimpleName(this.ast);
+								simpleName.internalSetIdentifier(new String(tokens[startingIndex]));
+								recordPendingNameScopeResolution(simpleName);
 								int start = (int)(positions[startingIndex]>>>32);
 								int end = (int) positions[startingIndex];
-								name.setSourceRange(start, end - start + 1);
-								name.index = 1;
+								simpleName.setSourceRange(start, end - start + 1);
+								simpleName.index = 1;
+								name = simpleName;
+								if (this.resolveBindings) {
+		 							recordNodes(simpleName, typeReference);
+								}
 							} else {
 								name = this.setQualifiedNameNameAndSourceRanges(tokens, positions, endingIndex, typeReference);
 							}
-							recordNodes(name, typeReference);
-							SimpleType simpleType = this.ast.newSimpleType(name);
+							SimpleType simpleType = new SimpleType(this.ast);
+							simpleType.setName(name);
 							int start = (int)(positions[startingIndex]>>>32);
 							int end = (int) positions[endingIndex];
 							simpleType.setSourceRange(start, end - start + 1);
-							ParameterizedType parameterizedType = this.ast.newParameterizedType(simpleType);
+							ParameterizedType parameterizedType = new ParameterizedType(this.ast);
+							parameterizedType.setType(simpleType);
                             if (this.resolveBindings) {
                                 recordNodes(simpleType, typeReference);
                                 recordNodes(parameterizedType, typeReference);
@@ -158,13 +178,16 @@
 							startingIndex = endingIndex + 1;
 							Type currentType = parameterizedType;
 							while(startingIndex < typeArguments.length) {
-								SimpleName simpleName = this.ast.newSimpleName(new String(tokens[startingIndex]));
+								SimpleName simpleName = new SimpleName(this.ast);
+								simpleName.internalSetIdentifier(new String(tokens[startingIndex]));
 								simpleName.index = startingIndex + 1;
 								start = (int)(positions[startingIndex]>>>32);
 								end = (int) positions[startingIndex];
 								simpleName.setSourceRange(start, end - start + 1);
 								recordPendingNameScopeResolution(simpleName);
-								QualifiedType qualifiedType = this.ast.newQualifiedType(currentType, simpleName);
+								QualifiedType qualifiedType = new QualifiedType(this.ast);
+								qualifiedType.setQualifier(currentType);
+								qualifiedType.setName(simpleName);	
                                 if (this.resolveBindings) {
                                     recordNodes(simpleName, typeReference);
                                     recordNodes(qualifiedType, typeReference);
@@ -175,7 +198,8 @@
 								indexOfEnclosingType++;
 								if (typeArguments[startingIndex] != null) {
 	                               	qualifiedType.index = indexOfEnclosingType;
-									ParameterizedType parameterizedType2 = this.ast.newParameterizedType(qualifiedType);
+									ParameterizedType parameterizedType2 = new ParameterizedType(this.ast);
+									parameterizedType2.setType(qualifiedType);
  									parameterizedType2.index = indexOfEnclosingType;
                                    if (this.resolveBindings) {
                                         recordNodes(parameterizedType2, typeReference);
@@ -208,8 +232,10 @@
 				long[] positions = ((org.eclipse.jdt.internal.compiler.ast.QualifiedTypeReference) typeReference).sourcePositions;
 				sourceStart = (int)(positions[0]>>>32);
 				length = (int)(positions[nameLength - 1] & 0xFFFFFFFF) - sourceStart + 1;
-				Name qualifiedName = this.setQualifiedNameNameAndSourceRanges(name, positions, typeReference);
-				type = this.ast.newSimpleType(qualifiedName);
+				final Name qualifiedName = this.setQualifiedNameNameAndSourceRanges(name, positions, typeReference);
+				final SimpleType simpleType = new SimpleType(this.ast);
+				simpleType.setName(qualifiedName);
+				type = simpleType;
 				type.setSourceRange(sourceStart, length);
 			}
 
