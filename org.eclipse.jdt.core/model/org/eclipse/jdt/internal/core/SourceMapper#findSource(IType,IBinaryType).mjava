@@ -46,43 +46,25 @@
 			fullName = name;
 		}
 
-		char[] source = null;
-		if (Util.isArchiveFileName(this.sourcePath.lastSegment())) {
-			// try to get the entry
-			ZipEntry entry = null;
-			ZipFile zip = null;
-			JavaModelManager manager = JavaModelManager.getJavaModelManager();
-			try {
-				zip = manager.getZipFile(this.sourcePath);
-				entry = zip.getEntry(fullName);
-				if (entry != null) {
-					// now read the source code
-					source = readSource(entry, zip);
+		char[] source = findSource(fullName);
+		if (source == null) {
+			// root path may just have been a hint: try recomputing it
+			String rootPath = this.computeRootPath();
+			String newFullName;
+			if (rootPath != null && !rootPath.equals(IPackageFragmentRoot.DEFAULT_PACKAGEROOT_PATH)) {
+				if (rootPath.endsWith("/")) { //$NON-NLS-1$
+					newFullName = rootPath + name;
+				} else {
+					newFullName = rootPath + '/' + name;
 				}
-			} catch (CoreException e) {
-				return null;
-			} finally {
-				manager.closeZipFile(zip); // handle null case
+			} else {
+				newFullName = name;
 			}
-		} else {
-			Object target = JavaModel.getTarget(ResourcesPlugin.getWorkspace().getRoot(), this.sourcePath, true);
-			if (target instanceof IFolder) {
-				IFolder folder = (IFolder)target;
-				IResource res = folder.findMember(fullName);
-				if (res instanceof IFile) {
-					try {
-						source = org.eclipse.jdt.internal.core.Util.getResourceContentsAsCharArray((IFile)res, this.encoding);
-					} catch (JavaModelException e) {
-					}
-				}
-			} else if (target instanceof File) {
-				File file = (File)target;
-				if (file.isDirectory()) {
-					File sourceFile = new File(file, fullName);
-					try {
-						source = Util.getFileCharContent(sourceFile, this.encoding);
-					} catch (IOException e) {
-					}
+			if (!fullName.equals(newFullName)) {
+				source = this.findSource(newFullName);
+				if (source != null) {
+					// remember right root path
+					this.rootPath = rootPath;
 				}
 			}
 		}
