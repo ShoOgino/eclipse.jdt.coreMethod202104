@@ -8,82 +8,12 @@
 				javaProject.getPackageFragmentRoots() :
 				javaProject.getAllPackageFragmentRoots()); // all potential matches are resolved in the focus' project context
 		
-		// copy array because elements  from the original are removed below
 		int length = potentialMatches.length;
-		PotentialMatch[] copy = new PotentialMatch[length];
-		System.arraycopy(potentialMatches, 0, copy, 0, length);
-		this.initialize(javaProject, copy);
-	
-		this.compilationAborted = false;
-
-		// create and resolve binding (equivalent to beginCompilation() in Compiler)
-		try {
-			this.createAndResolveBindings(potentialMatches);
-		} catch (AbortCompilation e) {
-			this.compilationAborted = true;
+		int index = 0;
+		while (index < length) {
+			int max = Math.min(MAX_AT_ONCE, length-index);
+			locateMatches(javaProject, potentialMatches, index, max);
+			index += max;
 		}
-	
-		// create hierarchy resolver if needed
-		try {
-			if (!this.compilationAborted && !this.createHierarchyResolver(copy)) {
-				return;
-			}
-		} catch (AbortCompilation e) {
-			this.compilationAborted = true;
-		}
-		
-		// free memory
-		copy = null;
-	
-		// potential match resolution
-		try {
-			CompilationUnitDeclaration unit = null;
-			for (int i = 0; i < this.totalUnits; i++) {
-				if (this.progressMonitor != null && this.progressMonitor.isCanceled()) {
-					throw new OperationCanceledException();
-				}
-				unit = this.unitsToProcess[i];
-				try {
-					if (this.options.verbose)
-						System.out.println(
-							Util.bind(
-								"compilation.process" , //$NON-NLS-1$
-								new String[] {
-									String.valueOf(i + 1),
-									String.valueOf(totalUnits),
-									new String(unitsToProcess[i].getFileName())}));
-					process(unit, i);
-				} catch (AbortCompilation e) {
-					// problem with class path: it could not find base classes
-					// continue and try next matching openable reporting innacurate matches (since bindings will be null)
-					this.compilationAborted = true;
-				} catch (CoreException e) {
-					if (e instanceof JavaModelException) {
-						// problem with class path: it could not find base classes
-						// continue and try next matching openable reporting innacurate matches (since bindings will be null)
-						this.compilationAborted = true;
-					} else {
-						// core exception thrown by client's code: let it through
-						throw new JavaModelException(e);
-					}
-				} finally {
-					// cleanup compilation unit result
-					unit.cleanUp();
-					if (this.options.verbose)
-						System.out.println(Util.bind("compilation.done", //$NON-NLS-1$
-					new String[] {
-						String.valueOf(i + 1),
-						String.valueOf(totalUnits),
-						new String(unitsToProcess[i].getFileName())}));
-				}
-				this.unitsToProcess[i] = null; // release reference to processed unit declaration
-				this.matchesToProcess[i] = null; // release reference to processed potential match
-				if (this.progressMonitor != null) {
-					this.progressMonitor.worked(5);
-				}
-			}
-		} catch (AbortCompilation e) {
-			this.compilationAborted = true;
-		}		
 	}
 
