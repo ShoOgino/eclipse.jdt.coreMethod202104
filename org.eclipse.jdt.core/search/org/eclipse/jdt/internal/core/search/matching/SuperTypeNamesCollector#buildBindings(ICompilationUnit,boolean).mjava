@@ -1,8 +1,7 @@
 /*
  * Parse the given compiation unit and build its type bindings.
- * Don't build methods and fields.
  */
-protected CompilationUnitDeclaration buildBindings(ICompilationUnit compilationUnit) throws JavaModelException {
+protected CompilationUnitDeclaration buildBindings(ICompilationUnit compilationUnit, boolean isTopLevelOrMember) throws JavaModelException {
 	final IFile file = (IFile) compilationUnit.getResource();
 	final String fileName = file.getFullPath().lastSegment();
 	final char[] mainTypeName = fileName.substring(0, fileName.length() - 5).toCharArray();
@@ -22,10 +21,18 @@ protected CompilationUnitDeclaration buildBindings(ICompilationUnit compilationU
 		};
 
 	CompilationResult compilationResult = new CompilationResult(sourceUnit, 1, 1, 0);
-	CompilationUnitDeclaration unit = this.locator.basicParser().dietParse(sourceUnit, compilationResult);
+	CompilationUnitDeclaration unit = 
+		isTopLevelOrMember ?
+			this.locator.basicParser().dietParse(sourceUnit, compilationResult) :
+			this.locator.basicParser().parse(sourceUnit, compilationResult);
 	if (unit != null) {
 		this.locator.lookupEnvironment.buildTypeBindings(unit);
-		this.locator.lookupEnvironment.completeTypeBindings(unit, false);
+		this.locator.lookupEnvironment.completeTypeBindings(unit, !isTopLevelOrMember);
+		if (!isTopLevelOrMember) {
+			if (unit.scope != null)
+				unit.scope.faultInTypes(); // fault in fields & methods
+			unit.resolve();
+		}
 	}
 	return unit;
 }
