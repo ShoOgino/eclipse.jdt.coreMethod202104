@@ -1,8 +1,15 @@
 	/**
-	 * Parses the source string of the given Java model compilation unit element
-	 * and creates and returns a corresponding abstract syntax tree. The source 
-	 * string is obtained from the Java model element using
-	 * <code>ICompilationUnit.getSource()</code>.
+	 * Parses the source string of the given Java model compilation unit element and populated the
+	 * node that contains the given position, and creates and returns a corresponding
+	 * abstract syntax tree. The source string is obtained from the Java model element
+	 * using <code>ICompilationUnit.getSource()</code>.
+	 * <p>
+	 * Only the method or initializer containing the given position will be populated with its 
+	 * statements. Field initializers are preserved even if the given position is not within
+	 * the field declaration source range. If the given position is not located within any body
+	 * declarations, then a compilation unit is returned without any statements inside its methods or
+	 * initializers.
+	 * </p>
 	 * <p>
 	 * The returned compilation unit node is the root node of a new AST.
 	 * Each node in the subtree carries source range(s) information relating back
@@ -12,18 +19,13 @@
 	 * corresponding to the node; leading whitespace and comments are <b>not</b>
 	 * included. The source range usually extends through the last character of
 	 * the last token corresponding to the node; trailing whitespace and
-	 * comments are <b>not</b> included. There are a handful of exceptions
-	 * (including compilation units and the various body declarations); the
-	 * specification for these node type spells out the details.
-	 * Source ranges nest properly: the source range for a child is always
-	 * within the source range of its parent, and the source ranges of sibling
-	 * nodes never overlap.
+	 * comments are <b>not</b> included.
 	 * If a syntax error is detected while parsing, the relevant node(s) of the
 	 * tree will be flagged as <code>MALFORMED</code>.
 	 * </p>
 	 * <p>
 	 * If <code>resolveBindings</code> is <code>true</code>, the various names
-	 * and types appearing in the compilation unit can be resolved to "bindings"
+	 * and types appearing in the method declaration can be resolved to "bindings"
 	 * by calling the <code>resolveBinding</code> methods. These bindings 
 	 * draw connections between the different parts of a program, and 
 	 * generally afford a more powerful vantage point for clients who wish to
@@ -50,22 +52,25 @@
 	 * </p>
 	 * 
 	 * @param unit the Java model compilation unit whose source code is to be parsed
+	 * @param position the given position to locate the corresponding body declaration
 	 * @param resolveBindings <code>true</code> if bindings are wanted, 
 	 *   and <code>false</code> if bindings are not of interest
 	 * @param owner the owner of working copies that take precedence over underlying 
 	 *   compilation units
 	 * @return the compilation unit node
 	 * @exception IllegalArgumentException if the given Java element does not 
-	 * exist or if its source string cannot be obtained
+	 * exist or the source range is null or if its source string cannot be obtained
 	 * @see ASTNode#getFlags()
 	 * @see ASTNode#MALFORMED
 	 * @see ASTNode#getStartPosition()
 	 * @see ASTNode#getLength()
 	 * @see WorkingCopyOwner
 	 * @since 3.0
+	 * TODO Jim, please review the javadoc. We can discuss about it if necessary
 	 */
-	public static CompilationUnit parseCompilationUnit(
+	public static CompilationUnit parsePartialCompilationUnit(
 		ICompilationUnit unit,
+		int position,
 		boolean resolveBindings,
 		WorkingCopyOwner owner) {
 				
@@ -81,6 +86,9 @@
 			throw new IllegalArgumentException();
 		}
 
+		NodeSearcher searcher = new NodeSearcher(position);
+
+		final Map options = unit.getJavaProject().getOptions(true);
 		if (resolveBindings) {
 			NameLookup lookup = null;
 			try {
@@ -89,32 +97,63 @@
 				JavaModelManager manager = JavaModelManager.getJavaModelManager();
 				ICompilationUnit[] workingCopies = manager.getWorkingCopies(owner, true/*add primary WCs*/);
 				lookup.setUnitsToLookInside(workingCopies);
-				
+
 				// parse and resolve
-				CompilationUnitDeclaration compilationUnitDeclaration = CompilationUnitResolver.resolve(unit);
-				ASTConverter converter = new ASTConverter(unit.getJavaProject().getOptions(true), true);
+				CompilationUnitDeclaration compilationUnitDeclaration = CompilationUnitResolver.resolve(
+					unit,
+					searcher);
+				
+				ASTConverter converter = new ASTConverter(options, true);
 				AST ast = new AST();
 				BindingResolver resolver = new DefaultBindingResolver(compilationUnitDeclaration.scope);
 				ast.setBindingResolver(resolver);
 				converter.setAST(ast);
 			
-				CompilationUnit cu = converter.convert(compilationUnitDeclaration, source);
-				cu.setLineEndTable(compilationUnitDeclaration.compilationResult.lineSeparatorPositions);
+				CompilationUnit compilationUnit = converter.convert(compilationUnitDeclaration, source);
+				compilationUnit.setLineEndTable(compilationUnitDeclaration.compilationResult.lineSeparatorPositions);
 				resolver.storeModificationCount(ast.modificationCount());
-				return cu;
+				return compilationUnit;
 			} catch(JavaModelException e) {
 				/* if a JavaModelException is thrown trying to retrieve the name environment
 				 * then we simply do a parsing without creating bindings.
 				 * Therefore all binding resolution will return null.
 				 */
-				return parseCompilationUnit(source);			
+				CompilationUnitDeclaration compilationUnitDeclaration = CompilationUnitResolver.parse(
+					source,
+					searcher,
+					options);
+				
+				ASTConverter converter = new ASTConverter(options, false);
+				AST ast = new AST();
+				final BindingResolver resolver = new BindingResolver();
+				ast.setBindingResolver(resolver);
+				converter.setAST(ast);
+	
+				CompilationUnit compilationUnit = converter.convert(compilationUnitDeclaration, source);
+				compilationUnit.setLineEndTable(compilationUnitDeclaration.compilationResult.lineSeparatorPositions);
+				resolver.storeModificationCount(ast.modificationCount());
+				return compilationUnit;
 			} finally {
 				if (lookup != null) {
 					lookup.setUnitsToLookInside(null);
 				}
 			}
 		} else {
-			return parseCompilationUnit(source);
+			CompilationUnitDeclaration compilationUnitDeclaration = CompilationUnitResolver.parse(
+				source,
+				searcher,
+				options);
+			
+			ASTConverter converter = new ASTConverter(options, false);
+			AST ast = new AST();
+			final BindingResolver resolver = new BindingResolver();
+			ast.setBindingResolver(resolver);
+			converter.setAST(ast);
+
+			CompilationUnit compilationUnit = converter.convert(compilationUnitDeclaration, source);
+			compilationUnit.setLineEndTable(compilationUnitDeclaration.compilationResult.lineSeparatorPositions);
+			resolver.storeModificationCount(ast.modificationCount());
+			return compilationUnit;
 		}
 	}
 

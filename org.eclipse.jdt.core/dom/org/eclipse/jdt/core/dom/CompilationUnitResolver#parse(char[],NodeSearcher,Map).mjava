@@ -1,0 +1,45 @@
+	public static CompilationUnitDeclaration parse(char[] source, NodeSearcher nodeSearcher, Map settings) {
+		if (source == null) {
+			throw new IllegalArgumentException();
+		}
+		CompilerOptions compilerOptions = new CompilerOptions(settings);
+		Parser parser = createDomParser(
+			new ProblemReporter(
+					DefaultErrorHandlingPolicies.proceedWithAllProblems(), 
+					compilerOptions, 
+					new DefaultProblemFactory()));
+		org.eclipse.jdt.internal.compiler.env.ICompilationUnit sourceUnit = 
+			new org.eclipse.jdt.internal.compiler.batch.CompilationUnit(
+				source, 
+				"", //$NON-NLS-1$
+				compilerOptions.defaultEncoding);
+		CompilationUnitDeclaration compilationUnitDeclaration = parser.dietParse(sourceUnit, new CompilationResult(sourceUnit, 0, 0, compilerOptions.maxProblemsPerUnit));
+		
+		if (compilationUnitDeclaration.ignoreMethodBodies) {
+			compilationUnitDeclaration.ignoreFurtherInvestigation = true;
+			// if initial diet parse did not work, no need to dig into method bodies.
+			return null; 
+		}
+				
+		compilationUnitDeclaration.traverse(nodeSearcher, compilationUnitDeclaration.scope);
+		
+		AstNode node = nodeSearcher.found;
+ 		if (node == null) {
+ 			return compilationUnitDeclaration;
+ 		}
+ 		
+ 		org.eclipse.jdt.internal.compiler.ast.TypeDeclaration enclosingTypeDeclaration = nodeSearcher.enclosingType;
+ 		
+		if (node instanceof AbstractMethodDeclaration) {
+			((AbstractMethodDeclaration)node).parseStatements(parser, compilationUnitDeclaration);
+		} else if (enclosingTypeDeclaration != null) {
+			if (node instanceof org.eclipse.jdt.internal.compiler.ast.Initializer) {
+				((org.eclipse.jdt.internal.compiler.ast.Initializer) node).parseStatements(parser, enclosingTypeDeclaration, compilationUnitDeclaration);
+			} else {  					
+				((org.eclipse.jdt.internal.compiler.ast.TypeDeclaration)node).parseMethod(parser, compilationUnitDeclaration);
+			} 				
+		}
+		
+		return compilationUnitDeclaration;
+	}
+
