@@ -1,0 +1,135 @@
+/*
+ * Parse a method with completionNode check
+ */
+public void checkMethodParse(
+		char[] source, 
+		int cursorLocation, 
+		String expectedCompletion, 
+		String expectedParentCompletion,
+		String expectedUnitToString, 
+		String expectedCompletionIdentifier, 
+		String expectedReplacedSource,
+		String[] expectedLabels,
+		String testName) {
+
+	CompilerOptions options = new CompilerOptions();
+	CompletionParser parser = 
+		new CompletionParser(
+			new ProblemReporter(
+				DefaultErrorHandlingPolicies.proceedWithAllProblems(), 
+				options, 
+				new DefaultProblemFactory(Locale.getDefault())),
+			options.sourceLevel >= CompilerOptions.JDK1_4);
+
+	ICompilationUnit sourceUnit = new CompilationUnit(source, testName, null);
+	CompilationResult compilationResult = new CompilationResult(sourceUnit, 0, 0, 0);	
+
+	CompilationUnitDeclaration unit = parser.dietParse(sourceUnit, compilationResult, cursorLocation);
+
+	AstNode foundMethod = null;
+	if (unit.types != null) {
+		for (int i = 0; i < unit.types.length; i++) {
+			TypeDeclaration type = unit.types[i];
+			AstNode method = findMethod(type, cursorLocation);
+			if (method != null) {
+				foundMethod = method;
+				break;
+			}
+		}
+	}
+	assertTrue("no method found at cursor location", foundMethod != null);
+	if (foundMethod instanceof AbstractMethodDeclaration) {
+		parser.parseBlockStatements((AbstractMethodDeclaration)foundMethod, unit);
+	} else {
+		TypeDeclaration type = (TypeDeclaration)foundMethod;
+		if (type.fields != null) {
+			for (int i = 0; i < type.fields.length; i++) {
+				FieldDeclaration field = type.fields[i];
+				if (field.declarationSourceStart <= cursorLocation && (cursorLocation <= field.declarationSourceEnd || field.declarationSourceEnd == 0)) {
+					if (field instanceof Initializer) {
+						parser.parseBlockStatements((Initializer)field, type, unit);
+						break;
+					} else {
+						assertTrue("TBD", false); // field initializer
+					}
+				}
+			}
+		}
+	}
+	
+	String computedCompletion = parser.assistNode == null 
+								? NONE
+								: parser.assistNode.toString(0);
+	String computedParentCompletion = parser.assistNodeParent == null 
+								? NONE
+								: parser.assistNodeParent.toString(0);
+	String computedUnitToString = unit.toString();
+	//System.out.println(computedUnitToString);
+	//System.out.println(Util.displayString(computedUnitToString));
+	//System.out.println(expectedUnitToString);		
+
+	assertEquals(
+		"invalid completion node-" + testName,
+		expectedCompletion,
+		computedCompletion);
+		
+	if(expectedParentCompletion != null) {
+		assertEquals(
+		"invalid completion parent node-" + testName,
+		expectedParentCompletion,
+		computedParentCompletion);
+	}
+
+	assertEquals(
+		"invalid completion location-"+testName,
+		expectedUnitToString,
+		computedUnitToString);
+
+	if (expectedCompletionIdentifier != null){
+		char[] chars = ((CompletionScanner)parser.scanner).completionIdentifier;
+		String computedCompletionIdentifier = chars == null ? NONE : new String(chars);
+		assertEquals(
+			"invalid completion identifier-" + testName,
+			expectedCompletionIdentifier,
+			computedCompletionIdentifier);
+	}
+	if (expectedReplacedSource != null){
+		char[] chars = null;
+		if (parser.assistNode != null){
+			chars = CharOperation.subarray(
+				parser.scanner.source, 
+				parser.assistNode.sourceStart, 
+				parser.assistNode.sourceEnd + 1);
+		} else {
+			if (parser.assistIdentifier() != null){
+				if (((CompletionScanner)parser.scanner).completedIdentifierEnd 
+					>= ((CompletionScanner)parser.scanner).completedIdentifierStart){
+					chars = CharOperation.subarray(
+						parser.scanner.source, 
+						((CompletionScanner)parser.scanner).completedIdentifierStart, 
+						((CompletionScanner)parser.scanner).completedIdentifierEnd + 1);
+				}
+			}
+		}
+		String computedReplacedSource  = chars == null ? NONE : new String(chars);
+		assertEquals(
+			"invalid replaced source-" + testName,
+			expectedReplacedSource,
+			computedReplacedSource);
+		if (expectedReplacedSource.length() == 0) {
+			assertEquals(
+				"invalid insertion point-" + testName,
+				cursorLocation + 1, 
+				parser.assistNode.sourceStart);
+		}
+	}
+//	if (expectedLabels != null) {
+//		int length = (parser.labels == null) ? 0 : parser.labels.length;
+//		assertEquals("invalid number of labels-" + testName, expectedLabels.length, length);
+//		for (int i = 0; i < length; i++) {
+//			String label = new String(parser.labels[i]);
+//			assertEquals("invalid label-" + testName, expectedLabels[i], label);
+//		}
+//	}
+}
+
