@@ -27,63 +27,68 @@ void faultInImports() {
 	resolvedImports[0] = getDefaultImports()[0];
 	int index = 1;
 
+	// keep static imports with normal imports until there is a reason to split them up
+	// on demand imports continue to be packages & types. need to check on demand type imports for fields/methods
+	// single imports change from being just types to types or fields
 	nextImport : for (int i = 0; i < numberOfStatements; i++) {
 		ImportReference importReference = referenceContext.imports[i];
 		char[][] compoundName = importReference.tokens;
 
 		// skip duplicates or imports of the current package
-		for (int j = 0; j < index; j++)
-			if (resolvedImports[j].onDemand == importReference.onDemand)
+		for (int j = 0; j < index; j++) {
+			if (resolvedImports[j].onDemand == importReference.onDemand) {
 				if (CharOperation.equals(compoundName, resolvedImports[j].compoundName)) {
 					problemReporter().unusedImport(importReference); // since skipped, must be reported now
 					continue nextImport;
 				}
-		if (importReference.onDemand == true)
+			}
+		}
+		if (importReference.onDemand) {
 			if (CharOperation.equals(compoundName, currentPackageName)) {
 				problemReporter().unusedImport(importReference); // since skipped, must be reported now
 				continue nextImport;
 			}
-		if (importReference.onDemand) {
-			Binding importBinding = findOnDemandImport(compoundName);
+
+			Binding importBinding = findOnDemandImport(compoundName, importReference.isStatic());
 			if (!importBinding.isValidBinding()) {
 				problemReporter().importProblem(importReference, importBinding);
 				continue nextImport;
 			}
 			resolvedImports[index++] = new ImportBinding(compoundName, true, importBinding, importReference);
 		} else {
-			Binding typeBinding = findSingleTypeImport(compoundName);
-			if (!typeBinding.isValidBinding()) {
-				problemReporter().importProblem(importReference, typeBinding);
+			Binding importBinding = findSingleImport(compoundName, importReference.isStatic());
+			if (!importBinding.isValidBinding()) {
+				problemReporter().importProblem(importReference, importBinding);
 				continue nextImport;
 			}
-			if (typeBinding instanceof PackageBinding) {
+			if (importBinding instanceof PackageBinding) {
 				problemReporter().cannotImportPackage(importReference);
 				continue nextImport;
 			}
-			if (typeBinding instanceof ReferenceBinding) {
-				ReferenceBinding referenceBinding = (ReferenceBinding) typeBinding;
-				if (importReference.isTypeUseDeprecated(referenceBinding, this)) {
-					problemReporter().deprecatedType((TypeBinding) typeBinding, importReference);
-				}
-			}
-			ReferenceBinding existingType = typesBySimpleNames.get(compoundName[compoundName.length - 1]);
-			if (existingType != null) {
-				// duplicate test above should have caught this case, but make sure
-				if (existingType == typeBinding) {
+			// collisions between an imported static field & a type should be checked according to spec... but currently not by javac
+			if (importBinding instanceof ReferenceBinding) {
+				ReferenceBinding referenceBinding = (ReferenceBinding) importBinding;
+				if (importReference.isTypeUseDeprecated(referenceBinding, this))
+					problemReporter().deprecatedType(referenceBinding, importReference);
+
+				ReferenceBinding existingType = typesBySimpleNames.get(compoundName[compoundName.length - 1]);
+				if (existingType != null) {
+					// duplicate test above should have caught this case, but make sure
+					if (existingType == referenceBinding)
+						continue nextImport;
+					// either the type collides with a top level type or another imported type
+					for (int j = 0, length = topLevelTypes.length; j < length; j++) {
+						if (CharOperation.equals(topLevelTypes[j].sourceName, existingType.sourceName)) {
+							problemReporter().conflictingImport(importReference);
+							continue nextImport;
+						}
+					}
+					problemReporter().duplicateImport(importReference);
 					continue nextImport;
 				}
-				// either the type collides with a top level type or another imported type
-				for (int j = 0, length = topLevelTypes.length; j < length; j++) {
-					if (CharOperation.equals(topLevelTypes[j].sourceName, existingType.sourceName)) {
-						problemReporter().conflictingImport(importReference);
-						continue nextImport;
-					}
-				}
-				problemReporter().duplicateImport(importReference);
-				continue nextImport;
+				typesBySimpleNames.put(compoundName[compoundName.length - 1], referenceBinding);
 			}
-			resolvedImports[index++] = new ImportBinding(compoundName, false, typeBinding, importReference);
-			typesBySimpleNames.put(compoundName[compoundName.length - 1], (ReferenceBinding) typeBinding);
+			resolvedImports[index++] = new ImportBinding(compoundName, false, importBinding, importReference);
 		}
 	}
 
@@ -96,7 +101,7 @@ void faultInImports() {
 	resolvedSingeTypeImports = new HashtableOfObject(length);
 	for (int i = 0; i < length; i++) {
 		ImportBinding binding = imports[i];
-		if (!binding.onDemand)
+		if (!binding.onDemand && binding.resolvedImport instanceof ReferenceBinding)
 			resolvedSingeTypeImports.put(binding.compoundName[binding.compoundName.length - 1], binding);
 	}
 }

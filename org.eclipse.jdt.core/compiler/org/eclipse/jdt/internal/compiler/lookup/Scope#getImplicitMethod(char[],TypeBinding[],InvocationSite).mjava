@@ -37,7 +37,7 @@
 					MethodBinding methodBinding =
 						(foundMethod == null)
 							? classScope.findExactMethod(receiverType, selector, argumentTypes, invocationSite)
-							: classScope.findExactMethod( receiverType, foundMethod.selector, foundMethod.parameters, invocationSite);
+							: classScope.findExactMethod(receiverType, foundMethod.selector, foundMethod.parameters, invocationSite);
 					//		? findExactMethod(receiverType, selector, argumentTypes, invocationSite)
 					//		: findExactMethod(receiverType, foundMethod.selector, foundMethod.parameters, invocationSite);
 					if (methodBinding == null) {
@@ -100,7 +100,7 @@
 
 							if (receiverType == methodBinding.declaringClass
 								|| (receiverType.getMethods(selector)) != NoMethods
-								|| ((fuzzyProblem == null || fuzzyProblem.problemId() != NotVisible) && environment().options.complianceLevel >= ClassFileConstants.JDK1_4)){
+								|| ((fuzzyProblem == null || fuzzyProblem.problemId() != NotVisible) && environment().options.complianceLevel >= ClassFileConstants.JDK1_4)) {
 								// found a valid method in the 'immediate' scope (ie. not inherited)
 								// OR the receiverType implemented a method with the correct name
 								// OR in 1.4 mode (inherited visible shadows enclosing)
@@ -128,12 +128,10 @@
 							}
 						}
 
-						if (foundMethod == null
-							|| (foundMethod.problemId() == NotVisible
-								&& methodBinding.problemId() != NotVisible)) {
+						if (foundMethod == null || (foundMethod.problemId() == NotVisible && methodBinding.problemId() != NotVisible)) {
 							// only remember the methodBinding if its the first one found or the previous one was not visible & methodBinding is...
 							// remember that private methods are visible if defined directly by an enclosing class
-							if (depth > 0){
+							if (depth > 0) {
 								invocationSite.setDepth(depth);
 								invocationSite.setActualReceiverType(receiverType);
 							}
@@ -164,6 +162,45 @@
 			return foundInsideProblem;
 		if (foundMethod != null)
 			return foundMethod;
+
+		if (insideStaticContext && environment().options.complianceLevel >= ClassFileConstants.JDK1_5) {
+			// at this point the scope is a compilation unit scope & need to check for imported static methods
+			CompilationUnitScope unitScope = (CompilationUnitScope) scope;
+			ImportBinding[] imports = unitScope.imports;
+			if (imports != null) {
+				// check on demand imports
+				boolean foundInImport = false;
+				for (int i = 0, length = imports.length; i < length; i++) {
+					ImportBinding importBinding = imports[i];
+					if (importBinding.isStatic() && importBinding.onDemand) {
+						Binding resolvedImport = importBinding.resolvedImport;
+						if (resolvedImport instanceof ReferenceBinding) {
+							MethodBinding temp = findMethod((ReferenceBinding) resolvedImport, selector, argumentTypes, invocationSite);
+							if (temp != null) {
+								if (!temp.isValidBinding()) {
+									if (foundMethod == null)
+										foundMethod = temp;
+								} else if (temp.isStatic()) {
+									if (temp.canBeSeenBy(unitScope.fPackage)) {
+										ImportReference importReference = importBinding.reference;
+										if (importReference != null) importReference.used = true;
+										if (foundInImport)
+											// Answer error binding -- import on demand conflict; name found in two import on demand types.
+											return new ProblemMethodBinding(temp, selector, temp.parameters, Ambiguous);
+										foundMethod = temp;
+										foundInImport = true;
+									} else if (foundMethod == null) {
+										foundMethod = new ProblemMethodBinding(temp, selector, temp.parameters, NotVisible);
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			if (foundMethod != null)
+				return foundMethod;
+		}
 		return new ProblemMethodBinding(selector, argumentTypes, NotFound);
 	}
 

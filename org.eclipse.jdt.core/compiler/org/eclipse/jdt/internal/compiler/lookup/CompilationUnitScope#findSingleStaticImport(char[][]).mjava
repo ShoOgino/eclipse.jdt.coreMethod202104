@@ -1,0 +1,57 @@
+private Binding findSingleStaticImport(char[][] compoundName) {
+	recordQualifiedReference(compoundName);
+
+	Binding binding = environment.getTopLevelPackage(compoundName[0]);
+	int i = 1;
+	int length = compoundName.length;
+	foundNothingOrType: if (binding != null) {
+		PackageBinding packageBinding = (PackageBinding) binding;
+		while (i < length) {
+			binding = packageBinding.getTypeOrPackage(compoundName[i++]);
+			if (binding == null || !binding.isValidBinding()) {
+				binding = null;
+				break foundNothingOrType;
+			}
+			if (!(binding instanceof PackageBinding))
+				break foundNothingOrType;
+
+			packageBinding = (PackageBinding) binding;
+		}
+		return packageBinding; // cannot be a package, error is caught in sender
+	}
+
+	ReferenceBinding type;
+	if (binding == null) {
+		if (environment.defaultPackage == null || environment.options.complianceLevel >= ClassFileConstants.JDK1_4)
+			return new ProblemReferenceBinding(CharOperation.subarray(compoundName, 0, i), NotFound);
+		type = findType(compoundName[0], environment.defaultPackage, environment.defaultPackage);
+		if (type == null || !type.isValidBinding())
+			return new ProblemReferenceBinding(CharOperation.subarray(compoundName, 0, i), NotFound);
+		i = 1; // reset to look for member types inside the default package type
+	} else {
+		type = (ReferenceBinding) binding;
+	}
+
+	while (i < length) {
+		if (!type.canBeSeenBy(fPackage))
+			return new ProblemReferenceBinding(CharOperation.subarray(compoundName, 0, i), type, NotVisible);		
+		// does look for inherited member types unlike non static imports, member types have precedence over static fields
+		char[] name = compoundName[i++];
+		ReferenceBinding memberType = findMemberType(name, type);
+		if (memberType == null || !memberType.isStatic()) {
+			if (i != length) // fields can only be found in the last spot
+				return new ProblemReferenceBinding(CharOperation.subarray(compoundName, 0, i), NotFound);
+
+			// need to look for a static field
+			FieldBinding field = findField(type, name, null, true);
+			if (field == null || !field.isStatic() || !field.canBeSeenBy(fPackage))
+				return new ProblemReferenceBinding(CharOperation.subarray(compoundName, 0, i), NotFound);
+			return field;
+		}
+		type = memberType;
+	}
+	if (!type.canBeSeenBy(fPackage))
+		return new ProblemReferenceBinding(compoundName, type, NotVisible);
+	return type;
+}
+

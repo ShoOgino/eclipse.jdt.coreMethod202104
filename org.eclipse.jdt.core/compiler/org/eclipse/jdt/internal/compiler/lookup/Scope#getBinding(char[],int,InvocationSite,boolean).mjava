@@ -18,14 +18,14 @@
 	 *	Limitations: cannot request FIELD independently of LOCAL, or vice versa
 	 */
 	public Binding getBinding(char[] name, int mask, InvocationSite invocationSite, boolean needResolve) {
-			
+
 		try {
 			Binding binding = null;
 			FieldBinding problemField = null;
 			if ((mask & VARIABLE) != 0) {
 				boolean insideStaticContext = false;
 				boolean insideConstructorCall = false;
-	
+
 				FieldBinding foundField = null;
 				// can be a problem field which is answered if a valid field is not found
 				ProblemFieldBinding foundInsideProblem = null;
@@ -59,8 +59,7 @@
 						case CLASS_SCOPE :
 							ClassScope classScope = (ClassScope) scope;
 							SourceTypeBinding enclosingType = classScope.referenceContext.binding;
-							FieldBinding fieldBinding =
-								classScope.findField(enclosingType, name, invocationSite, needResolve);
+							FieldBinding fieldBinding = classScope.findField(enclosingType, name, invocationSite, needResolve);
 							// Use next line instead if willing to enable protected access accross inner types
 							// FieldBinding fieldBinding = findField(enclosingType, name, invocationSite);
 							if (fieldBinding != null) { // skip it if we did not find anything
@@ -75,7 +74,7 @@
 										name,
 										InheritedNameHidesEnclosingName);
 								}
-	
+
 								ProblemFieldBinding insideProblem = null;
 								if (fieldBinding.isValidBinding()) {
 									if (!fieldBinding.isStatic()) {
@@ -95,8 +94,7 @@
 													NonStaticReferenceInStaticContext);
 										}
 									}
-									if (enclosingType == fieldBinding.declaringClass
-										|| environment().options.complianceLevel >= ClassFileConstants.JDK1_4){
+									if (enclosingType == fieldBinding.declaringClass || environment().options.complianceLevel >= ClassFileConstants.JDK1_4) {
 										// found a valid field in the 'immediate' scope (ie. not inherited)
 										// OR in 1.4 mode (inherited shadows enclosing)
 										if (foundField == null) {
@@ -118,10 +116,8 @@
 													InheritedNameHidesEnclosingName);
 									}
 								}
-	
-								if (foundField == null
-									|| (foundField.problemId() == NotVisible
-										&& fieldBinding.problemId() != NotVisible)) {
+
+								if (foundField == null || (foundField.problemId() == NotVisible && fieldBinding.problemId() != NotVisible)) {
 									// only remember the fieldBinding if its the first one found or the previous one was not visible & fieldBinding is...
 									foundDepth = depth;
 									foundActualReceiverType = enclosingType;
@@ -143,12 +139,12 @@
 					}
 					scope = scope.parent;
 				}
-	
+
 				if (foundInsideProblem != null)
 					return foundInsideProblem;
 				if (foundField != null) {
-					if (foundField.isValidBinding()){
-						if (foundDepth > 0){
+					if (foundField.isValidBinding()) {
+						if (foundDepth > 0) {
 							invocationSite.setDepth(foundDepth);
 							invocationSite.setActualReceiverType(foundActualReceiverType);
 						}
@@ -156,8 +152,54 @@
 					}
 					problemField = foundField;
 				}
+
+				if (environment().options.complianceLevel >= ClassFileConstants.JDK1_5) {
+					// at this point the scope is a compilation unit scope & need to check for imported static fields
+					CompilationUnitScope unitScope = (CompilationUnitScope) scope;
+					ImportBinding[] imports = unitScope.imports;
+					if (imports != null) {
+						// check single static imports
+						for (int i = 0, length = imports.length; i < length; i++) {
+							ImportBinding importBinding = imports[i];
+							if (importBinding.isStatic() && !importBinding.onDemand) {
+								if (CharOperation.equals(importBinding.compoundName[importBinding.compoundName.length - 1], name)) {
+									if (unitScope.resolveSingleImport(importBinding) != null && importBinding.resolvedImport instanceof FieldBinding) {
+										ImportReference importReference = importBinding.reference;
+										if (importReference != null) importReference.used = true;
+										return importBinding.resolvedImport; // already know its visible
+									}
+								}
+							}
+						}
+						// check on demand imports
+						boolean foundInImport = false;
+						for (int i = 0, length = imports.length; i < length; i++) {
+							ImportBinding importBinding = imports[i];
+							if (importBinding.isStatic() && importBinding.onDemand) {
+								Binding resolvedImport = importBinding.resolvedImport;
+								if (resolvedImport instanceof ReferenceBinding) {
+									FieldBinding temp = findField((ReferenceBinding) resolvedImport, name, invocationSite, needResolve);
+									if (temp != null) {
+										if (!temp.isValidBinding()) {
+											problemField = temp;
+										} else if (temp.isStatic()) {
+											ImportReference importReference = importBinding.reference;
+											if (importReference != null) importReference.used = true;
+											if (foundInImport)
+												// Answer error binding -- import on demand conflict; name found in two import on demand packages.
+												return new ProblemReferenceBinding(name, Ambiguous);
+											foundField = temp;
+											foundInImport = true;
+										}
+									}
+								}
+							}
+						}
+						if (foundField != null) return foundField;
+					}
+				}
 			}
-	
+
 			// We did not find a local or instance variable.
 			if ((mask & TYPE) != 0) {
 				if ((binding = getBaseType(name)) != null)
