@@ -1,0 +1,118 @@
+/*
+ * Parse a method with selectionNode check
+ */
+public void checkMethodParse(
+		char[] source, 
+		int selectionStart,
+		int selectionEnd, 
+		String expectedSelection, 
+		String expectedUnitToString, 
+		String expectedSelectionIdentifier, 
+		String expectedSelectedSource,
+		String[] expectedLabels,
+		String testName) {
+
+	CompilerOptions options = new CompilerOptions();
+	SelectionParser parser = 
+		new SelectionParser(
+			new ProblemReporter(
+				DefaultErrorHandlingPolicies.proceedWithAllProblems(), 
+				options, 
+				new DefaultProblemFactory(Locale.getDefault())),
+			options.assertMode);
+
+	ICompilationUnit sourceUnit = new CompilationUnit(source, testName, null);
+	CompilationResult compilationResult = new CompilationResult(sourceUnit, 0, 0, 0);	
+
+	CompilationUnitDeclaration unit = parser.dietParse(sourceUnit, compilationResult, selectionStart, selectionEnd);
+
+	AstNode foundMethod = null;
+	if (unit.types != null) {
+		for (int i = 0; i < unit.types.length; i++) {
+			TypeDeclaration type = unit.types[i];
+			AstNode method = findMethod(type, selectionStart);
+			if (method != null) {
+				foundMethod = method;
+				break;
+			}
+		}
+	}
+	assertTrue("no method found at cursor location", foundMethod != null);
+	if (foundMethod instanceof AbstractMethodDeclaration) {
+		parser.parseBlockStatements((AbstractMethodDeclaration)foundMethod, unit);
+	} else {
+		TypeDeclaration type = (TypeDeclaration)foundMethod;
+		if (type.fields != null) {
+			for (int i = 0; i < type.fields.length; i++) {
+				FieldDeclaration field = type.fields[i];
+				if (field instanceof Initializer && field.sourceStart <= selectionStart && selectionStart <= field.sourceEnd) {
+					parser.parseBlockStatements((Initializer)field, type, unit);
+					break;
+				}
+			}
+		}
+	}
+
+	String computedUnitToString = unit.toString();
+	//System.out.println(computedUnitToString);
+	//System.out.println(Util.displayString(computedUnitToString));
+	//System.out.println(expectedUnitToString);	
+	
+	String computedCompletion = parser.assistNode == null 
+								? NONE
+								: parser.assistNode.toString(0);
+	assertEquals(
+		"invalid selection node-" + testName,
+		expectedSelection,
+		computedCompletion);
+
+	assertEquals(
+		"invalid selection location-"+testName,
+		expectedUnitToString,
+		computedUnitToString);
+
+	if (expectedSelectionIdentifier != null){
+		char[] chars = ((SelectionScanner)parser.scanner).selectionIdentifier;
+		String computedSelectionIdentifier = chars == null ? NONE : new String(chars);
+		assertEquals(
+			"invalid selection identifier-" + testName,
+			expectedSelectionIdentifier,
+			computedSelectionIdentifier);
+	}
+	if (expectedSelectedSource != null){
+		char[] chars = null;
+		if (parser.assistNode != null){
+			chars = CharOperation.subarray(
+				parser.scanner.source, 
+				parser.assistNode.sourceStart, 
+				parser.assistNode.sourceEnd + 1);
+		} else {
+			if (parser.assistIdentifier() != null){
+				if (((SelectionScanner)parser.scanner).selectionEnd 
+					>= ((SelectionScanner)parser.scanner).selectionStart){
+					chars = CharOperation.subarray(
+						parser.scanner.source, 
+						((SelectionScanner)parser.scanner).selectionStart, 
+						((SelectionScanner)parser.scanner).selectionEnd + 1);
+				}
+			}
+		}
+		String computedReplacedSource  = chars == null ? NONE : new String(chars);
+		assertEquals(
+			"invalid replaced source-" + testName,
+			expectedSelectedSource,
+			computedReplacedSource);
+	}
+/*	
+	if (expectedLabels != null) {
+		assert("no labels-" + testName, parser.labels != null);
+		int length = parser.labels.length;
+		assertEquals("invalid number of labels-" + testName, expectedLabels.length, length);
+		for (int i = 0; i < length; i++) {
+			String label = new String(parser.labels[i]);
+			assertEquals("invalid label-" + testName, expectedLabels[i], label);
+		}
+	}
+*/	
+}
+
