@@ -14,7 +14,7 @@
 		// No visibility checks can be performed without the scope & invocationSite
 
 		int fieldLength = fieldName.length;
-		next : for (int f = fields.length; --f >= 0;) {
+		next : for (int f = fields.length; --f >= 0;) {			
 			FieldBinding field = fields[f];
 			if (onlyStaticFields && !field.isStatic())
 				continue next;
@@ -40,53 +40,27 @@
 				}
 			}
 
-			fieldsFound.add(field);
+			boolean prefixRequired = false;
+			char[] completion = field.name;
 
 			for (int l = localsFound.size; --l >= 0;) {
 				LocalVariableBinding local = (LocalVariableBinding) localsFound.elementAt(l);
 
 				if (CharOperation.equals(field.name, local.name, true)) {
-					char[] completion = field.name;
-					SourceTypeBinding enclosing = scope.enclosingSourceType();
-
-					if (field.isStatic()) {
-						char[] name = enclosing.compoundName[enclosing.compoundName.length - 1];
-						completion = CharOperation.concat(name, completion, '.');
-
-					} else if (enclosing == invocationScope.enclosingSourceType()) {
-						completion = CharOperation.concat(THIS, completion, '.');
-
-					} else {
-
-						char[] name = enclosing.compoundName[enclosing.compoundName.length - 1];
-
-						if (!enclosing.isNestedType()) {
-							completion = CharOperation.concat(THIS, completion, '.');
-							completion = CharOperation.concat(name, completion, '.');
-
-						} else if (enclosing.isAnonymousType()) {
-							continue next;
-						} else {
-							completion = CharOperation.concat(THIS, completion, '.');
-							int index = CharOperation.lastIndexOf('$', name);
-							char[] shortName = CharOperation.subarray(name, index + 1, name.length);
-							completion = CharOperation.concat(shortName, completion, '.');
-						}
+					SourceTypeBinding declarationType = scope.enclosingSourceType();
+					if (declarationType.isAnonymousType() && declarationType != invocationScope.enclosingSourceType()) {
+						continue next;
 					}
-
-					requestor
-						.acceptField(
-							field.declaringClass.qualifiedPackageName(),
-							field.declaringClass.qualifiedSourceName(),
-							field.name,
-							field.type.qualifiedPackageName(),
-							field.type.qualifiedSourceName(),
-							completion,
-
-					// may include some qualification to resolve ambiguities
-					field.modifiers, startPosition, endPosition);
-					continue next;
+					prefixRequired = true;
+					break;
 				}
+			}
+			
+			fieldsFound.add(field);
+			
+			if(prefixRequired){
+				char[] prefix = computePrefix(scope.enclosingSourceType(), invocationScope.enclosingSourceType(), field.isStatic());
+				completion = CharOperation.concat(prefix,completion,'.');
 			}
 
 			requestor
@@ -96,7 +70,7 @@
 					field.name,
 					field.type.qualifiedPackageName(),
 					field.type.qualifiedSourceName(),
-					field.name,
+					completion,
 			// may include some qualification to resolve ambiguities
 			field.modifiers, startPosition, endPosition);
 		}
