@@ -1,0 +1,108 @@
+		// Helper method for private void findVariableNames(char[] name, TypeReference type )
+	private void findVariableName(
+		char[] token,
+		char[] qualifiedPackageName,
+		char[] qualifiedSourceName,
+		char[] sourceName,
+		final TypeBinding typeBinding,
+		char[][] excludeNames,
+		int dim,
+		int kind,
+		int modifiers){
+			
+		if(sourceName == null || sourceName.length == 0)
+			return;
+
+		// compute variable name for non base type
+		final char[] displayName;
+		if (dim > 0){
+			int l = qualifiedSourceName.length;
+			displayName = new char[l+(2*dim)];
+			System.arraycopy(qualifiedSourceName, 0, displayName, 0, l);
+			for(int i = 0; i < dim; i++){
+				displayName[l+(i*2)] = '[';
+				displayName[l+(i*2)+1] = ']';
+			}
+		} else {
+			displayName = qualifiedSourceName;
+		}
+		
+		final char[] t = token;
+		final char[] q = qualifiedPackageName;
+		INamingRequestor namingRequestor = new INamingRequestor() {
+			public void acceptNameWithPrefixAndSuffix(char[] name, boolean isFirstPrefix, boolean isFirstSuffix) {
+				accept(	name,
+					(isFirstPrefix ? R_NAME_FIRST_PREFIX : R_NAME_PREFIX) + (isFirstSuffix ? R_NAME_FIRST_SUFFIX : R_NAME_SUFFIX));
+			}
+
+			public void acceptNameWithPrefix(char[] name, boolean isFirstPrefix) {
+				accept(name, isFirstPrefix ? R_NAME_FIRST_PREFIX :  R_NAME_PREFIX);
+			}
+
+			public void acceptNameWithSuffix(char[] name, boolean isFirstSuffix) {
+				accept(name, isFirstSuffix ? R_NAME_FIRST_SUFFIX : R_NAME_SUFFIX);
+			}
+
+			public void acceptNameWithoutPrefixAndSuffix(char[] name) {
+				accept(name, 0);
+			}
+			void accept(char[] name, int prefixAndSuffixRelevance){
+				if (CharOperation.prefixEquals(t, name, false)) {
+					int relevance = computeBaseRelevance();
+					relevance += computeRelevanceForInterestingProposal();
+					relevance += computeRelevanceForCaseMatching(t, name);
+					relevance += prefixAndSuffixRelevance;
+
+					// accept result
+					CompletionEngine.this.noProposal = false;
+					if(!CompletionEngine.this.requestor.isIgnored(CompletionProposal.VARIABLE_DECLARATION)) {
+						CompletionProposal proposal = CompletionEngine.this.createProposal(CompletionProposal.VARIABLE_DECLARATION, CompletionEngine.this.actualCompletionPosition);
+						proposal.setSignature(getSignature(typeBinding));
+						proposal.setPackageName(q);
+						proposal.setTypeName(displayName);
+						proposal.setName(name);
+						proposal.setCompletion(name);
+						//proposal.setFlags(Flags.AccDefault);
+						proposal.setReplaceRange(CompletionEngine.this.startPosition - CompletionEngine.this.offset, CompletionEngine.this.endPosition - CompletionEngine.this.offset);
+						proposal.setRelevance(relevance);
+						CompletionEngine.this.requestor.accept(proposal);
+						if(DEBUG) {
+							CompletionEngine.this.printDebug(proposal);
+						}
+					}
+				}
+			}
+		};
+		
+		switch (kind) {
+			case FIELD :
+				InternalNamingConventions.suggestFieldNames(
+					this.javaProject,
+					qualifiedPackageName,
+					qualifiedSourceName,
+					dim,
+					modifiers,
+					excludeNames,
+					namingRequestor);
+				break;
+			case LOCAL :
+				InternalNamingConventions.suggestLocalVariableNames(
+					this.javaProject,
+					qualifiedPackageName,
+					qualifiedSourceName,
+					dim,
+					excludeNames,
+					namingRequestor);
+				break;
+			case ARGUMENT :
+				InternalNamingConventions.suggestArgumentNames(
+					this.javaProject,
+					qualifiedPackageName,
+					qualifiedSourceName,
+					dim,
+					excludeNames,
+					namingRequestor);
+				break;
+		}
+	}
+
