@@ -1,118 +1,118 @@
-final Binding getTypeOrPackage(char[] name, int mask) {
-	Scope scope = this;
-	if ((mask & TYPE) == 0) {
-		Scope next = scope;
-		while ((next = scope.parent) != null)
-			scope = next;
-	} else {
-		ReferenceBinding foundType = null;
-		done : while (true) { // done when a COMPILATION_UNIT_SCOPE is found
-			switch(scope.kind) {
-				case METHOD_SCOPE :
-				case BLOCK_SCOPE :
-					ReferenceBinding localType = ((BlockScope) scope).findLocalType(name); // looks in this scope only
-					if (localType != null) {
-						if (foundType != null && foundType != localType)
-							return new ProblemReferenceBinding(name, InheritedNameHidesEnclosingName);
-						return localType;
-					}
-					break;
-				case CLASS_SCOPE :
-					SourceTypeBinding sourceType = ((ClassScope) scope).referenceContext.binding;
-					if (CharOperation.equals(sourceType.sourceName, name)) {
-						if (foundType != null && foundType != sourceType)
-							return new ProblemReferenceBinding(name, InheritedNameHidesEnclosingName);
-						return sourceType;
-					}
-
-					ReferenceBinding memberType = findMemberType(name, sourceType);
-					if (memberType != null) { // skip it if we did not find anything
-						if (memberType.problemId() == Ambiguous) {
-							if (foundType == null || foundType.problemId() == NotVisible)
-								// supercedes any potential InheritedNameHidesEnclosingName problem
-								return memberType;
-							else
-								// make the user qualify the type, likely wants the first inherited type
+	/* Internal use only 
+	*/
+	final Binding getTypeOrPackage(char[] name, int mask) {
+		Scope scope = this;
+		if ((mask & TYPE) == 0) {
+			Scope next = scope;
+			while ((next = scope.parent) != null)
+				scope = next;
+		} else {
+			ReferenceBinding foundType = null;
+			done : while (true) { // done when a COMPILATION_UNIT_SCOPE is found
+				switch (scope.kind) {
+					case METHOD_SCOPE :
+					case BLOCK_SCOPE :
+						ReferenceBinding localType = ((BlockScope) scope).findLocalType(name);
+						// looks in this scope only
+						if (localType != null) {
+							if (foundType != null && foundType != localType)
 								return new ProblemReferenceBinding(name, InheritedNameHidesEnclosingName);
+							return localType;
 						}
-
-						if (memberType.isValidBinding()) {
-							if (sourceType == memberType.enclosingType()) { // found a valid type in the 'immediate' scope (ie. not inherited)
-								if (foundType == null)
+						break;
+					case CLASS_SCOPE :
+						SourceTypeBinding sourceType = ((ClassScope) scope).referenceContext.binding;
+						if (CharOperation.equals(sourceType.sourceName, name)) {
+							if (foundType != null && foundType != sourceType)
+								return new ProblemReferenceBinding(name, InheritedNameHidesEnclosingName);
+							return sourceType;
+						}
+						ReferenceBinding memberType = findMemberType(name, sourceType);
+						if (memberType != null) { // skip it if we did not find anything
+							if (memberType.problemId() == Ambiguous) {
+								if (foundType == null || foundType.problemId() == NotVisible)
+									// supercedes any potential InheritedNameHidesEnclosingName problem
 									return memberType;
-								if (foundType.isValidBinding()) // if a valid type was found, complain when another is found in an 'immediate' enclosing type (ie. not inherited)
-									if (foundType != memberType)
-										return new ProblemReferenceBinding(name, InheritedNameHidesEnclosingName);
+								else
+									// make the user qualify the type, likely wants the first inherited type
+									return new ProblemReferenceBinding(name, InheritedNameHidesEnclosingName);
 							}
+							if (memberType.isValidBinding()) {
+								if (sourceType == memberType.enclosingType()) {
+									// found a valid type in the 'immediate' scope (ie. not inherited)
+									if (foundType == null)
+										return memberType;
+									if (foundType.isValidBinding())
+										// if a valid type was found, complain when another is found in an 'immediate' enclosing type (ie. not inherited)
+										if (foundType != memberType)
+											return new ProblemReferenceBinding(name, InheritedNameHidesEnclosingName);
+								}
+							}
+							if (foundType == null
+								|| (foundType.problemId() == NotVisible && memberType.problemId() != NotVisible))
+								// only remember the memberType if its the first one found or the previous one was not visible & memberType is...
+								foundType = memberType;
 						}
-
-						if (foundType == null || (foundType.problemId() == NotVisible && memberType.problemId() != NotVisible))
-							// only remember the memberType if its the first one found or the previous one was not visible & memberType is...
-							foundType = memberType;
-					}
-					break;
-				case COMPILATION_UNIT_SCOPE :
-					break done;
+						break;
+					case COMPILATION_UNIT_SCOPE :
+						break done;
+				}
+				scope = scope.parent;
 			}
-			scope = scope.parent;
+			if (foundType != null)
+				return foundType;
 		}
-		if (foundType != null)
-			return foundType;
-	}
+		// at this point the scope is a compilation unit scope
+		CompilationUnitScope unitScope = (CompilationUnitScope) scope;
+		// ask for the imports + name
+		if ((mask & TYPE) != 0) {
+			// check single type imports.
+			ImportBinding[] imports = unitScope.imports;
+			// copy the list, since single type imports are removed if they cannot be resolved
+			for (int i = 0, length = imports.length; i < length; i++) {
+				ImportBinding typeImport = imports[i];
+				if (!typeImport.onDemand)
+					if (CharOperation
+						.equals(typeImport.compoundName[typeImport.compoundName.length - 1], name))
+						if (unitScope.resolveSingleTypeImport(typeImport) != null)
+							return typeImport.resolvedImport; // already know its visible
+			}
+			// check if the name is in the current package (answer the problem binding unless its not found in which case continue to look)
+			ReferenceBinding type = findType(name, unitScope.fPackage, unitScope.fPackage);
+			// is always visible
+			if (type != null)
+				return type;
 
-	// at this point the scope is a compilation unit scope
-	CompilationUnitScope unitScope = (CompilationUnitScope) scope;
-	// ask for the imports + name
-	if ((mask & TYPE) != 0) {
-		// check single type imports.
-		ImportBinding[] imports = unitScope.imports; // copy the list, since single type imports are removed if they cannot be resolved
-		for (int i = 0, length = imports.length; i < length; i++) {
-			ImportBinding typeImport = imports[i];
-			if (!typeImport.onDemand)
-				if (CharOperation.equals(typeImport.compoundName[typeImport.compoundName.length - 1], name))
-					if (unitScope.resolveSingleTypeImport(typeImport) != null)
-						return typeImport.resolvedImport; // already know its visible
-		}
-
-		// check if the name is in the current package (answer the problem binding unless its not found in which case continue to look)
-		ReferenceBinding type = findType(name, unitScope.fPackage, unitScope.fPackage); // is always visible
-		if (type != null)
-			return type;
-
-		// check on demand imports
-		boolean foundInImport = false;
-		for (int i = 0, length = unitScope.imports.length; i < length; i++) {
-			if (unitScope.imports[i].onDemand) {
-				Binding resolvedImport = unitScope.imports[i].resolvedImport;
-				ReferenceBinding temp =
-					(resolvedImport instanceof PackageBinding)
-						? findType(name, (PackageBinding) resolvedImport, unitScope.fPackage)
-						: findDirectMemberType(name, (ReferenceBinding) resolvedImport);
-				if (temp != null && temp.isValidBinding()) {
-					if (foundInImport)
-						// Answer error binding -- import on demand conflict; name found in two import on demand packages.
-						return new ProblemReferenceBinding(name, Ambiguous);
-					type = temp;
-					foundInImport = true;
+			// check on demand imports
+			boolean foundInImport = false;
+			for (int i = 0, length = unitScope.imports.length; i < length; i++) {
+				if (unitScope.imports[i].onDemand) {
+					Binding resolvedImport = unitScope.imports[i].resolvedImport;
+					ReferenceBinding temp =
+						(resolvedImport instanceof PackageBinding)
+							? findType(name, (PackageBinding) resolvedImport, unitScope.fPackage)
+							: findDirectMemberType(name, (ReferenceBinding) resolvedImport);
+					if (temp != null && temp.isValidBinding()) {
+						if (foundInImport)
+							// Answer error binding -- import on demand conflict; name found in two import on demand packages.
+							return new ProblemReferenceBinding(name, Ambiguous);
+						type = temp;
+						foundInImport = true;
+					}
 				}
 			}
+			if (type != null)
+				return type;
 		}
-
-		if (type != null)
-			return type;
+		// see if the name is a package
+		if ((mask & PACKAGE) != 0) {
+			PackageBinding packageBinding = unitScope.environment.getTopLevelPackage(name);
+			if (packageBinding != null)
+				return packageBinding;
+		}
+		// Answer error binding -- could not find name
+		compilationUnitScope().addNamespaceReference(
+			new ProblemPackageBinding(name, NotFound));
+		return new ProblemReferenceBinding(name, NotFound);
 	}
-
-	// see if the name is a package
-	if ((mask & PACKAGE) != 0) {
-		PackageBinding packageBinding = unitScope.environment.getTopLevelPackage(name);
-		if (packageBinding != null)
-			return packageBinding;
-	}
-
-	// Answer error binding -- could not find name
-	compilationUnitScope().addNamespaceReference(new ProblemPackageBinding(name, NotFound));
-	return new ProblemReferenceBinding(name, NotFound);
-}
-/* Answer whether the type is defined in the same compilation unit as the receiver
-*/
 

@@ -1,0 +1,59 @@
+	/**
+	 * Add an additional source type
+	 */
+	public void accept(ISourceType[] sourceTypes, PackageBinding packageBinding) {
+		ISourceType sourceType = sourceTypes[0];
+		while (sourceType.getEnclosingType() != null)
+			sourceType = sourceType.getEnclosingType();
+		CompilationUnitDeclaration unit;
+		if (sourceType instanceof SourceTypeElementInfo) {
+			// get source
+			SourceTypeElementInfo elementInfo = (SourceTypeElementInfo) sourceType;
+			IType type = elementInfo.getHandle();
+			try {
+				final IFile file = (IFile) type.getUnderlyingResource();
+				final char[] source = PotentialMatch.getContents(file);
+
+				// get main type name
+				final String fileName = file.getFullPath().lastSegment();
+				final char[] mainTypeName =
+					fileName.substring(0, fileName.length() - 5).toCharArray();
+
+				// source unit
+				ICompilationUnit sourceUnit = new ICompilationUnit() {
+					public char[] getContents() {
+						return source;
+					}
+					public char[] getFileName() {
+						return fileName.toCharArray();
+					}
+					public char[] getMainTypeName() {
+						return mainTypeName;
+					}
+				};
+
+				// diet parse
+				CompilationResult compilationResult = new CompilationResult(sourceUnit, 0, 0);
+				unit = this.parser.dietParse(sourceUnit, compilationResult);
+			} catch (JavaModelException e) {
+				unit = null;
+			}
+		} else {
+			CompilationResult result =
+				new CompilationResult(sourceType.getFileName(), 0, 0);
+			unit =
+				SourceTypeConverter.buildCompilationUnit(
+					sourceTypes,
+					true,
+					true,
+					lookupEnvironment.problemReporter,
+					result);
+		}
+
+		if (unit != null) {
+			this.lookupEnvironment.buildTypeBindings(unit);
+			this.lookupEnvironment.completeTypeBindings(unit, true);
+			this.parsedUnits.put(sourceType.getQualifiedName(), unit);
+		}
+	}
+

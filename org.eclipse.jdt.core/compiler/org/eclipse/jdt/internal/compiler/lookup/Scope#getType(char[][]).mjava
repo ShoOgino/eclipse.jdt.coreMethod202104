@@ -1,57 +1,70 @@
-public final TypeBinding getType(char[][] compoundName) {
-	int typeNameLength = compoundName.length;	
-	if (typeNameLength == 1) {
-		// Would like to remove this test and require senders to specially handle base types
-		TypeBinding binding = getBaseType(compoundName[0]);
-		if (binding != null)
-			return binding;
-	}
+	/* Answer the type binding corresponding to the compoundName.
+	*
+	* NOTE: If a problem binding is returned, senders should extract the compound name
+	* from the binding & not assume the problem applies to the entire compoundName.
+	*/
+	public final TypeBinding getType(char[][] compoundName) {
+		int typeNameLength = compoundName.length;
+		if (typeNameLength == 1) {
+			// Would like to remove this test and require senders to specially handle base types
+			TypeBinding binding = getBaseType(compoundName[0]);
+			if (binding != null)
+				return binding;
+		}
+		Binding binding =
+			getTypeOrPackage(compoundName[0], typeNameLength == 1 ? TYPE : TYPE | PACKAGE);
+		if (binding == null)
+			return new ProblemReferenceBinding(compoundName[0], NotFound);
+		if (!binding.isValidBinding()) {
+			compilationUnitScope().addNamespaceReference(
+				new ProblemPackageBinding(compoundName[0], NotFound));
+			// record extra reference to pkg
+			return (ReferenceBinding) binding;
+		}
+		int currentIndex = 1;
+		boolean checkVisibility = false;
+		if (binding instanceof PackageBinding) {
+			PackageBinding packageBinding = (PackageBinding) binding;
+			compilationUnitScope().addNamespaceReference(packageBinding);
 
-	Binding binding = getTypeOrPackage(compoundName[0], typeNameLength == 1 ? TYPE : TYPE | PACKAGE);
-	if (binding == null)
-		return new ProblemReferenceBinding(compoundName[0], NotFound);
-	if (!binding.isValidBinding()){
-		compilationUnitScope().addNamespaceReference(new ProblemPackageBinding(compoundName[0], NotFound)); // record extra reference to pkg
-		return (ReferenceBinding) binding;
-	}
-	int currentIndex = 1;
-	boolean checkVisibility = false;
-	if (binding instanceof PackageBinding) {
-		PackageBinding packageBinding = (PackageBinding) binding;
-		compilationUnitScope().addNamespaceReference(packageBinding);
+			while (currentIndex < typeNameLength) {
+				binding = packageBinding.getTypeOrPackage(compoundName[currentIndex++]);
+				// does not check visibility
+				if (binding == null)
+					return new ProblemReferenceBinding(
+						CharOperation.subarray(compoundName, 0, currentIndex),
+						NotFound);
+				if (!binding.isValidBinding())
+					return new ProblemReferenceBinding(
+						CharOperation.subarray(compoundName, 0, currentIndex),
+						binding.problemId());
+				if (!(binding instanceof PackageBinding))
+					break;
+				packageBinding = (PackageBinding) binding;
+				compilationUnitScope().addNamespaceReference(packageBinding);
+			}
+			if (binding instanceof PackageBinding)
+				return new ProblemReferenceBinding(
+					CharOperation.subarray(compoundName, 0, currentIndex),
+					NotFound);
+			checkVisibility = true;
+		}
+		// binding is now a ReferenceBinding
+		ReferenceBinding typeBinding = (ReferenceBinding) binding;
+		compilationUnitScope().addTypeReference(typeBinding);
+		if (checkVisibility) // handles the fall through case
+			if (!typeBinding.canBeSeenBy(this))
+				return new ProblemReferenceBinding(
+					CharOperation.subarray(compoundName, 0, currentIndex),
+					NotVisible);
 
 		while (currentIndex < typeNameLength) {
-			binding = packageBinding.getTypeOrPackage(compoundName[currentIndex++]); // does not check visibility
-			if (binding == null)
-				return new ProblemReferenceBinding(CharOperation.subarray(compoundName, 0, currentIndex), NotFound);
- 			if (!binding.isValidBinding())
-				return new ProblemReferenceBinding(CharOperation.subarray(compoundName, 0, currentIndex), binding.problemId());
- 			if (!(binding instanceof PackageBinding))
- 				break;
- 			packageBinding = (PackageBinding) binding;
-			compilationUnitScope().addNamespaceReference(packageBinding);
+			typeBinding = getMemberType(compoundName[currentIndex++], typeBinding);
+			if (!typeBinding.isValidBinding())
+				return new ProblemReferenceBinding(
+					CharOperation.subarray(compoundName, 0, currentIndex),
+					typeBinding.problemId());
 		}
-
-		if (binding instanceof PackageBinding)
-			return new ProblemReferenceBinding(CharOperation.subarray(compoundName, 0, currentIndex), NotFound);
-		checkVisibility = true;
+		return typeBinding;
 	}
-
-	// binding is now a ReferenceBinding
-	ReferenceBinding typeBinding = (ReferenceBinding) binding;
-	compilationUnitScope().addTypeReference(typeBinding);
-	if (checkVisibility) // handles the fall through case
-		if (!typeBinding.canBeSeenBy(this))
-			return new ProblemReferenceBinding(CharOperation.subarray(compoundName, 0, currentIndex), NotVisible); 
-
-	while (currentIndex < typeNameLength) {
-		typeBinding = getMemberType(compoundName[currentIndex++], typeBinding);
-		if (!typeBinding.isValidBinding())
-			return new ProblemReferenceBinding(CharOperation.subarray(compoundName, 0, currentIndex), typeBinding.problemId());
-	}
-	return typeBinding;
-}
-/* Answer the type binding that corresponds the given name, starting the lookup in the receiver.
-* The name provided is a simple source name (e.g., "Object" , "Point", ...)
-*/
 
