@@ -1,99 +1,92 @@
-	protected void consumeEnterVariable() {
-		// EnterVariable ::= $empty
-		// do nothing by default
+protected void consumeEnterVariable() {
+	// EnterVariable ::= $empty
+	// do nothing by default
 
-		char[] name = identifierStack[identifierPtr];
-		long namePosition = identifierPositionStack[identifierPtr--];
-		int extendedDimension = intStack[intPtr--];
+	char[] name = identifierStack[identifierPtr];
+	long namePosition = identifierPositionStack[identifierPtr--];
+	int extendedDimension = intStack[intPtr--];
 
-		AbstractVariableDeclaration declaration;
-		// create the ast node
-		boolean isLocalDeclaration = nestedMethod[nestedType] != 0;
+	AbstractVariableDeclaration declaration;
+	// create the ast node
+	boolean isLocalDeclaration = nestedMethod[nestedType] != 0; 
+	if (isLocalDeclaration) {
+		// create the local variable declarations
+		declaration = 
+			new LocalDeclaration(null, name, (int) (namePosition >>> 32), (int) namePosition); 
+	} else {
+		// create the field declaration
+		declaration = 
+			this.createFieldDeclaration(null, name, (int) (namePosition >>> 32), (int) namePosition); 
+	}
+	identifierLengthPtr--;
+	TypeReference type;
+	int variableIndex = variablesCounter[nestedType];
+	int typeDim = 0;
+	if (variableIndex == 0) {
+		// first variable of the declaration (FieldDeclaration or LocalDeclaration)
 		if (isLocalDeclaration) {
-			// create the local variable declarations
-			declaration =
-				new LocalDeclaration(
-					null,
-					name,
-					(int) (namePosition >>> 32),
-					(int) namePosition);
-		} else {
-			// create the field declaration
-			declaration =
-				this.createFieldDeclaration(
-					null,
-					name,
-					(int) (namePosition >>> 32),
-					(int) namePosition);
-		}
-		identifierLengthPtr--;
-		TypeReference type;
-		int variableIndex = variablesCounter[nestedType];
-		int typeDim = 0;
-		if (variableIndex == 0) {
-			// first variable of the declaration (FieldDeclaration or LocalDeclaration)
-			if (isLocalDeclaration) {
-				declaration.declarationSourceStart = intStack[intPtr--];
-				declaration.modifiers = intStack[intPtr--];
-				type = getTypeReference(typeDim = intStack[intPtr--]); // type dimension
-				if (declaration.declarationSourceStart == -1) {
-					// this is true if there is no modifiers for the local variable declaration
-					declaration.declarationSourceStart = type.sourceStart;
-				}
-				pushOnAstStack(type);
-			} else {
-				type = getTypeReference(typeDim = intStack[intPtr--]); // type dimension
-				pushOnAstStack(type);
-				declaration.declarationSourceStart = intStack[intPtr--];
-				declaration.modifiers = intStack[intPtr--];
+			declaration.declarationSourceStart = intStack[intPtr--];
+			declaration.modifiers = intStack[intPtr--];
+			type = getTypeReference(typeDim = intStack[intPtr--]); // type dimension
+			if (declaration.declarationSourceStart == -1) {
+				// this is true if there is no modifiers for the local variable declaration
+				declaration.declarationSourceStart = type.sourceStart;
 			}
+			pushOnAstStack(type);
 		} else {
-			type = (TypeReference) astStack[astPtr - variableIndex];
-			typeDim = type.dimensions();
-			AbstractVariableDeclaration previousVariable =
-				(AbstractVariableDeclaration) astStack[astPtr];
-			declaration.declarationSourceStart = previousVariable.declarationSourceStart;
-			declaration.modifiers = previousVariable.modifiers;
+			type = getTypeReference(typeDim = intStack[intPtr--]); // type dimension
+			pushOnAstStack(type);
+			declaration.declarationSourceStart = intStack[intPtr--];
+			declaration.modifiers = intStack[intPtr--];
 		}
+	} else {
+		type = (TypeReference) astStack[astPtr - variableIndex];
+		typeDim = type.dimensions();
+		AbstractVariableDeclaration previousVariable = 
+			(AbstractVariableDeclaration) astStack[astPtr]; 
+		declaration.declarationSourceStart = previousVariable.declarationSourceStart;
+		declaration.modifiers = previousVariable.modifiers;
+	}
 
-		if (extendedDimension == 0) {
+	if (extendedDimension == 0) {
+		declaration.type = type;
+	} else {
+		int dimension = typeDim + extendedDimension;
+		//on the identifierLengthStack there is the information about the type....
+		int baseType;
+		if ((baseType = identifierLengthStack[identifierLengthPtr + 1]) < 0) {
+			//it was a baseType
+			int typeSourceStart = type.sourceStart();
+			type = TypeReference.baseTypeReference(-baseType, dimension);
+			type.sourceStart = typeSourceStart;
 			declaration.type = type;
 		} else {
-			int dimension = typeDim + extendedDimension;
-			//on the identifierLengthStack there is the information about the type....
-			int baseType;
-			if ((baseType = identifierLengthStack[identifierLengthPtr + 1]) < 0) {
-				//it was a baseType
-				int typeSourceStart = type.sourceStart();
-				type = TypeReference.baseTypeReference(-baseType, dimension);
-				type.sourceStart = typeSourceStart;
-				declaration.type = type;
-			} else {
-				declaration.type = type.copyDims(dimension);
-			}
-		}
-		variablesCounter[nestedType]++;
-		pushOnAstStack(declaration);
-		// recovery
-		if (currentElement != null) {
-			if (!(currentElement instanceof RecoveredType)
-				&& (currentToken == TokenNameDOT //|| declaration.modifiers != 0
-					|| (scanner.searchLineNumber(declaration.type.sourceStart)
-						!= scanner.searchLineNumber((int) (namePosition >>> 32))))) {
-				lastCheckPoint = (int) (namePosition >>> 32);
-				restartRecovery = true;
-				return;
-			}
-			if (isLocalDeclaration) {
-				LocalDeclaration localDecl = (LocalDeclaration) astStack[astPtr];
-				lastCheckPoint = localDecl.sourceEnd + 1;
-				currentElement = currentElement.add(localDecl, 0);
-			} else {
-				FieldDeclaration fieldDecl = (FieldDeclaration) astStack[astPtr];
-				lastCheckPoint = fieldDecl.sourceEnd + 1;
-				currentElement = currentElement.add(fieldDecl, 0);
-			}
-			lastIgnoredToken = -1;
+			declaration.type = type.copyDims(dimension);
 		}
 	}
+	variablesCounter[nestedType]++;
+	pushOnAstStack(declaration);
+	// recovery
+	if (currentElement != null) {
+		if (!(currentElement instanceof RecoveredType)
+			&& (currentToken == TokenNameDOT
+				//|| declaration.modifiers != 0
+				|| (scanner.searchLineNumber(declaration.type.sourceStart)
+						!= scanner.searchLineNumber((int) (namePosition >>> 32))))){
+			lastCheckPoint = (int) (namePosition >>> 32);
+			restartRecovery = true;
+			return;
+		}
+		if (isLocalDeclaration){
+			LocalDeclaration localDecl = (LocalDeclaration) astStack[astPtr];
+			lastCheckPoint = localDecl.sourceEnd + 1;
+			currentElement = currentElement.add(localDecl, 0);
+		} else {
+			FieldDeclaration fieldDecl = (FieldDeclaration) astStack[astPtr];
+			lastCheckPoint = fieldDecl.sourceEnd + 1;
+			currentElement = currentElement.add(fieldDecl, 0);
+		}
+		lastIgnoredToken = -1;
+	}
+}
 

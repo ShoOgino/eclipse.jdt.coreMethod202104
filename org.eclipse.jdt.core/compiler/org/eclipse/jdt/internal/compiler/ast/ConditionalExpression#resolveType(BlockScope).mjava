@@ -1,114 +1,94 @@
-	public TypeBinding resolveType(BlockScope scope) {
-		// specs p.368
-		constant = NotAConstant;
-		TypeBinding condTb = condition.resolveTypeExpecting(scope, BooleanBinding);
-		TypeBinding trueTb = valueIfTrue.resolveType(scope);
-		TypeBinding falseTb = valueIfFalse.resolveType(scope);
-		if (condTb == null || trueTb == null || falseTb == null)
-			return null;
+public TypeBinding resolveType(BlockScope scope) {
+	// specs p.368
+	constant = NotAConstant;
+	TypeBinding condTb = condition.resolveTypeExpecting(scope, BooleanBinding);
+	TypeBinding trueTb = valueIfTrue.resolveType(scope);
+	TypeBinding falseTb = valueIfFalse.resolveType(scope);
+	if (condTb == null || trueTb == null || falseTb == null)
+		return null;
 
-		// Propagate the constant value from the valueIfTrue and valueIFFalse expression if it is possible
-		if (condition.constant != NotAConstant
-			&& valueIfTrue.constant != NotAConstant
-			&& valueIfFalse.constant != NotAConstant) {
-			// all terms are constant expression so we can propagate the constant
-			// from valueIFTrue or valueIfFalse to teh receiver constant
-			constant =
-				(condition.constant.booleanValue())
-					? valueIfTrue.constant
-					: valueIfFalse.constant;
+	// Propagate the constant value from the valueIfTrue and valueIFFalse expression if it is possible
+	if (condition.constant != NotAConstant && valueIfTrue.constant != NotAConstant && valueIfFalse.constant != NotAConstant) {
+		// all terms are constant expression so we can propagate the constant
+		// from valueIFTrue or valueIfFalse to teh receiver constant
+		constant = (condition.constant.booleanValue()) ? valueIfTrue.constant : valueIfFalse.constant;
+	}
+	if (trueTb == falseTb) { // harmed the implicit conversion 
+		valueIfTrue.implicitWidening(trueTb, trueTb);
+		valueIfFalse.implicitConversion = valueIfTrue.implicitConversion;
+		if (trueTb == LongBinding || trueTb == DoubleBinding) {
+			returnTypeSlotSize = 2;
 		}
-		if (trueTb == falseTb) { // harmed the implicit conversion 
-			valueIfTrue.implicitWidening(trueTb, trueTb);
-			valueIfFalse.implicitConversion = valueIfTrue.implicitConversion;
-			if (trueTb == LongBinding || trueTb == DoubleBinding) {
-				returnTypeSlotSize = 2;
-			}
-			return trueTb;
+		return trueTb;
+	}
+
+	// Determine the return type depending on argument types
+	// Numeric types
+	if (trueTb.isNumericType() && falseTb.isNumericType()) {
+		// (Short x Byte) or (Byte x Short)"
+		if ((trueTb == ByteBinding && falseTb == ShortBinding) || (trueTb == ShortBinding && falseTb == ByteBinding)) {
+			valueIfTrue.implicitWidening(ShortBinding, trueTb);
+			valueIfFalse.implicitWidening(ShortBinding, falseTb);
+			return ShortBinding;
 		}
 
-		// Determine the return type depending on argument types
-		// Numeric types
-		if (trueTb.isNumericType() && falseTb.isNumericType()) {
-			// (Short x Byte) or (Byte x Short)"
-			if ((trueTb == ByteBinding && falseTb == ShortBinding)
-				|| (trueTb == ShortBinding && falseTb == ByteBinding)) {
-				valueIfTrue.implicitWidening(ShortBinding, trueTb);
-				valueIfFalse.implicitWidening(ShortBinding, falseTb);
-				return ShortBinding;
-			}
-
-			// <Byte|Short|Char> x constant(Int)  ---> <Byte|Short|Char>   and reciprocally
-			if ((trueTb == ByteBinding || trueTb == ShortBinding || trueTb == CharBinding)
-				&& (falseTb == IntBinding
-					&& valueIfFalse.isConstantValueOfTypeAssignableToType(falseTb, trueTb))) {
+		// <Byte|Short|Char> x constant(Int)  ---> <Byte|Short|Char>   and reciprocally
+		if ((trueTb == ByteBinding || trueTb == ShortBinding || trueTb == CharBinding) &&
+			(falseTb == IntBinding && valueIfFalse.isConstantValueOfTypeAssignableToType(falseTb, trueTb))) {
 				valueIfTrue.implicitWidening(trueTb, trueTb);
 				valueIfFalse.implicitWidening(trueTb, falseTb);
 				return trueTb;
-			}
-			if ((falseTb == ByteBinding
-				|| falseTb == ShortBinding
-				|| falseTb == CharBinding)
-				&& (trueTb == IntBinding
-					&& valueIfTrue.isConstantValueOfTypeAssignableToType(trueTb, falseTb))) {
+		}
+		if ((falseTb == ByteBinding || falseTb == ShortBinding || falseTb == CharBinding) &&
+			(trueTb == IntBinding && valueIfTrue.isConstantValueOfTypeAssignableToType(trueTb, falseTb))) {
 				valueIfTrue.implicitWidening(falseTb, trueTb);
 				valueIfFalse.implicitWidening(falseTb, falseTb);
 				return falseTb;
-			}
+		}
 
-			// Manual binary numeric promotion
-			// int
-			if (BaseTypeBinding.isNarrowing(trueTb.id, T_int)
-				&& BaseTypeBinding.isNarrowing(falseTb.id, T_int)) {
-				valueIfTrue.implicitWidening(IntBinding, trueTb);
-				valueIfFalse.implicitWidening(IntBinding, falseTb);
-				return IntBinding;
-			}
-			// long
-			if (BaseTypeBinding.isNarrowing(trueTb.id, T_long)
-				&& BaseTypeBinding.isNarrowing(falseTb.id, T_long)) {
-				valueIfTrue.implicitWidening(LongBinding, trueTb);
-				valueIfFalse.implicitWidening(LongBinding, falseTb);
-				returnTypeSlotSize = 2;
-				return LongBinding;
-			}
-			// float
-			if (BaseTypeBinding.isNarrowing(trueTb.id, T_float)
-				&& BaseTypeBinding.isNarrowing(falseTb.id, T_float)) {
-				valueIfTrue.implicitWidening(FloatBinding, trueTb);
-				valueIfFalse.implicitWidening(FloatBinding, falseTb);
-				return FloatBinding;
-			}
-			// double
-			valueIfTrue.implicitWidening(DoubleBinding, trueTb);
-			valueIfFalse.implicitWidening(DoubleBinding, falseTb);
+		// Manual binary numeric promotion
+		// int
+		if (BaseTypeBinding.isNarrowing(trueTb.id, T_int) && BaseTypeBinding.isNarrowing(falseTb.id, T_int)) {
+			valueIfTrue.implicitWidening(IntBinding, trueTb);
+			valueIfFalse.implicitWidening(IntBinding, falseTb);
+			return IntBinding;
+		}
+		// long
+		if (BaseTypeBinding.isNarrowing(trueTb.id, T_long) && BaseTypeBinding.isNarrowing(falseTb.id, T_long)) {
+			valueIfTrue.implicitWidening(LongBinding, trueTb);
+			valueIfFalse.implicitWidening(LongBinding, falseTb);
 			returnTypeSlotSize = 2;
-			return DoubleBinding;
+			return LongBinding;
 		}
+		// float
+		if (BaseTypeBinding.isNarrowing(trueTb.id, T_float) && BaseTypeBinding.isNarrowing(falseTb.id, T_float)) {
+			valueIfTrue.implicitWidening(FloatBinding, trueTb);
+			valueIfFalse.implicitWidening(FloatBinding, falseTb);
+			return FloatBinding;
+		}
+		// double
+		valueIfTrue.implicitWidening(DoubleBinding, trueTb);
+		valueIfFalse.implicitWidening(DoubleBinding, falseTb);
+		returnTypeSlotSize = 2;
+		return DoubleBinding;
+	}
 
-		// Type references (null null is already tested)
-		if ((trueTb.isBaseType() && trueTb != NullBinding)
-			|| (falseTb.isBaseType() && falseTb != NullBinding)) {
-			scope.problemReporter().conditionalArgumentsIncompatibleTypes(
-				this,
-				trueTb,
-				falseTb);
-			return null;
-		}
-		if (scope.areTypesCompatible(falseTb, trueTb)) {
-			valueIfTrue.implicitWidening(trueTb, trueTb);
-			valueIfFalse.implicitWidening(trueTb, falseTb);
-			return trueTb;
-		}
-		if (scope.areTypesCompatible(trueTb, falseTb)) {
-			valueIfTrue.implicitWidening(falseTb, trueTb);
-			valueIfFalse.implicitWidening(falseTb, falseTb);
-			return falseTb;
-		}
-		scope.problemReporter().conditionalArgumentsIncompatibleTypes(
-			this,
-			trueTb,
-			falseTb);
+	// Type references (null null is already tested)
+	if ((trueTb.isBaseType() && trueTb != NullBinding) || (falseTb.isBaseType() && falseTb != NullBinding)) {
+		scope.problemReporter().conditionalArgumentsIncompatibleTypes(this, trueTb, falseTb);
 		return null;
 	}
+	if (scope.areTypesCompatible(falseTb, trueTb)) {
+		valueIfTrue.implicitWidening(trueTb, trueTb);
+		valueIfFalse.implicitWidening(trueTb, falseTb);
+		return trueTb;
+	}
+	if (scope.areTypesCompatible(trueTb, falseTb)) {
+		valueIfTrue.implicitWidening(falseTb, trueTb);
+		valueIfFalse.implicitWidening(falseTb, falseTb);
+		return falseTb;
+	}
+	scope.problemReporter().conditionalArgumentsIncompatibleTypes(this, trueTb, falseTb);
+	return null;
+}
 

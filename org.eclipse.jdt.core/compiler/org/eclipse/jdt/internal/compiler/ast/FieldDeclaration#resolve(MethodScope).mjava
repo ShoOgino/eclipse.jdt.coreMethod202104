@@ -1,64 +1,53 @@
-	public void resolve(MethodScope initializationScope) {
-		// the two <constant = Constant.NotAConstant> could be regrouped into
-		// a single line but it is clearer to have two lines while the reason of their
-		// existence is not at all the same. See comment for the second one.
+public void resolve(MethodScope initializationScope) {
+	// the two <constant = Constant.NotAConstant> could be regrouped into
+	// a single line but it is clearer to have two lines while the reason of their
+	// existence is not at all the same. See comment for the second one.
 
-		//--------------------------------------------------------
-		if (!hasBeenResolved && binding != null && binding.isValidBinding()) {
-			hasBeenResolved = true;
-			if (isTypeUseDeprecated(binding.type, initializationScope))
-				initializationScope.problemReporter().deprecatedType(binding.type, type);
+	//--------------------------------------------------------
+	if (!hasBeenResolved && binding != null && binding.isValidBinding()) {
+		hasBeenResolved = true;
+		if (isTypeUseDeprecated(binding.type, initializationScope))
+			initializationScope.problemReporter().deprecatedType(binding.type, type);
 
-			this.type.binding = this.binding.type; // update binding for type reference
-
-			// the resolution of the initialization hasn't been done
-			if (initialization == null) {
+		this.type.binding = this.binding.type; // update binding for type reference
+		
+		// the resolution of the initialization hasn't been done
+		if (initialization == null) {
+			binding.constant = Constant.NotAConstant;
+		} else {
+			// break dead-lock cycles by forcing constant to NotAConstant
+			int previous = initializationScope.fieldDeclarationIndex;
+			try {
+				initializationScope.fieldDeclarationIndex = binding.id;
 				binding.constant = Constant.NotAConstant;
-			} else {
-				// break dead-lock cycles by forcing constant to NotAConstant
-				int previous = initializationScope.fieldDeclarationIndex;
-				try {
-					initializationScope.fieldDeclarationIndex = binding.id;
-					binding.constant = Constant.NotAConstant;
-					TypeBinding tb = binding.type;
-					TypeBinding initTb;
-					if (initialization instanceof ArrayInitializer) {
-						if ((initTb = initialization.resolveTypeExpecting(initializationScope, tb))
-							!= null) {
-							((ArrayInitializer) initialization).binding = (ArrayBinding) initTb;
-							initialization.implicitWidening(tb, initTb);
-						}
-					} else
-						if ((initTb = initialization.resolveType(initializationScope)) != null) {
-							if (initialization.isConstantValueOfTypeAssignableToType(initTb, tb)
-								|| (tb.isBaseType() && BaseTypeBinding.isWidening(tb.id, initTb.id)))
-								initialization.implicitWidening(tb, initTb);
-							else
-								if (initializationScope.areTypesCompatible(initTb, tb))
-									initialization.implicitWidening(tb, initTb);
-								else
-									initializationScope.problemReporter().typeMismatchError(initTb, tb, this);
-							if (binding.isFinal()) // cast from constant actual type to variable type
-								binding.constant =
-									initialization.constant.castTo(
-										(binding.type.id << 4) + initialization.constant.typeID());
-						} else {
-							binding.constant = NotAConstant;
-						}
-				} finally {
-					initializationScope.fieldDeclarationIndex = previous;
-					if (binding.constant == null)
-						binding.constant = Constant.NotAConstant;
+				TypeBinding tb = binding.type;
+				TypeBinding initTb;
+				if (initialization instanceof ArrayInitializer) {
+					if ((initTb = initialization.resolveTypeExpecting(initializationScope, tb)) != null) {
+						((ArrayInitializer) initialization).binding = (ArrayBinding) initTb;
+						initialization.implicitWidening(tb, initTb);
+					}
+				} else if ((initTb = initialization.resolveType(initializationScope)) != null) {
+					if (initialization.isConstantValueOfTypeAssignableToType(initTb, tb) || (tb.isBaseType() && BaseTypeBinding.isWidening(tb.id, initTb.id)))
+						initialization.implicitWidening(tb, initTb);
+					else if (initializationScope.areTypesCompatible(initTb, tb))
+						initialization.implicitWidening(tb, initTb);
+					else
+						initializationScope.problemReporter().typeMismatchError(initTb, tb, this);
+					if (binding.isFinal())  // cast from constant actual type to variable type
+						binding.constant = initialization.constant.castTo((binding.type.id << 4) + initialization.constant.typeID());
+				} else {
+					binding.constant = NotAConstant;
 				}
+			} finally {
+				initializationScope.fieldDeclarationIndex = previous;
+				if (binding.constant == null) binding.constant = Constant.NotAConstant;
 			}
-			// cannot define static non-constant field inside nested class
-			if (binding.isStatic() && binding.constant == NotAConstant)
-				if (binding.declaringClass.isNestedType()
-					&& binding.declaringClass.isClass()
-					&& !binding.declaringClass.isStatic())
-					initializationScope.problemReporter().unexpectedStaticModifierForField(
-						(SourceTypeBinding) binding.declaringClass,
-						this);
 		}
-	}
+		// cannot define static non-constant field inside nested class
+		if (binding.isStatic() && binding.constant == NotAConstant)
+			if (binding.declaringClass.isNestedType() && binding.declaringClass.isClass() && !binding.declaringClass.isStatic())
+				initializationScope.problemReporter().unexpectedStaticModifierForField((SourceTypeBinding)binding.declaringClass, this);		
+	} 
+}
 

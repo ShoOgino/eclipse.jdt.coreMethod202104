@@ -1,160 +1,151 @@
-	/*
-	 * Build initial recovery state.
-	 * Recovery state is inferred from the current state of the parser (reduced node stack).
-	 */
-	public RecoveredElement buildInitialRecoveryState() {
+/*
+ * Build initial recovery state.
+ * Recovery state is inferred from the current state of the parser (reduced node stack).
+ */
+public RecoveredElement buildInitialRecoveryState(){
 
-		if (!ENABLE_RECOVERY)
-			return null; // do not resume to recovery
+	if (!ENABLE_RECOVERY) return null; // do not resume to recovery
 
-		/* recovery in unit structure */
-		if (referenceContext instanceof CompilationUnitDeclaration) {
-			RecoveredElement element = super.buildInitialRecoveryState();
-			flushAssistState();
-			return element;
-		}
+	/* recovery in unit structure */
+	if (referenceContext instanceof CompilationUnitDeclaration){
+		RecoveredElement element = super.buildInitialRecoveryState();
+		flushAssistState();
+		return element;
+	}
 
-		/* recovery in method body */
-		lastCheckPoint = 0;
+	/* recovery in method body */
+	lastCheckPoint = 0;
 
-		RecoveredElement element = null;
-		if (referenceContext instanceof AbstractMethodDeclaration) {
-			element =
-				new RecoveredMethod(
-					(AbstractMethodDeclaration) referenceContext,
-					null,
-					0,
-					this);
-			lastCheckPoint = ((AbstractMethodDeclaration) referenceContext).bodyStart;
-		} else {
-			/* Initializer bodies are parsed in the context of the type declaration, we must thus search it inside */
-			if (referenceContext instanceof TypeDeclaration) {
-				TypeDeclaration type = (TypeDeclaration) referenceContext;
-				for (int i = 0; i < type.fields.length; i++) {
-					FieldDeclaration field = type.fields[i];
-					if (field.declarationSourceStart <= scanner.initialPosition
+	RecoveredElement element = null;
+	if (referenceContext instanceof AbstractMethodDeclaration){
+		element = new RecoveredMethod((AbstractMethodDeclaration) referenceContext, null, 0, this);
+		lastCheckPoint = ((AbstractMethodDeclaration) referenceContext).bodyStart;
+	} else {
+		/* Initializer bodies are parsed in the context of the type declaration, we must thus search it inside */
+		if (referenceContext instanceof TypeDeclaration){
+			TypeDeclaration type = (TypeDeclaration) referenceContext;
+			for (int i = 0; i < type.fields.length; i++){
+				FieldDeclaration field = type.fields[i];					
+				if (field.declarationSourceStart <= scanner.initialPosition
 						&& scanner.initialPosition <= field.declarationSourceEnd
-						&& scanner.eofPosition <= field.declarationSourceEnd + 1) {
-						element = new RecoveredInitializer((Initializer) field, null, 1, this);
-						lastCheckPoint = field.declarationSourceStart;
-						break;
-					}
-				}
-			}
-		}
-
-		if (element == null)
-			return element;
-
-		/* add initial block */
-		Block block = new Block(0);
-		int lastStart = blockStarts[0];
-		block.sourceStart = lastStart;
-		element = element.add(block, 1);
-		int blockIndex = 1; // ignore first block start, since manually rebuilt here
-
-		for (int i = 0; i <= astPtr; i++) {
-			AstNode node = astStack[i];
-
-			/* check for intermediate block creation, so recovery can properly close them afterwards */
-			int nodeStart = node.sourceStart;
-			for (int j = blockIndex; j <= realBlockPtr; j++) {
-				if (blockStarts[j] > nodeStart) {
-					blockIndex = j; // shift the index to the new block
+						&& scanner.eofPosition <= field.declarationSourceEnd+1){
+					element = new RecoveredInitializer((Initializer) field, null, 1, this);
+					lastCheckPoint = field.declarationSourceStart;					
 					break;
 				}
-				if (blockStarts[j] != lastStart) { // avoid multiple block if at same position
-					block = new Block(0);
-					block.sourceStart = lastStart = blockStarts[j];
-					element = element.add(block, 1);
-				}
-				blockIndex = j + 1; // shift the index to the new block
 			}
-			if (node instanceof LocalDeclaration) {
-				LocalDeclaration local = (LocalDeclaration) node;
-				if (local.declarationSourceEnd == 0) {
-					element = element.add(local, 0);
-					if (local.initialization == null) {
-						lastCheckPoint = local.sourceEnd + 1;
-					} else {
-						lastCheckPoint = local.initialization.sourceEnd + 1;
-					}
-				} else {
-					element = element.add(local, 0);
-					lastCheckPoint = local.declarationSourceEnd + 1;
-				}
-				continue;
-			}
-			if (node instanceof AbstractMethodDeclaration) {
-				AbstractMethodDeclaration method = (AbstractMethodDeclaration) node;
-				if (method.declarationSourceEnd == 0) {
-					element = element.add(method, 0);
-					lastCheckPoint = method.bodyStart;
-				} else {
-					element = element.add(method, 0);
-					lastCheckPoint = method.declarationSourceEnd + 1;
-				}
-				continue;
-			}
-			if (node instanceof Initializer) {
-				Initializer initializer = (Initializer) node;
-				if (initializer.declarationSourceEnd == 0) {
-					element = element.add(initializer, 1);
-					lastCheckPoint = initializer.bodyStart;
-				} else {
-					element = element.add(initializer, 0);
-					lastCheckPoint = initializer.declarationSourceEnd + 1;
-				}
-				continue;
-			}
-			if (node instanceof FieldDeclaration) {
-				FieldDeclaration field = (FieldDeclaration) node;
-				if (field.declarationSourceEnd == 0) {
-					element = element.add(field, 0);
-					if (field.initialization == null) {
-						lastCheckPoint = field.sourceEnd + 1;
-					} else {
-						lastCheckPoint = field.initialization.sourceEnd + 1;
-					}
-				} else {
-					element = element.add(field, 0);
-					lastCheckPoint = field.declarationSourceEnd + 1;
-				}
-				continue;
-			}
-			if (node instanceof TypeDeclaration) {
-				TypeDeclaration type = (TypeDeclaration) node;
-				if (type.declarationSourceEnd == 0) {
-					element = element.add(type, 0);
-					lastCheckPoint = type.bodyStart;
-				} else {
-					element = element.add(type, 0);
-					lastCheckPoint = type.declarationSourceEnd + 1;
-				}
-				continue;
-			}
-			if (node instanceof ImportReference) {
-				ImportReference importRef = (ImportReference) node;
-				element = element.add(importRef, 0);
-				lastCheckPoint = importRef.declarationSourceEnd + 1;
-			}
-		}
-		if (this.currentToken == TokenNameRBRACE) {
-			this.currentToken = 0; // closing brace has already been taken care of
-		}
+		} 
+	}
 
-		/* might need some extra block (after the last reduced node) */
-		int pos =
-			this.assistNode == null ? lastCheckPoint : this.assistNode.sourceStart;
-		for (int j = blockIndex; j <= realBlockPtr; j++) {
-			if ((blockStarts[j] < pos)
-				&& (blockStarts[j] != lastStart)) { // avoid multiple block if at same position
+	if (element == null) return element;
+
+	/* add initial block */
+	Block block = new Block(0);
+	int lastStart = blockStarts[0];
+	block.sourceStart = lastStart;
+	element = element.add(block, 1);
+	int blockIndex = 1;	// ignore first block start, since manually rebuilt here
+
+	for(int i = 0; i <= astPtr; i++){
+		AstNode node = astStack[i];
+
+		/* check for intermediate block creation, so recovery can properly close them afterwards */
+		int nodeStart = node.sourceStart;
+		for (int j = blockIndex; j <= realBlockPtr; j++){
+			if (blockStarts[j] > nodeStart){
+				blockIndex = j; // shift the index to the new block
+				break;
+			}
+			if (blockStarts[j] != lastStart){ // avoid multiple block if at same position
 				block = new Block(0);
 				block.sourceStart = lastStart = blockStarts[j];
 				element = element.add(block, 1);
 			}
+			blockIndex = j+1; // shift the index to the new block
 		}
-
-		return element;
+		if (node instanceof LocalDeclaration){
+			LocalDeclaration local = (LocalDeclaration) node;
+			if (local.declarationSourceEnd == 0){
+				element = element.add(local, 0);
+				if (local.initialization == null){
+					lastCheckPoint = local.sourceEnd + 1;
+				} else {
+					lastCheckPoint = local.initialization.sourceEnd + 1;
+				}
+			} else {
+				element = element.add(local, 0);
+				lastCheckPoint = local.declarationSourceEnd + 1;
+			}
+			continue;
+		}		
+		if (node instanceof AbstractMethodDeclaration){
+			AbstractMethodDeclaration method = (AbstractMethodDeclaration) node;
+			if (method.declarationSourceEnd == 0){
+				element = element.add(method, 0);
+				lastCheckPoint = method.bodyStart;
+			} else {
+				element = element.add(method, 0);
+				lastCheckPoint = method.declarationSourceEnd + 1;
+			}
+			continue;
+		}
+		if (node instanceof Initializer){
+			Initializer initializer = (Initializer) node;
+			if (initializer.declarationSourceEnd == 0){
+				element = element.add(initializer, 1);
+				lastCheckPoint = initializer.bodyStart;				
+			} else {
+				element = element.add(initializer, 0);
+				lastCheckPoint = initializer.declarationSourceEnd + 1;
+			}
+			continue;
+		}		
+		if (node instanceof FieldDeclaration){
+			FieldDeclaration field = (FieldDeclaration) node;
+			if (field.declarationSourceEnd == 0){
+				element = element.add(field, 0);
+				if (field.initialization == null){
+					lastCheckPoint = field.sourceEnd + 1;
+				} else {
+					lastCheckPoint = field.initialization.sourceEnd + 1;
+				}
+			} else {
+				element = element.add(field, 0);
+				lastCheckPoint = field.declarationSourceEnd + 1;
+			}
+			continue;
+		}
+		if (node instanceof TypeDeclaration){
+			TypeDeclaration type = (TypeDeclaration) node;
+			if (type.declarationSourceEnd == 0){
+				element = element.add(type, 0);	
+				lastCheckPoint = type.bodyStart;
+			} else {
+				element = element.add(type, 0);				
+				lastCheckPoint = type.declarationSourceEnd + 1;
+			}
+			continue;
+		}
+		if (node instanceof ImportReference){
+			ImportReference importRef = (ImportReference) node;
+			element = element.add(importRef, 0);
+			lastCheckPoint = importRef.declarationSourceEnd + 1;
+		}
 	}
+	if (this.currentToken == TokenNameRBRACE) {
+		this.currentToken = 0; // closing brace has already been taken care of
+	}
+
+	/* might need some extra block (after the last reduced node) */
+	int pos = this.assistNode == null ? lastCheckPoint : this.assistNode.sourceStart;
+	for (int j = blockIndex; j <= realBlockPtr; j++){
+		if ((blockStarts[j] < pos) && (blockStarts[j] != lastStart)){ // avoid multiple block if at same position
+			block = new Block(0);
+			block.sourceStart = lastStart = blockStarts[j];
+			element = element.add(block, 1);
+		}
+	}
+	
+	return element;
+}
 

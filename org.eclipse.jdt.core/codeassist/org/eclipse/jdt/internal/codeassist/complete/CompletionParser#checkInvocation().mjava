@@ -1,145 +1,129 @@
-	/**
-	 * Checks if the completion is inside a method invocation or a constructor invocation.
-	 * Returns whether we found a completion node.
-	 */
-	private boolean checkInvocation() {
-		Expression topExpression =
-			this.expressionPtr >= 0 ? this.expressionStack[this.expressionPtr] : null;
-		boolean isEmptyNameCompletion = false;
-		boolean isEmptyAssistIdentifier = false;
-		int startInvocationPtr =
-			this.blockInvocationPtr >= 0
-				? this.blockInvocationStack[this.blockInvocationPtr]
-				: 0;
-			if (this.invocationPtr >= startInvocationPtr
-				&& ((isEmptyNameCompletion =
-					topExpression == this.assistNode
-						&& this.isEmptyNameCompletion())
-			// eg. it is something like "this.fred([cursor]" but it is not something like "this.fred(1 + [cursor]"
-					|| (isEmptyAssistIdentifier =
-						this.indexOfAssistIdentifier() >= 0
-							&& this.identifierStack[this.identifierPtr].length == 0))) {
-			// eg. it is something like "this.fred(1 [cursor]"
+/**
+ * Checks if the completion is inside a method invocation or a constructor invocation.
+ * Returns whether we found a completion node.
+ */
+private boolean checkInvocation() {
+	Expression topExpression = this.expressionPtr >= 0 ? 
+		this.expressionStack[this.expressionPtr] :
+		null;
+	boolean isEmptyNameCompletion = false;
+	boolean isEmptyAssistIdentifier = false;
+	int startInvocationPtr = this.blockInvocationPtr >= 0 ? this.blockInvocationStack[this.blockInvocationPtr] : 0;
+	if (this.invocationPtr >= startInvocationPtr
+		&& ((isEmptyNameCompletion = topExpression == this.assistNode && this.isEmptyNameCompletion()) // eg. it is something like "this.fred([cursor]" but it is not something like "this.fred(1 + [cursor]"
+			|| (isEmptyAssistIdentifier = this.indexOfAssistIdentifier() >= 0 && this.identifierStack[this.identifierPtr].length == 0))) { // eg. it is something like "this.fred(1 [cursor]"
+				
+		// pop empty name completion
+		if (isEmptyNameCompletion) {
+			this.expressionPtr--;
+			this.expressionLengthStack[this.expressionLengthPtr]--;
+		} else if (isEmptyAssistIdentifier) {
+			this.identifierPtr--;
+			this.identifierLengthPtr--;
+		}
 
-			// pop empty name completion
-			if (isEmptyNameCompletion) {
-				this.expressionPtr--;
-				this.expressionLengthStack[this.expressionLengthPtr]--;
-			} else
-				if (isEmptyAssistIdentifier) {
-					this.identifierPtr--;
-					this.identifierLengthPtr--;
-				}
+		// find receiver and qualifier
+		int invocationType = this.invocationTypeStack[this.invocationPtr];
+		int qualifierExprPtr = this.qualifierStack[this.invocationPtr];
 
-			// find receiver and qualifier
-			int invocationType = this.invocationTypeStack[this.invocationPtr];
-			int qualifierExprPtr = this.qualifierStack[this.invocationPtr];
+		// find arguments
+		int numArgs = this.expressionPtr - qualifierExprPtr;
+		int argStart = qualifierExprPtr + 1;
+		Expression[] arguments = null;
+		if (numArgs > 0) {
+			// remember the arguments
+			arguments = new Expression[numArgs];
+			System.arraycopy(this.expressionStack, argStart, arguments, 0, numArgs);
 
-			// find arguments
-			int numArgs = this.expressionPtr - qualifierExprPtr;
-			int argStart = qualifierExprPtr + 1;
-			Expression[] arguments = null;
-			if (numArgs > 0) {
-				// remember the arguments
-				arguments = new Expression[numArgs];
-				System.arraycopy(this.expressionStack, argStart, arguments, 0, numArgs);
+			// consume the expression arguments
+			this.expressionPtr -= numArgs;
+			int count = numArgs;
+			while (count > 0) {
+				count -= this.expressionLengthStack[this.expressionLengthPtr--];
+			} 
+		}
 
-				// consume the expression arguments
-				this.expressionPtr -= numArgs;
-				int count = numArgs;
-				while (count > 0) {
-					count -= this.expressionLengthStack[this.expressionLengthPtr--];
-				}
+		// build ast node
+		if (invocationType != ALLOCATION && invocationType != QUALIFIED_ALLOCATION) {
+			// creates completion on message send	
+			CompletionOnMessageSend messageSend = new CompletionOnMessageSend();
+			messageSend.arguments = arguments;
+			switch (invocationType) {
+				case NO_RECEIVER:
+					// implicit this
+					messageSend.receiver = ThisReference.ThisImplicit;
+					break;
+				case NAME_RECEIVER:
+					// remove selector 
+					this.identifierPtr--; 
+					this.identifierLengthStack[this.identifierLengthPtr]--;
+					// consume the receiver
+					messageSend.receiver = this.getUnspecifiedReference();
+					break;
+				case SUPER_RECEIVER:
+					messageSend.receiver = SuperReference.Super;
+					break;
+				case EXPLICIT_RECEIVER:
+					messageSend.receiver = this.expressionStack[qualifierExprPtr];
 			}
 
-			// build ast node
-			if (invocationType != ALLOCATION && invocationType != QUALIFIED_ALLOCATION) {
-				// creates completion on message send	
-				CompletionOnMessageSend messageSend = new CompletionOnMessageSend();
-				messageSend.arguments = arguments;
-				switch (invocationType) {
-					case NO_RECEIVER :
-						// implicit this
-						messageSend.receiver = ThisReference.ThisImplicit;
-						break;
-					case NAME_RECEIVER :
-						// remove selector 
-						this.identifierPtr--;
-						this.identifierLengthStack[this.identifierLengthPtr]--;
-						// consume the receiver
-						messageSend.receiver = this.getUnspecifiedReference();
-						break;
-					case SUPER_RECEIVER :
-						messageSend.receiver = SuperReference.Super;
-						break;
-					case EXPLICIT_RECEIVER :
-						messageSend.receiver = this.expressionStack[qualifierExprPtr];
-				}
+			// set selector
+			messageSend.selector = this.identifierStack[this.selectorStack[this.invocationPtr]];
+			// remove selector
+			if (this.identifierLengthPtr >=0 && this.identifierLengthStack[this.identifierLengthPtr] == 1) {
+				this.identifierPtr--; 
+				this.identifierLengthPtr--;
+			}
+		
+			// no source is going to be replaced
+			messageSend.sourceStart = this.cursorLocation + 1;
+			messageSend.sourceEnd = this.cursorLocation;
 
-				// set selector
-				messageSend.selector =
-					this.identifierStack[this.selectorStack[this.invocationPtr]];
-				// remove selector
-				if (this.identifierLengthPtr >= 0
-					&& this.identifierLengthStack[this.identifierLengthPtr] == 1) {
-					this.identifierPtr--;
-					this.identifierLengthPtr--;
+			// remember the message send as an orphan completion node
+			this.assistNode = messageSend;
+			this.lastCheckPoint = messageSend.sourceEnd + 1;
+			this.isOrphanCompletionNode = true;
+			return true;
+		} else {
+			int selectorPtr = this.selectorStack[this.invocationPtr];
+			if (selectorPtr == THIS_CONSTRUCTOR || selectorPtr == SUPER_CONSTRUCTOR) {
+				// creates an explicit constructor call
+				CompletionOnExplicitConstructorCall call = new CompletionOnExplicitConstructorCall(
+					(selectorPtr == THIS_CONSTRUCTOR) ? ExplicitConstructorCall.This : ExplicitConstructorCall.Super);
+				call.arguments = arguments;
+				if (invocationType == QUALIFIED_ALLOCATION) {
+					call.qualification = this.expressionStack[qualifierExprPtr];
 				}
-
+		
 				// no source is going to be replaced
-				messageSend.sourceStart = this.cursorLocation + 1;
-				messageSend.sourceEnd = this.cursorLocation;
+				call.sourceStart = this.cursorLocation + 1;
+				call.sourceEnd = this.cursorLocation;
 
-				// remember the message send as an orphan completion node
-				this.assistNode = messageSend;
-				this.lastCheckPoint = messageSend.sourceEnd + 1;
+				// remember the explicit constructor call as an orphan completion node
+				this.assistNode = call;
+				this.lastCheckPoint = call.sourceEnd + 1;
 				this.isOrphanCompletionNode = true;
 				return true;
 			} else {
-				int selectorPtr = this.selectorStack[this.invocationPtr];
-				if (selectorPtr == THIS_CONSTRUCTOR || selectorPtr == SUPER_CONSTRUCTOR) {
-					// creates an explicit constructor call
-					CompletionOnExplicitConstructorCall call =
-						new CompletionOnExplicitConstructorCall(
-							(selectorPtr == THIS_CONSTRUCTOR)
-								? ExplicitConstructorCall.This
-								: ExplicitConstructorCall.Super);
-					call.arguments = arguments;
-					if (invocationType == QUALIFIED_ALLOCATION) {
-						call.qualification = this.expressionStack[qualifierExprPtr];
-					}
-
-					// no source is going to be replaced
-					call.sourceStart = this.cursorLocation + 1;
-					call.sourceEnd = this.cursorLocation;
-
-					// remember the explicit constructor call as an orphan completion node
-					this.assistNode = call;
-					this.lastCheckPoint = call.sourceEnd + 1;
-					this.isOrphanCompletionNode = true;
-					return true;
-				} else {
-					// creates an allocation expression 
-					CompletionOnQualifiedAllocationExpression allocExpr =
-						new CompletionOnQualifiedAllocationExpression();
-					allocExpr.arguments = arguments;
-					allocExpr.type = super.getTypeReference(0);
-					// we don't want a completion node here, so call super
-					if (invocationType == QUALIFIED_ALLOCATION) {
-						allocExpr.enclosingInstance = this.expressionStack[qualifierExprPtr];
-					}
-					// no source is going to be replaced
-					allocExpr.sourceStart = this.cursorLocation + 1;
-					allocExpr.sourceEnd = this.cursorLocation;
-
-					// remember the allocation expression as an orphan completion node
-					this.assistNode = allocExpr;
-					this.lastCheckPoint = allocExpr.sourceEnd + 1;
-					this.isOrphanCompletionNode = true;
-					return true;
+				// creates an allocation expression 
+				CompletionOnQualifiedAllocationExpression allocExpr = new CompletionOnQualifiedAllocationExpression();
+				allocExpr.arguments = arguments;
+				allocExpr.type = super.getTypeReference(0); // we don't want a completion node here, so call super
+				if (invocationType == QUALIFIED_ALLOCATION) {
+					allocExpr.enclosingInstance = this.expressionStack[qualifierExprPtr];
 				}
+				// no source is going to be replaced
+				allocExpr.sourceStart = this.cursorLocation + 1;
+				allocExpr.sourceEnd = this.cursorLocation;
+				
+				// remember the allocation expression as an orphan completion node
+				this.assistNode = allocExpr;
+				this.lastCheckPoint = allocExpr.sourceEnd + 1;
+				this.isOrphanCompletionNode = true;
+				return true;
 			}
 		}
-		return false;
 	}
+	return false;
+}
 

@@ -1,75 +1,68 @@
-	/**
-	 *	Flow analysis for a local innertype
-	 *
-	 */
-	public FlowInfo analyseCode(
-		BlockScope currentScope,
-		FlowContext flowContext,
-		FlowInfo flowInfo) {
-		if (ignoreFurtherInvestigation)
-			return flowInfo;
-		try {
-			// remember local types binding for innerclass emulation propagation
-			currentScope.referenceCompilationUnit().record((LocalTypeBinding) binding);
-
-			InitializationFlowContext initializerContext =
-				new InitializationFlowContext(null, this, initializerScope);
-			// propagate down the max field count
-			updateMaxFieldCount();
-			FlowInfo fieldInfo = flowInfo.copy();
-			// so as not to propagate changes outside this type
-			if (fields != null) {
-				for (int i = 0, count = fields.length; i < count; i++) {
-					fieldInfo =
-						fields[i].analyseCode(initializerScope, initializerContext, fieldInfo);
+/**
+ *	Flow analysis for a local innertype
+ *
+ */
+public FlowInfo analyseCode(BlockScope currentScope, FlowContext flowContext, FlowInfo flowInfo) {
+	if (ignoreFurtherInvestigation)
+		return flowInfo;
+	try {
+		// remember local types binding for innerclass emulation propagation
+		currentScope.referenceCompilationUnit().record((LocalTypeBinding)binding);
+		
+		
+		InitializationFlowContext initializerContext = new InitializationFlowContext(null, this, initializerScope);
+		// propagate down the max field count
+		updateMaxFieldCount();
+		FlowInfo fieldInfo = flowInfo.copy(); // so as not to propagate changes outside this type
+		if (fields != null) {
+			for (int i = 0, count = fields.length; i < count; i++) {
+				fieldInfo = fields[i].analyseCode(initializerScope, initializerContext, fieldInfo);
 					if (fieldInfo == FlowInfo.DeadEnd) {
 						// in case the initializer is not reachable, use a reinitialized flowInfo and enter a fake reachable
 						// branch, since the previous initializer already got the blame.
 						initializerScope.problemReporter().initializerMustCompleteNormally(fields[i]);
 						fieldInfo = FlowInfo.initial(maxFieldCount).markAsFakeReachable(true);
-					}
-				}
+					}					
 			}
-			if (memberTypes != null) {
-				for (int i = 0, count = memberTypes.length; i < count; i++) {
-					memberTypes[i].analyseCode(scope, flowContext, fieldInfo.copy());
-				}
+		}
+		if (memberTypes != null) {
+			for (int i = 0, count = memberTypes.length; i < count; i++) {
+				memberTypes[i].analyseCode(scope, flowContext, fieldInfo.copy());
 			}
-			if (methods != null) {
-				int recursionBalance = 0; // check constructor recursions			
-				for (int i = 0, count = methods.length; i < count; i++) {
-					AbstractMethodDeclaration method = methods[i];
-					if (method.ignoreFurtherInvestigation)
-						continue;
-					if (method.isConstructor()) { // constructor
+		}
+		if (methods != null) {
+			int recursionBalance = 0; // check constructor recursions			
+			for (int i = 0, count = methods.length; i < count; i++) {
+				AbstractMethodDeclaration method = methods[i];
+				if (method.ignoreFurtherInvestigation)
+					continue;
+				if (method.isConstructor()) { // constructor
 						ConstructorDeclaration constructor = (ConstructorDeclaration) method;
-						constructor.analyseCode(scope, initializerContext, fieldInfo.copy());
+					 	constructor.analyseCode(scope, initializerContext, fieldInfo.copy());						
 						// compute the recursive invocation balance:
 						//   how many thisReferences vs. superReferences to constructors
-						int refCount;
-						if ((refCount = constructor.referenceCount) > 0) {
-							if ((constructor.constructorCall == null)
+						int refCount; 
+						if ((refCount = constructor.referenceCount) > 0){
+							if ((constructor.constructorCall == null) 
 								|| constructor.constructorCall.isSuperAccess()
-								|| !constructor.constructorCall.binding.isValidBinding()) {
+								|| !constructor.constructorCall.binding.isValidBinding()){
 								recursionBalance -= refCount;
-								constructor.referenceCount = -1;
-								// for error reporting propagation																
+								constructor.referenceCount = -1; // for error reporting propagation																
 							} else {
 								recursionBalance += refCount;
 							}
-						}
-					} else { // regular method
-						method.analyseCode(scope, null, flowInfo.copy());
-					}
-				}
-				if (recursionBalance > 0) {
-					// there is one or more cycle(s) amongst constructor invocations
-					scope.problemReporter().recursiveConstructorInvocation(this);
+						}						
+				} else { // regular method
+					method.analyseCode(scope, null, flowInfo.copy());
 				}
 			}
-		} catch (AbortType e) {
-			this.ignoreFurtherInvestigation = true;
+			if (recursionBalance > 0){// there is one or more cycle(s) amongst constructor invocations
+				scope.problemReporter().recursiveConstructorInvocation(this);
+			}
 		}
-		return flowInfo;
+	} catch (AbortType e) {
+		this.ignoreFurtherInvestigation = true;		
 	}
+	return flowInfo;
+}
 

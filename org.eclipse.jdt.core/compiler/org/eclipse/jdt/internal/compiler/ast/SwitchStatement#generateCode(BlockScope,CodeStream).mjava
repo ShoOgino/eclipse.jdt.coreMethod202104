@@ -1,102 +1,102 @@
-	/**
-	 * Switch code generation
-	 *
-	 * @param currentScope org.eclipse.jdt.internal.compiler.lookup.BlockScope
-	 * @param codeStream org.eclipse.jdt.internal.compiler.codegen.CodeStream
-	 */
-	public void generateCode(BlockScope currentScope, CodeStream codeStream) {
-		int[] sortedIndexes = new int[caseCount];
-		int[] localKeysCopy;
-		if ((bits & IsReachableMASK) == 0) {
-			return;
-		}
-		int pc = codeStream.position;
+/**
+ * Switch code generation
+ *
+ * @param currentScope org.eclipse.jdt.internal.compiler.lookup.BlockScope
+ * @param codeStream org.eclipse.jdt.internal.compiler.codegen.CodeStream
+ */
+public void generateCode(BlockScope currentScope, CodeStream codeStream) {
+	int[] sortedIndexes = new int[caseCount];
+	int[] localKeysCopy;
+	if ((bits & IsReachableMASK) == 0) {
+		return;
+	}
+	int pc = codeStream.position;
 
-		// prepare the labels and constants
-		breakLabel.codeStream = codeStream;
-		CaseLabel[] caseLabels = new CaseLabel[caseCount];
-		int[] constants = new int[caseCount];
-		boolean needSwitch = caseCount != 0;
-		for (int i = 0; i < caseCount; i++) {
-			constants[i] = cases[i].constantExpression.constant.intValue();
-			cases[i].targetLabel = (caseLabels[i] = new CaseLabel(codeStream));
-		}
+	// prepare the labels and constants
+	breakLabel.codeStream = codeStream;
+	CaseLabel[] caseLabels = new CaseLabel[caseCount];
+	int[] constants = new int[caseCount];
+	boolean needSwitch = caseCount != 0;
+	for (int i = 0; i < caseCount; i++) {
+		constants[i] = cases[i].constantExpression.constant.intValue();
+		cases[i].targetLabel = (caseLabels[i] = new CaseLabel(codeStream));
+	}
 
-		// we sort the keys to be able to generate the code for tableswitch or lookupswitch
-		for (int i = 0; i < caseCount; i++) {
-			sortedIndexes[i] = i;
-		}
-		System.arraycopy(
-			constants,
-			0,
-			(localKeysCopy = new int[caseCount]),
-			0,
-			caseCount);
-		CodeStream.sort(localKeysCopy, 0, caseCount - 1, sortedIndexes);
-		CaseLabel defaultLabel = new CaseLabel(codeStream);
-		if (defaultCase != null) {
-			defaultCase.targetLabel = defaultLabel;
-		}
-		// generate expression testes
-		testExpression.generateCode(currentScope, codeStream, needSwitch);
+	// we sort the keys to be able to generate the code for tableswitch or lookupswitch
+	for (int i = 0; i < caseCount; i++) {
+		sortedIndexes[i] = i;
+	}
+	System.arraycopy(
+		constants, 
+		0, 
+		(localKeysCopy = new int[caseCount]), 
+		0, 
+		caseCount); 
+	CodeStream.sort(localKeysCopy, 0, caseCount - 1, sortedIndexes);
+	CaseLabel defaultLabel = new CaseLabel(codeStream);
+	if (defaultCase != null) {
+		defaultCase.targetLabel = defaultLabel;
+	}
+	// generate expression testes
+	testExpression.generateCode(currentScope, codeStream, needSwitch);
 
-		// generate the appropriate switch table
-		if (needSwitch) {
-			int max = localKeysCopy[caseCount - 1];
-			int min = localKeysCopy[0];
-			if ((long) (caseCount * 2.5) > ((long) max - (long) min)) {
-				codeStream.tableswitch(
-					defaultLabel,
-					min,
-					max,
-					constants,
-					sortedIndexes,
-					caseLabels);
+	// generate the appropriate switch table
+	if (needSwitch) {
+		int max = localKeysCopy[caseCount - 1];
+		int min = localKeysCopy[0];
+		if ((long) (caseCount * 2.5) > ((long) max - (long) min)) {
+			codeStream.tableswitch(
+				defaultLabel, 
+				min, 
+				max, 
+				constants, 
+				sortedIndexes, 
+				caseLabels); 
+		} else {
+			codeStream.lookupswitch(defaultLabel, constants, sortedIndexes, caseLabels);
+		}
+		codeStream.updateLastRecordedEndPC(codeStream.position);
+	}
+	// generate the switch block statements
+	int caseIndex = 0;
+	if (statements != null) {
+		for (int i = 0, maxCases = statements.length; i < maxCases; i++) {
+			Statement statement = statements[i];
+			if ((caseIndex < caseCount)
+				&& (statement == cases[caseIndex])) { // statements[i] is a case
+				if (preSwitchInitStateIndex != -1) {
+					codeStream.removeNotDefinitelyAssignedVariables(
+						currentScope, 
+						preSwitchInitStateIndex); 
+					caseIndex++;
+				}
 			} else {
-				codeStream.lookupswitch(defaultLabel, constants, sortedIndexes, caseLabels);
-			}
-			codeStream.updateLastRecordedEndPC(codeStream.position);
-		}
-		// generate the switch block statements
-		int caseIndex = 0;
-		if (statements != null) {
-			for (int i = 0, maxCases = statements.length; i < maxCases; i++) {
-				Statement statement = statements[i];
-				if ((caseIndex < caseCount)
-					&& (statement == cases[caseIndex])) { // statements[i] is a case
+				if (statement == defaultCase) { // statements[i] is a case or a default case
 					if (preSwitchInitStateIndex != -1) {
 						codeStream.removeNotDefinitelyAssignedVariables(
-							currentScope,
-							preSwitchInitStateIndex);
-						caseIndex++;
-					}
-				} else {
-					if (statement == defaultCase) { // statements[i] is a case or a default case
-						if (preSwitchInitStateIndex != -1) {
-							codeStream.removeNotDefinitelyAssignedVariables(
-								currentScope,
-								preSwitchInitStateIndex);
-						}
+							currentScope, 
+							preSwitchInitStateIndex); 
 					}
 				}
-				statement.generateCode(scope, codeStream);
 			}
+			statement.generateCode(scope, codeStream);
 		}
-		// place the trailing labels (for break and default case)
-		breakLabel.place();
-		if (defaultCase == null) {
-			defaultLabel.place();
-		}
-		// May loose some local variable initializations : affecting the local variable attributes
-		if (mergedInitStateIndex != -1) {
-			codeStream.removeNotDefinitelyAssignedVariables(
-				currentScope,
-				mergedInitStateIndex);
-			codeStream.addDefinitelyAssignedVariables(currentScope, mergedInitStateIndex);
-		}
-		if (scope != currentScope) {
-			codeStream.exitUserScope(scope);
-		}
-		codeStream.recordPositionsFrom(pc, this);
 	}
+	// place the trailing labels (for break and default case)
+	breakLabel.place();
+	if (defaultCase == null) {
+		defaultLabel.place();
+	}
+	// May loose some local variable initializations : affecting the local variable attributes
+	if (mergedInitStateIndex != -1) {
+		codeStream.removeNotDefinitelyAssignedVariables(
+			currentScope, 
+			mergedInitStateIndex); 
+		codeStream.addDefinitelyAssignedVariables(currentScope, mergedInitStateIndex);
+	}
+	if (scope != currentScope) {
+		codeStream.exitUserScope(scope);
+	}
+	codeStream.recordPositionsFrom(pc, this);
+}
 

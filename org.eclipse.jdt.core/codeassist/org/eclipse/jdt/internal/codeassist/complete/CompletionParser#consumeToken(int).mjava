@@ -1,136 +1,123 @@
-	protected void consumeToken(int token) {
-		int previous = this.previousToken;
-		int previousIdentifierPtr = this.previousIdentifierPtr;
-		super.consumeToken(token);
+protected void consumeToken(int token) {
+	int previous = this.previousToken;
+	int previousIdentifierPtr = this.previousIdentifierPtr;
+	super.consumeToken(token);
 
-		// if in field initializer (directly or not), on the completion identifier and not in recovery mode yet
-		// then position end of file at cursor location (so that we have the same behavior as
-		// in method bodies)
-		if (token == TokenNameIdentifier
+	// if in field initializer (directly or not), on the completion identifier and not in recovery mode yet
+	// then position end of file at cursor location (so that we have the same behavior as
+	// in method bodies)
+	if (token == TokenNameIdentifier
 			&& this.identifierStack[this.identifierPtr] == assistIdentifier()
 			&& this.currentElement == null
 			&& this.insideFieldInitializer()) {
-			this.scanner.eofPosition = cursorLocation + 1;
-		}
-
-		// if in a method or if in a field initializer 
-		if (this.inMethodStack[this.inMethodPtr]
-			|| this.inInitializerStack[this.inInitializerPtr]) {
-			switch (token) {
-				case TokenNameDOT :
-					switch (previous) {
-						case TokenNamethis : // eg. this[.]fred()
-							this.invocationType = EXPLICIT_RECEIVER;
-							break;
-						case TokenNamesuper : // eg. super[.]fred()
-							this.invocationType = SUPER_RECEIVER;
-							break;
-						case TokenNameIdentifier : // eg. bar[.]fred()
-							if (!this.betweenNewAndLeftBraket) { // eg. not new z.y[.]X()
-								if (this.identifierPtr != previousIdentifierPtr) {
-									// if identifier has been consumed, eg. this.x[.]fred()
-									this.invocationType = EXPLICIT_RECEIVER;
-								} else {
-									this.invocationType = NAME_RECEIVER;
-								}
+		this.scanner.eofPosition = cursorLocation+1;
+	}
+	
+	// if in a method or if in a field initializer 
+	if (this.inMethodStack[this.inMethodPtr] || this.inInitializerStack[this.inInitializerPtr]) {
+		switch (token) {
+			case TokenNameDOT:
+				switch (previous) {
+					case TokenNamethis: // eg. this[.]fred()
+						this.invocationType = EXPLICIT_RECEIVER;
+						break;
+					case TokenNamesuper: // eg. super[.]fred()
+						this.invocationType = SUPER_RECEIVER;
+						break;
+					case TokenNameIdentifier: // eg. bar[.]fred()
+						if (!this.betweenNewAndLeftBraket) { // eg. not new z.y[.]X()
+							if (this.identifierPtr != previousIdentifierPtr) { // if identifier has been consumed, eg. this.x[.]fred()
+								this.invocationType = EXPLICIT_RECEIVER;
+							} else {
+								this.invocationType = NAME_RECEIVER;
 							}
-							break;
-					}
-					break;
-				case TokenNameIdentifier :
-					if (previous == TokenNameDOT) { // eg. foo().[fred]()
-						// if current identifier is the empty completion one
-						if (identifierStack[identifierPtr]
-							== CompletionScanner.EmptyCompletionIdentifier) {
-							this.completionBehindDot = true;
 						}
-						if (this.invocationType != SUPER_RECEIVER // eg. not super.[fred]()
-							&& this.invocationType != NAME_RECEIVER // eg. not bar.[fred]()
-							&& this.invocationType != ALLOCATION // eg. not new foo.[Bar]()
-							&& this.invocationType != QUALIFIED_ALLOCATION) {
-							// eg. not fred().new foo.[Bar]()
+						break;
+				}
+				break;
+			case TokenNameIdentifier:
+				if (previous == TokenNameDOT) { // eg. foo().[fred]()
+					// if current identifier is the empty completion one
+					if (identifierStack[identifierPtr] == CompletionScanner.EmptyCompletionIdentifier){
+						this.completionBehindDot = true;
+					}
+					if (this.invocationType != SUPER_RECEIVER // eg. not super.[fred]()
+						&& this.invocationType != NAME_RECEIVER // eg. not bar.[fred]()
+						&& this.invocationType != ALLOCATION // eg. not new foo.[Bar]()
+						&& this.invocationType != QUALIFIED_ALLOCATION) { // eg. not fred().new foo.[Bar]()
 
-							this.invocationType = EXPLICIT_RECEIVER;
-							this.qualifier = this.expressionPtr;
-						}
+						this.invocationType = EXPLICIT_RECEIVER;
+						this.qualifier = this.expressionPtr;
 					}
-					break;
-				case TokenNamenew :
-					this.betweenNewAndLeftBraket = true;
+				}
+				break;	
+			case TokenNamenew:
+				this.betweenNewAndLeftBraket = true;
+				this.qualifier = this.expressionPtr; // NB: even if there is no qualification, set it to the expression ptr so that the number of arguments are correctly computed
+				if (previous == TokenNameDOT) { // eg. fred().[new] X()
+					this.invocationType = QUALIFIED_ALLOCATION;
+				} else { // eg. [new] X()
+					this.invocationType = ALLOCATION;
+				}
+				break;
+			case TokenNamethis:
+				if (previous == TokenNameDOT) { // eg. fred().[this]()
+					this.invocationType = QUALIFIED_ALLOCATION;
 					this.qualifier = this.expressionPtr;
-					// NB: even if there is no qualification, set it to the expression ptr so that the number of arguments are correctly computed
-					if (previous == TokenNameDOT) { // eg. fred().[new] X()
-						this.invocationType = QUALIFIED_ALLOCATION;
-					} else { // eg. [new] X()
-						this.invocationType = ALLOCATION;
-					}
-					break;
-				case TokenNamethis :
-					if (previous == TokenNameDOT) { // eg. fred().[this]()
-						this.invocationType = QUALIFIED_ALLOCATION;
-						this.qualifier = this.expressionPtr;
-					}
-					break;
-				case TokenNamesuper :
-					if (previous == TokenNameDOT) { // eg. fred().[super]()
-						this.invocationType = QUALIFIED_ALLOCATION;
-						this.qualifier = this.expressionPtr;
-					}
-					break;
-				case TokenNamecatch :
-					this.betweenCatchAndRightParen = true;
-					break;
-				case TokenNameLPAREN :
-					this.betweenNewAndLeftBraket = false;
-					if (this.invocationType == NO_RECEIVER
-						|| this.invocationType == NAME_RECEIVER) {
-						this.qualifier = this.expressionPtr;
-						// remenber the last expression so that arguments are correctly computed
-					}
-					switch (previous) {
-						case TokenNameIdentifier : // eg. fred[(]) or foo.fred[(])
-							this.pushOnInvocationStacks(this.invocationType, this.qualifier);
-							this.invocationType = NO_RECEIVER;
-							break;
-						case TokenNamethis : // explicit constructor invocation, eg. this[(]1, 2)
-							this.pushOnInvocationStacks(
-								(this.invocationType == QUALIFIED_ALLOCATION)
-									? QUALIFIED_ALLOCATION
-									: ALLOCATION,
-								this.qualifier);
-							this.invocationType = NO_RECEIVER;
-							break;
-						case TokenNamesuper : // explicit constructor invocation, eg. super[(]1, 2)
-							this.pushOnInvocationStacks(
-								(this.invocationType == QUALIFIED_ALLOCATION)
-									? QUALIFIED_ALLOCATION
-									: ALLOCATION,
-								this.qualifier);
-							this.invocationType = NO_RECEIVER;
-							break;
-					}
-					break;
-				case TokenNameLBRACE :
-					this.betweenNewAndLeftBraket = false;
-					this.pushBlockInvocationPtr();
-					break;
-				case TokenNameLBRACKET :
-					this.betweenNewAndLeftBraket = false;
-					break;
-				case TokenNameRBRACE :
-					if (this.blockInvocationPtr >= 0)
-						this.blockInvocationPtr--;
-					break;
-				case TokenNameRPAREN :
-					this.betweenCatchAndRightParen = false;
-					break;
-				case TokenNameCOLON :
-					if (previous == TokenNameIdentifier) {
-						if (this.labelCounterPtr >= 0)
-							this.labelCounterStack[this.labelCounterPtr]++;
-					}
-					break;
-			}
+				}
+				break;
+			case TokenNamesuper:
+				if (previous == TokenNameDOT) { // eg. fred().[super]()
+					this.invocationType = QUALIFIED_ALLOCATION;
+					this.qualifier = this.expressionPtr;
+				}
+				break;
+			case TokenNamecatch:
+				this.betweenCatchAndRightParen = true;
+				break;
+			case TokenNameLPAREN:
+				this.betweenNewAndLeftBraket = false;
+				if (this.invocationType == NO_RECEIVER || this.invocationType == NAME_RECEIVER) {
+					this.qualifier = this.expressionPtr; // remenber the last expression so that arguments are correctly computed
+				}
+				switch (previous) {
+					case TokenNameIdentifier: // eg. fred[(]) or foo.fred[(])
+						this.pushOnInvocationStacks(this.invocationType, this.qualifier);
+						this.invocationType = NO_RECEIVER;
+						break;
+					case TokenNamethis: // explicit constructor invocation, eg. this[(]1, 2)
+						this.pushOnInvocationStacks(
+							(this.invocationType == QUALIFIED_ALLOCATION) ? QUALIFIED_ALLOCATION : ALLOCATION, 
+							this.qualifier);
+						this.invocationType = NO_RECEIVER;
+						break;
+					case TokenNamesuper: // explicit constructor invocation, eg. super[(]1, 2)
+						this.pushOnInvocationStacks(
+							(this.invocationType == QUALIFIED_ALLOCATION) ? QUALIFIED_ALLOCATION : ALLOCATION, 
+							this.qualifier);
+						this.invocationType = NO_RECEIVER;
+						break;
+				}
+				break;
+			case TokenNameLBRACE:
+				this.betweenNewAndLeftBraket = false;
+				this.pushBlockInvocationPtr();
+				break;
+			case TokenNameLBRACKET:
+				this.betweenNewAndLeftBraket = false;
+				break;
+			case TokenNameRBRACE:
+				if (this.blockInvocationPtr >= 0) this.blockInvocationPtr--;
+				break;
+			case TokenNameRPAREN:
+				this.betweenCatchAndRightParen = false;
+				break;
+			case TokenNameCOLON:
+				if (previous == TokenNameIdentifier) {
+					if (this.labelCounterPtr >= 0) this.labelCounterStack[this.labelCounterPtr]++;
+				}
+				break;
 		}
 	}
+}
 

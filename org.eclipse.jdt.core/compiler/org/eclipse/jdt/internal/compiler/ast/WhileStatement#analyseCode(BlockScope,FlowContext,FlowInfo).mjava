@@ -1,88 +1,62 @@
-	public FlowInfo analyseCode(
-		BlockScope currentScope,
-		FlowContext flowContext,
-		FlowInfo flowInfo) {
-		breakLabel = new Label();
-		continueLabel = new Label();
+public FlowInfo analyseCode(BlockScope currentScope, FlowContext flowContext, FlowInfo flowInfo) {
+	breakLabel = new Label();
+	continueLabel = new Label();
 
-		preCondInitStateIndex =
-			currentScope.methodScope().recordInitializationStates(flowInfo);
-		LoopingFlowContext condLoopContext;
-		FlowInfo postCondInfo =
-			condition.analyseCode(
-				currentScope,
-				(condLoopContext =
-					new LoopingFlowContext(flowContext, this, null, null, currentScope)),
-				flowInfo);
-		condLoopContext.complainOnFinalAssignmentsInLoop(currentScope, postCondInfo);
+	preCondInitStateIndex = currentScope.methodScope().recordInitializationStates(flowInfo);
+	LoopingFlowContext condLoopContext;
+	FlowInfo postCondInfo = condition.analyseCode(
+		currentScope,
+		(condLoopContext = new LoopingFlowContext(flowContext, this, null, null, currentScope)),
+		flowInfo);
+	condLoopContext.complainOnFinalAssignmentsInLoop(currentScope, postCondInfo);
 
-		LoopingFlowContext loopingContext;
-		if ((action == null) || action.isEmptyBlock()) {
-			if ((condition.constant != NotAConstant)
-				&& (condition.constant.booleanValue() == true)) {
-				return FlowInfo.DeadEnd;
-			} else {
-				FlowInfo mergedInfo = postCondInfo.initsWhenFalse().unconditionalInits();
-				mergedInitStateIndex =
-					currentScope.methodScope().recordInitializationStates(mergedInfo);
-				return mergedInfo;
-			}
+	LoopingFlowContext loopingContext;
+	if ((action == null) || action.isEmptyBlock()) {
+		if ((condition.constant != NotAConstant) && (condition.constant.booleanValue() == true)) {
+			return FlowInfo.DeadEnd;
 		} else {
-			// in case the condition was inlined to false, record the fact that there is no way to reach any 
-			// statement inside the looping action
-			loopingContext =
-				new LoopingFlowContext(
-					flowContext,
-					this,
-					breakLabel,
-					continueLabel,
-					currentScope);
-			FlowInfo actionInfo =
-				((condition.constant != Constant.NotAConstant)
-					&& (condition.constant.booleanValue() == false))
-					? FlowInfo.DeadEnd
-					: postCondInfo.initsWhenTrue().copy();
-
-			// for computing local var attributes
-			condIfTrueInitStateIndex =
-				currentScope.methodScope().recordInitializationStates(
-					postCondInfo.initsWhenTrue());
-
-			if (!actionInfo.complainIfUnreachable(action, currentScope)) {
-				actionInfo = action.analyseCode(currentScope, loopingContext, actionInfo);
-			}
-
-			// code generation can be optimized when no need to continue in the loop
-			if ((actionInfo == FlowInfo.DeadEnd) || actionInfo.isFakeReachable()) {
-				if ((loopingContext.initsOnContinue == FlowInfo.DeadEnd)
-					|| loopingContext.initsOnContinue.isFakeReachable()) {
-					continueLabel = null;
-				} else {
-					loopingContext.complainOnFinalAssignmentsInLoop(
-						currentScope,
-						loopingContext.initsOnContinue);
-				}
-			} else {
-				loopingContext.complainOnFinalAssignmentsInLoop(currentScope, actionInfo);
-			}
-		}
-
-		// infinite loop
-		FlowInfo mergedInfo;
-		if ((condition.constant != Constant.NotAConstant)
-			&& (condition.constant.booleanValue() == true)) {
-			mergedInitStateIndex =
-				currentScope.methodScope().recordInitializationStates(
-					mergedInfo = loopingContext.initsOnBreak);
+			FlowInfo mergedInfo = postCondInfo.initsWhenFalse().unconditionalInits();
+			mergedInitStateIndex = currentScope.methodScope().recordInitializationStates(mergedInfo);
 			return mergedInfo;
 		}
+	} else {
+		// in case the condition was inlined to false, record the fact that there is no way to reach any 
+		// statement inside the looping action
+		loopingContext = new LoopingFlowContext(flowContext, this, breakLabel, continueLabel, currentScope);
+		FlowInfo actionInfo =
+			((condition.constant != Constant.NotAConstant) && (condition.constant.booleanValue() == false)) ?
+				FlowInfo.DeadEnd :
+				postCondInfo.initsWhenTrue().copy();
+				
+		// for computing local var attributes
+		condIfTrueInitStateIndex = currentScope.methodScope().recordInitializationStates(postCondInfo.initsWhenTrue());
+		
+		if (!actionInfo.complainIfUnreachable(action, currentScope)){
+			actionInfo = action.analyseCode(currentScope, loopingContext, actionInfo);
+		}
 
-		// end of loop: either condition false or break
-		mergedInfo =
-			postCondInfo.initsWhenFalse().unconditionalInits().mergedWith(
-				loopingContext.initsOnBreak);
-		mergedInitStateIndex =
-			currentScope.methodScope().recordInitializationStates(mergedInfo);
+		// code generation can be optimized when no need to continue in the loop
+		if ((actionInfo == FlowInfo.DeadEnd) || actionInfo.isFakeReachable()){
+			if ((loopingContext.initsOnContinue == FlowInfo.DeadEnd) || loopingContext.initsOnContinue.isFakeReachable()){
+				continueLabel = null;
+			} else {
+				loopingContext.complainOnFinalAssignmentsInLoop(currentScope, loopingContext.initsOnContinue);				
+			}
+		} else {
+			loopingContext.complainOnFinalAssignmentsInLoop(currentScope, actionInfo);
+		}
+	}		
+
+	// infinite loop
+	FlowInfo mergedInfo;
+	if ((condition.constant != Constant.NotAConstant) && (condition.constant.booleanValue() == true)) {
+		mergedInitStateIndex = currentScope.methodScope().recordInitializationStates(mergedInfo = loopingContext.initsOnBreak);
 		return mergedInfo;
 	}
+
+	// end of loop: either condition false or break
+	mergedInfo = postCondInfo.initsWhenFalse().unconditionalInits().mergedWith(loopingContext.initsOnBreak);
+	mergedInitStateIndex = currentScope.methodScope().recordInitializationStates(mergedInfo);
+	return mergedInfo;
+}
 
