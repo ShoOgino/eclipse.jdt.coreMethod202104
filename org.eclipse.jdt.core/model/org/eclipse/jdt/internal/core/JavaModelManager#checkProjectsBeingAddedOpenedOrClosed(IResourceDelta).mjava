@@ -1,0 +1,40 @@
+	/*
+	 * Process the given delta and look for projects being added, opened or closed.
+	 * In this case of a project being added, removes it from the list of projects being deleted.
+	 * In all cases, add the project's dependents to the list of projects to update
+	 * so that the classpath related markers can be updated.
+	 */
+	public void checkProjectsBeingAddedOpenedOrClosed(IResourceDelta delta) {
+		IResource resource = delta.getResource();
+		switch (resource.getType()) {
+			case IResource.ROOT :
+				IResourceDelta[] children = delta.getAffectedChildren();
+				for (int i = 0, length = children.length; i < length; i++) {
+					this.checkProjectsBeingAddedOpenedOrClosed(children[i]);
+				}
+				break;
+			case IResource.PROJECT :
+				// NB: No need to check project's nature as if the project is not a java project:
+				//     - if the project is added or changed this is a noop for projectsBeingDeleted
+				//     - if the project is closed, it has already lost its java nature
+				int deltaKind = delta.getKind();
+				if (deltaKind == IResourceDelta.ADDED) {
+					// in case the project was removed then added
+					this.projectsBeingDeleted.remove(resource);
+					
+					// remember dependents
+					this.deltaProcessor.addDependentsToProjectsToUpdate(resource.getFullPath());
+					
+				} else if (deltaKind == IResourceDelta.CHANGED) {
+					// in case the project was removed then added then changed
+					this.projectsBeingDeleted.remove(resource);
+					
+					if ((delta.getFlags() & IResourceDelta.OPEN) != 0) {
+						// project opened or closed: remember dependents
+						this.deltaProcessor.addDependentsToProjectsToUpdate(resource.getFullPath());
+					}
+				}
+				break;
+		}
+	}
+
