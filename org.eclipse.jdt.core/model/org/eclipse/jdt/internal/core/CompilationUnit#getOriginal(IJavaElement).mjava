@@ -1,9 +1,81 @@
-/**
- * Returns <code>null</code>, this is not a working copy.
- *
- * @see IWorkingCopy#getOriginal(IJavaElement)
+/*
+ * @see ICompilationUnit
  */
 public IJavaElement getOriginal(IJavaElement workingCopyElement) {
-	return null;
+	if (!isWorkingCopy()) return null;
+	
+	//not a element contained in a compilation unit
+	int javaElementType = workingCopyElement.getElementType();
+	if (javaElementType < COMPILATION_UNIT || javaElementType == CLASS_FILE) {
+		return null;
+	}
+	if (workingCopyElement instanceof BinaryMember) {
+		return null;
+	}
+	IJavaElement parent = workingCopyElement.getParent();
+	ArrayList hierarchy = new ArrayList(4);
+	
+	while (parent.getElementType() > COMPILATION_UNIT) {
+		hierarchy.add(parent);
+		parent = parent.getParent();
+	}
+	if (parent.getElementType() == COMPILATION_UNIT) {
+		hierarchy.add(((ICompilationUnit)parent).getOriginalElement());
+	}
+	
+	ICompilationUnit cu = (ICompilationUnit) getOriginalElement();
+	if (javaElementType == COMPILATION_UNIT) {
+		parent = workingCopyElement;
+	}
+	if (((ICompilationUnit) parent).isWorkingCopy() && !((ICompilationUnit) parent).getOriginalElement().equals(cu)) {
+		return null;
+	}
+	switch (javaElementType) {
+		case PACKAGE_DECLARATION :
+			return cu.getPackageDeclaration(workingCopyElement.getElementName());
+		case IMPORT_CONTAINER :
+			return cu.getImportContainer();
+		case IMPORT_DECLARATION :
+			return cu.getImport(workingCopyElement.getElementName());
+		case TYPE :
+			if (hierarchy.size() == 1) {
+				return cu.getType(workingCopyElement.getElementName());
+			} else {
+				//inner type
+				return getOriginalType(hierarchy).getType(workingCopyElement.getElementName());
+			}
+		case METHOD :
+			IType type;
+			if (hierarchy.size() == 2) {
+				String typeName = ((IJavaElement) hierarchy.get(0)).getElementName();
+				type = cu.getType(typeName);
+			} else {
+				//inner type
+				type = getOriginalType(hierarchy);
+			}
+			return type.getMethod(workingCopyElement.getElementName(), ((IMethod) workingCopyElement).getParameterTypes());
+		case FIELD :
+			if (hierarchy.size() == 2) {
+				String typeName = ((IJavaElement) hierarchy.get(0)).getElementName();
+				type = cu.getType(typeName);
+			} else {
+				//inner type
+				type = getOriginalType(hierarchy);
+			}
+			return type.getField(workingCopyElement.getElementName());
+		case INITIALIZER :
+			if (hierarchy.size() == 2) {
+				String typeName = ((IJavaElement) hierarchy.get(0)).getElementName();
+				type = cu.getType(typeName);
+			} else {
+				//inner type
+				type = getOriginalType(hierarchy);
+			}
+			return type.getInitializer(((Initializer) workingCopyElement).getOccurrenceCount());
+		case COMPILATION_UNIT :
+			return cu;
+		default :
+			return null;
+	}
 }
 

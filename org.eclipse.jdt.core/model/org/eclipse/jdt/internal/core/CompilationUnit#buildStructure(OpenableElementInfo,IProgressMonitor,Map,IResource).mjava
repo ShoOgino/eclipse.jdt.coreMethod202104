@@ -1,0 +1,68 @@
+protected boolean buildStructure(OpenableElementInfo info, final IProgressMonitor pm, Map newElements, IResource underlyingResource) throws JavaModelException {
+
+	// check if this compilation unit can be opened
+	if (!(info instanceof WorkingCopyElementInfo)) { // no check is done on root kind or exclusion pattern for working copies
+		if (((IPackageFragment)getParent()).getKind() == IPackageFragmentRoot.K_BINARY
+				|| !isValidCompilationUnit()
+				|| !underlyingResource.isAccessible()) {
+			throw newNotPresentException();
+		}
+	}
+	if (this.owner == DESTROYED_WC_OWNER) {
+		throw newNotPresentException();
+	}
+
+	CompilationUnitElementInfo unitInfo = (CompilationUnitElementInfo) info;
+
+	// get buffer contents
+	IBuffer buffer = getBufferManager().getBuffer(CompilationUnit.this);
+	if (buffer == null) {
+		buffer = openBuffer(pm, unitInfo); // open buffer independently from the info, since we are building the info
+	}
+	final char[] contents = buffer == null ? null : buffer.getCharacters();
+
+	// generate structure and compute syntax problems if needed
+	CompilationUnitStructureRequestor requestor = new CompilationUnitStructureRequestor(this, unitInfo, newElements);
+	boolean computeProblems = computeProblems(info);
+	IProblemFactory factory = 
+		computeProblems 
+			?  CompilationUnitProblemFinder.getProblemFactory(getElementName().toCharArray(), (WorkingCopyElementInfo)unitInfo, pm) 
+			:  	new DefaultProblemFactory();
+	SourceElementParser parser = new SourceElementParser(requestor, factory, new CompilerOptions(getJavaProject().getOptions(true)));
+	requestor.parser = parser;
+	if (computeProblems) {
+		((WorkingCopyElementInfo)unitInfo).problems = new ArrayList();
+	}
+	CompilationUnitDeclaration unit = parser.parseCompilationUnit(new org.eclipse.jdt.internal.compiler.env.ICompilationUnit() {
+			public char[] getContents() {
+				return contents;
+			}
+			public char[] getMainTypeName() {
+				return CompilationUnit.this.getMainTypeName();
+			}
+			public char[][] getPackageName() {
+				return CompilationUnit.this.getPackageName();
+			}
+			public char[] getFileName() {
+				return CompilationUnit.this.getFileName();
+			}
+		}, computeProblems /*full parse if compute problems*/);
+	
+	// update timestamp (might be IResource.NULL_STAMP if original does not exist)
+	if (underlyingResource == null) {
+		CompilationUnit original = new CompilationUnit((IPackageFragment)getParent(), getElementName(), DefaultCompilationUnitOwner.PRIMARY);
+		underlyingResource = original.getResource();
+	}
+	unitInfo.fTimestamp = ((IFile)underlyingResource).getModificationStamp();
+	
+	// compute other problems if needed
+	if (computeProblems){
+		CompilationUnitProblemFinder.process(unit, this, (WorkingCopyElementInfo)unitInfo, pm); 
+	
+		// TODO: can now report problems as they are computed
+		reportProblemsIfNeeded((WorkingCopyElementInfo)info);
+	}		
+	
+	return unitInfo.isStructureKnown();
+}
+

@@ -1,7 +1,10 @@
 /**
  * @see IWorkingCopy#getSharedWorkingCopy(IProgressMonitor, IBufferFactory, IProblemRequestor)
+ * @deprecated
  */
 public IJavaElement getSharedWorkingCopy(IProgressMonitor pm, IBufferFactory factory, IProblemRequestor problemRequestor) throws JavaModelException {
+	
+	if (isWorkingCopy()) return this;
 	
 	// if factory is null, default factory must be used
 	if (factory == null) factory = this.getBufferManager().getDefaultBufferFactory();
@@ -13,24 +16,28 @@ public IJavaElement getSharedWorkingCopy(IProgressMonitor pm, IBufferFactory fac
 	// Assuming there is a little set of buffer factories, then use a 2 level Map cache.
 	Map sharedWorkingCopies = manager.sharedWorkingCopies;
 	
-	Map perFactoryWorkingCopies = (Map) sharedWorkingCopies.get(factory);
-	if (perFactoryWorkingCopies == null){
-		perFactoryWorkingCopies = new HashMap();
-		sharedWorkingCopies.put(factory, perFactoryWorkingCopies);
+	CompilationUnitOwner workingCopyOwner = new DefaultCompilationUnitOwner(factory, problemRequestor);
+	Map perOwnerWorkingCopies = (Map) sharedWorkingCopies.get(workingCopyOwner);
+	if (perOwnerWorkingCopies == null){
+		perOwnerWorkingCopies = new HashMap();
+		sharedWorkingCopies.put(workingCopyOwner, perOwnerWorkingCopies);
 	}
-	WorkingCopy workingCopy = (WorkingCopy)perFactoryWorkingCopies.get(this);
+	CompilationUnit workingCopy = (CompilationUnit)perOwnerWorkingCopies.get(this);
 	if (workingCopy != null) {
-		workingCopy.useCount++;
+		Object info = manager.getInfo(workingCopy);
+		if (info instanceof WorkingCopyElementInfo) {
+			((WorkingCopyElementInfo)info).incrementUseCount();
 
-		if (SHARED_WC_VERBOSE) {
-			System.out.println("Incrementing use count of shared working copy " + workingCopy.toStringWithAncestors()); //$NON-NLS-1$
+			if (SHARED_WC_VERBOSE) {
+				System.out.println("Incrementing use count of shared working copy " + workingCopy.toStringWithAncestors()); //$NON-NLS-1$
+			}
+
+			return workingCopy;
 		}
-
-		return workingCopy;
-	} else {
-		CreateWorkingCopyOperation op = new CreateWorkingCopyOperation(this, perFactoryWorkingCopies, factory, problemRequestor);
-		runOperation(op, pm);
-		return op.getResultElements()[0];
-	}
+	} 
+	workingCopy = new CompilationUnit((IPackageFragment)getParent(), getElementName(), workingCopyOwner);
+	BecomeWorkingCopyOperation op = new BecomeWorkingCopyOperation(workingCopy, perOwnerWorkingCopies);
+	runOperation(op, pm);
+	return workingCopy;
 }
 
