@@ -1,0 +1,56 @@
+/**
+ * Finds the accurate positions of the sequence of tokens given by qualifiedName
+ * in the source and reports a reference to this parameterized type name
+ * to the search requestor.
+ * @since 3.1
+ */
+protected void reportAccurateParameterizedMethodReference(SearchMatch match, ASTNode statement, TypeReference[] typeArguments) throws CoreException {
+	if (match.getRule() == 0) return;
+	if (!encloses((IJavaElement)match.getElement())) return;
+
+	// If there's type arguments, look for end (ie. char '>') of last one.
+	int start = match.getOffset();
+	if (typeArguments != null && typeArguments.length > 0) {
+		boolean isErasureMatch= (pattern instanceof OrPattern) ? ((OrPattern)pattern).isErasureMatch() : ((JavaSearchPattern)pattern).isErasureMatch();
+		if (!isErasureMatch) {
+			
+			// Initialize scanner
+			Scanner scanner = this.parser.scanner;
+			char[] source = this.currentPossibleMatch.getContents();
+			scanner.setSource(source);
+
+			// Search previous opening '<'
+			start = typeArguments[0].sourceStart;
+			int end = statement.sourceEnd;
+			scanner.resetTo(start, end);
+			int lineStart = start;
+			try {
+				linesUp: while (true) {
+					while (scanner.source[scanner.currentPosition] != '\n') {
+						scanner.currentPosition--;
+						if (scanner.currentPosition == 0) break linesUp;
+					}
+					lineStart = scanner.currentPosition+1;
+					scanner.resetTo(lineStart, end);
+					while (!scanner.atEnd()) {
+						if (scanner.getNextToken() == TerminalTokens.TokenNameLESS) {
+							start = scanner.getCurrentTokenStartPosition();
+							break linesUp;
+						}
+					}
+					end = lineStart - 2;
+					scanner.currentPosition = end;
+				}
+			}
+			catch (InvalidInputException ex) {
+				// give up
+			}
+	 	}
+	}
+	
+	// Report match
+	match.setOffset(start);
+	match.setLength(statement.sourceEnd-start+1);
+	report(match);
+}
+

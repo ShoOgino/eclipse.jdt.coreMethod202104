@@ -1,0 +1,65 @@
+void matchReportReference(MessageSend messageSend, MatchLocator locator, MethodBinding methodBinding) throws CoreException {
+
+	// Look if there's a need to special report for parameterized type
+	boolean isParameterized = false;
+	if (methodBinding instanceof ParameterizedGenericMethodBinding) { // parameterized generic method
+		isParameterized = true;
+
+		// Update match regarding method type arguments
+		ParameterizedGenericMethodBinding parameterizedMethodBinding = (ParameterizedGenericMethodBinding) methodBinding;
+		match.setRaw(parameterizedMethodBinding.isRaw);
+		TypeBinding[] typeArguments = /*parameterizedMethodBinding.isRaw ? null :*/ parameterizedMethodBinding.typeArguments;
+		updateMatch(typeArguments, locator, this.pattern.methodArguments, this.pattern.hasMethodParameters());
+
+		// Update match regarding declaring class type arguments
+		if (methodBinding.declaringClass.isParameterizedType() || methodBinding.declaringClass.isRawType()) {
+			ParameterizedTypeBinding parameterizedBinding = (ParameterizedTypeBinding)methodBinding.declaringClass;
+			if (!this.pattern.hasTypeArguments() && this.pattern.hasMethodArguments()) {
+				// special case for pattern which defines method arguments but not its declaring type
+				// in this case, we do not refine accuracy using declaring type arguments...!
+			} else {
+				updateMatch(parameterizedBinding, this.pattern.getTypeArguments(), this.pattern.hasTypeParameters(), 0, locator);
+			}
+		} else if (this.pattern.hasTypeArguments()) {
+			match.setRule(SearchPattern.R_ERASURE_MATCH);
+		}
+
+		// Update match regarding method parameters
+		// TODO ? (frederic)
+
+		// Update match regarding method return type
+		// TODO ? (frederic)
+	} else if (methodBinding instanceof ParameterizedMethodBinding) {
+		isParameterized = true;
+		if (methodBinding.declaringClass.isParameterizedType() || methodBinding.declaringClass.isRawType()) {
+			ParameterizedTypeBinding parameterizedBinding = (ParameterizedTypeBinding)methodBinding.declaringClass;
+			updateMatch(parameterizedBinding, this.pattern.getTypeArguments(), this.pattern.hasTypeParameters(), 0, locator);
+		} else if (this.pattern.hasTypeArguments()) {
+			match.setRule(SearchPattern.R_ERASURE_MATCH);
+		}
+
+		// Update match regarding method parameters
+		// TODO ? (frederic)
+
+		// Update match regarding method return type
+		// TODO ? (frederic)
+	} else if (this.pattern.hasMethodArguments()) { // binding has no type params, compatible erasure if pattern does
+		match.setRule(SearchPattern.R_ERASURE_MATCH);
+	}
+
+	// See whether it is necessary to report or not
+	if (match.getRule() == 0) return; // impossible match
+	boolean report = (this.isErasureMatch && match.isErasure()) || (this.isEquivalentMatch && match.isEquivalent()) || match.isExact();
+	if (!report) return;
+
+	// Report match
+	int offset = (int) (messageSend.nameSourcePosition >>> 32);
+	match.setOffset(offset);
+	match.setLength(messageSend.sourceEnd - offset + 1);
+	 if (isParameterized && this.pattern.hasMethodArguments())  {
+		locator.reportAccurateParameterizedMethodReference(match, messageSend, messageSend.typeArguments);
+	} else {
+		locator.report(match);
+	}
+}
+
