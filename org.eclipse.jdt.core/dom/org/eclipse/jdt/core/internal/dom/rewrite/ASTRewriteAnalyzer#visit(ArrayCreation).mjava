@@ -1,0 +1,92 @@
+	/* (non-Javadoc)
+	 * @see org.eclipse.jdt.core.dom.ASTVisitor#visit(ArrayCreation)
+	 */
+	public boolean visit(ArrayCreation node) {
+		if (!hasChildrenChanges(node)) {
+			return visitChildrenNeeded(node);
+		}
+		
+		ArrayType arrayType= (ArrayType) getOriginalValue(node, ArrayCreation.TYPE_PROPERTY);
+		int nOldBrackets= getDimensions(arrayType); // number of total brackets
+		int nNewBrackets= nOldBrackets;
+		
+		TextEditGroup editGroup= null;
+		RewriteEvent typeEvent= getEvent(node, ArrayCreation.TYPE_PROPERTY);
+		if (typeEvent != null && typeEvent.getChangeKind() == RewriteEvent.REPLACED) { // changed arraytype can have different dimension or type name
+			ArrayType replacingType= (ArrayType) typeEvent.getNewValue();
+			editGroup= getEditGroup(typeEvent);
+			Type newType= replacingType.getElementType();
+			Type oldType= getElementType(arrayType);
+			if (!newType.equals(oldType)) {
+				int offset= getExtendedOffset(oldType);
+				int length= getExtendedLength(oldType);
+				doTextRemove(offset, length, editGroup);
+				doTextInsert(offset, newType, 0, false, editGroup);
+			}
+			nNewBrackets= replacingType.getDimensions(); // is replaced type
+		}
+		doVisit(arrayType);
+		
+
+		try {
+			int offset= getScanner().getTokenStartOffset(ITerminalSymbols.TokenNameLBRACKET, arrayType.getStartPosition());
+			// dimension node with expressions
+			RewriteEvent dimEvent= getEvent(node, ArrayCreation.DIMENSIONS_PROPERTY);
+			boolean hasDimensionChanges= (dimEvent != null && dimEvent.getChangeKind() != RewriteEvent.UNCHANGED);
+			if (hasDimensionChanges) {
+				RewriteEvent[] events= dimEvent.getChildren();
+				// offset on first opening brace
+				for (int i= 0; i < events.length; i++) {
+					RewriteEvent event= events[i];
+					int changeKind= event.getChangeKind();
+					if (changeKind == RewriteEvent.INSERTED) { // insert new dimension
+						editGroup= getEditGroup(event);
+						doTextInsert(offset, "[", editGroup); //$NON-NLS-1$
+						doTextInsert(offset, (ASTNode) event.getNewValue(), 0, false, editGroup);
+						doTextInsert(offset, "]", editGroup); //$NON-NLS-1$
+						nNewBrackets--;
+					} else {
+						ASTNode elem= (ASTNode) event.getOriginalValue();
+						int elemEnd= elem.getStartPosition() + elem.getLength();
+						int endPos= getScanner().getTokenEndOffset(ITerminalSymbols.TokenNameRBRACKET, elemEnd);
+						if (changeKind == RewriteEvent.REMOVED) {
+							editGroup= getEditGroup(event);
+							doTextRemoveAndVisit(offset, endPos - offset, elem, editGroup);
+						} else if (changeKind == RewriteEvent.REPLACED) {
+							editGroup= getEditGroup(event);
+							int elemOffset= getExtendedOffset(elem);
+							int elemLength= getExtendedLength(elem);
+							doTextRemoveAndVisit(elemOffset, elemLength, elem, editGroup);
+							doTextInsert(elemOffset, (ASTNode) event.getNewValue(), 0, false, editGroup);
+							nNewBrackets--;
+						} else {
+							doVisit(elem);
+							nNewBrackets--;
+						}
+						offset= endPos;
+						nOldBrackets--;
+					}
+				}
+			} else {
+				offset= doVisit(node, ArrayCreation.DIMENSIONS_PROPERTY, offset);
+			}
+			if (nOldBrackets != nNewBrackets) {
+				if (!hasDimensionChanges) {
+					offset= getScanner().getTokenEndOffset(ITerminalSymbols.TokenNameRBRACKET, offset);
+				}
+				rewriteExtraDimensions(nOldBrackets, nNewBrackets, offset, editGroup);
+			}
+				
+			int kind= getChangeKind(node, ArrayCreation.INITIALIZER_PROPERTY);
+			if (kind == RewriteEvent.REMOVED) {
+				offset= getScanner().getPreviousTokenEndOffset(ITerminalSymbols.TokenNameLBRACE, offset);
+			} else {
+				offset= node.getStartPosition() + node.getLength(); // insert pos
+			}
+			rewriteNode(node, ArrayCreation.INITIALIZER_PROPERTY, offset, ASTRewriteFormatter.SPACE); //$NON-NLS-1$
+		} catch (CoreException e) {
+			handleException(e);
+		}		
+		return false;
+	}
+

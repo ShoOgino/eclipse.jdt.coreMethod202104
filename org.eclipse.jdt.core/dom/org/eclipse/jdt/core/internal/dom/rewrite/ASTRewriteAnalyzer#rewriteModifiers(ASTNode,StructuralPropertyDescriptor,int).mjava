@@ -1,0 +1,59 @@
+	private void rewriteModifiers(ASTNode parent, StructuralPropertyDescriptor property, int offset) {
+		
+		RewriteEvent event= getEvent(parent, property);
+		if (event == null || event.getChangeKind() != RewriteEvent.REPLACED) {
+			return;
+		}
+		
+		int oldModifiers= ((Integer) event.getOriginalValue()).intValue();
+		int newModifiers= ((Integer) event.getNewValue()).intValue();
+		TextEditGroup editGroup= getEditGroup(event);
+		
+		try {
+			int tok= getScanner().readNext(offset, true);
+			int startPos= getScanner().getCurrentStartOffset();
+			int endPos= startPos;
+			loop: while (true) {
+				boolean keep= true;
+				switch (tok) {
+					case ITerminalSymbols.TokenNamepublic: keep= Modifier.isPublic(newModifiers); break;
+					case ITerminalSymbols.TokenNameprotected: keep= Modifier.isProtected(newModifiers); break;
+					case ITerminalSymbols.TokenNameprivate: keep= Modifier.isPrivate(newModifiers); break;
+					case ITerminalSymbols.TokenNamestatic: keep= Modifier.isStatic(newModifiers); break;
+					case ITerminalSymbols.TokenNamefinal: keep= Modifier.isFinal(newModifiers); break;
+					case ITerminalSymbols.TokenNameabstract: keep= Modifier.isAbstract(newModifiers); break;
+					case ITerminalSymbols.TokenNamenative: keep= Modifier.isNative(newModifiers); break;
+					case ITerminalSymbols.TokenNamevolatile: keep= Modifier.isVolatile(newModifiers); break;
+					case ITerminalSymbols.TokenNamestrictfp: keep= Modifier.isStrictfp(newModifiers); break;
+					case ITerminalSymbols.TokenNametransient: keep= Modifier.isTransient(newModifiers); break;
+					case ITerminalSymbols.TokenNamesynchronized: keep= Modifier.isSynchronized(newModifiers); break;
+					default:
+						break loop;
+				}
+				tok= getScanner().readNext(true);
+				int currPos= endPos;
+				endPos= getScanner().getCurrentStartOffset();
+				if (!keep) {
+					doTextRemove(currPos, endPos - currPos, editGroup);
+				}
+			} 
+			int addedModifiers= newModifiers & ~oldModifiers;
+			if (addedModifiers != 0) {
+				if (startPos != endPos) {
+					int visibilityModifiers= addedModifiers & (Modifier.PUBLIC | Modifier.PRIVATE | Modifier.PROTECTED);
+					if (visibilityModifiers != 0) {
+						StringBuffer buf= new StringBuffer();
+						ASTRewriteFlattener.printModifiers(visibilityModifiers, buf);
+						doTextInsert(startPos, buf.toString(), editGroup);
+						addedModifiers &= ~visibilityModifiers;
+					}
+				}
+				StringBuffer buf= new StringBuffer();
+				ASTRewriteFlattener.printModifiers(addedModifiers, buf);
+				doTextInsert(endPos, buf.toString(), editGroup);
+			}
+		} catch (CoreException e) {
+			// ignore
+		}		
+	}
+

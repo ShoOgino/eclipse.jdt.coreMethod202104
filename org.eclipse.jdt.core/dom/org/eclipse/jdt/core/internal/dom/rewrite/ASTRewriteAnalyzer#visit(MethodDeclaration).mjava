@@ -1,0 +1,51 @@
+	/* (non-Javadoc)
+	 * @see org.eclipse.jdt.core.dom.ASTVisitor#visit(MethodDeclaration)
+	 */
+	public boolean visit(MethodDeclaration node) {
+		if (!hasChildrenChanges(node)) {
+			return visitChildrenNeeded(node);
+		}
+		int pos= rewriteJavadoc(node, MethodDeclaration.JAVADOC_PROPERTY);
+		rewriteModifiers(node, MethodDeclaration.MODIFIERS_PROPERTY, pos);
+		
+		boolean isConstructorChange= isChanged(node, MethodDeclaration.CONSTRUCTOR_PROPERTY);
+		boolean isConstructor= ((Boolean) getOriginalValue(node, MethodDeclaration.CONSTRUCTOR_PROPERTY)).booleanValue();
+		if (!isConstructor || isConstructorChange) {
+			rewriteReturnType(node, isConstructor, isConstructorChange);
+		}
+		// method name
+		pos= rewriteRequiredNode(node, MethodDeclaration.NAME_PROPERTY);
+		
+		// parameters
+		try {
+			if (isChanged(node, MethodDeclaration.PARAMETERS_PROPERTY)) {
+				pos= getScanner().getTokenEndOffset(ITerminalSymbols.TokenNameLPAREN, pos);
+				pos= rewriteNodeList(node, MethodDeclaration.PARAMETERS_PROPERTY, pos, "", ", "); //$NON-NLS-1$ //$NON-NLS-2$
+			} else {
+				pos= doVisit(node, MethodDeclaration.PARAMETERS_PROPERTY, pos);
+			}
+			
+			pos= getScanner().getTokenEndOffset(ITerminalSymbols.TokenNameRPAREN, pos);
+			
+			int extraDims= rewriteExtraDimensions(node, MethodDeclaration.EXTRA_DIMENSIONS_PROPERTY, pos);
+			
+			boolean hasExceptionChanges= isChanged(node, MethodDeclaration.THROWN_EXCEPTIONS_PROPERTY);
+			
+			int bodyChangeKind= getChangeKind(node, MethodDeclaration.BODY_PROPERTY);
+			
+			if ((extraDims > 0) && (hasExceptionChanges || bodyChangeKind == RewriteEvent.INSERTED || bodyChangeKind == RewriteEvent.REMOVED)) {
+				int dim= ((Integer) getOriginalValue(node, MethodDeclaration.EXTRA_DIMENSIONS_PROPERTY)).intValue();
+				while (dim > 0) {
+					pos= getScanner().getTokenEndOffset(ITerminalSymbols.TokenNameRBRACKET, pos);
+					dim--;
+				}
+			}
+			
+			pos= rewriteNodeList(node, MethodDeclaration.THROWN_EXCEPTIONS_PROPERTY, pos, " throws ", ", "); //$NON-NLS-1$ //$NON-NLS-2$
+			rewriteMethodBody(node, pos);
+		} catch (CoreException e) {
+			// ignore
+		}
+		return false;
+	}
+

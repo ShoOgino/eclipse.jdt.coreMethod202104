@@ -1,0 +1,34 @@
+	private void rewriteReturnType(MethodDeclaration node, boolean isConstructor, boolean isConstructorChange) {
+		// weakness in the AST: return type always exists, even if missing in source
+		ASTNode originalReturnType= (ASTNode) getOriginalValue(node, MethodDeclaration.RETURN_TYPE_PROPERTY);
+		boolean returnTypeExists=  originalReturnType != null && originalReturnType.getStartPosition() != -1;
+		if (!isConstructorChange && returnTypeExists) {
+			rewriteRequiredNode(node, MethodDeclaration.RETURN_TYPE_PROPERTY);
+			return;
+		}
+		ASTNode newReturnType= (ASTNode) getNewValue(node, MethodDeclaration.RETURN_TYPE_PROPERTY);
+		if (isConstructorChange || !returnTypeExists && newReturnType != originalReturnType) {
+			try {
+				int startPos= node.getStartPosition();
+				
+				getScanner().setOffset(startPos);
+				int token= getScanner().readNext(true);
+				while (TokenScanner.isModifier(token)) {
+					startPos= getScanner().getCurrentEndOffset();
+					token= getScanner().readNext(true);
+				}
+				
+				TextEditGroup editGroup= getEditGroup(node, MethodDeclaration.RETURN_TYPE_PROPERTY);
+				if (isConstructor || !returnTypeExists) { // insert
+					doTextInsert(startPos, " ", editGroup); //$NON-NLS-1$
+					doTextInsert(startPos, newReturnType, getIndent(startPos), true, editGroup);
+				} else { // remove
+					int len= getExtendedEnd(originalReturnType) - startPos;
+					doTextRemoveAndVisit(startPos, len, originalReturnType, editGroup);
+				}
+			} catch (CoreException e) {
+				handleException(e);
+			}
+		}
+	}
+
