@@ -1,0 +1,48 @@
+	/*
+	 * Parse a method reference in @see tag
+	 */
+	private Expression parseMember(TypeReference receiver) throws InvalidInputException {
+		// Init
+		this.identifierPtr = -1;
+		this.identifierLengthPtr = -1;
+		int start = this.scanner.getCurrentTokenStartPosition();
+		
+		// Get type ref
+		TypeReference typeRef = receiver;
+		if (typeRef == null) {
+			TypeDeclaration typeDecl = getParserStackLastTypeDeclaration();
+			char[] name = null;
+			if (typeDecl == null) {
+				name = this.sourceParser.compilationUnit.compilationResult.compilationUnit.getMainTypeName();
+			} else {
+				name = typeDecl.name;
+			}
+			typeRef = new JavadocSingleTypeReference(name, 0, 0, 0);
+		}
+		
+		// Get member identifier
+		if (readTokenAndConsume() == TerminalTokens.TokenNameIdentifier) {
+			pushIdentifier(true);
+			if (readTokenAndConsume() == TerminalTokens.TokenNameLPAREN) {
+				start = this.scanner.currentPosition;
+				try {
+					return parseArguments(typeRef);
+				} catch (InvalidInputException e) {
+					int end = this.scanner.getCurrentTokenEndPosition() < this.lineEnd ?
+							this.scanner.getCurrentTokenEndPosition() :
+							this.scanner.getCurrentTokenStartPosition();
+					end = end < this.lineEnd ? end : (this.lineEnd - 1);
+					this.sourceParser.problemReporter().javadocInvalidSeeReferenceArgs(start, end);
+				}
+				return null;
+			}
+			JavadocFieldReference field = new JavadocFieldReference(identifierStack[0], identifierPositionStack[0]);
+			field.receiver = typeRef;
+			field.tagSourceStart = this.tagSourceStart;
+			field.tagSourceEnd = this.tagSourceEnd;
+			return field;
+		}
+		this.sourceParser.problemReporter().javadocInvalidSeeReference(start, getEndPosition());
+		return null;
+	}
+
