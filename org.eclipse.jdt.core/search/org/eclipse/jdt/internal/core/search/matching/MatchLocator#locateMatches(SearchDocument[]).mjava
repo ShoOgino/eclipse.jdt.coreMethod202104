@@ -2,16 +2,23 @@
  * Locate the matches in the given files and report them using the search requestor. 
  */
 public void locateMatches(SearchDocument[] searchDocuments) throws CoreException {
+	long start = System.currentTimeMillis(); // debug
+	int docsLength = searchDocuments.length;
 	if (SearchEngine.VERBOSE) {
 		System.out.println("Locating matches in documents ["); //$NON-NLS-1$
-		for (int i = 0, length = searchDocuments.length; i < length; i++)
+		for (int i = 0; i < docsLength; i++)
 			System.out.println("\t" + searchDocuments[i]); //$NON-NLS-1$
 		System.out.println("]"); //$NON-NLS-1$
 	}
-	
+
+	// init infos for progress increasing
+	int n = docsLength<1000 ? Math.min(Math.max(docsLength/100, 2),4) : 5 *(docsLength/1000);
+	this.progressStep = docsLength < n ? 1 : docsLength / n; // step should not be 0
+	this.progressWorked = 0;
+
 	// extract working copies
 	ArrayList copies = new ArrayList();
-	for (int i = 0, length = searchDocuments.length; i < length; i++) {
+	for (int i = 0; i < docsLength; i++) {
 		SearchDocument document = searchDocuments[i];
 		if (document instanceof WorkingCopyDocument) {
 			copies.add(((WorkingCopyDocument)document).workingCopy);
@@ -38,22 +45,27 @@ public void locateMatches(SearchDocument[] searchDocuments) throws CoreException
 		this.patternLocator.initializePolymorphicSearch(this);
 
 		JavaProject previousJavaProject = null;
-		int skipped = 0;
 		PossibleMatchSet matchSet = new PossibleMatchSet();
 		Util.sort(searchDocuments, new Util.Comparer() {
 			public int compare(Object a, Object b) {
 				return ((SearchDocument)a).getPath().compareTo(((SearchDocument)b).getPath());
 			}
 		}); 
-		for (int i = 0, l = searchDocuments.length; i < l; i++) {
-			if (this.progressMonitor != null && this.progressMonitor.isCanceled())
+		int displayed = 0; // progress worked displayed
+		for (int i = 0; i < docsLength; i++) {
+			if (this.progressMonitor != null && this.progressMonitor.isCanceled()) {
 				throw new OperationCanceledException();
+			}
 
 			// skip duplicate paths
 			SearchDocument searchDocument = searchDocuments[i];
 			String pathString = searchDocument.getPath();
 			if (i > 0 && pathString.equals(searchDocuments[i - 1].getPath())) {
-				skipped++;
+				if (this.progressMonitor != null) {
+					this.progressWorked++;
+					if ((this.progressWorked%this.progressStep)==0) this.progressMonitor.worked(this.progressStep);
+				}
+				displayed++;
 				continue;
 			}
 
@@ -64,7 +76,14 @@ public void locateMatches(SearchDocument[] searchDocuments) throws CoreException
 				openable = (Openable) workingCopy;
 			} else {
 				openable = this.handleFactory.createOpenable(pathString, this.scope);
-				if (openable == null) continue; // match is outside classpath
+				if (openable == null) {
+					if (this.progressMonitor != null) {
+						this.progressWorked++;
+						if ((this.progressWorked%this.progressStep)==0) this.progressMonitor.worked(this.progressStep);
+					}
+					displayed++;
+					continue; // match is outside classpath
+				}
 			}
 
 			// create new parser and lookup environment if this is a new project
@@ -77,30 +96,25 @@ public void locateMatches(SearchDocument[] searchDocuments) throws CoreException
 				// locate matches in previous project
 				if (previousJavaProject != null) {
 					try {
-						locateMatches(previousJavaProject, matchSet);
+						locateMatches(previousJavaProject, matchSet, i-displayed);
+						displayed = i;
 					} catch (JavaModelException e) {
 						// problem with classpath in this project -> skip it
 					}
-					if (this.progressMonitor != null)
-						this.progressMonitor.worked(skipped);
 					matchSet.reset();
 				}
 				previousJavaProject = javaProject;
-				skipped = 0;
 			}
 			matchSet.add(new PossibleMatch(this, resource, openable, searchDocument));
-			skipped++;
 		}
 
 		// last project
 		if (previousJavaProject != null) {
 			try {
-				locateMatches(previousJavaProject, matchSet);
+				locateMatches(previousJavaProject, matchSet, docsLength-displayed);
 			} catch (JavaModelException e) {
 				// problem with classpath in last project -> ignore
 			}
-			if (this.progressMonitor != null)
-				this.progressMonitor.worked(skipped);
 		} 
 
 		if (this.progressMonitor != null)
@@ -109,6 +123,13 @@ public void locateMatches(SearchDocument[] searchDocuments) throws CoreException
 		if (this.nameEnvironment != null)
 			this.nameEnvironment.cleanup();
 		manager.flushZipFiles();
-	}	
+	}
+	// debug
+	System.out.println("Time to locate " + //$NON-NLS-1$
+			this.progressWorked+
+			" matches: " + //$NON-NLS-1$
+			(System.currentTimeMillis() - start) +
+			" ms"); //$NON-NLS-1$
+	// end debug
 }
 
