@@ -1,0 +1,57 @@
+	/**
+	 * @see org.eclipse.jdt.internal.compiler.IAbstractSyntaxTreeVisitor#visit(org.eclipse.jdt.internal.compiler.ast.QualifiedAllocationExpression, org.eclipse.jdt.internal.compiler.lookup.BlockScope)
+	 */
+	public boolean visit(
+		QualifiedAllocationExpression qualifiedAllocationExpression,
+		BlockScope scope) {
+			
+		final int numberOfParens = (qualifiedAllocationExpression.bits & AstNode.ParenthesizedMASK) >> AstNode.ParenthesizedSHIFT;
+		if (numberOfParens > 0) manageOpeningParenthesizedExpression(qualifiedAllocationExpression, numberOfParens);
+		
+		final Expression enclosingInstance = qualifiedAllocationExpression.enclosingInstance;
+		if (enclosingInstance != null) {
+			enclosingInstance.traverse(this, scope);
+			this.scribe.printNextToken(ITerminalSymbols.TokenNameDOT);
+		}
+		this.scribe.printNextToken(ITerminalSymbols.TokenNamenew);
+		this.scribe.space();
+		qualifiedAllocationExpression.type.traverse(this, scope);
+		
+		this.scribe.printNextToken(ITerminalSymbols.TokenNameLPAREN, this.preferences.insert_space_before_message_send);
+
+		final Expression[] arguments = qualifiedAllocationExpression.arguments;
+		if (arguments != null) {
+			int argumentLength = arguments.length;
+			Alignment argumentsAlignment =this.scribe.createAlignment(
+					"allocation",//$NON-NLS-1$
+					this.preferences.qualified_allocation_expression_arguments_alignment,
+					argumentLength,
+					this.scribe.scanner.currentPosition);
+			this.scribe.enterAlignment(argumentsAlignment);
+			boolean ok = false;
+			do {
+				try {
+					if (this.preferences.insert_space_within_message_send) this.scribe.space();
+					for (int i = 0; i < argumentLength; i++) {
+						if (i > 0) this.scribe.printNextToken(ITerminalSymbols.TokenNameCOMMA, this.preferences.insert_space_before_comma_in_allocation_expression);
+						this.scribe.alignFragment(argumentsAlignment, i);
+						if (i > 0 && this.preferences.insert_space_after_comma_in_allocation_expression) this.scribe.space();
+						arguments[i].traverse(this, scope);
+					}
+					ok = true;
+				} catch (AlignmentException e) {
+					this.scribe.redoAlignment(e);
+				}
+			} while (!ok);
+			this.scribe.exitAlignment(argumentsAlignment, true);
+			this.scribe.printNextToken(ITerminalSymbols.TokenNameRPAREN, this.preferences.insert_space_within_message_send); 
+		} else {
+			this.scribe.printNextToken(ITerminalSymbols.TokenNameRPAREN, this.preferences.insert_space_between_empty_arguments); 
+		}
+		final AnonymousLocalTypeDeclaration anonymousType = qualifiedAllocationExpression.anonymousType;
+		if (anonymousType != null) anonymousType.traverse(this, scope);
+		
+		if (numberOfParens > 0) manageClosingParenthesizedExpression(qualifiedAllocationExpression, numberOfParens);
+		return false;
+	}
+

@@ -1,0 +1,51 @@
+	/**
+	 * @see org.eclipse.jdt.internal.compiler.IAbstractSyntaxTreeVisitor#visit(org.eclipse.jdt.internal.compiler.ast.AllocationExpression, org.eclipse.jdt.internal.compiler.lookup.BlockScope)
+	 */
+	public boolean visit(
+		AllocationExpression allocationExpression,
+		BlockScope scope) {
+		// 'new' ClassType '(' ArgumentListopt ')' ClassBodyopt
+
+		final int numberOfParens = (allocationExpression.bits & AstNode.ParenthesizedMASK) >> AstNode.ParenthesizedSHIFT;
+		if (numberOfParens > 0) manageOpeningParenthesizedExpression(allocationExpression, numberOfParens);
+		
+		this.scribe.printNextToken(ITerminalSymbols.TokenNamenew);
+		this.scribe.space();
+		allocationExpression.type.traverse(this, scope);
+		
+		this.scribe.printNextToken(ITerminalSymbols.TokenNameLPAREN, this.preferences.insert_space_before_message_send);
+
+		final Expression[] arguments = allocationExpression.arguments;
+		if (arguments != null) {
+			int argumentLength = arguments.length;
+			Alignment argumentsAlignment =this.scribe.createAlignment(
+					"allocation",//$NON-NLS-1$
+					this.preferences.allocation_expression_arguments_alignment,
+					argumentLength,
+					this.scribe.scanner.currentPosition);
+			this.scribe.enterAlignment(argumentsAlignment);
+			boolean ok = false;
+			do {
+				try {
+					if (this.preferences.insert_space_within_message_send) this.scribe.space();
+					for (int i = 0; i < argumentLength; i++) {
+						if (i > 0) this.scribe.printNextToken(ITerminalSymbols.TokenNameCOMMA, this.preferences.insert_space_before_comma_in_allocation_expression);
+						this.scribe.alignFragment(argumentsAlignment, i);
+						if (i > 0 && this.preferences.insert_space_after_comma_in_allocation_expression) this.scribe.space();
+						arguments[i].traverse(this, scope);
+					}
+					ok = true;
+				} catch (AlignmentException e) {
+					this.scribe.redoAlignment(e);
+				}
+			} while (!ok);
+			this.scribe.exitAlignment(argumentsAlignment, true);
+			this.scribe.printNextToken(ITerminalSymbols.TokenNameRPAREN, this.preferences.insert_space_within_message_send); 
+		} else {
+			this.scribe.printNextToken(ITerminalSymbols.TokenNameRPAREN, this.preferences.insert_space_between_empty_arguments); 
+		}
+		
+		if (numberOfParens > 0) manageClosingParenthesizedExpression(allocationExpression, numberOfParens);
+		return false;
+	}
+

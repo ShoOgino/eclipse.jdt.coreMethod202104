@@ -1,0 +1,45 @@
+	private boolean dumpBinaryExpression(
+		BinaryExpression binaryExpression,
+		int operator,
+		BlockScope scope) {
+
+		final int numberOfParens = (binaryExpression.bits & AstNode.ParenthesizedMASK) >> AstNode.ParenthesizedSHIFT;
+
+		if (numberOfParens > 0) manageOpeningParenthesizedExpression(binaryExpression, numberOfParens);
+			
+		BinaryExpressionFragmentBuilder builder = buildFragments(binaryExpression, scope);
+		final int fragmentsSize = builder.size();
+		
+		if (fragmentsSize > 1) {
+			Alignment binaryExpressionAlignment = this.scribe.createAlignment("binaryExpressionAlignment", this.preferences.binary_expression_alignment, fragmentsSize, this.scribe.scanner.currentPosition); //$NON-NLS-1$
+			this.scribe.enterAlignment(binaryExpressionAlignment);
+			boolean ok = false;
+			AstNode[] fragments = builder.fragments();
+			int[] operators = builder.operators();
+			do {
+				try {
+					for (int i = 0; i < fragmentsSize - 1; i++) {
+						AstNode fragment = fragments[i];
+						fragment.traverse(this, scope);
+						this.scribe.alignFragment(binaryExpressionAlignment, i);
+						this.scribe.printNextToken(operators[i], this.preferences.insert_space_before_binary_operator);
+					}
+					fragments[fragmentsSize - 1].traverse(this, scope);
+					ok = true;
+				} catch(AlignmentException e){
+					this.scribe.redoAlignment(e);
+				}
+			} while (!ok);		
+			this.scribe.exitAlignment(binaryExpressionAlignment, true);
+		} else {
+			binaryExpression.left.traverse(this, scope);
+			this.scribe.printNextToken(operator, this.preferences.insert_space_before_binary_operator);
+			if (this.preferences.insert_space_after_binary_operator) {
+				this.scribe.space();
+			}
+			binaryExpression.right.traverse(this, scope);
+		}	
+		if (numberOfParens > 0) manageClosingParenthesizedExpression(binaryExpression, numberOfParens);
+		return false;
+	}
+

@@ -1,0 +1,108 @@
+	/**
+	 * @see org.eclipse.jdt.internal.compiler.IAbstractSyntaxTreeVisitor#visit(org.eclipse.jdt.internal.compiler.ast.IfStatement, org.eclipse.jdt.internal.compiler.lookup.BlockScope)
+	 */
+	public boolean visit(IfStatement ifStatement, BlockScope scope) {
+
+		this.scribe.printNextToken(ITerminalSymbols.TokenNameif);
+		this.scribe.printNextToken(ITerminalSymbols.TokenNameLPAREN, this.preferences.insert_space_before_if_condition);
+		if (this.preferences.insert_space_in_if_condition) this.scribe.space();
+		ifStatement.condition.traverse(this, scope);
+		this.scribe.printNextToken(ITerminalSymbols.TokenNameRPAREN, this.preferences.insert_space_in_if_condition);
+
+		final Statement thenStatement = ifStatement.thenStatement;
+		final Statement elseStatement = ifStatement.elseStatement;
+
+		if (thenStatement != null) {
+			if (thenStatement instanceof Block) {
+				if (isGuardClause((Block)thenStatement) && elseStatement == null && this.preferences.format_guardian_clause_on_one_line) {
+					/* 
+					 * Need a specific formatting for guard clauses
+					 * guard clauses are block with a single return or throw
+					 * statement
+					 */
+					 formatGuardClauseBlock((Block) thenStatement, scope);
+				} else {
+					thenStatement.traverse(this, scope);
+					if (elseStatement == null || this.preferences.insert_new_line_in_control_statements) {
+						this.scribe.printTrailingComment();
+					}
+				}
+			} else if (elseStatement == null && this.preferences.keep_simple_if_on_one_line) {
+				Alignment compactIfAlignment = this.scribe.createAlignment(
+					"compactIf", //$NON-NLS-1$
+					this.preferences.compact_if_alignment,
+					Alignment.R_OUTERMOST,
+					1, 
+					this.scribe.scanner.currentPosition);
+				this.scribe.enterAlignment(compactIfAlignment);
+				boolean ok = false;
+				do {
+					try {
+						this.scribe.alignFragment(compactIfAlignment, 0);
+						this.scribe.space();
+						thenStatement.traverse(this, scope);
+						if (thenStatement instanceof Expression) {
+							this.scribe.printNextToken(ITerminalSymbols.TokenNameSEMICOLON, this.preferences.insert_space_before_semicolon);
+						}
+						this.scribe.printTrailingComment();
+						ok = true;
+					} catch (AlignmentException e) {
+						this.scribe.redoAlignment(e);
+					}
+				} while (!ok);
+				this.scribe.exitAlignment(compactIfAlignment, true);				
+			} else if (this.preferences.keep_then_statement_on_same_line) {
+				this.scribe.space();
+				thenStatement.traverse(this, scope);
+				if (thenStatement instanceof Expression) {
+					this.scribe.printNextToken(ITerminalSymbols.TokenNameSEMICOLON, this.preferences.insert_space_before_semicolon);
+				}
+				this.scribe.printTrailingComment();
+			} else {
+				this.scribe.printTrailingComment();
+				this.scribe.indent();
+				thenStatement.traverse(this, scope);
+				if (thenStatement instanceof Expression) {
+					this.scribe.printNextToken(ITerminalSymbols.TokenNameSEMICOLON, this.preferences.insert_space_before_semicolon);
+				}
+				this.scribe.printTrailingComment();
+				this.scribe.unIndent();
+			}
+		}
+		
+		if (elseStatement != null) {
+			this.scribe.printNextToken(ITerminalSymbols.TokenNameelse, true);
+			if (elseStatement instanceof Block) {
+				elseStatement.traverse(this, scope);
+			} else if (elseStatement instanceof IfStatement) {
+				if (!this.preferences.compact_else_if) {
+					this.scribe.printTrailingComment();
+					this.scribe.indent();
+				}
+				this.scribe.space();				
+				elseStatement.traverse(this, scope);
+				if (!this.preferences.compact_else_if) {
+					this.scribe.printTrailingComment();
+					this.scribe.unIndent();
+				}
+			} else if (this.preferences.keep_else_statement_on_same_line) {
+				this.scribe.space();
+				elseStatement.traverse(this, scope);
+				if (elseStatement instanceof Expression) {
+					this.scribe.printNextToken(ITerminalSymbols.TokenNameSEMICOLON, this.preferences.insert_space_before_semicolon);
+				}
+				this.scribe.printTrailingComment();
+			} else {
+				this.scribe.printTrailingComment();
+				this.scribe.indent();
+				elseStatement.traverse(this, scope);
+				if (elseStatement instanceof Expression) {
+					this.scribe.printNextToken(ITerminalSymbols.TokenNameSEMICOLON, this.preferences.insert_space_before_semicolon);
+				}
+				this.scribe.printTrailingComment();
+				this.scribe.unIndent();
+			}
+		}
+		return false;
+	}
+

@@ -1,0 +1,62 @@
+	/*
+	 * Merged traversal of member (types, fields, methods)
+	 */
+	private void formatTypeMembers(TypeDeclaration typeDeclaration) {
+		final int FIELD = 1, METHOD = 2, TYPE = 3;
+		
+		Alignment memberAlignment = this.scribe.createAlignment("typeMembers", this.preferences.type_member_alignment, 4, this.scribe.scanner.currentPosition); //$NON-NLS-1$
+		this.scribe.enterAlignment(memberAlignment);
+		AstNode[] members = computeMergedMemberDeclarations(typeDeclaration);
+		boolean isChunkStart = false;
+		boolean ok = false;
+		int startIndex = 0;
+		do {
+			try {
+				for (int i = startIndex, max = members.length; i < max; i++) {
+					AstNode member = members[i];
+					if (member instanceof FieldDeclaration) {
+						isChunkStart = memberAlignment.checkChunkStart(FIELD, i, this.scribe.scanner.currentPosition);
+						if (member instanceof MultiFieldDeclaration){
+							MultiFieldDeclaration multiField = (MultiFieldDeclaration) member;
+							
+							if (multiField.isStatic()) {
+								format(multiField, this, typeDeclaration.staticInitializerScope, isChunkStart);
+							} else {
+								format(multiField, this, typeDeclaration.initializerScope, isChunkStart);
+							}					
+						} else if (member instanceof Initializer) {
+							Initializer initializer = (Initializer) member;
+							if (initializer.isStatic()) {
+								initializer.traverse(this, typeDeclaration.staticInitializerScope);
+							} else {
+								initializer.traverse(this, typeDeclaration.initializerScope);
+							}					
+						} else {
+							FieldDeclaration field = (FieldDeclaration) member;
+							if (field.isStatic()) {
+								format(field, this, typeDeclaration.staticInitializerScope, isChunkStart);
+							} else {
+								format(field, this, typeDeclaration.initializerScope, isChunkStart);
+							}					
+						}
+					} else if (member instanceof AbstractMethodDeclaration) {
+						isChunkStart = memberAlignment.checkChunkStart(METHOD, i, this.scribe.scanner.currentPosition);
+						format((AbstractMethodDeclaration) member, typeDeclaration.scope, isChunkStart);
+					} else {
+						isChunkStart = memberAlignment.checkChunkStart(TYPE, i, this.scribe.scanner.currentPosition);
+						format((MemberTypeDeclaration)member, typeDeclaration.scope, isChunkStart);
+					}
+					if (isSemiColon()) {
+						this.scribe.printNextToken(ITerminalSymbols.TokenNameSEMICOLON, this.preferences.insert_space_before_semicolon);
+						this.scribe.printTrailingComment();
+					}
+				}
+				ok = true;
+			} catch(AlignmentException e){
+				startIndex = memberAlignment.chunkStartIndex;
+				this.scribe.redoAlignment(e);
+			}
+		} while (!ok);		
+		this.scribe.exitAlignment(memberAlignment, true);
+	}
+

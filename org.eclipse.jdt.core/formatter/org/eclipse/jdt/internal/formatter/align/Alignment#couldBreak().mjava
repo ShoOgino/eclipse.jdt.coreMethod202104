@@ -1,0 +1,115 @@
+	public boolean couldBreak(){
+
+		int i;
+		switch(mode & SPLIT_MASK){
+
+			/*  # aligned fragment
+			 *  foo(
+			 *     #AAAAA, #BBBBB,
+			 *     #CCCC);
+			 */
+			case M_COMPACT_FIRST_BREAK_SPLIT : 
+				if (this.fragmentBreaks[0] == NONE) {
+					this.fragmentBreaks[0] = BREAK;
+					this.fragmentIndentations[0] = this.breakIndentationLevel;
+					return wasSplit = true;
+				}
+				// fall through COMPACT split
+
+			/*  # aligned fragment
+			 *  foo(#AAAAA, #BBBBB,
+			 *     #CCCC);
+			 */
+			case M_COMPACT_SPLIT : 
+				i = this.fragmentIndex;
+				do {
+					if (this.fragmentBreaks[i] == NONE) {
+						this.fragmentBreaks[i] = BREAK;
+						this.fragmentIndentations[i] = this.breakIndentationLevel;
+						return wasSplit = true;
+					}
+				} while (--i >= 0);
+				break;
+
+			/*  # aligned fragment
+			 *  foo(
+			 *      #AAAAA,
+			 *          #BBBBB,
+			 *          #CCCC);
+			 */
+			case M_NEXT_SHIFTED_SPLIT :
+				if (this.fragmentBreaks[0] == NONE) {
+					this.fragmentBreaks[0] = BREAK;					
+					this.fragmentIndentations[0] = this.breakIndentationLevel;
+					for (i = 1; i < this.fragmentCount; i++){
+						this.fragmentBreaks[i] = BREAK;
+						this.fragmentIndentations[i] = this.shiftBreakIndentationLevel;
+					}
+					return wasSplit = true;
+				}
+				break;
+				
+			/*  # aligned fragment
+			 *  foo(
+			 *      #AAAAA,
+			 *      #BBBBB,
+			 *      #CCCC);
+			 */
+			case M_ONE_PER_LINE_SPLIT :
+				if (this.fragmentBreaks[0] == NONE) {
+					for (i = 0; i < this.fragmentCount; i++){
+						this.fragmentBreaks[i] = BREAK;
+						this.fragmentIndentations[i] = this.breakIndentationLevel;
+					}
+					return wasSplit = true;
+				}
+
+			/*  # aligned fragment
+			 *  foo(#AAAAA,
+			 *      #BBBBB,
+			 *      #CCCC);
+			 */
+			case M_NEXT_PER_LINE_SPLIT : {
+				if (this.fragmentBreaks[0] == NONE) {
+					
+					if (this.fragmentCount > 1 && this.fragmentBreaks[1] == NONE) {
+						for (i = 1; i < this.fragmentCount; i++){
+							this.fragmentBreaks[i] = BREAK;
+							this.fragmentIndentations[i] = this.breakIndentationLevel;
+						}
+						// first fragment is also broken if it would be beyond the subsequent fragments
+						// e.g.   foobar(#AAAAA,    foobar(
+						//          #BBBBB,     -->   #AAAAA,
+						//          #CCCCC)           #BBBBB,
+						//                            #CCCCC)
+						int firstFragmentIndentation = this.scribe.getIndentationLevel(this.location.outputColumn);
+						if (firstFragmentIndentation > this.breakIndentationLevel){
+							this.fragmentBreaks[0] = BREAK;					
+							this.fragmentIndentations[0] = this.breakIndentationLevel;						
+						} else if (firstFragmentIndentation < this.breakIndentationLevel) {
+							if ((this.mode & M_INDENT_ON_COLUMN) == 0) this.fragmentBreaks[0] = BREAK;					
+							this.fragmentIndentations[0] = this.breakIndentationLevel;						
+						}
+						return wasSplit = true;
+					} else {
+						if (this.fragmentIndentations[0] != this.breakIndentationLevel) {
+							this.fragmentBreaks[0] = BREAK;					
+							this.fragmentIndentations[0] = this.breakIndentationLevel;						
+							return wasSplit = true;
+					}
+					}
+				}
+				break;
+			}
+		}		
+		
+//		// if was break-indenting on current column, try again using original indentation level instead
+//		if ((mode & M_INDENT_ON_COLUMN) != 0) {
+//			this.mode &= ~M_INDENT_ON_COLUMN; // retry in different mode
+//			this.reinitialize();
+//			resetFragments(this.fragmentCount);
+//			return true;
+//		}
+		return false; // cannot split better
+	}
+
