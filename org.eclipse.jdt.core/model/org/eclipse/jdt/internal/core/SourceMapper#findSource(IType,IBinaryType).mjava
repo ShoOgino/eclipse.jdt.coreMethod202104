@@ -38,33 +38,40 @@
 		if (name == null) {
 			return null;
 		}
-
-		String fullName;
-		if (this.rootPath != null && !this.rootPath.equals(IPackageFragmentRoot.DEFAULT_PACKAGEROOT_PATH)) {
-			fullName = this.rootPath + '/' + name;
-		} else {
-			fullName = name;
+	
+		char[] source = null;
+		if (this.rootPath != null) {
+			source = getSourceForRootPath(this.rootPath, name);
 		}
 
-		char[] source = findSource(fullName);
 		if (source == null) {
-			// root path may just have been a hint: try recomputing it
-			String rootPath = this.computeRootPath();
-			String newFullName;
-			if (rootPath != null && !rootPath.equals(IPackageFragmentRoot.DEFAULT_PACKAGEROOT_PATH)) {
-				if (rootPath.endsWith("/")) { //$NON-NLS-1$
-					newFullName = rootPath + name;
-				} else {
-					newFullName = rootPath + '/' + name;
+			/*
+			 * We should try all existing root paths. If none works, try to recompute it.
+			 * If it still doesn't work, then return null
+			 */
+			if (this.rootPaths != null) {
+				loop: for (Iterator iterator = this.rootPaths.iterator(); iterator.hasNext(); ) {
+					String currentRootPath = (String) iterator.next();
+					if (!currentRootPath.equals(this.rootPath)) {
+						source = getSourceForRootPath(currentRootPath, name);
+						if (source != null) {
+							// remember right root path
+							this.rootPath = currentRootPath;
+							break loop;
+						}
+					}
 				}
-			} else {
-				newFullName = name;
 			}
-			if (!fullName.equals(newFullName)) {
-				source = this.findSource(newFullName);
-				if (source != null) {
-					// remember right root path
-					this.rootPath = rootPath;
+			if (source == null) {
+				// Try to recompute it and add the new root path to the rootPaths collection
+				String newRootPath = computeRootPath(name);
+				if (newRootPath != null) {
+					if (this.rootPaths == null) {
+						this.rootPaths = new HashSet();
+					}
+					this.rootPaths.add(newRootPath);
+					this.rootPath = newRootPath;
+					source = getSourceForRootPath(newRootPath, name);
 				}
 			}
 		}

@@ -2,22 +2,26 @@
 	 * Computes the root path by scanning the first .java file in this source archive or folder.
 	 * Returns null if could not compute the root path.
 	 */
-	private String computeRootPath() {
+	private String computeRootPath(final String fullName) {
 		if (Util.isArchiveFileName(this.sourcePath.lastSegment())) {
 			JavaModelManager manager = JavaModelManager.getJavaModelManager();
 			ZipFile zip = null;
 			try {
 				zip = manager.getZipFile(this.sourcePath);
+				int index = Integer.MAX_VALUE;
+				String foundEntry = null;
 				for (Enumeration entries = zip.entries(); entries.hasMoreElements(); ) {
 					ZipEntry entry = (ZipEntry) entries.nextElement();
 					String name;
 					if (!entry.isDirectory() && Util.isJavaFileName(name = entry.getName())) {
-						char[] contents = this.readSource(entry, zip);
-						String rootPath = computeRootPath(name, contents);
-						if (rootPath != null) {
-							return rootPath;
+						if (name.endsWith(fullName)) {
+							index = Math.min(index, name.indexOf(fullName));
+							foundEntry = name;
 						}
 					}
+				}
+				if (foundEntry != null) {
+					return foundEntry.substring(0, index);
 				}
 				return null;
 			} catch (CoreException e) {
@@ -30,6 +34,7 @@
 			if (target instanceof IFolder) {
 				IFolder folder = (IFolder)target;
 				final String[] rootPathHolder = new String[1];
+				final int[] index = new int[] { Integer.MAX_VALUE };
 				try {
 					folder.accept(
 						new IResourceProxyVisitor() {
@@ -37,14 +42,13 @@
 								if (proxy.getType() == IResource.FILE) {
 									if (Util.isJavaFileName(proxy.getName())) { 
 										IResource resource = proxy.requestResource();
-										char[] contents = org.eclipse.jdt.internal.core.Util.getResourceContentsAsCharArray((IFile)resource, encoding);
-										IPath fullPath = resource.getFullPath();
+										IPath resourceFullPath = resource.getFullPath();
 										int sourcePathSegmentCount = sourcePath.segmentCount();
-										IPath javaFilePath = fullPath.removeFirstSegments(sourcePathSegmentCount);
-										String rootPath = computeRootPath(javaFilePath.toString(), contents);
-										if (rootPath != null) {
-											rootPathHolder[0] = rootPath;
-											throw new CoreException(new JavaModelStatus()); // abort visit
+										IPath javaFilePath = resourceFullPath.removeFirstSegments(sourcePathSegmentCount);
+										String javaFilePathString = javaFilePath.toString();
+										if (javaFilePathString.endsWith(fullName)) {
+											index[0] = Math.min(index[0], javaFilePathString.indexOf(javaFilePathString));
+											rootPathHolder[0] = javaFilePathString;
 										}
 									}
 									return false;
@@ -57,12 +61,23 @@
 				} catch (CoreException e) {
 				}
 				if (rootPathHolder[0] != null) {
-					return rootPathHolder[0];
+					if (index[0] == 0) {
+						return ""; //$NON-NLS-1$
+					}
+					return rootPathHolder[0].substring(0, index[0]);
 				}
 			} else if (target instanceof File) {
 				File file = (File)target;
 				if (file.isDirectory()) {
-					return computeRootPath(file);
+					final String[] rootPathHolder = new String[1];
+					final int[] index = new int[] { Integer.MAX_VALUE };
+					computeRootPath(file, fullName, rootPathHolder, index);
+					if (rootPathHolder[0] != null) {
+						if (index[0] == 0) {
+							return ""; //$NON-NLS-1$
+						}
+						return rootPathHolder[0].substring(0, index[0]);
+					}
 				}
 			}
 		}
