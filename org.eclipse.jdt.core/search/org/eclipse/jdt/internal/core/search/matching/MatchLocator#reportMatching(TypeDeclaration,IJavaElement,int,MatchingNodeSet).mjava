@@ -1,9 +1,8 @@
 /**
  * Visit the given type declaration and report the nodes that match exactly the
  * search pattern (ie. the ones in the matching nodes set)
- * Note that the type declaration has already been checked.
  */
-protected void reportMatching(TypeDeclaration type, IJavaElement parent, MatchingNodeSet nodeSet) throws CoreException {
+protected void reportMatching(TypeDeclaration type, IJavaElement parent, int accuracy, MatchingNodeSet nodeSet) throws CoreException {
 	// create type handle
 	IJavaElement enclosingElement;
 	if (parent == null) {
@@ -15,20 +14,24 @@ protected void reportMatching(TypeDeclaration type, IJavaElement parent, Matchin
 		enclosingElement = parent;
 	}
 
+	// report the type declaration
+	if (accuracy > -1)
+		report(type.sourceStart, type.sourceEnd, enclosingElement, accuracy);
+
 	// super types
-	boolean searchInsideTypes = (this.matchContainer & PatternLocator.CLASS_CONTAINER) != 0;
+	boolean matchedClassContainer = (this.matchContainer & PatternLocator.CLASS_CONTAINER) != 0;
 	if (type instanceof AnonymousLocalTypeDeclaration) {
 		TypeReference superType = ((AnonymousLocalTypeDeclaration) type).allocation.type;
 		if (superType != null) {
 			Integer level = (Integer) nodeSet.matchingNodes.removeKey(superType);
-			if (level != null && searchInsideTypes)
+			if (level != null && matchedClassContainer)
 				this.patternLocator.matchReportReference(superType, enclosingElement, level.intValue(), this);
 		}
 	} else {
 		TypeReference superClass = type.superclass;
 		if (superClass != null) {
 			Integer level = (Integer) nodeSet.matchingNodes.removeKey(superClass);
-			if (level != null && searchInsideTypes)
+			if (level != null && matchedClassContainer)
 				this.patternLocator.matchReportReference(superClass, enclosingElement, level.intValue(), this);
 		}
 		TypeReference[] superInterfaces = type.superInterfaces;
@@ -36,7 +39,7 @@ protected void reportMatching(TypeDeclaration type, IJavaElement parent, Matchin
 			for (int i = 0, l = superInterfaces.length; i < l; i++) {
 				TypeReference superInterface = superInterfaces[i];
 				Integer level = (Integer) nodeSet.matchingNodes.removeKey(superInterface);
-				if (level != null && searchInsideTypes)
+				if (level != null && matchedClassContainer)
 					this.patternLocator.matchReportReference(superInterface, enclosingElement, level.intValue(), this);
 			}
 		}
@@ -44,6 +47,7 @@ protected void reportMatching(TypeDeclaration type, IJavaElement parent, Matchin
 
 	// filter out element not in hierarchy scope
 	boolean typeInHierarchy = type.binding == null || typeInHierarchy(type.binding);
+	matchedClassContainer = matchedClassContainer && typeInHierarchy; 
 
 	FieldDeclaration[] fields = type.fields;
 	if (fields != null) {
@@ -51,9 +55,8 @@ protected void reportMatching(TypeDeclaration type, IJavaElement parent, Matchin
 		for (int i = 0, l = fields.length; i < l; i++) {
 			FieldDeclaration field = fields[i];
 			Integer level = (Integer) nodeSet.matchingNodes.removeKey(field);
-			if (level != null && typeInHierarchy && searchInsideTypes)
-				reportFieldDeclaration(field, enclosingElement, level.intValue());
-			reportMatching(field, enclosingElement, type, nodeSet, typeInHierarchy);
+			int value = (level != null && matchedClassContainer) ? level.intValue() : -1;
+			reportMatching(field, type, enclosingElement, value, typeInHierarchy, nodeSet);
 		}
 	}
 
@@ -63,9 +66,8 @@ protected void reportMatching(TypeDeclaration type, IJavaElement parent, Matchin
 		for (int i = 0, l = methods.length; i < l; i++) {
 			AbstractMethodDeclaration method = methods[i];
 			Integer level = (Integer) nodeSet.matchingNodes.removeKey(method);
-			if (level != null && typeInHierarchy && searchInsideTypes)
-				reportMethodDeclaration(method, enclosingElement, level.intValue());
-			reportMatching(method, enclosingElement, nodeSet, typeInHierarchy);
+			int value = (level != null && matchedClassContainer) ? level.intValue() : -1;
+			reportMatching(method, enclosingElement, value, typeInHierarchy, nodeSet);
 		}
 	}
 
@@ -75,9 +77,8 @@ protected void reportMatching(TypeDeclaration type, IJavaElement parent, Matchin
 			if (nodeSet.matchingNodes.elementSize == 0) return; // reported all the matching nodes
 			MemberTypeDeclaration memberType = memberTypes[i];
 			Integer level = (Integer) nodeSet.matchingNodes.removeKey(memberType);
-			if (level != null && typeInHierarchy && searchInsideTypes)
-				reportTypeDeclaration(memberType, enclosingElement, level.intValue());
-			reportMatching(memberType, enclosingElement, nodeSet);
+			int value = (level != null && matchedClassContainer) ? level.intValue() : -1;
+			reportMatching(memberType, enclosingElement, value, nodeSet);
 		}
 	}
 }

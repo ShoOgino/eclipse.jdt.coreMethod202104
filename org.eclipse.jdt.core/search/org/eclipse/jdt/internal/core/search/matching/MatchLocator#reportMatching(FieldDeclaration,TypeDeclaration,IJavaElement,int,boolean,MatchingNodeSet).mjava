@@ -1,0 +1,42 @@
+/**
+ * Visit the given field declaration and report the nodes that match exactly the
+ * search pattern (ie. the ones in the matching nodes set)
+ */
+protected void reportMatching(FieldDeclaration field, TypeDeclaration type, IJavaElement parent, int accuracy, boolean typeInHierarchy, MatchingNodeSet nodeSet) throws CoreException {
+	IJavaElement enclosingElement = null;
+	if (accuracy > -1) {
+		enclosingElement = createHandle(field, type, parent);
+		report(field.sourceStart, field.sourceEnd, enclosingElement, accuracy);
+	}
+
+	// handle the nodes for the local type first
+	if ((field.bits & AstNode.HasLocalTypeMASK) != 0) {
+		if (enclosingElement == null)
+			enclosingElement = createHandle(field, type, parent);
+		LocalDeclarationVisitor localDeclarationVisitor = new LocalDeclarationVisitor(enclosingElement, nodeSet);
+		try {
+			field.traverse(localDeclarationVisitor, null);
+		} catch (WrappedCoreException e) {
+			throw e.coreException;
+		}
+	}
+
+	if (typeInHierarchy) {
+		AstNode[] nodes = nodeSet.matchingNodes(field.declarationSourceStart, field.declarationSourceEnd);
+		if (nodes != null) {
+			if ((this.matchContainer & PatternLocator.FIELD_CONTAINER) == 0) {
+				for (int i = 0, l = nodes.length; i < l; i++)
+					nodeSet.matchingNodes.removeKey(nodes[i]);
+			} else {
+				if (enclosingElement == null)
+					enclosingElement = createHandle(field, type, parent);
+				for (int i = 0, l = nodes.length; i < l; i++) {
+					AstNode node = nodes[i];
+					Integer level = (Integer) nodeSet.matchingNodes.removeKey(node);
+					this.patternLocator.matchReportReference(node, enclosingElement, level.intValue(), this);
+				}
+			}
+		}
+	}
+}
+

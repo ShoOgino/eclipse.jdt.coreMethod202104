@@ -1,0 +1,57 @@
+/**
+ * Visit the given method declaration and report the nodes that match exactly the
+ * search pattern (ie. the ones in the matching nodes set)
+ * Note that the method declaration has already been checked.
+ */
+protected void reportMatching(AbstractMethodDeclaration method, IJavaElement parent, int accuracy, boolean typeInHierarchy, MatchingNodeSet nodeSet) throws CoreException {
+	IJavaElement enclosingElement = null;
+	if (accuracy > -1) {
+		enclosingElement = createHandle(method, parent);
+
+		// compute source positions of the selector 
+		Scanner scanner = parser.scanner;
+		int nameSourceStart = method.sourceStart;
+		scanner.setSource(this.currentPossibleMatch.getContents());
+		scanner.resetTo(nameSourceStart, method.sourceEnd);
+		try {
+			scanner.getNextToken();
+		} catch (InvalidInputException e) {
+			// ignore
+		}
+		int nameSourceEnd = scanner.currentPosition - 1;
+
+		report(nameSourceStart, nameSourceEnd, enclosingElement, accuracy);
+	}
+
+	// handle nodes for the local type first
+	if ((method.bits & AstNode.HasLocalTypeMASK) != 0) {
+		if (enclosingElement == null)
+			enclosingElement = createHandle(method, parent);
+		LocalDeclarationVisitor localDeclarationVisitor = new LocalDeclarationVisitor(enclosingElement, nodeSet);
+		try {
+			method.traverse(localDeclarationVisitor, (ClassScope) null);
+		} catch (WrappedCoreException e) {
+			throw e.coreException;
+		}
+	}
+
+	// references in this method
+	if (typeInHierarchy) {
+		AstNode[] nodes = nodeSet.matchingNodes(method.declarationSourceStart, method.declarationSourceEnd);
+		if (nodes != null) {
+			if ((this.matchContainer & PatternLocator.METHOD_CONTAINER) == 0) {
+				for (int i = 0, l = nodes.length; i < l; i++)
+					nodeSet.matchingNodes.removeKey(nodes[i]);
+			} else {
+				if (enclosingElement == null)
+					enclosingElement = createHandle(method, parent);
+				for (int i = 0, l = nodes.length; i < l; i++) {
+					AstNode node = nodes[i];
+					Integer level = (Integer) nodeSet.matchingNodes.removeKey(node);
+					this.patternLocator.matchReportReference(node, enclosingElement, level.intValue(), this);
+				}
+			}
+		}
+	}
+}
+
