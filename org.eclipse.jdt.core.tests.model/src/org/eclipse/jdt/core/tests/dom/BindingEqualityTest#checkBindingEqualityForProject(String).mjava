@@ -1,0 +1,68 @@
+	/**
+	 * @throws JavaModelException
+	 */
+	private void checkBindingEqualityForProject(String projectName) throws JavaModelException {
+		IJavaProject javaProject = getJavaProject(projectName);
+		IPackageFragment[] packageFragments = javaProject.getPackageFragments();
+		ArrayList compilationUnitscollector = new ArrayList();
+		for (int j = 0, max2 = packageFragments.length; j < max2; j++) {
+			ICompilationUnit[] units = packageFragments[j].getCompilationUnits();
+			if (units != null) {
+				for (int k = 0, max3 = units.length; k < max3; k++) {
+					compilationUnitscollector.add(units[k]);
+				}
+			}
+		}
+		final int length = compilationUnitscollector.size();
+		ICompilationUnit[] units = new ICompilationUnit[length];
+		compilationUnitscollector.toArray(units);
+		long totalTime = 0;
+		this.fPerformanceMeter.start();
+		for (int j = 0; j < length; j++) {
+			ICompilationUnit currentUnit = units[j];
+			ASTNode result = runConversion(AST.JLS3, currentUnit, true);
+			assertEquals("Not a compilation unit", ASTNode.COMPILATION_UNIT, result.getNodeType());
+			CompilationUnit unit = (CompilationUnit) result;
+			result = runConversion(AST.JLS3, currentUnit, true);
+			assertEquals("Not a compilation unit", ASTNode.COMPILATION_UNIT, result.getNodeType());
+			if (DEBUG) {
+				if (unit.types().size() > 0 ) {
+					AbstractTypeDeclaration typeDeclaration = (AbstractTypeDeclaration) unit.types().get(0);
+					StringBuffer buffer = new StringBuffer();
+					PackageDeclaration packageDeclaration = unit.getPackage();
+					if (packageDeclaration != null) {
+						buffer.append(unit.getPackage().getName()).append(".").append(typeDeclaration.getName());
+					} else {
+						buffer.append(typeDeclaration.getName());
+					}
+					System.out.println(String.valueOf(buffer));
+				} else {
+					System.out.println(currentUnit.getElementName());
+				}
+			}
+			CompilationUnit unit2 = (CompilationUnit) result;
+			BindingsCollector collector = new BindingsCollector();
+			unit.accept(collector);
+			List bindings1 = collector.getBindings();
+			BindingsCollector collector2 = new BindingsCollector();
+			unit2.accept(collector2);
+			List bindings2 = collector2.getBindings();
+			assertEquals("Wrong size", bindings1.size(), bindings2.size());
+			long time = System.currentTimeMillis();
+			for (int i = 0, max = bindings1.size(); i < max; i++) {
+				final Object object = bindings1.get(i);
+				assertTrue("not a binding", object instanceof IBinding);
+				final IBinding binding = (IBinding) object;
+				final Object object2 = bindings2.get(i);
+				assertTrue("not a binding", object2 instanceof IBinding);
+				final IBinding binding2 = (IBinding) object2;
+				final boolean equalTo = binding.isEqualTo(binding2);
+				assertTrue("not equals", equalTo);
+			}
+			totalTime += (System.currentTimeMillis() - time);
+		}
+		this.fPerformanceMeter.stop();
+		this.fPerformanceMeter.commit();
+		System.out.println("Total time = " + totalTime + "ms");
+	}
+
