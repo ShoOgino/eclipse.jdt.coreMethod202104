@@ -1,11 +1,66 @@
 	public void loadVariables() throws CoreException {
+
+		// backward compatibility, consider persistent property	
+		QualifiedName qName = new QualifiedName(JavaCore.PLUGIN_ID, "variables"); //$NON-NLS-1$
+		String xmlString = ResourcesPlugin.getWorkspace().getRoot().getPersistentProperty(qName);
 		
-		String xmlString = ResourcesPlugin.getWorkspace().getRoot().getPersistentProperty(
-								new QualifiedName(JavaCore.PLUGIN_ID, "variables")); //$NON-NLS-1$
 		try {
-			if (xmlString != null) readVariables(xmlString);
+			if (xmlString != null){
+				StringReader reader = new StringReader(xmlString);
+				Element cpElement;
+				try {
+					DocumentBuilder parser = DocumentBuilderFactory.newInstance().newDocumentBuilder();
+					cpElement = parser.parse(new InputSource(reader)).getDocumentElement();
+				} catch(SAXException e) {
+					return;
+				} catch(ParserConfigurationException e){
+					return;
+				} finally {
+					reader.close();
+				}
+				if (cpElement == null) return;
+				if (!cpElement.getNodeName().equalsIgnoreCase("variables")) { //$NON-NLS-1$
+					return;
+				}
+				ArrayList variableNamesList = new ArrayList();
+				ArrayList variablePathsList = new ArrayList();
+				
+				NodeList list= cpElement.getChildNodes();
+				int length= list.getLength();
+				for (int i= 0; i < length; ++i) {
+					Node node= list.item(i);
+					short type= node.getNodeType();
+					if (type == Node.ELEMENT_NODE) {
+						Element element= (Element) node;
+						if (element.getNodeName().equalsIgnoreCase("variable")) { //$NON-NLS-1$
+							variablePut( 
+								element.getAttribute("name"), //$NON-NLS-1$
+								new Path(element.getAttribute("path"))); //$NON-NLS-1$
+						}
+					}
+				}
+			}
 		} catch(IOException e){
-			return;
+		} finally {
+			if (xmlString != null){
+				ResourcesPlugin.getWorkspace().getRoot().setPersistentProperty(qName, null); // flush old one
+			}
+			
 		}
+		
+		// load variables from preferences into cache
+		Preferences preferences = JavaCore.getPlugin().getPluginPreferences();
+
+		// only get variable from preferences not set to their default
+		String[] propertyNames = preferences.propertyNames();
+		int prefixLength = CP_VARIABLE_PREFERENCES_PREFIX.length();
+		for (int i = 0; i < propertyNames.length; i++){
+			String propertyName = propertyNames[i];
+			if (propertyName.startsWith(CP_VARIABLE_PREFERENCES_PREFIX)){
+				String varName = propertyName.substring(prefixLength);
+				IPath varPath = new Path(preferences.getString(propertyName));
+				Variables.put(varName, varPath);
+			}
+		}		
 	}
 
