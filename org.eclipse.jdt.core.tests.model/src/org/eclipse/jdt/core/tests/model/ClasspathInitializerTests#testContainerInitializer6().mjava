@@ -1,0 +1,57 @@
+/*
+ * Ensures that running the initializer during a reconcile operation just after workspace startup
+ * doesn't throw a NPE
+ * (regression test for bug 48818 NPE in delta processor)
+  */
+public void testContainerInitializer6() throws CoreException {
+    ICompilationUnit workingCopy = null;
+	try {
+		this.createProject("P1");
+		ContainerInitializer.setInitializer(new DefaultContainerInitializer(new String[] {"P2", ""}));
+		IJavaProject p2 = this.createJavaProject(
+				"P2", 
+				new String[] {"src"}, 
+				new String[] {"org.eclipse.jdt.core.tests.model.TEST_CONTAINER"}, 
+				"bin");
+		createFile(
+			"/P2/src/X,java",
+			"public class X {\n" +
+			"}"
+		);
+		workingCopy = getCompilationUnit("/P2/src/X.java");
+				
+		// change value of TEST_CONTAINER
+		ContainerInitializer.setInitializer(new DefaultContainerInitializer(new String[] {"P2", "/P1"}));
+
+		// simulate state on startup (flush containers, and preserve their previous values)
+		waitUntilIndexesReady();
+		JavaModelManager.PreviousSessionContainers = JavaModelManager.Containers;
+		JavaModelManager.Containers = new HashMap(5);
+		JavaModelManager.getJavaModelManager().removePerProjectInfo((JavaProject)p2);
+		p2.close();
+		ResourcesPlugin.getWorkspace().removeResourceChangeListener(JavaModelManager.getJavaModelManager().deltaState);
+		JavaModelManager.getJavaModelManager().deltaState = new DeltaProcessingState();
+		ResourcesPlugin.getWorkspace().addResourceChangeListener(
+			JavaModelManager.getJavaModelManager().deltaState,
+			IResourceChangeEvent.PRE_AUTO_BUILD
+					| IResourceChangeEvent.POST_AUTO_BUILD
+					| IResourceChangeEvent.POST_CHANGE
+					| IResourceChangeEvent.PRE_DELETE
+					| IResourceChangeEvent.PRE_CLOSE);
+		
+		startDeltas();
+		workingCopy.becomeWorkingCopy(null, null);
+		
+		assertDeltas(
+			"Unexpected delta on startup", 
+			"P2[*]: {CONTENT}\n" + 
+			"	ResourceDelta(/P2/.project)[*]"
+		);
+	} finally {
+		stopDeltas();
+		if (workingCopy != null) workingCopy.discardWorkingCopy();
+		this.deleteProject("P1");
+		this.deleteProject("P2");
+	}
+}
+
