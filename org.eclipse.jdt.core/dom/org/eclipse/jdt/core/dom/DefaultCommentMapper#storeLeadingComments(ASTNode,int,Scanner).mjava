@@ -1,0 +1,108 @@
+	/*
+	 * Store leading comments of a node from a previous extended position.
+	 * By default, if no leading comment is found, then return node start position.
+	 * 
+	 * Starts comments search from nodes and goes up in comments list.
+	 * To get this comment, uses global comment index to reduce range for scope
+	 * (see method doExtraRangesForChildren(ASTNode,Scanner)).
+	 *
+	 * If none of following condition is true then current comment becomes current
+	 * node and loop on comment before, otherwise stop the search:
+	 * 	1) comment is over previous end
+	 * 	2) there's other than white characters between current node and comment
+	 * 	3) there's more than 1 line between current node and comment
+	 * 
+	 * If at least one potential comment has been found, then no token should be on
+	 * on the same line before, so remove all comments which do not verify this assumption.
+	 * 
+	 * If finally there is a subset of comments, then store start and end indexes 
+	 * in leading comments table.
+	 * 
+	 */
+	int storeLeadingComments(ASTNode node, int previousEnd, Scanner scanner) {
+		// Init extended position
+		int nodeStart = node.getStartPosition();
+		int extended = nodeStart;
+		
+		// Get line of node start position
+		int previousEndLine = scanner.getLineNumber(previousEnd);
+		
+		// Find first comment index
+		int idx = getCommentIndex(this.commentIndex, nodeStart, -1);
+		if (idx == -1) {
+			return nodeStart;
+		}
+		
+		// Look after potential comments
+		int startIdx = -1;
+		int endIdx = idx;
+		int previousStart = nodeStart;
+		while (idx >= 0 && previousStart  >= previousEnd) {
+			// Verify for each comment that there's only white spaces between end and start of {following comment|node}
+			Comment comment = this.comments[idx];
+			int commentStart = comment.getStartPosition();
+			int end = commentStart+comment.getLength();
+			int commentLine = scanner.getLineNumber(commentStart);
+			if (end <= previousEnd || commentLine == previousEndLine) {
+				break;
+			} else if (end < previousStart) { // may be equals => then no scan is necessary
+				scanner.resetTo(end, previousStart);
+				try {
+					int token = scanner.getNextToken();
+					if (token != TerminalTokens.TokenNameWHITESPACE || scanner.currentPosition != previousStart) {
+						// if first comment fails, then there's no extended position in fact
+						if (idx == endIdx) {
+							return nodeStart;
+						}
+						break;
+					}
+				} catch (InvalidInputException e) {
+					// Should not happen, but return no extended position...
+					return nodeStart;
+				}
+				// verify that there's no more than one line between node/comments
+				char[] gap = scanner.getCurrentIdentifierSource();
+				int nbrLine = 0;
+				int pos = -1;
+				while ((pos=CharOperation.indexOf('\n', gap,pos+1)) >= 0) {
+					nbrLine++;
+				}
+				if (nbrLine > 1) {
+					break;
+				}
+			}
+			// Store previous infos
+			previousStart = commentStart;
+			startIdx = idx--;
+		}
+		if (startIdx != -1) {
+			// Verify that there's no token on the same line before first leading comment
+			int commentStart = this.comments[startIdx].getStartPosition();
+			if (previousEnd < commentStart) {
+				int startPosition = previousEnd;
+				scanner.resetTo(previousEnd, commentStart);
+				try {
+					while (scanner.currentPosition != commentStart) {
+						if (scanner.getNextToken() != TerminalTokens.TokenNameWHITESPACE) {
+							startPosition =  scanner.getCurrentTokenStartPosition();
+						}
+					}
+				} catch (InvalidInputException e) {
+					// do nothing
+				}
+				int lastTokenLine = scanner.getLineNumber(startPosition);
+				int length = this.comments.length;
+				while (startIdx<length && lastTokenLine == scanner.getLineNumber(this.comments[startIdx].getStartPosition())) {
+					startIdx++;
+				}
+			}
+			// Store leading comments indexes
+			if (startIdx <= endIdx) {
+				this.leadingComments.put(node, new int[] { startIdx, endIdx });
+				extended = this.comments[endIdx].getStartPosition();
+				this.commentIndex = endIdx;
+			}
+		}
+		return extended;
+	}
+
