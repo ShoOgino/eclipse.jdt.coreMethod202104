@@ -5,53 +5,56 @@
 	 *
 	 * @exception CoreException If unable to create/open the ZipFile
 	 */
-	public synchronized ZipFile getZipFile(IPath path) throws CoreException {
-		Thread currentThread = Thread.currentThread();
-		HashMap map = null;
-		ZipFile zipFile;
-		if ((map = (HashMap)this.zipFiles.get(currentThread)) != null 
-				&& (zipFile = (ZipFile)map.get(path)) != null) {
-				
-			return zipFile;
-		}
-		String fileSystemPath= null;
-		IWorkspaceRoot root = ResourcesPlugin.getWorkspace().getRoot();
-		IResource file = root.findMember(path);
-		if (path.isAbsolute() && file != null) {
-			if (file == null) { // external file
-				fileSystemPath= path.toOSString();
-			} else { // internal resource (not an IFile or not existing)
-				IPath location;
-				if (file.getType() != IResource.FILE || (location = file.getLocation()) == null) {
+	public ZipFile getZipFile(IPath path) throws CoreException {
+			
+		synchronized(this.zipFiles) { // TODO:  use PeThreadObject which does synchronization
+			Thread currentThread = Thread.currentThread();
+			HashMap map = null;
+			ZipFile zipFile;
+			if ((map = (HashMap)this.zipFiles.get(currentThread)) != null 
+					&& (zipFile = (ZipFile)map.get(path)) != null) {
+					
+				return zipFile;
+			}
+			String fileSystemPath= null;
+			IWorkspaceRoot root = ResourcesPlugin.getWorkspace().getRoot();
+			IResource file = root.findMember(path);
+			if (path.isAbsolute() && file != null) {
+				if (file == null) { // external file
+					fileSystemPath= path.toOSString();
+				} else { // internal resource (not an IFile or not existing)
+					IPath location;
+					if (file.getType() != IResource.FILE || (location = file.getLocation()) == null) {
+						throw new CoreException(new Status(IStatus.ERROR, JavaCore.PLUGIN_ID, -1, Util.bind("file.notFound", path.toString()), null)); //$NON-NLS-1$
+					}
+					fileSystemPath= location.toOSString();
+				}
+			} else if (!path.isAbsolute()) {
+				file= root.getFile(path);
+				if (file == null || file.getType() != IResource.FILE) {
+					throw new CoreException(new Status(IStatus.ERROR, JavaCore.PLUGIN_ID, -1, Util.bind("file.notFound", path.toString()), null)); //$NON-NLS-1$
+				}
+				IPath location = file.getLocation();
+				if (location == null) {
 					throw new CoreException(new Status(IStatus.ERROR, JavaCore.PLUGIN_ID, -1, Util.bind("file.notFound", path.toString()), null)); //$NON-NLS-1$
 				}
 				fileSystemPath= location.toOSString();
+			} else {
+				fileSystemPath= path.toOSString();
 			}
-		} else if (!path.isAbsolute()) {
-			file= root.getFile(path);
-			if (file == null || file.getType() != IResource.FILE) {
-				throw new CoreException(new Status(IStatus.ERROR, JavaCore.PLUGIN_ID, -1, Util.bind("file.notFound", path.toString()), null)); //$NON-NLS-1$
+	
+			try {
+				if (ZIP_ACCESS_VERBOSE) {
+					System.out.println("(" + currentThread + ") [JavaModelManager.getZipFile(IPath)] Creating ZipFile on " + fileSystemPath ); //$NON-NLS-1$ //$NON-NLS-2$
+				}
+				zipFile = new ZipFile(fileSystemPath);
+				if (map != null) {
+					map.put(path, zipFile);
+				}
+				return zipFile;
+			} catch (IOException e) {
+				throw new CoreException(new Status(Status.ERROR, JavaCore.PLUGIN_ID, -1, Util.bind("status.IOException"), e)); //$NON-NLS-1$
 			}
-			IPath location = file.getLocation();
-			if (location == null) {
-				throw new CoreException(new Status(IStatus.ERROR, JavaCore.PLUGIN_ID, -1, Util.bind("file.notFound", path.toString()), null)); //$NON-NLS-1$
-			}
-			fileSystemPath= location.toOSString();
-		} else {
-			fileSystemPath= path.toOSString();
-		}
-
-		try {
-			if (ZIP_ACCESS_VERBOSE) {
-				System.out.println("(" + currentThread + ") [JavaModelManager.getZipFile(IPath)] Creating ZipFile on " + fileSystemPath ); //$NON-NLS-1$ //$NON-NLS-2$
-			}
-			zipFile = new ZipFile(fileSystemPath);
-			if (map != null) {
-				map.put(path, zipFile);
-			}
-			return zipFile;
-		} catch (IOException e) {
-			throw new CoreException(new Status(Status.ERROR, JavaCore.PLUGIN_ID, -1, Util.bind("status.IOException"), e)); //$NON-NLS-1$
 		}
 	}
 
