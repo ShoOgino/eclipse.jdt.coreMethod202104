@@ -1,0 +1,189 @@
+/**
+ * Converts the given method signature to a readable form. The method signature is expected to
+ * be dot-based.
+ * <p>
+ * For example:
+ * <pre>
+ * <code>
+ * toString("([Ljava.lang.String;)V", "main", new String[] {"args"}, false, true) -> "void main(String[] args)"
+ * </code>
+ * </pre>
+ * </p>
+ * 
+ * @param methodSignature the method signature to convert
+ * @param methodName the name of the method to insert in the result, or 
+ *   <code>null</code> if no method name is to be included
+ * @param parameterNames the parameter names to insert in the result, or 
+ *   <code>null</code> if no parameter names are to be included; if supplied,
+ *   the number of parameter names must match that of the method signature
+ * @param fullyQualifyTypeNames <code>true</code> if type names should be fully
+ *   qualified, and <code>false</code> to use only simple names
+ * @param includeReturnType <code>true</code> if the return type is to be
+ *   included
+ * @param includeFormalTypeParameters <code>true</code> if any formal type
+ * parameters are to be included
+ * @param includeThrownExceptions <code>true</code> if any thrown exceptions
+ * are to be included
+ * @return the char array representation of the method signature
+ * @since 3.0
+ */
+public static char[] toCharArray(
+		char[] methodSignature,
+		char[] methodName,
+		char[][] parameterNames,
+		boolean fullyQualifyTypeNames,
+		boolean includeReturnType,
+		boolean includeFormalTypeParameters,
+		boolean includeThrownExceptions) {
+	// TODO (jeem) - needs to handle includeFormalTypeParameters and includeThrownExceptions
+	try {
+		int firstParen = CharOperation.indexOf(C_PARAM_START, methodSignature);
+		if (firstParen == -1) throw new IllegalArgumentException();
+		
+		int sigLength = methodSignature.length;
+		
+		// compute result length
+		
+		// method signature
+		int paramCount = 0;
+		int lastParen = -1;
+		int resultLength = 0;
+		signature: for (int i = firstParen; i < sigLength; i++) {
+			switch (methodSignature[i]) {
+				case C_ARRAY :
+					resultLength += 2; // []
+					continue signature;
+				case C_BOOLEAN :
+					resultLength += BOOLEAN.length;
+					break;
+				case C_BYTE :
+					resultLength += BYTE.length;
+					break;
+				case C_CHAR :
+					resultLength += CHAR.length;
+					break;
+				case C_DOUBLE :
+					resultLength += DOUBLE.length;
+					break;
+				case C_FLOAT :
+					resultLength += FLOAT.length;
+					break;
+				case C_INT :
+					resultLength += INT.length;
+					break;
+				case C_LONG :
+					resultLength += LONG.length;
+					break;
+				case C_SHORT :
+					resultLength += SHORT.length;
+					break;
+				case C_VOID :
+					resultLength += VOID.length;
+					break;
+				case C_RESOLVED :
+				case C_UNRESOLVED :
+					int end = CharOperation.indexOf(C_SEMICOLON, methodSignature, i);
+					if (end == -1) throw new IllegalArgumentException();
+					int start;
+					if (fullyQualifyTypeNames) {
+						start = i+1;
+					} else {
+						start = CharOperation.lastIndexOf(C_DOT, methodSignature, i, end) + 1;
+						if (start == 0) start = i+1;
+					} 
+					resultLength += end-start;
+					i = end;
+					break;
+				case C_PARAM_START :
+					// add space for "("
+					resultLength++;
+					continue signature;
+				case C_PARAM_END :
+					lastParen = i;
+					if (includeReturnType) {
+						if (paramCount > 0) {
+							// remove space for ", " that was added with last parameter and remove space that is going to be added for ", " after return type 
+							// and add space for ") "
+							resultLength -= 2;
+						} //else
+							// remove space that is going to be added for ", " after return type 
+							// and add space for ") "
+							// -> noop
+						
+						// decrement param count because it is going to be added for return type
+						paramCount--;
+						continue signature;
+					} else {
+						if (paramCount > 0) {
+							// remove space for ", " that was added with last parameter and add space for ")"
+							resultLength--;
+						} else {
+							// add space for ")"
+							resultLength++;
+						}
+						break signature;
+					}
+				default :
+					throw new IllegalArgumentException();
+			}
+			resultLength += 2; // add space for ", "
+			paramCount++;
+		}
+		
+		// parameter names
+		int parameterNamesLength = parameterNames == null ? 0 : parameterNames.length;
+		for (int i = 0; i <parameterNamesLength; i++) {
+			resultLength += parameterNames[i].length + 1; // parameter name + space
+		}
+		
+		// selector
+		int selectorLength = methodName == null ? 0 : methodName.length;
+		resultLength += selectorLength;
+		
+		// create resulting char array
+		char[] result = new char[resultLength];
+		
+		// returned type
+		int index = 0;
+		if (includeReturnType) {
+			long pos = copyType(methodSignature, lastParen+1, result, index, fullyQualifyTypeNames);
+			index = (int) (pos >>> 32);
+			result[index++] = ' ';
+		}
+		
+		// selector
+		if (methodName != null) {
+			System.arraycopy(methodName, 0, result, index, selectorLength);
+			index += selectorLength;
+		}
+		
+		// parameters
+		result[index++] = C_PARAM_START;
+		int sigPos = firstParen+1;
+		for (int i = 0; i < paramCount; i++) {
+			long pos = copyType(methodSignature, sigPos, result, index, fullyQualifyTypeNames);
+			index = (int) (pos >>> 32);
+			sigPos = (int)pos;
+			if (parameterNames != null) {
+				result[index++] = ' ';
+				char[] parameterName = parameterNames[i];
+				int paramLength = parameterName.length;
+				System.arraycopy(parameterName, 0, result, index, paramLength);
+				index += paramLength;
+			}
+			if (i != paramCount-1) {
+				result[index++] = ',';
+				result[index++] = ' ';
+			}
+		}
+		if (sigPos >= sigLength) {
+			throw new IllegalArgumentException(); // should be on last paren
+		}
+		result[index++] = C_PARAM_END;
+		
+		return result;
+	} catch (ArrayIndexOutOfBoundsException e) {
+		throw new IllegalArgumentException();
+	}		
+}
+
