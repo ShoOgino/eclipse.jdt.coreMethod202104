@@ -114,23 +114,83 @@ public void searchAllTypeNames(
 			for (int i = 0, length = copies.length; i < length; i++) {
 				ICompilationUnit workingCopy = copies[i];
 				IPackageDeclaration[] packageDeclarations = workingCopy.getPackageDeclarations();
-				String path = workingCopy.getPath().toString();
-				char[] packageDeclaration = packageDeclarations.length == 0 ? CharOperation.NO_CHAR : packageDeclarations[0].getElementName().toCharArray();
-				IType[] allTypes = workingCopy.getAllTypes();
-				for (int j = 0, allTypesLength = allTypes.length; j < allTypesLength; j++) {
-					IType type = allTypes[j];
-					IJavaElement parent = type.getParent();
-					char[][] enclosingTypeNames;
-					if (parent instanceof IType) {
-						char[] parentQualifiedName = ((IType)parent).getTypeQualifiedName('.').toCharArray();
-						enclosingTypeNames = CharOperation.splitOn('.', parentQualifiedName);
-					} else {
-						enclosingTypeNames = CharOperation.NO_CHAR_CHAR;
+				final String path = workingCopy.getPath().toString();
+				final char[] packageDeclaration = packageDeclarations.length == 0 ? CharOperation.NO_CHAR : packageDeclarations[0].getElementName().toCharArray();
+				if (workingCopy.isConsistent()) {
+					IType[] allTypes = workingCopy.getAllTypes();
+					for (int j = 0, allTypesLength = allTypes.length; j < allTypesLength; j++) {
+						IType type = allTypes[j];
+						IJavaElement parent = type.getParent();
+						char[][] enclosingTypeNames;
+						if (parent instanceof IType) {
+							char[] parentQualifiedName = ((IType)parent).getTypeQualifiedName('.').toCharArray();
+							enclosingTypeNames = CharOperation.splitOn('.', parentQualifiedName);
+						} else {
+							enclosingTypeNames = CharOperation.NO_CHAR_CHAR;
+						}
+						if (type.isClass()) {
+							nameRequestor.acceptClass(packageDeclaration, type.getElementName().toCharArray(), enclosingTypeNames, path);
+						} else {
+							nameRequestor.acceptInterface(packageDeclaration, type.getElementName().toCharArray(), enclosingTypeNames, path);
+						}
 					}
-					if (type.isClass()) {
-						nameRequestor.acceptClass(packageDeclaration, type.getElementName().toCharArray(), enclosingTypeNames, path);
-					} else {
-						nameRequestor.acceptInterface(packageDeclaration, type.getElementName().toCharArray(), enclosingTypeNames, path);
+				} else {
+					Parser basicParser = getParser();
+					final char[] contents = workingCopy.getBuffer().getCharacters();
+					org.eclipse.jdt.internal.compiler.env.ICompilationUnit unit = new org.eclipse.jdt.internal.compiler.env.ICompilationUnit() {
+						public char[] getContents() {
+							return contents;
+						}
+						public char[] getMainTypeName() {
+							return null;
+						}
+						public char[][] getPackageName() {
+							return null;
+						}
+						public char[] getFileName() {
+							return null;
+						}
+					};
+					CompilationResult compilationUnitResult = new CompilationResult(unit, 0, 0, this.compilerOptions.maxProblemsPerUnit);
+					CompilationUnitDeclaration parsedUnit = basicParser.dietParse(unit, compilationUnitResult);
+					if (parsedUnit != null) {
+						class AllTypeDeclarationsVisitor extends AbstractSyntaxTreeVisitorAdapter {
+							public boolean visit(LocalTypeDeclaration typeDeclaration, BlockScope blockScope) {
+								return false; // no local type
+							}
+							public boolean visit(AnonymousLocalTypeDeclaration typeDeclaration, BlockScope blockScope) {
+								return false; // no anonymous type
+							}
+							public boolean visit(TypeDeclaration typeDeclaration, CompilationUnitScope compilationUnitScope) {
+								if (!typeDeclaration.isInterface()) {
+									nameRequestor.acceptClass(packageDeclaration, typeDeclaration.name, CharOperation.NO_CHAR_CHAR, path);
+								} else {
+									nameRequestor.acceptInterface(packageDeclaration, typeDeclaration.name, CharOperation.NO_CHAR_CHAR, path);
+								}
+								return true;
+							}
+							public boolean visit(MemberTypeDeclaration memberTypeDeclaration, ClassScope classScope) {
+								// compute encloising type names
+								TypeDeclaration enclosing = memberTypeDeclaration.enclosingType;
+								char[][] enclosingTypeNames = CharOperation.NO_CHAR_CHAR;
+								while (enclosing != null) {
+									enclosingTypeNames = CharOperation.arrayConcat(new char[][] {enclosing.name}, enclosingTypeNames);
+									if (enclosing instanceof MemberTypeDeclaration) {
+										enclosing = ((MemberTypeDeclaration)enclosing).enclosingType;
+									} else {
+										enclosing = null;
+									}
+								}
+								// report
+								if (!memberTypeDeclaration.isInterface()) {
+									nameRequestor.acceptClass(packageDeclaration, memberTypeDeclaration.name, enclosingTypeNames, path);
+								} else {
+									nameRequestor.acceptInterface(packageDeclaration, memberTypeDeclaration.name, enclosingTypeNames, path);
+								}
+								return true;
+							}
+						}
+						parsedUnit.traverse(new AllTypeDeclarationsVisitor(), parsedUnit.scope);
 					}
 				}
 			}
