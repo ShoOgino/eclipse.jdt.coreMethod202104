@@ -1,16 +1,42 @@
-/**
- * Main entry point for Java Model operations.  Executes this operation
- * and registers any deltas created.
- *
- * @see IWorkspaceRunnable
- * @exception CoreException if the operation fails
- */
-public void run(IProgressMonitor monitor) throws CoreException {
-	try {
-		fMonitor = monitor;
-		execute();
-	} finally {
-		registerDeltas();
+	/**
+	 * Main entry point for Java Model operations.  Executes this operation
+	 * and registers any deltas created.
+	 *
+	 * @see IWorkspaceRunnable
+	 * @exception CoreException if the operation fails
+	 */
+	public void run(IProgressMonitor monitor) throws CoreException {
+		JavaModelManager manager = JavaModelManager.getJavaModelManager();
+		int previousDeltaCount = manager.javaModelDeltas.size();
+		try {
+			fMonitor = monitor;
+			pushOperation(this);
+			try {
+				this.execute();
+			} finally {
+				if (this.isTopLevelOperation()) {
+					this.runPostActions();
+				}
+			}
+		} finally {
+			try {
+				// update JavaModel using deltas that were recorded during this operation
+				for (int i = previousDeltaCount, size = manager.javaModelDeltas.size(); i < size; i++) {
+					manager.updateJavaModel((IJavaElementDelta)manager.javaModelDeltas.get(i));
+				}
+				
+				// fire only iff:
+				// - the operation is a top level operation
+				// - the operation did produce some delta(s)
+				// - but the operation has not modified any resource
+				if (this.isTopLevelOperation()
+						&& (manager.javaModelDeltas.size() > previousDeltaCount) 
+						&& !this.hasModifiedResource()) {
+					manager.fire(null, JavaModelManager.DEFAULT_CHANGE_EVENT);
+				} // else deltas are fired while processing the resource delta
+			} finally {
+				popOperation();
+			}
+		}
 	}
-}
 
