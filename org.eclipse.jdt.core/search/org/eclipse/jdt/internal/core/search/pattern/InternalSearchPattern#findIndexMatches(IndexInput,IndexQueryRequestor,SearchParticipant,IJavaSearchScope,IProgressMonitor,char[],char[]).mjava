@@ -1,0 +1,31 @@
+	protected void findIndexMatches(IndexInput input, IndexQueryRequestor requestor, SearchParticipant participant, IJavaSearchScope scope, IProgressMonitor progressMonitor, char[] queryKey, char[] category) throws IOException {
+		/* narrow down a set of entries using prefix criteria */
+		// TODO per construction the queryKey will always be the most specific prefix. This should evolve to be the search pattern directly, using proper match rule
+		// ideally the index query API should be defined to avoid the need for concatenating the category to the key
+		char[] pattern = CharOperation.concat(category, queryKey);
+		IEntryResult[] entries = input.queryEntries(pattern, SearchPattern.R_PREFIX_MATCH);
+		if (entries == null) return;
+
+		/* only select entries which actually match the entire search pattern */
+		for (int iMatch = 0, matchesLength = entries.length; iMatch < matchesLength; iMatch++) {
+			if (progressMonitor != null && progressMonitor.isCanceled()) throw new OperationCanceledException();
+
+			/* retrieve and decode entry */	
+			IEntryResult entry = entries[iMatch];
+			char[] word = entry.getWord();
+			char[] indexKey = CharOperation.subarray(word, category.length, word.length);
+			SearchPattern indexRecord = getIndexRecord();
+			indexRecord.decodeIndexKey(indexKey);
+			if (isMatchingIndexRecord()) {
+				int[] references = entry.getFileReferences();
+				for (int iReference = 0, refererencesLength = references.length; iReference < refererencesLength; iReference++) {
+					String documentPath = IndexedFile.convertPath( input.getIndexedFile(references[iReference]).getPath());
+					if (scope.encloses(documentPath)) {
+						if (!requestor.acceptIndexMatch(documentPath, indexRecord, participant)) 
+							throw new OperationCanceledException();
+					}
+				}
+			}
+		}
+	}
+

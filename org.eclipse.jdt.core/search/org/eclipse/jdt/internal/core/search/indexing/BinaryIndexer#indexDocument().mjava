@@ -1,0 +1,85 @@
+	public void indexDocument() {
+		try {
+			byte[] contents = this.document.getByteContents();
+			ClassFileReader reader = new ClassFileReader(contents, this.document.getPath().toCharArray());
+	
+			// first add type references
+			char[] className = replace('/', '.', reader.getName()); // looks like java/lang/String
+			// need to extract the package name and the simple name
+			int packageNameIndex = CharOperation.lastIndexOf('.', className);
+			char[] packageName = null;
+			char[] name = null;
+			if (packageNameIndex >= 0) {
+				packageName = CharOperation.subarray(className, 0, packageNameIndex);
+				name = CharOperation.subarray(className, packageNameIndex + 1, className.length);
+			} else {
+				packageName = CharOperation.NO_CHAR;
+				name = className;
+			}
+			char[] enclosingTypeName = null;
+			if (reader.isNestedType()) {
+				if (reader.isAnonymous()) {
+					name = CharOperation.NO_CHAR;
+				} else {
+					name = reader.getInnerSourceName();
+				}
+				if (reader.isLocal() || reader.isAnonymous()) {
+					enclosingTypeName = ONE_ZERO;
+				} else {
+					char[] fullEnclosingName = reader.getEnclosingTypeName();
+					int nameLength = fullEnclosingName.length - packageNameIndex - 1;
+					if (nameLength <= 0) {
+						// See PR 1GIR345: ITPJCORE:ALL - Indexer: NegativeArraySizeException
+						return;
+					}
+					enclosingTypeName = new char[nameLength]; 
+					System.arraycopy(fullEnclosingName, packageNameIndex + 1, enclosingTypeName, 0, nameLength);
+				}
+			}
+			// eliminate invalid innerclasses (1G4KCF7)
+			if (name == null) return;
+			
+			char[][] superinterfaces = replace('/', '.', reader.getInterfaceNames());
+			char[][] enclosingTypeNames = enclosingTypeName == null ? null : new char[][] {enclosingTypeName};
+			if (reader.isInterface()) {
+				addInterfaceDeclaration(reader.getModifiers(), packageName, name, enclosingTypeNames, superinterfaces);
+			} else {
+				char[] superclass = replace('/', '.', reader.getSuperclassName());
+				addClassDeclaration(reader.getModifiers(), packageName, name, enclosingTypeNames, superclass, superinterfaces);
+			}
+	
+			// first reference all methods declarations and field declarations
+			MethodInfo[] methods = (MethodInfo[]) reader.getMethods();
+			if (methods != null) {
+				for (int i = 0, max = methods.length; i < max; i++) {
+					MethodInfo method = methods[i];
+					char[] descriptor = method.getMethodDescriptor();
+					char[][] parameterTypes = decodeParameterTypes(descriptor);
+					char[] returnType = decodeReturnType(descriptor);
+					char[][] exceptionTypes = replace('/', '.', method.getExceptionTypeNames());
+					if (method.isConstructor()) {
+						addConstructorDeclaration(className, parameterTypes, exceptionTypes);
+					} else {
+						if (!method.isClinit()) {
+							addMethodDeclaration(method.getSelector(), parameterTypes, returnType, exceptionTypes);
+						}
+					}
+				}
+			}
+			FieldInfo[] fields = (FieldInfo[]) reader.getFields();
+			if (fields != null) {
+				for (int i = 0, max = fields.length; i < max; i++) {
+					FieldInfo field = fields[i];
+					char[] fieldName = field.getName();
+					char[] fieldType = decodeFieldType(replace('/', '.', field.getTypeName()));
+					addFieldDeclaration(fieldType, fieldName);
+				}
+			}
+	
+			// record all references found inside the .class file
+			extractReferenceFromConstantPool(contents, reader);
+		} catch (ClassFormatException e) {
+			// ignore
+		}
+	}
+

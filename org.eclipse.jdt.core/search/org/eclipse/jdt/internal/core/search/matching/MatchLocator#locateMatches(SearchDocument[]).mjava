@@ -1,0 +1,103 @@
+/**
+ * Locate the matches in the given files and report them using the search requestor. 
+ */
+public void locateMatches(SearchDocument[] searchDocuments) throws JavaModelException {
+	if (SearchEngine.VERBOSE) {
+		System.out.println("Locating matches in documents ["); //$NON-NLS-1$
+		for (int i = 0, length = searchDocuments.length; i < length; i++)
+			System.out.println("\t" + searchDocuments[i]); //$NON-NLS-1$
+		System.out.println("]"); //$NON-NLS-1$
+	}
+
+	JavaModelManager manager = JavaModelManager.getJavaModelManager();
+	try {
+		// optimize access to zip files during search operation
+		manager.cacheZipFiles();
+
+		// initialize handle factory (used as a cache of handles so as to optimize space)
+		if (this.handleFactory == null)
+			this.handleFactory = new HandleFactory();
+
+		if (this.progressMonitor != null) {
+			// 1 for file path, 4 for parsing and binding creation, 5 for binding resolution? //$NON-NLS-1$
+			this.progressMonitor.beginTask("", searchDocuments.length * (this.pattern.mustResolve ? 10 : 5)); //$NON-NLS-1$
+		}
+
+		// initialize pattern for polymorphic search (ie. method reference pattern)
+		this.patternLocator.initializePolymorphicSearch(this);
+
+		JavaProject previousJavaProject = null;
+		PossibleMatchSet matchSet = new PossibleMatchSet();
+		Util.sort(searchDocuments, new Util.Comparer() {
+			public int compare(Object a, Object b) {
+				return ((SearchDocument)a).getPath().compareTo(((SearchDocument)b).getPath());
+			}
+		}); 
+		for (int i = 0, l = searchDocuments.length; i < l; i++) {
+			if (this.progressMonitor != null && this.progressMonitor.isCanceled())
+				throw new OperationCanceledException();
+
+			// skip duplicate paths
+			SearchDocument searchDocument = searchDocuments[i];
+			String pathString = searchDocument.getPath();
+			if (i > 0 && pathString.equals(searchDocuments[i - 1].getPath())) continue;
+
+			Openable openable;
+			org.eclipse.jdt.core.ICompilationUnit workingCopy = null;
+			if (searchDocument instanceof JavaSearchParticipant.WorkingCopyDocument) {
+				workingCopy = ((JavaSearchParticipant.WorkingCopyDocument)searchDocument).workingCopy;
+				openable = (Openable) workingCopy;
+			} else {
+				openable = this.handleFactory.createOpenable(pathString, this.scope);
+				if (openable == null) continue; // match is outside classpath
+			}
+
+			// create new parser and lookup environment if this is a new project
+			IResource resource = null;
+			try {
+				JavaProject javaProject = (JavaProject) openable.getJavaProject();
+				resource = workingCopy != null ? workingCopy.getResource() : openable.getResource();
+				if (resource == null)
+					resource = javaProject.getProject(); // case of a file in an external jar
+				if (!javaProject.equals(previousJavaProject)) {
+					// locate matches in previous project
+					if (previousJavaProject != null) {
+						try {
+							locateMatches(previousJavaProject, matchSet);
+						} catch (JavaModelException e) {
+							if (e.getException() instanceof CoreException) throw e;
+							// problem with classpath in this project -> skip it
+						}
+						matchSet.reset();
+					}
+					previousJavaProject = javaProject;
+				}
+			} catch (JavaModelException e) {
+				// file doesn't exist -> skip it
+				continue;
+			}
+			matchSet.add(new PossibleMatch(this, resource, openable, searchDocument));
+
+			if (this.progressMonitor != null)
+				this.progressMonitor.worked(1);
+		}
+
+		// last project
+		if (previousJavaProject != null) {
+			try {
+				locateMatches(previousJavaProject, matchSet);
+			} catch (JavaModelException e) {
+				if (e.getException() instanceof CoreException) throw e;
+				// problem with classpath in last project -> skip it
+			}
+		} 
+
+		if (this.progressMonitor != null)
+			this.progressMonitor.done();
+	} finally {
+		if (this.nameEnvironment != null)
+			this.nameEnvironment.cleanup();
+		manager.flushZipFiles();
+	}	
+}
+

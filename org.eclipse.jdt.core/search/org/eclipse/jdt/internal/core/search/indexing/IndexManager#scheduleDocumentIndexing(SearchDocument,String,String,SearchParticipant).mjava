@@ -1,0 +1,32 @@
+public void scheduleDocumentIndexing(final SearchDocument searchDocument, String containerPathString, final String indexPath, final SearchParticipant searchParticipant) {
+	IPath containerPath = new Path(containerPathString);
+	request(new IndexRequest(containerPath, this) {
+		public boolean execute(IProgressMonitor progressMonitor) {
+			if (this.isCancelled || progressMonitor != null && progressMonitor.isCanceled()) return true;
+			
+			/* ensure no concurrent write access to index */
+			IIndex index = getIndex(containerPath, true, /*reuse index file*/ true /*create if none*/);
+			if (index == null) return true;
+			ReadWriteMonitor monitor = getMonitorFor(index);
+			if (monitor == null) return true; // index got deleted since acquired
+			
+			try {
+				monitor.enterWrite(); // ask permission to write
+				indexDocument(searchDocument, searchParticipant, index);
+			} catch (IOException e) {
+				if (JobManager.VERBOSE) {
+					JobManager.verbose("-> failed to index " + searchDocument.getPath() + " because of the following exception:"); //$NON-NLS-1$ //$NON-NLS-2$
+					e.printStackTrace();
+				}
+				return false;
+			} finally {
+				monitor.exitWrite(); // free write lock
+			}
+			return true;
+		}
+		public String toString() {
+			return "indexing " + searchDocument.getPath(); //$NON-NLS-1$
+		}
+	});
+}
+

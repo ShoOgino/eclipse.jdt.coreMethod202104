@@ -1,90 +1,31 @@
-/**
- * Searches for matches of a given search pattern. Search patterns can be created using helper
- * methods (from a String pattern or a Java element) and encapsulate the description of what is
- * being searched (for example, search method declarations in a case sensitive way).
- *
- * @param workspace the workspace
- * @param searchPattern the pattern to be searched for
- * @param scope the search result has to be limited to the given scope
- * @param resultCollector a callback object to which each match is reported
- * @exception JavaModelException if the search failed. Reasons include:
- *	<ul>
- *		<li>the classpath is incorrectly set</li>
- *	</ul>
- */
-public void search(IWorkspace workspace, ISearchPattern searchPattern, IJavaSearchScope scope, IJavaSearchResultCollector resultCollector) throws JavaModelException {
-	
-	long start = -1;
-	if (VERBOSE) {
-		start = System.currentTimeMillis();
-		System.out.println("Searching for " + searchPattern + " in " + scope); //$NON-NLS-1$//$NON-NLS-2$
-	}
-
-	/* search is starting */
-	resultCollector.aboutToStart();
-
-	IProgressMonitor progressMonitor = resultCollector.getProgressMonitor();
-	MatchLocator matchLocator = null;
-	try {	
-		if (searchPattern == null) return;
-
-		/* initialize progress monitor */
-		if (progressMonitor != null) {
-			progressMonitor.beginTask(Util.bind("engine.searching"), 100); //$NON-NLS-1$
-		}
-
-		/* index search */
-		PathCollector pathCollector = new PathCollector();
-		
-		// In the case of a hierarchy scope make sure that the hierarchy is not computed.
-		// MatchLocator will filter out elements not in the hierarchy
-		SearchPattern pattern = (SearchPattern)searchPattern;
-		if (scope instanceof HierarchyScope) {
-			((HierarchyScope)scope).needsRefresh = false;
-			pattern.mustResolve = true; // force resolve to compute type bindings
-		}
-
-		IndexManager indexManager = JavaModelManager.getJavaModelManager().getIndexManager();
-		matchLocator = 
-			new MatchLocator(
-				pattern, 
-				resultCollector, 
-				scope,
-				progressMonitor == null ? null : new SubProgressMonitor(progressMonitor, 95)
-		);
-
-		indexManager.performConcurrentJob(
-			new PatternSearchJob(
-				pattern, 
+	/**
+	 * Searches for matches of a given search pattern. Search patterns can be created using helper
+	 * methods (from a String pattern or a Java element) and encapsulate the description of what is
+	 * being searched (for example, search method declarations in a case sensitive way).
+	 *
+	 * @param workspace the workspace
+	 * @param searchPattern the pattern to be searched for
+	 * @param scope the search result has to be limited to the given scope
+	 * @param resultCollector a callback object to which each match is reported
+	 * @exception JavaModelException if the search failed. Reasons include:
+	 *	<ul>
+	 *		<li>the classpath is incorrectly set</li>
+	 *	</ul>
+	 */
+	public void search(IWorkspace workspace, ISearchPattern searchPattern, IJavaSearchScope scope, IJavaSearchResultCollector resultCollector) throws JavaModelException {
+		try {
+			search(
+				(SearchPattern)searchPattern, 
+				new SearchParticipant[] {new JavaSearchParticipant(getWorkingCopies())}, 
 				scope, 
-				pathCollector, 
-				indexManager),
-			IJavaSearchConstants.WAIT_UNTIL_READY_TO_SEARCH,
-			progressMonitor == null ? null : new SubProgressMonitor(progressMonitor, 5));
-			
-		/* eliminating false matches and locating them */
-		if (progressMonitor != null && progressMonitor.isCanceled()) throw new OperationCanceledException();
-		matchLocator.locateMatches(
-			pathCollector.getPaths(), 
-			workspace,
-			workingCopiesThatCanSeeFocus(pattern.focus, pattern.isPolymorphicSearch())
-		);
-		
-
-		if (progressMonitor != null && progressMonitor.isCanceled()) throw new OperationCanceledException();
-		
-		matchLocator.locatePackageDeclarations(workspace);
-	} finally {
-		if (progressMonitor != null) {
-			progressMonitor.done();
-		}
-
-		/* search has ended */
-		resultCollector.done();
-		if (VERBOSE) {
-			System.out.println("Total time: " + (System.currentTimeMillis()-start) + "ms"); //$NON-NLS-1$ //$NON-NLS-2$
-			if (matchLocator != null) System.out.println("Time in result collector: " + matchLocator.resultCollectorTime + "ms"); //$NON-NLS-1$ //$NON-NLS-2$
+				new ResultCollectorAdapter(resultCollector), 
+				resultCollector.getProgressMonitor());
+		} catch (CoreException e) {
+			if (e instanceof JavaModelException) {
+				throw (JavaModelException) e;
+			} else {
+				throw new JavaModelException(e);
+			}
 		}
 	}
-}
 

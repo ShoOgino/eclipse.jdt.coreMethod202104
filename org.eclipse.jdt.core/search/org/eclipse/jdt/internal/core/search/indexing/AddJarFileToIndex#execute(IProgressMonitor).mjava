@@ -5,23 +5,23 @@
 		try {
 			// if index is already cached, then do not perform any check
 			// MUST reset the IndexManager if a jar file is changed
-			IIndex index = manager.getIndexForUpdate(this.indexPath, false, /*do not reuse index file*/ false /*do not create if none*/);
+			IIndex index = manager.getIndexForUpdate(this.containerPath, false, /*do not reuse index file*/ false /*do not create if none*/);
 			if (index != null) {
 				if (JobManager.VERBOSE)
-					JobManager.verbose("-> no indexing required (index already exists) for " + this.indexPath); //$NON-NLS-1$
+					JobManager.verbose("-> no indexing required (index already exists) for " + this.containerPath); //$NON-NLS-1$
 				return true;
 			}
 
-			index = manager.getIndexForUpdate(this.indexPath, true, /*reuse index file*/ true /*create if none*/);
+			index = manager.getIndexForUpdate(this.containerPath, true, /*reuse index file*/ true /*create if none*/);
 			if (index == null) {
 				if (JobManager.VERBOSE)
-					JobManager.verbose("-> index could not be created for " + this.indexPath); //$NON-NLS-1$
+					JobManager.verbose("-> index could not be created for " + this.containerPath); //$NON-NLS-1$
 				return true;
 			}
 			ReadWriteMonitor monitor = manager.getMonitorFor(index);
 			if (monitor == null) {
 				if (JobManager.VERBOSE)
-					JobManager.verbose("-> index for " + this.indexPath + " just got deleted"); //$NON-NLS-1$//$NON-NLS-2$
+					JobManager.verbose("-> index for " + this.containerPath + " just got deleted"); //$NON-NLS-1$//$NON-NLS-2$
 				return true; // index got deleted since acquired
 			}
 			ZipFile zip = null;
@@ -41,9 +41,9 @@
 					// absolute path relative to the workspace
 				} else {
 					if (JavaModelManager.ZIP_ACCESS_VERBOSE)
-						System.out.println("(" + Thread.currentThread() + ") [AddJarFileToIndex.execute()] Creating ZipFile on " + this.indexPath); //$NON-NLS-1$	//$NON-NLS-2$
-					zip = new ZipFile(this.indexPath.toFile());
-					zipFilePath = (Path) this.indexPath;
+						System.out.println("(" + Thread.currentThread() + ") [AddJarFileToIndex.execute()] Creating ZipFile on " + this.containerPath); //$NON-NLS-1$	//$NON-NLS-2$
+					zip = new ZipFile(this.containerPath.toFile());
+					zipFilePath = (Path) this.containerPath;
 					// path is already canonical since coming from a library classpath entry
 				}
 
@@ -99,7 +99,7 @@
 
 				// Index the jar for the first time or reindex the jar in case the previous index file has been corrupted
 				// index already existed: recreate it so that we forget about previous entries
-				index = manager.recreateIndex(this.indexPath);
+				index = manager.recreateIndex(this.containerPath);
 				for (Enumeration e = zip.entries(); e.hasMoreElements();) {
 					if (this.isCancelled) {
 						if (JobManager.VERBOSE)
@@ -110,11 +110,18 @@
 					// iterate each entry to index it
 					ZipEntry ze = (ZipEntry) e.nextElement();
 					if (Util.isClassFileName(ze.getName())) {
-						byte[] classFileBytes = org.eclipse.jdt.internal.compiler.util.Util.getZipEntryByteContent(ze, zip);
-						// Add the name of the file to the index
-						index.add(
-							new JarFileEntryDocument(ze, classFileBytes, zipFilePath),
-							new BinaryIndexer(true));
+						final byte[] classFileBytes = org.eclipse.jdt.internal.compiler.util.Util.getZipEntryByteContent(ze, zip);
+						SearchParticipant participant = SearchEngine.getDefaultSearchParticipant();
+						JarFileEntryDocument entryDocument = new JarFileEntryDocument(ze, null, zipFilePath);
+						SearchDocument document = new JavaSearchDocument(entryDocument.getName(), participant) {
+							public byte[] getByteContents() {
+								return classFileBytes;
+							}
+							public String toString() {
+								return "JarEntryDocument for " + getPath(); //$NON-NLS-1$
+							}
+						};
+						this.manager.indexDocument(document, participant, index);
 					}
 				}
 				this.manager.saveIndex(index);
@@ -132,10 +139,10 @@
 			}
 		} catch (IOException e) {
 			if (JobManager.VERBOSE) {
-				JobManager.verbose("-> failed to index " + this.indexPath + " because of the following exception:"); //$NON-NLS-1$ //$NON-NLS-2$
+				JobManager.verbose("-> failed to index " + this.containerPath + " because of the following exception:"); //$NON-NLS-1$ //$NON-NLS-2$
 				e.printStackTrace();
 			}
-			manager.removeIndex(this.indexPath);
+			manager.removeIndex(this.containerPath);
 			return false;
 		}
 		return true;

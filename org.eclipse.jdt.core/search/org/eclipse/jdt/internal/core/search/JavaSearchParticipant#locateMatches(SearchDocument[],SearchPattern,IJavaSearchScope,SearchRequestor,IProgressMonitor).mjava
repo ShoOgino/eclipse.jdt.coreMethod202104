@@ -1,0 +1,54 @@
+	/* (non-Javadoc)
+	 * @see SearchParticipant#locateMatches(SearchDocument[], SearchPattern, IJavaSearchScope, SearchRequestor, IProgressMonitor)
+	 */
+	public void locateMatches(SearchDocument[] indexMatches, SearchPattern pattern,
+			IJavaSearchScope scope, SearchRequestor requestor, IProgressMonitor monitor) throws CoreException {
+		
+		MatchLocator matchLocator = 
+			new MatchLocator(
+				pattern, 
+				requestor, 
+				scope,
+				this.workingCopies,
+				monitor == null ? null : new SubProgressMonitor(monitor, 95)
+		);
+
+		// working copies take precedence over corresponding compilation units
+		HashMap workingCopyDocuments = workingCopiesThatCanSeeFocus(pattern.focus, pattern.isPolymorphicSearch());
+		SearchDocument[] matches = null;
+		int length = indexMatches.length;
+		for (int i = 0; i < length; i++) {
+			SearchDocument searchDocument = indexMatches[i];
+			if (searchDocument.getParticipant() == this) {
+				SearchDocument workingCopyDocument = (SearchDocument) workingCopyDocuments.remove(searchDocument.getPath());
+				if (workingCopyDocument != null) {
+					if (matches == null) {
+						System.arraycopy(indexMatches, 0, matches = new SearchDocument[length], 0, length);
+					}
+					matches[i] = workingCopyDocument;
+				}
+			}
+		}
+		if (matches == null) { // no working copy
+			matches = indexMatches;
+		}
+		int remainingWorkingCopiesSize = workingCopyDocuments.size();
+		if (remainingWorkingCopiesSize != 0) {
+			System.arraycopy(matches, 0, matches = new SearchDocument[length+remainingWorkingCopiesSize], 0, length);
+			Iterator iterator = workingCopyDocuments.values().iterator();
+			int index = length;
+			while (iterator.hasNext()) {
+				matches[index++] = (SearchDocument) iterator.next();
+			}
+		}
+
+		/* eliminating false matches and locating them */
+		if (monitor != null && monitor.isCanceled()) throw new OperationCanceledException();
+		matchLocator.locateMatches(matches);
+		
+
+		if (monitor != null && monitor.isCanceled()) throw new OperationCanceledException();
+		
+		matchLocator.locatePackageDeclarations(this);
+	}
+

@@ -1,0 +1,58 @@
+/**
+ * Query a given index for matching entries. 
+ */
+public void findIndexMatches(IndexInput input, IndexQueryRequestor requestor, SearchParticipant participant, IJavaSearchScope scope, IProgressMonitor progressMonitor) throws IOException {
+	if (this.entryResults == null) {
+		// non-optimized case
+		super.findIndexMatches(input, requestor, participant, scope, progressMonitor);	
+		return;
+	}
+
+	if (progressMonitor != null && progressMonitor.isCanceled()) throw new OperationCanceledException();
+
+	/* narrow down a set of entries using prefix criteria */
+	IEntryResult[] entries = (IEntryResult[]) this.entryResults.get(input);
+	if (entries == null) {
+		entries = input.queryEntriesPrefixedBy(SUPER_REF);
+		if (entries == null)
+			entries = NO_ENTRY_RESULT;
+		this.entryResults.put(input, entries);
+	}
+	if (entries == NO_ENTRY_RESULT) return;
+
+	/* only select entries which actually match the entire search pattern */
+	int slash = SUPER_REF.length;
+	int length = this.superSimpleName == null ? 0 : this.superSimpleName.length;
+	nextEntry: for (int i = 0, max = entries.length; i < max; i++) {
+		/* check that the entry is a super ref to the super simple name */
+		IEntryResult entry = entries[i];
+		if (simpleName != null) {
+			char[] word = entry.getWord();
+			if (slash + length >= word.length) continue;
+			
+			// ensure it is the end of the ref (a simple name is not a prefix of ref)
+			if (word[length + slash] != '/') continue; 
+			
+			// compare ref to simple name
+			for (int j = 0; j < length; j++)
+				if (word[j + slash] != this.superSimpleName[j]) continue nextEntry;
+		}
+
+		/* retrieve and decode entry */	
+		char[] word = entry.getWord();
+		char[] indexKey = CharOperation.subarray(word, SUPER_REF.length, word.length);
+		SearchPattern record = getIndexRecord();
+		record.decodeIndexKey(indexKey);
+		if (isMatchingIndexRecord()) {
+			int[] references = entry.getFileReferences();
+			for (int iReference = 0, refererencesLength = references.length; iReference < refererencesLength; iReference++) {
+				String documentPath = IndexedFile.convertPath( input.getIndexedFile(references[iReference]).getPath());
+				if (scope.encloses(documentPath)) {
+					if (!requestor.acceptIndexMatch(documentPath, record, participant)) 
+						throw new OperationCanceledException();
+				}
+			}
+			}
+	}
+}
+

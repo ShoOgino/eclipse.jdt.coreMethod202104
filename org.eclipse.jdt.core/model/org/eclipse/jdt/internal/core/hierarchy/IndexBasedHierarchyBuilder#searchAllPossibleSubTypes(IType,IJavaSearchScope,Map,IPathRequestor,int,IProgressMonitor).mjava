@@ -23,40 +23,44 @@ public static void searchAllPossibleSubTypes(
 	IndexManager indexManager = JavaModelManager.getJavaModelManager().getIndexManager();
 
 	/* use a special collector to collect paths and queue new subtype names */
-	IIndexSearchRequestor searchRequestor = new IndexSearchAdapter(){
-		public void acceptSuperTypeReference(String resourcePath, char[] qualification, char[] typeName, char[] enclosingTypeName, char classOrInterface, char[] superQualification, char[] superTypeName, char superClassOrInterface, int modifiers) {
-			pathRequestor.acceptPath(resourcePath, enclosingTypeName == IIndexConstants.ONE_ZERO);
-			int suffix = resourcePath.toLowerCase().indexOf(SUFFIX_STRING_class);
+	IndexQueryRequestor searchRequestor = new IndexQueryRequestor() {
+		public boolean acceptIndexMatch(String documentPath, SearchPattern indexRecord, SearchParticipant participant) {
+			SuperTypeReferencePattern record = (SuperTypeReferencePattern)indexRecord;
+			pathRequestor.acceptPath(documentPath, record.enclosingTypeName == IIndexConstants.ONE_ZERO);
+			char[] typeName = record.simpleName;
+			int suffix = documentPath.toLowerCase().indexOf(SUFFIX_STRING_class);
 			if (suffix != -1){ 
-				HierarchyBinaryType binaryType = (HierarchyBinaryType)binariesFromIndexMatches.get(resourcePath);
+				HierarchyBinaryType binaryType = (HierarchyBinaryType)binariesFromIndexMatches.get(documentPath);
 				if (binaryType == null){
+					char[] enclosingTypeName = record.enclosingTypeName;
 					if (enclosingTypeName == IIndexConstants.ONE_ZERO) { // local or anonymous type
-						int lastSlash = resourcePath.lastIndexOf('/');
-						if (lastSlash == -1) return;
-						int lastDollar = resourcePath.lastIndexOf('$');
-						if (lastDollar == -1) return;
-						enclosingTypeName = resourcePath.substring(lastSlash+1, lastDollar).toCharArray();
-						typeName = resourcePath.substring(lastDollar+1, suffix).toCharArray();
+						int lastSlash = documentPath.lastIndexOf('/');
+						if (lastSlash == -1) return true;
+						int lastDollar = documentPath.lastIndexOf('$');
+						if (lastDollar == -1) return true;
+						enclosingTypeName = documentPath.substring(lastSlash+1, lastDollar).toCharArray();
+						typeName = documentPath.substring(lastDollar+1, suffix).toCharArray();
 					}
-					binaryType = new HierarchyBinaryType(modifiers, qualification, typeName, enclosingTypeName, classOrInterface);
-					binariesFromIndexMatches.put(resourcePath, binaryType);
+					binaryType = new HierarchyBinaryType(record.modifiers, record.pkgName, typeName, enclosingTypeName, record.classOrInterface);
+					binariesFromIndexMatches.put(documentPath, binaryType);
 				}
-				binaryType.recordSuperType(superTypeName, superQualification, superClassOrInterface);
+				binaryType.recordSuperType(record.superSimpleName, record.superQualification, record.superClassOrInterface);
 			}
 			if (!foundSuperNames.containsKey(typeName)){
 				foundSuperNames.put(typeName, typeName);
 				awaitings.add(typeName);
 			}
+			return true;
 		}		
 	};
 	
-	SuperTypeReferencePattern pattern = new SuperTypeReferencePattern(null, null, IJavaSearchConstants.EXACT_MATCH, IJavaSearchConstants.CASE_SENSITIVE);
+	SuperTypeReferencePattern pattern = new SuperTypeReferencePattern(null, null, SearchPattern.R_EXACT_MATCH | SearchPattern.R_CASE_SENSITIVE);
 	pattern.focus = type;
 	SubTypeSearchJob job = new SubTypeSearchJob(
-				pattern, 
-				scope,
-				searchRequestor, 
-				indexManager);
+		pattern, 
+		new JavaSearchParticipant(null), // java search only
+		scope, 
+		searchRequestor);
 	
 	/* initialize entry result cache */
 	pattern.entryResults = new HashMap();
