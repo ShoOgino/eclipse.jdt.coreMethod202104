@@ -1,0 +1,46 @@
+protected void reportDeclaration(ASTNode reference, IJavaElement element, MatchLocator locator, SimpleSet knownTypes) throws CoreException {
+	int maxType = -1;
+	TypeBinding typeBinding = null;
+	if (reference instanceof TypeReference) {
+		typeBinding = ((TypeReference) reference).resolvedType;
+		maxType = Integer.MAX_VALUE;
+	} else if (reference instanceof QualifiedNameReference) {
+		QualifiedNameReference qNameRef = (QualifiedNameReference) reference;
+		Binding binding = qNameRef.binding;
+		maxType = qNameRef.tokens.length - 1;
+		switch (qNameRef.bits & ASTNode.RestrictiveFlagMASK) {
+			case BindingIds.FIELD : // reading a field
+				typeBinding = qNameRef.actualReceiverType;
+				maxType -= qNameRef.otherBindings == null ? 1 : qNameRef.otherBindings.length + 1;
+				break;
+			case BindingIds.TYPE : //=============only type ==============
+				if (binding instanceof TypeBinding)
+					typeBinding = (TypeBinding) binding;
+				break;
+			case BindingIds.VARIABLE : //============unbound cases===========
+			case BindingIds.TYPE | BindingIds.VARIABLE :
+				if (binding instanceof ProblemFieldBinding) {
+					typeBinding = qNameRef.actualReceiverType;
+					maxType -= qNameRef.otherBindings == null ? 1 : qNameRef.otherBindings.length + 1;
+				} else if (binding instanceof ProblemBinding) {
+					ProblemBinding pbBinding = (ProblemBinding) binding;
+					typeBinding = pbBinding.searchType; // second chance with recorded type so far
+					char[] partialQualifiedName = pbBinding.name;
+					maxType = CharOperation.occurencesOf('.', partialQualifiedName) - 1; // index of last bound token is one before the pb token
+					if (typeBinding == null || maxType < 0) return;
+				}
+				break;
+		}
+	} else if (reference instanceof SingleNameReference) {
+		typeBinding = (TypeBinding) ((SingleNameReference) reference).binding;
+		maxType = 1;
+	}
+	
+	if (typeBinding instanceof ArrayBinding)
+		typeBinding = ((ArrayBinding) typeBinding).leafComponentType;
+	if (typeBinding == null || typeBinding instanceof BaseTypeBinding) return;
+	if (typeBinding instanceof ProblemReferenceBinding)
+		typeBinding = ((ProblemReferenceBinding) typeBinding).original;
+	reportDeclaration((ReferenceBinding) typeBinding, maxType, locator, knownTypes);
+}
+

@@ -1,0 +1,71 @@
+	private static TypeDeclaration convert(IType type, IType alreadyComputedMember,TypeDeclaration alreadyComputedMemberDeclaration, CompilationResult compilationResult) throws JavaModelException {
+		/* create type declaration - can be member type */
+		TypeDeclaration typeDeclaration = new TypeDeclaration(compilationResult);
+
+		if (type.getDeclaringType() != null) {
+			typeDeclaration.bits |= ASTNode.IsMemberTypeMASK;
+		}
+		typeDeclaration.name = type.getElementName().toCharArray();
+		typeDeclaration.modifiers = type.getFlags();
+
+
+		/* set superclass and superinterfaces */
+		if (type.getSuperclassName() != null) {
+			typeDeclaration.superclass = createTypeReference(type.getSuperclassName().toCharArray(), type);
+		}
+		String[] interfaceNames = type.getSuperInterfaceNames();
+		int interfaceCount = interfaceNames == null ? 0 : interfaceNames.length;
+		typeDeclaration.superInterfaces = new TypeReference[interfaceCount];
+		for (int i = 0; i < interfaceCount; i++) {
+			typeDeclaration.superInterfaces[i] = createTypeReference(interfaceNames[i].toCharArray(), type);
+		}
+		
+		/* convert member types */
+		IType[] memberTypes = type.getTypes();
+		int memberTypeCount =	memberTypes == null ? 0 : memberTypes.length;
+		typeDeclaration.memberTypes = new TypeDeclaration[memberTypeCount];
+		for (int i = 0; i < memberTypeCount; i++) {
+			if(alreadyComputedMember != null && alreadyComputedMember.getFullyQualifiedName().equals(memberTypes[i].getFullyQualifiedName())) {
+				typeDeclaration.memberTypes[i] = alreadyComputedMemberDeclaration;
+			} else {
+				typeDeclaration.memberTypes[i] = convert(memberTypes[i], null, null, compilationResult);
+			}
+		}
+
+		/* convert fields */
+		IField[] fields = type.getFields();
+		int fieldCount = fields == null ? 0 : fields.length;
+		typeDeclaration.fields = new FieldDeclaration[fieldCount];
+		for (int i = 0; i < fieldCount; i++) {
+			typeDeclaration.fields[i] = convert(fields[i], type);
+		}
+
+		/* convert methods - need to add default constructor if necessary */
+		IMethod[] methods = type.getMethods();
+		int methodCount = methods == null ? 0 : methods.length;
+
+		/* source type has a constructor ?           */
+		/* by default, we assume that one is needed. */
+		int neededCount = 1;
+		for (int i = 0; i < methodCount; i++) {
+			if (methods[i].isConstructor()) {
+				neededCount = 0;
+				// Does not need the extra constructor since one constructor already exists.
+				break;
+			}
+		}
+		boolean isInterface = type.isInterface();
+		typeDeclaration.methods = new AbstractMethodDeclaration[methodCount + neededCount];
+		if (neededCount != 0 && !isInterface) { // add default constructor in first position
+			typeDeclaration.methods[0] = typeDeclaration.createsInternalConstructor(false, false);
+		}
+		for (int i = 0; i < methodCount; i++) {
+			AbstractMethodDeclaration method =convert(methods[i], type, compilationResult);
+			if (isInterface || method.isAbstract()) { // fix-up flag 
+				method.modifiers |= CompilerModifiers.AccSemicolonBody;
+			}
+			typeDeclaration.methods[neededCount + i] = method;
+		}
+		return typeDeclaration;
+	}
+

@@ -1,0 +1,359 @@
+	private void complete(ASTNode astNode, ASTNode astNodeParent, Binding qualifiedBinding, Scope scope) {
+
+		setSourceRange(astNode.sourceStart, astNode.sourceEnd);
+		
+		computeUninterestingBindings(astNodeParent, scope);
+		if(astNodeParent != null) {
+			computeExpectedTypes(astNodeParent, scope);
+		}
+		
+		if (astNode instanceof CompletionOnFieldType) {
+
+			CompletionOnFieldType field = (CompletionOnFieldType) astNode;
+			CompletionOnSingleTypeReference type = (CompletionOnSingleTypeReference) field.type;
+			completionToken = type.token;
+			setSourceRange(type.sourceStart, type.sourceEnd);
+			
+			findTypesAndPackages(completionToken, scope);
+			findKeywordsForMember(completionToken, field.modifiers);
+			
+			if(!field.isLocalVariable && field.modifiers == CompilerModifiers.AccDefault) {
+				findMethods(completionToken,null,scope.enclosingSourceType(),scope,new ObjectVector(),false,false,true,null,null,false, false);
+			}
+		} else {
+			if(astNode instanceof CompletionOnMethodReturnType) {
+				
+				CompletionOnMethodReturnType method = (CompletionOnMethodReturnType) astNode;
+				SingleTypeReference type = (CompletionOnSingleTypeReference) method.returnType;
+				completionToken = type.token;
+				setSourceRange(type.sourceStart, type.sourceEnd);
+				findTypesAndPackages(completionToken, scope);
+				findKeywordsForMember(completionToken, method.modifiers);
+			
+				if(method.modifiers == CompilerModifiers.AccDefault) {
+					findMethods(completionToken,null,scope.enclosingSourceType(),scope,new ObjectVector(),false,false,true,null,null,false,false);
+				}
+			} else {
+				
+				if (astNode instanceof CompletionOnSingleNameReference) {
+					CompletionOnSingleNameReference singleNameReference = (CompletionOnSingleNameReference) astNode;
+					completionToken = singleNameReference.token;
+					findVariablesAndMethods(
+						completionToken,
+						scope,
+						(CompletionOnSingleNameReference) astNode,
+						scope);
+					// can be the start of a qualified type name
+					findTypesAndPackages(completionToken, scope);
+					findKeywords(completionToken, singleNameReference.possibleKeywords);
+					if(singleNameReference.canBeExplicitConstructor){
+						if(CharOperation.prefixEquals(completionToken, Keywords.THIS, false)) {
+							ReferenceBinding ref = scope.enclosingSourceType();
+							findExplicitConstructors(Keywords.THIS, ref, (MethodScope)scope, singleNameReference);
+						} else if(CharOperation.prefixEquals(completionToken, Keywords.SUPER, false)) {
+							ReferenceBinding ref = scope.enclosingSourceType();
+							findExplicitConstructors(Keywords.SUPER, ref.superclass(), (MethodScope)scope, singleNameReference);
+						}
+					}
+				} else {
+	
+					if (astNode instanceof CompletionOnSingleTypeReference) {
+	
+						completionToken = ((CompletionOnSingleTypeReference) astNode).token;
+						
+						assistNodeIsClass = astNode instanceof CompletionOnClassReference;
+						assistNodeIsException = astNode instanceof CompletionOnExceptionReference;
+						assistNodeIsInterface = astNode instanceof CompletionOnInterfaceReference;
+	
+						// can be the start of a qualified type name
+						if (qualifiedBinding == null) {
+							findTypesAndPackages(completionToken, scope);
+							} else {
+								findMemberTypes(
+								completionToken,
+								(ReferenceBinding) qualifiedBinding,
+								scope,
+								scope.enclosingSourceType());
+						}
+					} else {
+						
+						if (astNode instanceof CompletionOnQualifiedNameReference) {
+	
+							insideQualifiedReference = true;
+							CompletionOnQualifiedNameReference ref =
+								(CompletionOnQualifiedNameReference) astNode;
+							completionToken = ref.completionIdentifier;
+							long completionPosition = ref.sourcePositions[ref.sourcePositions.length - 1];
+	
+							if (qualifiedBinding instanceof VariableBinding) {
+	
+								setSourceRange((int) (completionPosition >>> 32), (int) completionPosition);
+								TypeBinding receiverType = ((VariableBinding) qualifiedBinding).type;
+								if (receiverType != null) {
+									findFieldsAndMethods(completionToken, receiverType, scope, ref, scope,false,false);
+								}
+	
+							} else {
+	
+								if (qualifiedBinding instanceof ReferenceBinding) {
+	
+									ReferenceBinding receiverType = (ReferenceBinding) qualifiedBinding;
+									setSourceRange((int) (completionPosition >>> 32), (int) completionPosition);
+	
+									findMemberTypes(completionToken, receiverType, scope, scope.enclosingSourceType());
+	
+									findClassField(completionToken, (TypeBinding) qualifiedBinding, scope);
+									
+									MethodScope methodScope = null;
+									if((scope instanceof MethodScope && !((MethodScope)scope).isStatic)
+										|| ((methodScope = scope.enclosingMethodScope()) != null && !methodScope.isStatic)) {
+										findKeywords(completionToken, new char[][]{Keywords.THIS});
+									}
+	
+									findFields(
+										completionToken,
+										receiverType,
+										scope,
+										new ObjectVector(),
+										new ObjectVector(),
+										true,
+										ref,
+										scope,
+										false);
+	
+									findMethods(
+										completionToken,
+										null,
+										receiverType,
+										scope,
+										new ObjectVector(),
+										true,
+										false,
+										false,
+										ref,
+										scope,
+										false,
+										false);
+	
+								} else {
+	
+									if (qualifiedBinding instanceof PackageBinding) {
+	
+										setSourceRange(astNode.sourceStart, (int) completionPosition);
+										// replace to the end of the completion identifier
+										findTypesAndSubpackages(completionToken, (PackageBinding) qualifiedBinding);
+									}
+								}
+							}
+	
+						} else {
+	
+								if (astNode instanceof CompletionOnQualifiedTypeReference) {
+	
+								insideQualifiedReference = true;
+								
+								assistNodeIsClass = astNode instanceof CompletionOnQualifiedClassReference;
+								assistNodeIsException = astNode instanceof CompletionOnQualifiedExceptionReference;
+								assistNodeIsInterface = astNode instanceof CompletionOnQualifiedInterfaceReference;
+								
+								CompletionOnQualifiedTypeReference ref =
+									(CompletionOnQualifiedTypeReference) astNode;
+								completionToken = ref.completionIdentifier;
+								long completionPosition = ref.sourcePositions[ref.tokens.length];
+	
+								// get the source positions of the completion identifier
+								if (qualifiedBinding instanceof ReferenceBinding) {
+	
+									setSourceRange((int) (completionPosition >>> 32), (int) completionPosition);
+									findMemberTypes(
+										completionToken,
+										(ReferenceBinding) qualifiedBinding,
+										scope,
+										scope.enclosingSourceType());
+	
+								} else {
+	
+									if (qualifiedBinding instanceof PackageBinding) {
+	
+										setSourceRange(astNode.sourceStart, (int) completionPosition);
+										// replace to the end of the completion identifier
+										findTypesAndSubpackages(completionToken, (PackageBinding) qualifiedBinding);
+									}
+								}
+	
+							} else {
+	
+								if (astNode instanceof CompletionOnMemberAccess) {
+									insideQualifiedReference = true;
+									CompletionOnMemberAccess access = (CompletionOnMemberAccess) astNode;
+									long completionPosition = access.nameSourcePosition;
+									setSourceRange((int) (completionPosition >>> 32), (int) completionPosition);
+					
+									completionToken = access.token;
+									
+									findKeywords(completionToken, new char[][]{Keywords.NEW});
+									
+									findFieldsAndMethods(
+										completionToken,
+										(TypeBinding) qualifiedBinding,
+										scope,
+										access,
+										scope,
+										false,
+										access.receiver instanceof SuperReference);
+	
+								} else {
+	
+									if (astNode instanceof CompletionOnMessageSend) {
+										setSourceRange(astNode.sourceStart, astNode.sourceEnd, false);
+										
+										CompletionOnMessageSend messageSend = (CompletionOnMessageSend) astNode;
+										TypeBinding[] argTypes =
+											computeTypes(messageSend.arguments, (BlockScope) scope);
+										completionToken = messageSend.selector;
+										if (qualifiedBinding == null) {
+											
+											findImplicitMessageSends(completionToken, argTypes, scope, messageSend, scope);
+										} else {
+	
+											findMethods(
+												completionToken,
+												argTypes,
+												(ReferenceBinding) qualifiedBinding,
+												scope,
+												new ObjectVector(),
+												false,
+												true,
+												false,
+												messageSend,
+												scope,
+												false,
+												messageSend.receiver instanceof SuperReference);
+										}
+	
+									} else {
+	
+										if (astNode instanceof CompletionOnExplicitConstructorCall) {
+											setSourceRange(astNode.sourceStart, astNode.sourceEnd, false);
+											
+											CompletionOnExplicitConstructorCall constructorCall =
+												(CompletionOnExplicitConstructorCall) astNode;
+											TypeBinding[] argTypes =
+												computeTypes(constructorCall.arguments, (BlockScope) scope);
+											findConstructors(
+												(ReferenceBinding) qualifiedBinding,
+												argTypes,
+												scope,
+												constructorCall,
+												false);
+	
+										} else {
+	
+											if (astNode instanceof CompletionOnQualifiedAllocationExpression) {
+												setSourceRange(astNode.sourceStart, astNode.sourceEnd, false);
+												
+												CompletionOnQualifiedAllocationExpression allocExpression =
+													(CompletionOnQualifiedAllocationExpression) astNode;
+												TypeBinding[] argTypes =
+													computeTypes(allocExpression.arguments, (BlockScope) scope);
+												
+												ReferenceBinding ref = (ReferenceBinding) qualifiedBinding;
+												if(ref.isClass()) {
+													if(!ref.isAbstract()) {
+														findConstructors(
+															ref,
+															argTypes,
+															scope,
+															allocExpression,
+															false);
+													}
+												}
+												if(!ref.isFinal()){
+													findAnonymousType(
+														ref,
+														argTypes,
+														scope,
+														allocExpression);
+												}
+	
+											} else {
+	
+												if (astNode instanceof CompletionOnClassLiteralAccess) {
+													CompletionOnClassLiteralAccess access = (CompletionOnClassLiteralAccess) astNode;
+													setSourceRange(access.classStart, access.sourceEnd);
+									
+													completionToken = access.completionIdentifier;
+									
+													findClassField(completionToken, (TypeBinding) qualifiedBinding, scope);
+												} else {
+													if(astNode instanceof CompletionOnMethodName) {
+														CompletionOnMethodName method = (CompletionOnMethodName) astNode;
+															
+														setSourceRange(method.sourceStart, method.selectorEnd);
+															
+														FieldBinding[] fields = scope.enclosingSourceType().fields();
+														char[][] excludeNames = new char[fields.length][];
+														for(int i = 0 ; i < fields.length ; i++){
+															excludeNames[i] = fields[i].name;
+														}
+														
+														completionToken = method.selector;
+														
+														findVariableNames(completionToken, method.returnType, excludeNames, FIELD, method.modifiers);
+													} else {
+														if (astNode instanceof CompletionOnFieldName) {
+															CompletionOnFieldName field = (CompletionOnFieldName) astNode;
+															
+															FieldBinding[] fields = scope.enclosingSourceType().fields();
+															char[][] excludeNames = new char[fields.length][];
+															for(int i = 0 ; i < fields.length ; i++){
+																excludeNames[i] = fields[i].name;
+															}
+															
+															completionToken = field.realName;
+															
+															findVariableNames(field.realName, field.type, excludeNames, FIELD, field.modifiers);
+														} else {
+															if (astNode instanceof CompletionOnLocalName ||
+																astNode instanceof CompletionOnArgumentName){
+																LocalDeclaration variable = (LocalDeclaration) astNode;
+																
+																LocalVariableBinding[] locals = ((BlockScope)scope).locals;
+																char[][] excludeNames = new char[locals.length][];
+																int localCount = 0;
+																for(int i = 0 ; i < locals.length ; i++){
+																	if(locals[i] != null) {
+																		excludeNames[localCount++] = locals[i].name;
+																	}
+																}
+																System.arraycopy(excludeNames, 0, excludeNames = new char[localCount][], 0, localCount);
+																
+																if(variable instanceof CompletionOnLocalName){
+																	completionToken = ((CompletionOnLocalName) variable).realName;
+																	findVariableNames(completionToken, variable.type, excludeNames, LOCAL, variable.modifiers);
+																} else {
+																	CompletionOnArgumentName arg = (CompletionOnArgumentName) variable;
+																	completionToken = arg.realName;
+																	findVariableNames(completionToken, variable.type, excludeNames, arg.isCatchArgument ? LOCAL : ARGUMENT, variable.modifiers);
+																}
+															} else {
+																if(astNode instanceof CompletionOnKeyword) {
+																	CompletionOnKeyword keyword = (CompletionOnKeyword)astNode;
+																	findKeywords(keyword.getToken(), keyword.getPossibleKeywords());
+																}
+															}
+														}
+													}
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+

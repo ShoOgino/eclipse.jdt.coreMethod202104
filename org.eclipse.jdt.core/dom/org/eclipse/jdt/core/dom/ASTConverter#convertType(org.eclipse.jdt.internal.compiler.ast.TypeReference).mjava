@@ -1,0 +1,89 @@
+	public Type convertType(org.eclipse.jdt.internal.compiler.ast.TypeReference typeReference) {
+		Type type = null;				
+		int sourceStart = -1;
+		int length = 0;
+		int dimensions = typeReference.dimensions();
+		if (typeReference instanceof org.eclipse.jdt.internal.compiler.ast.SingleTypeReference) {
+			// this is either an ArrayTypeReference or a SingleTypeReference
+			char[] name = ((org.eclipse.jdt.internal.compiler.ast.SingleTypeReference) typeReference).getTypeName()[0];
+			sourceStart = typeReference.sourceStart;
+			length = typeReference.sourceEnd - typeReference.sourceStart + 1;
+			if (dimensions != 0) {
+				// need to find out if this is an array type of primitive types or not
+				if (isPrimitiveType(name)) {
+					int end = retrieveEndOfElementTypeNamePosition(sourceStart, sourceStart + length);
+					if (end == -1) {
+						end = sourceStart + length - 1;
+					}					
+					PrimitiveType primitiveType = this.ast.newPrimitiveType(getPrimitiveTypeCode(name));
+					primitiveType.setSourceRange(sourceStart, end - sourceStart + 1);
+					type = this.ast.newArrayType(primitiveType, dimensions);
+					if (resolveBindings) {
+						// store keys for inner types
+						completeRecord((ArrayType) type, typeReference);
+					}
+					type.setSourceRange(sourceStart, length);
+				} else {
+					SimpleName simpleName = this.ast.newSimpleName(new String(name));
+					// we need to search for the starting position of the first brace in order to set the proper length
+					// PR http://dev.eclipse.org/bugs/show_bug.cgi?id=10759
+					int end = retrieveEndOfElementTypeNamePosition(sourceStart, sourceStart + length);
+					if (end == -1) {
+						end = sourceStart + length - 1;
+					}
+					simpleName.setSourceRange(sourceStart, end - sourceStart + 1);
+					SimpleType simpleType = this.ast.newSimpleType(simpleName);
+					simpleType.setSourceRange(sourceStart, end - sourceStart + 1);
+					type = this.ast.newArrayType(simpleType, dimensions);
+					type.setSourceRange(sourceStart, length);
+					if (this.resolveBindings) {
+						completeRecord((ArrayType) type, typeReference);
+						this.recordNodes(simpleName, typeReference);
+					}
+				}
+			} else {
+				if (isPrimitiveType(name)) {
+					type = this.ast.newPrimitiveType(getPrimitiveTypeCode(name));
+					type.setSourceRange(sourceStart, length);
+				} else {
+					SimpleName simpleName = this.ast.newSimpleName(new String(name));
+					simpleName.setSourceRange(sourceStart, length);
+					type = this.ast.newSimpleType(simpleName);
+					type.setSourceRange(sourceStart, length);
+					if (this.resolveBindings) {
+						this.recordNodes(simpleName, typeReference);
+					}
+				}
+			}
+		} else {
+			char[][] name = ((org.eclipse.jdt.internal.compiler.ast.QualifiedTypeReference) typeReference).getTypeName();
+			int nameLength = name.length;
+			long[] positions = ((org.eclipse.jdt.internal.compiler.ast.QualifiedTypeReference) typeReference).sourcePositions;
+			sourceStart = (int)(positions[0]>>>32);
+			length = (int)(positions[nameLength - 1] & 0xFFFFFFFF) - sourceStart + 1;
+			Name qualifiedName = this.setQualifiedNameNameAndSourceRanges(name, positions, typeReference);
+			if (dimensions != 0) {
+				// need to find out if this is an array type of primitive types or not
+				SimpleType simpleType = this.ast.newSimpleType(qualifiedName);
+				simpleType.setSourceRange(sourceStart, length);
+				type = this.ast.newArrayType(simpleType, dimensions);
+				if (this.resolveBindings) {
+					completeRecord((ArrayType) type, typeReference);
+				}				
+				int end = retrieveEndOfDimensionsPosition(sourceStart+length, this.compilationUnitSource.length);
+				if (end != -1) {
+					type.setSourceRange(sourceStart, end - sourceStart + 1);
+				} else {
+					type.setSourceRange(sourceStart, length);
+				}
+			} else {
+				type = this.ast.newSimpleType(qualifiedName);
+				type.setSourceRange(sourceStart, length);
+			}
+		}
+		if (this.resolveBindings) {
+			this.recordNodes(type, typeReference);
+		}
+		return type;
+	}
+

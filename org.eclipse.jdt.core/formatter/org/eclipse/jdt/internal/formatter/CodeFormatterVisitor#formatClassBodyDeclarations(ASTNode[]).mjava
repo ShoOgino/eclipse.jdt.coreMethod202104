@@ -1,0 +1,56 @@
+	/*
+	 * Merged traversal of member (types, fields, methods)
+	 */
+	private void formatClassBodyDeclarations(ASTNode[] nodes) {
+		final int FIELD = 1, METHOD = 2, TYPE = 3;
+		
+		ASTNode[] mergedNodes = computeMergedMemberDeclarations(nodes);
+		Alignment memberAlignment = this.scribe.createMemberAlignment("typeMembers", this.preferences.type_member_alignment, 4, this.scribe.scanner.currentPosition); //$NON-NLS-1$
+		this.scribe.enterMemberAlignment(memberAlignment);
+		boolean isChunkStart = false;
+		boolean ok = false;
+		int startIndex = 0;
+		do {
+			try {
+				for (int i = startIndex, max = mergedNodes.length; i < max; i++) {
+					ASTNode member = mergedNodes[i];
+					if (member instanceof FieldDeclaration) {
+						isChunkStart = memberAlignment.checkChunkStart(FIELD, i, this.scribe.scanner.currentPosition);
+						if (member instanceof MultiFieldDeclaration){
+							MultiFieldDeclaration multiField = (MultiFieldDeclaration) member;
+							format(multiField, this, null, isChunkStart);
+						} else if (member instanceof Initializer) {
+							Initializer initializer = (Initializer) member;
+							initializer.traverse(this, null);
+						} else {
+							FieldDeclaration field = (FieldDeclaration) member;
+							format(field, this, null, isChunkStart);
+						}
+					} else if (member instanceof AbstractMethodDeclaration) {
+						isChunkStart = memberAlignment.checkChunkStart(METHOD, i, this.scribe.scanner.currentPosition);
+						format((AbstractMethodDeclaration) member, null, isChunkStart);
+					} else {
+						isChunkStart = memberAlignment.checkChunkStart(TYPE, i, this.scribe.scanner.currentPosition);
+						format((TypeDeclaration)member, null, isChunkStart);
+					}
+					if (isSemiColon()) {
+						this.scribe.printNextToken(TerminalTokens.TokenNameSEMICOLON, this.preferences.insert_space_before_semicolon);
+						this.scribe.printTrailingComment();
+					}
+					if (i != max - 1) {
+						this.scribe.printNewLine();
+					}
+				}
+				ok = true;
+			} catch(AlignmentException e){
+				startIndex = memberAlignment.chunkStartIndex;
+				this.scribe.redoMemberAlignment(e);
+			}
+		} while (!ok);		
+		this.scribe.exitMemberAlignment(memberAlignment);
+		if (hasComments()) {
+			this.scribe.printNewLine();
+		}
+		this.scribe.printComment();
+	}
+

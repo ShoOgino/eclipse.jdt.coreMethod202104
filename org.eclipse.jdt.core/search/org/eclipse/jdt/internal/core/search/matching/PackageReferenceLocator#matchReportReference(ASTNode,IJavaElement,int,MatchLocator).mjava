@@ -1,0 +1,57 @@
+protected void matchReportReference(ASTNode reference, IJavaElement element, int accuracy, MatchLocator locator) throws CoreException {
+	long[] positions = null;
+	int last = -1;
+	if (reference instanceof ImportReference) {
+		ImportReference importRef = (ImportReference) reference;
+		positions = importRef.sourcePositions;
+		last = importRef.onDemand ? positions.length : positions.length - 1;
+	} else {
+		TypeBinding typeBinding = null;
+		if (reference instanceof QualifiedNameReference) {
+			QualifiedNameReference qNameRef = (QualifiedNameReference) reference;
+			positions = qNameRef.sourcePositions;
+			switch (qNameRef.bits & ASTNode.RestrictiveFlagMASK) {
+				case BindingIds.FIELD : // reading a field
+					typeBinding = qNameRef.actualReceiverType;
+					break;
+				case BindingIds.TYPE : //=============only type ==============
+					if (qNameRef.binding instanceof TypeBinding)
+						typeBinding = (TypeBinding) qNameRef.binding;
+					break;
+				case BindingIds.VARIABLE : //============unbound cases===========
+				case BindingIds.TYPE | BindingIds.VARIABLE :
+					Binding binding = qNameRef.binding; 
+					if (binding instanceof TypeBinding) {
+						typeBinding = (TypeBinding) binding;
+					} else if (binding instanceof ProblemFieldBinding) {
+						typeBinding = qNameRef.actualReceiverType;
+						last = qNameRef.tokens.length - (qNameRef.otherBindings == null ? 2 : qNameRef.otherBindings.length + 2);
+					} else if (binding instanceof ProblemBinding) {
+						ProblemBinding pbBinding = (ProblemBinding) binding;
+						typeBinding = pbBinding.searchType;
+						last = CharOperation.occurencesOf('.', pbBinding.name);
+					}
+					break;					
+			}
+		} else if (reference instanceof QualifiedTypeReference) {
+			QualifiedTypeReference qTypeRef = (QualifiedTypeReference) reference;
+			positions = qTypeRef.sourcePositions;
+			typeBinding = qTypeRef.resolvedType;
+		}
+		if (typeBinding instanceof ArrayBinding)
+			typeBinding = ((ArrayBinding) typeBinding).leafComponentType;
+		if (typeBinding instanceof ProblemReferenceBinding)
+			typeBinding = ((ProblemReferenceBinding) typeBinding).original;
+		if (typeBinding instanceof ReferenceBinding) {
+			PackageBinding pkgBinding = ((ReferenceBinding) typeBinding).fPackage;
+			if (pkgBinding != null)
+				last = pkgBinding.compoundName.length;
+		}
+	}
+	if (last == -1) {
+		last = this.pattern.segments.length;
+		if (last > positions.length) last = positions.length;
+	}
+	locator.report(positions[0], positions[last - 1], element, accuracy);
+}
+

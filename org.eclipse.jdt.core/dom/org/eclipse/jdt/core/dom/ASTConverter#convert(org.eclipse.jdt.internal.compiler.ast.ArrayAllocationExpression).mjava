@@ -1,0 +1,50 @@
+	public ArrayCreation convert(org.eclipse.jdt.internal.compiler.ast.ArrayAllocationExpression expression) {
+		ArrayCreation arrayCreation = this.ast.newArrayCreation();
+		if (this.resolveBindings) {
+			recordNodes(arrayCreation, expression);
+		}
+		arrayCreation.setSourceRange(expression.sourceStart, expression.sourceEnd - expression.sourceStart + 1);
+		org.eclipse.jdt.internal.compiler.ast.Expression[] dimensions = expression.dimensions;
+		
+		int dimensionsLength = dimensions.length;
+		for (int i = 0; i < dimensionsLength; i++) {
+			if (dimensions[i] != null) {
+				Expression dimension = convert(dimensions[i]);
+				if (this.resolveBindings) {
+					recordNodes(dimension, dimensions[i]);
+				}
+				arrayCreation.dimensions().add(dimension);
+			}
+		}
+		Type type = convertType(expression.type);
+		if (this.resolveBindings) {
+			recordNodes(type, expression.type);
+		}		
+		ArrayType arrayType = null;
+		if (type.isArrayType()) {
+			arrayType = (ArrayType) type;
+		} else {
+			arrayType = this.ast.newArrayType(type, dimensionsLength);
+			if (this.resolveBindings) {
+				completeRecord(arrayType, expression);
+			}			
+			int start = type.getStartPosition();
+			int end = type.getStartPosition() + type.getLength();
+			int previousSearchStart = end;
+			ArrayType componentType = (ArrayType) type.getParent();
+			for (int i = 0; i < dimensionsLength; i++) {
+				previousSearchStart = retrieveRightBracketPosition(previousSearchStart + 1, this.compilationUnitSource.length);
+				componentType.setSourceRange(start, previousSearchStart - start + 1);
+				componentType = (ArrayType) componentType.getParent();
+			}
+		}
+		arrayCreation.setType(arrayType);
+		if (this.resolveBindings) {
+			recordNodes(arrayType, expression);
+		}	
+		if (expression.initializer != null) {
+			arrayCreation.setInitializer(convert(expression.initializer));
+		}
+		return arrayCreation;
+	}
+

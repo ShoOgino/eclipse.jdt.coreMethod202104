@@ -4,29 +4,26 @@
 	private TypeDeclaration convert(SourceTypeElementInfo sourceType, CompilationResult compilationResult) {
 		
 		/* create type declaration - can be member type, local type or anonymous type */
-		TypeDeclaration type;
-		boolean isAnonymous = false;
+		TypeDeclaration type = new TypeDeclaration(compilationResult);
 		if (sourceType.getEnclosingType() == null) {
 			IType typeHandle = sourceType.getHandle();
 			try {
 				if (typeHandle.isAnonymous()) {
-					type = new AnonymousLocalTypeDeclaration(compilationResult);
-					isAnonymous = true;
-				} else if (typeHandle.isLocal()) {
-					type = new LocalTypeDeclaration(compilationResult);
+					type.name = TypeDeclaration.ANONYMOUS_EMPTY_NAME;
+					type.bits |= ASTNode.AnonymousAndLocalMask;
 				} else {
-					type = new TypeDeclaration(compilationResult);
+					if (typeHandle.isLocal()) {
+						type.bits |= ASTNode.IsLocalTypeMASK;
+					}
 				}
 			} catch (JavaModelException e) {
-				type = new TypeDeclaration(compilationResult);
+				// could not figure, assume toplevel
 			}
 		}  else {
-			type = new MemberTypeDeclaration(compilationResult);
+			type.bits |= ASTNode.IsMemberTypeMASK;
 		}
-		if (!isAnonymous) {
+		if ((type.bits & ASTNode.IsAnonymousTypeMASK) == 0) {
 			type.name = sourceType.getName();
-		} else {
-			type.name = AnonymousLocalTypeDeclaration.ANONYMOUS_EMPTY_NAME;
 		}
 		int start, end; // only positions available
 		type.sourceStart = start = sourceType.getNameSourceStart();
@@ -51,10 +48,9 @@
 		ISourceType[] sourceMemberTypes = sourceType.getMemberTypes();
 		int sourceMemberTypeCount =
 			sourceMemberTypes == null ? 0 : sourceMemberTypes.length;
-		type.memberTypes = new MemberTypeDeclaration[sourceMemberTypeCount];
+		type.memberTypes = new TypeDeclaration[sourceMemberTypeCount];
 		for (int i = 0; i < sourceMemberTypeCount; i++) {
-			type.memberTypes[i] =
-				(MemberTypeDeclaration) convert((SourceTypeElementInfo)sourceMemberTypes[i], compilationResult);
+			type.memberTypes[i] = convert((SourceTypeElementInfo)sourceMemberTypes[i], compilationResult);
 		}
 		
 		/* convert fields and initializers */
