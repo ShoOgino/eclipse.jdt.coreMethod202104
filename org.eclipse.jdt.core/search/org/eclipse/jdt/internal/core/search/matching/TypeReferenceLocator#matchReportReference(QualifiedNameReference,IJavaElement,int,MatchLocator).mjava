@@ -1,63 +1,46 @@
 protected void matchReportReference(QualifiedNameReference qNameRef, IJavaElement element, int accuracy, MatchLocator locator) throws CoreException {
-	char[][] tokens = null;
 	Binding binding = qNameRef.binding;
 	TypeBinding typeBinding = null;
-	char[][] nameTokens = qNameRef.tokens;
-	int lastIndex = nameTokens.length-1;
+	int lastIndex = qNameRef.tokens.length - 1;
 	switch (qNameRef.bits & AstNode.RestrictiveFlagMASK) {
 		case BindingIds.FIELD : // reading a field
 			typeBinding = qNameRef.actualReceiverType;
-			int otherBindingsCount = qNameRef.otherBindings == null ? 0 : qNameRef.otherBindings.length;			
-			lastIndex -= otherBindingsCount + 1;
+			lastIndex -= qNameRef.otherBindings == null ? 1 : qNameRef.otherBindings.length + 1;
 			break;
 		case BindingIds.TYPE : //=============only type ==============
-			if (binding instanceof ProblemBinding) {
-				ProblemBinding pbBinding = (ProblemBinding) binding;
-				typeBinding = pbBinding.searchType; // second chance with recorded type so far
-				char[] partialQualifiedName = pbBinding.name;
-				lastIndex = CharOperation.occurencesOf('.', partialQualifiedName) - 1; // index of last bound token is one before the pb token
-			} else {
-				typeBinding = (TypeBinding)binding;
-			}
+			if (binding instanceof TypeBinding)
+				typeBinding = (TypeBinding) binding;
 			break;
 		case BindingIds.VARIABLE : //============unbound cases===========
-		case BindingIds.TYPE | BindingIds.VARIABLE :						
-			if (binding instanceof ProblemBinding) {
-				ProblemBinding pbBinding = (ProblemBinding) binding;
-				typeBinding = pbBinding.searchType; // second chance with recorded type so far
-				char[] partialQualifiedName = pbBinding.name;
-				lastIndex = CharOperation.occurencesOf('.', partialQualifiedName) - 1; // index of last bound token is one before the pb token
+		case BindingIds.TYPE | BindingIds.VARIABLE :
+			if (binding instanceof ProblemReferenceBinding) {
+				typeBinding = (TypeBinding) binding;
+			} else if (binding instanceof ProblemFieldBinding) {
+				typeBinding = qNameRef.actualReceiverType;
+				lastIndex -= qNameRef.otherBindings == null ? 1 : qNameRef.otherBindings.length + 1;
+			} else if (binding instanceof ProblemBinding) {
+				typeBinding = ((ProblemBinding) binding).searchType;
 			}
-			break;
+			break;					
+	}
+	if (typeBinding instanceof ProblemReferenceBinding) {
+		ProblemReferenceBinding pbBinding = (ProblemReferenceBinding) typeBinding;
+		typeBinding = pbBinding.original;
+		lastIndex = pbBinding.compoundName.length - 1;
 	}
 	// try to match all enclosing types for which the token matches as well.
-	while (typeBinding != null && lastIndex >= 0) {
-		if (matchesName(this.pattern.simpleName, nameTokens[lastIndex--])) {
-			int level = resolveLevelForType(this.pattern.simpleName, this.pattern.qualification, typeBinding);
-			if (level != IMPOSSIBLE_MATCH) {
-				tokens = new char[lastIndex+2][];
-				System.arraycopy(nameTokens, 0, tokens, 0, lastIndex+2);
-				break;
+	if (typeBinding instanceof ReferenceBinding) {
+		ReferenceBinding refBinding = (ReferenceBinding) typeBinding; 
+		while (refBinding != null && lastIndex >= 0) {
+			if (resolveLevelForType(this.pattern.simpleName, this.pattern.qualification, refBinding) == ACCURATE_MATCH) {
+				long[] positions = qNameRef.sourcePositions;
+				locator.report(positions[this.pattern.qualification == null ? lastIndex : 0], positions[lastIndex], element, accuracy);
+				return;
 			}
-		}
-		typeBinding = typeBinding instanceof ReferenceBinding
-			? ((ReferenceBinding)typeBinding).enclosingType()
-			: null;
-	} 
-	if (tokens == null) {
-		tokens = binding == null || binding instanceof ProblemBinding
-			? new char[][] {this.pattern.simpleName}
-			: qNameRef.tokens;
-		if (!this.isCaseSensitive) {
-			int length = tokens.length;
-			char[][] lowerCaseTokens = new char[length][];
-			for (int i = 0; i < length; i++) {
-				char[] token = tokens[i];
-				lowerCaseTokens[i] = CharOperation.toLowerCase(token);
-			}
-			tokens = lowerCaseTokens;
+			lastIndex--;
+			refBinding = refBinding.enclosingType();
 		}
 	}
-	locator.reportAccurateReference(qNameRef.sourceStart, qNameRef.sourceEnd, tokens, element, accuracy);
+	locator.reportAccurateReference(qNameRef.sourceStart, qNameRef.sourceEnd, this.pattern.simpleName, element, accuracy);
 }
 
