@@ -6,33 +6,47 @@
 		if (Character.toLowerCase(readChar()) == 'a') {
 			this.scanner.currentPosition = this.index;
 			if (readToken() == TerminalTokens.TokenNameIdentifier) {
-				this.currentTokenType = -1; // do not update line end
+				consumeToken();
 				try {
 					if (CharOperation.equals(this.scanner.getCurrentIdentifierSource(), new char[]{'h', 'r', 'e', 'f'}, false) &&
 						readToken() == TerminalTokens.TokenNameEQUAL) {
-						this.currentTokenType = -1; // do not update line end
+						consumeToken();
 						if (readToken() == TerminalTokens.TokenNameStringLiteral) {
-							this.currentTokenType = -1; // do not update line end
+							consumeToken();
 							// Skip all characters after string literal until closing '>' (see bug 68726)
-							while (this.index <= this.lineEnd && readToken() != TerminalTokens.TokenNameGREATER) {
+							while (readToken() != TerminalTokens.TokenNameGREATER) {
+								if (this.scanner.currentPosition >= this.scanner.eofPosition || this.scanner.currentCharacter == '@' ||
+									(this.inlineTagStarted && this.scanner.currentCharacter == '}')) {
+									// Reset position: we want to rescan last token
+									this.index = this.tokenPreviousPosition;
+									this.scanner.currentPosition = this.tokenPreviousPosition;
+									this.currentTokenType = -1;
+									// Signal syntax error
+									if (this.tagValue != TAG_VALUE_VALUE) { // do not report error for @value tag, this will be done after...
+										if (this.sourceParser != null) this.sourceParser.problemReporter().javadocInvalidSeeUrlReference(start, this.lineEnd);
+									}
+									return false;
+								}
 								this.currentTokenType = -1; // do not update line end
 							}
 							if (this.currentTokenType == TerminalTokens.TokenNameGREATER) {
 								consumeToken(); // update line end as new lines are allowed in URL description
 								while (readToken() != TerminalTokens.TokenNameLESS) {
-									if (this.scanner.currentPosition >= this.scanner.eofPosition || this.scanner.currentCharacter == '@') {
+									if (this.scanner.currentPosition >= this.scanner.eofPosition || this.scanner.currentCharacter == '@' ||
+										(this.inlineTagStarted && this.scanner.currentCharacter == '}')) {
 										// Reset position: we want to rescan last token
 										this.index = this.tokenPreviousPosition;
 										this.scanner.currentPosition = this.tokenPreviousPosition;
 										this.currentTokenType = -1;
 										// Signal syntax error
-										if (this.tagValue != TAG_VALUE_VALUE && this.sourceParser != null)
-											this.sourceParser.problemReporter().javadocInvalidSeeUrlReference(start, this.lineEnd);
+										if (this.tagValue != TAG_VALUE_VALUE) { // do not report error for @value tag, this will be done after...
+											if (this.sourceParser != null) this.sourceParser.problemReporter().javadocInvalidSeeUrlReference(start, this.lineEnd);
+										}
 										return false;
 									}
 									consumeToken();
 								}
-								this.currentTokenType = -1; // do not update line end
+								consumeToken();
 								start = this.scanner.getCurrentTokenStartPosition();
 								if (readChar() == '/') {
 									if (Character.toLowerCase(readChar()) == 'a') {
@@ -55,8 +69,9 @@
 		this.scanner.currentPosition = this.tokenPreviousPosition;
 		this.currentTokenType = -1;
 		// Signal syntax error
-		if (this.tagValue != TAG_VALUE_VALUE && this.sourceParser != null)
-			this.sourceParser.problemReporter().javadocInvalidSeeUrlReference(start, this.lineEnd);
+		if (this.tagValue != TAG_VALUE_VALUE) { // do not report error for @value tag, this will be done after...
+			if (this.sourceParser != null) this.sourceParser.problemReporter().javadocInvalidSeeUrlReference(start, this.lineEnd);
+		}
 		return false;
 	}
 
