@@ -136,20 +136,30 @@
 				int sourceAttachmentFlags = 
 					this.getSourceAttachmentDeltaFlag(
 						oldResolvedPath[i].getSourceAttachmentPath(),
-						newSourcePath,
-						null/*not a source root path*/);
-				int sourceAttachmentRootFlags = 
-					this.getSourceAttachmentDeltaFlag(
-						oldResolvedPath[i].getSourceAttachmentRootPath(),
-						newResolvedPath[index].getSourceAttachmentRootPath(),
-						newSourcePath/*in case both root paths are null*/);
+						newSourcePath);
+				IPath oldRootPath = oldResolvedPath[i].getSourceAttachmentRootPath();
+				IPath newRootPath = newResolvedPath[index].getSourceAttachmentRootPath();
+				int sourceAttachmentRootFlags = getSourceAttachmentDeltaFlag(oldRootPath, newRootPath);
 				int flags = sourceAttachmentFlags | sourceAttachmentRootFlags;
 				if (flags != 0) {
-					addClasspathDeltas(
-						project.computePackageFragmentRoots(oldResolvedPath[i]),
-						flags,
-						delta);
+					addClasspathDeltas(project.computePackageFragmentRoots(oldResolvedPath[i]), flags, delta);
 					hasDelta = true;
+				} else {
+					if (oldRootPath == null && newRootPath == null) {
+						// if source path is specified and no root path, it needs to be recomputed dynamically
+						// force detach source on jar package fragment roots (source will be lazily computed when needed)
+						IPackageFragmentRoot[] computedRoots = project.computePackageFragmentRoots(oldResolvedPath[i]);
+						for (int j = 0; j < computedRoots.length; j++) {
+							IPackageFragmentRoot root = computedRoots[j];
+							// force detach source on jar package fragment roots (source will be lazily computed when needed)
+							try {
+								root.close();
+							} catch (JavaModelException e) {
+								// ignore
+							}
+							((PackageFragmentRoot) root).setSourceAttachmentProperty(null);// loose info - will be recomputed
+						}
+					}
 				}
 			}
 		}
@@ -220,6 +230,8 @@
 
 		if (hasDelta) {
 			this.addDelta(delta);
+		} else {
+			this.identicalRoots = true;
 		}
 		if (needToUpdateDependents){
 			updateAffectedProjects(project.getProject().getFullPath());
