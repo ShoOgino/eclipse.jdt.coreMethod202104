@@ -1,0 +1,50 @@
+	public void testSuperFieldInvocation() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        super.x= Outer.super.y;\n");
+		buf.append("    }\n");
+		buf.append("}\n");	
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+			
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		
+		AST ast= astRoot.getAST();
+		
+		assertTrue("Parse errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+		MethodDeclaration methodDecl= findMethodDeclaration(type, "foo");
+		Block block= methodDecl.getBody();
+		List statements= block.statements();
+		assertTrue("Number of statements not 1", statements.size() == 1);
+		{ // insert qualifier, replace field name, delete qualifier
+			ExpressionStatement stmt= (ExpressionStatement) statements.get(0);
+			Assignment assignment= (Assignment) stmt.getExpression();
+			SuperFieldAccess leftFieldAccess= (SuperFieldAccess) assignment.getLeftHandSide();
+			SuperFieldAccess rightFieldAccess= (SuperFieldAccess) assignment.getRightHandSide();
+			
+			SimpleName newQualifier= ast.newSimpleName("X");
+			rewrite.set(leftFieldAccess, SuperFieldAccess.QUALIFIER_PROPERTY, newQualifier, null);
+
+			SimpleName newName= ast.newSimpleName("y");
+			rewrite.markAsReplaced(leftFieldAccess.getName(), newName, null);
+
+			rewrite.markAsRemoved(rightFieldAccess.getQualifier(), null);
+		}
+		
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        X.super.y= super.y;\n");
+		buf.append("    }\n");
+		buf.append("}\n");	
+		assertEqualString(preview, buf.toString());
+		
+	}	
+

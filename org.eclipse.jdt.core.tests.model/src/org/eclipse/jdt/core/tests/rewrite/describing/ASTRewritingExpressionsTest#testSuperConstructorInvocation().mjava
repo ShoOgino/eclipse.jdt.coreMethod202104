@@ -1,0 +1,81 @@
+	public void testSuperConstructorInvocation() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public E() {\n");
+		buf.append("        super();\n");
+		buf.append("    }\n");
+		buf.append("    public E(int i) {\n");
+		buf.append("        foo(i + i).super(i);\n");
+		buf.append("    }\n");
+		buf.append("    public E(int i, int k) {\n");
+		buf.append("        Outer.super(foo(goo(x)), 1);\n");
+		buf.append("    }\n");	
+		buf.append("}\n");	
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+		
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		
+		AST ast= astRoot.getAST();
+		
+		assertTrue("Parse errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+		List bodyDeclarations= type.bodyDeclarations();
+		assertTrue("Number of bodyDeclarations not 3", bodyDeclarations.size() == 3);
+		{ // add expresssion & parameter
+			MethodDeclaration methodDecl= (MethodDeclaration) bodyDeclarations.get(0);
+			SuperConstructorInvocation invocation= (SuperConstructorInvocation) methodDecl.getBody().statements().get(0);
+
+			SimpleName newExpression= ast.newSimpleName("x");
+			rewrite.set(invocation, SuperConstructorInvocation.EXPRESSION_PROPERTY, newExpression, null);
+
+			ASTNode arg= ast.newNumberLiteral("1");
+			rewrite.getListRewrite(invocation, SuperConstructorInvocation.ARGUMENTS_PROPERTY).insertLast(arg, null);
+
+		}
+		{ // remove expression, replace argument with argument of expression
+			MethodDeclaration methodDecl= (MethodDeclaration) bodyDeclarations.get(1);
+			SuperConstructorInvocation invocation= (SuperConstructorInvocation) methodDecl.getBody().statements().get(0);
+
+			MethodInvocation expression= (MethodInvocation) invocation.getExpression();
+			rewrite.markAsRemoved(expression, null);
+			
+			ASTNode placeHolder= rewrite.createCopyTarget((ASTNode) expression.arguments().get(0));
+			
+			ASTNode arg1= (ASTNode) invocation.arguments().get(0);
+			
+			rewrite.markAsReplaced(arg1, placeHolder, null);
+		}
+		{ // remove argument, replace expression with part of argument
+			MethodDeclaration methodDecl= (MethodDeclaration) bodyDeclarations.get(2);
+			SuperConstructorInvocation invocation= (SuperConstructorInvocation) methodDecl.getBody().statements().get(0);
+			
+			MethodInvocation arg1= (MethodInvocation) invocation.arguments().get(0);
+			rewrite.markAsRemoved(arg1, null);
+			
+			ASTNode placeHolder= rewrite.createCopyTarget((ASTNode) arg1.arguments().get(0));
+			
+			rewrite.markAsReplaced(invocation.getExpression(), placeHolder, null);
+		}
+			
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public E() {\n");
+		buf.append("        x.super(1);\n");
+		buf.append("    }\n");
+		buf.append("    public E(int i) {\n");
+		buf.append("        super(i + i);\n");
+		buf.append("    }\n");
+		buf.append("    public E(int i, int k) {\n");
+		buf.append("        goo(x).super(1);\n");
+		buf.append("    }\n");	
+		buf.append("}\n");	
+		assertEqualString(preview, buf.toString());
+		
+	}
+

@@ -1,0 +1,47 @@
+	public void testNestedCopies() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo(Object o) {\n");
+		buf.append("        int i= (String) o.indexOf('1');\n");
+		buf.append("    }\n");
+		buf.append("}\n");
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+
+		CompilationUnit astRoot= createAST(cu);
+		AST ast= astRoot.getAST();
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		
+		TypeDeclaration typeDecl= findTypeDeclaration(astRoot, "E");
+		MethodDeclaration methDecl= findMethodDeclaration(typeDecl, "foo");
+		VariableDeclarationStatement varStat= (VariableDeclarationStatement) methDecl.getBody().statements().get(0);
+		
+		CastExpression expression= (CastExpression) ((VariableDeclarationFragment) varStat.fragments().get(0)).getInitializer();
+		MethodInvocation invocation= (MethodInvocation) expression.getExpression();
+		
+		CastExpression newCast= ast.newCastExpression();
+		newCast.setType((Type) rewrite.createCopyTarget(expression.getType()));
+		newCast.setExpression((Expression) rewrite.createCopyTarget(invocation.getExpression()));
+		ParenthesizedExpression parents= ast.newParenthesizedExpression();
+		parents.setExpression(newCast);
+		
+		ASTNode node= rewrite.createCopyTarget(invocation);
+		rewrite.markAsReplaced(expression, node, null);
+		rewrite.markAsReplaced(invocation.getExpression(), parents, null);
+				
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo(Object o) {\n");
+		buf.append("        int i= ((String) o).indexOf('1');\n");
+		buf.append("    }\n");
+		buf.append("}\n");
+		String expected= buf.toString();		
+
+		assertEqualString(preview, expected);
+	}
+

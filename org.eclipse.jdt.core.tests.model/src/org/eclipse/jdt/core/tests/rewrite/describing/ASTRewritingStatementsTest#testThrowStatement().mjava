@@ -1,0 +1,66 @@
+	public void testThrowStatement() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        throw new Exception();\n");
+		buf.append("    }\n");
+		buf.append("    public void goo() {\n");
+		buf.append("        throw new Exception('d');\n");
+		buf.append("    }\n");		
+		buf.append("}\n");	
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+		
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		
+		AST ast= astRoot.getAST();
+		
+		assertTrue("Parse errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+		{ // replace expression
+			MethodDeclaration methodDecl= findMethodDeclaration(type, "foo");
+			Block block= methodDecl.getBody();
+			List statements= block.statements();
+			assertTrue("Number of statements not 1", statements.size() == 1);			
+			
+			ThrowStatement statement= (ThrowStatement) statements.get(0);
+			
+			ClassInstanceCreation creation= ast.newClassInstanceCreation();
+			creation.setName(ast.newSimpleName("NullPointerException"));
+			creation.arguments().add(ast.newSimpleName("x"));
+			
+			rewrite.markAsReplaced(statement.getExpression(), creation, null);
+		}
+		
+		{ // modify expression
+			MethodDeclaration methodDecl= findMethodDeclaration(type, "goo");
+			Block block= methodDecl.getBody();
+			List statements= block.statements();
+			assertTrue("Number of statements not 1", statements.size() == 1);			
+			
+			ThrowStatement statement= (ThrowStatement) statements.get(0);			
+			
+			ClassInstanceCreation creation= (ClassInstanceCreation) statement.getExpression();
+			
+			ASTNode newArgument= ast.newSimpleName("x");
+			rewrite.markAsReplaced((ASTNode) creation.arguments().get(0), newArgument, null);
+		}				
+				
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        throw new NullPointerException(x);\n");
+		buf.append("    }\n");
+		buf.append("    public void goo() {\n");
+		buf.append("        throw new Exception(x);\n");
+		buf.append("    }\n");		
+		buf.append("}\n");	
+		assertEqualString(preview, buf.toString());
+
+	}		
+

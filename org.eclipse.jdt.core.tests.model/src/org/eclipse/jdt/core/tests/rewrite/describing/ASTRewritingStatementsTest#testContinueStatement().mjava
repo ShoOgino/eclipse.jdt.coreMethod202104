@@ -1,0 +1,66 @@
+	public void testContinueStatement() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        continue;\n");
+		buf.append("        continue label;\n");
+		buf.append("        continue label;\n");
+		buf.append("    }\n");
+		buf.append("}\n");	
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+		
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		
+		AST ast= astRoot.getAST();
+		
+		assertTrue("Parse errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+		MethodDeclaration methodDecl= findMethodDeclaration(type, "foo");
+		Block block= methodDecl.getBody();
+		List statements= block.statements();
+		assertTrue("Number of statements not 3", statements.size() == 3);
+		{ // insert label
+			ContinueStatement statement= (ContinueStatement) statements.get(0);
+			assertTrue("Has label", statement.getLabel() == null);
+			
+			SimpleName newLabel= ast.newSimpleName("label2");	
+
+			rewrite.set(statement, ContinueStatement.LABEL_PROPERTY, newLabel, null);
+		}
+		{ // replace label
+			ContinueStatement statement= (ContinueStatement) statements.get(1);
+			
+			SimpleName label= statement.getLabel();
+			assertTrue("Has no label", label != null);
+			
+			SimpleName newLabel= ast.newSimpleName("label2");	
+
+			rewrite.markAsReplaced(label, newLabel, null);
+		}
+		{ // remove label
+			ContinueStatement statement= (ContinueStatement) statements.get(2);
+			
+			SimpleName label= statement.getLabel();
+			assertTrue("Has no label", label != null);
+			
+			rewrite.markAsRemoved(label, null);
+		}	
+				
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        continue label2;\n");
+		buf.append("        continue label2;\n");
+		buf.append("        continue;\n");
+		buf.append("    }\n");
+		buf.append("}\n");	
+		assertEqualString(preview, buf.toString());
+
+	}
+

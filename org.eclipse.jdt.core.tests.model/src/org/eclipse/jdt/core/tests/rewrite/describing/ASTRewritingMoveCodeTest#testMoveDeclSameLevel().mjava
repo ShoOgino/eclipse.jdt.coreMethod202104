@@ -1,0 +1,107 @@
+	public void testMoveDeclSameLevel() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E extends Exception implements Runnable, Serializable {\n");
+		buf.append("    public static class EInner {\n");
+		buf.append("        public void xee() {\n");
+		buf.append("            /* does nothing */\n");
+		buf.append("        }\n");
+		buf.append("    }\n");		
+		buf.append("    private /* inner comment */ int i;\n");
+		buf.append("    private int k;\n");
+		buf.append("    public E() {\n");
+		buf.append("        super();\n");
+		buf.append("        i= 0;\n");
+		buf.append("        k= 9;\n");
+		buf.append("        if (System.out == null) {\n");
+		buf.append("            gee(); // cool\n");
+		buf.append("        }\n");
+		buf.append("    }\n");
+		buf.append("    public void gee() {\n");
+		buf.append("    }\n");
+		buf.append("}\n");
+		buf.append("interface G {\n");
+		buf.append("}\n");
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);	
+		
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		assertTrue("Code has errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+		
+		{ // move inner type to the end of the type & move, copy statements from constructor to method
+			
+			List members= type.bodyDeclarations();
+			assertTrue("Has declarations", !members.isEmpty());
+			
+			assertTrue("Cannot find inner class", members.get(0) instanceof TypeDeclaration);
+			TypeDeclaration innerType= (TypeDeclaration) members.get(0);
+			
+			ASTNode movedNode= rewrite.createMoveTarget(innerType);
+			rewrite.getListRewrite(type, TypeDeclaration.BODY_DECLARATIONS_PROPERTY).insertLast(movedNode, null);
+
+			
+			Statement toMove;
+			Statement toCopy;
+			{
+				MethodDeclaration methodDecl= findMethodDeclaration(type, "E");
+				assertTrue("Cannot find Constructor E", methodDecl != null);
+				Block body= methodDecl.getBody();
+				assertTrue("No body", body != null);
+				List statements= body.statements();
+				assertTrue("Not expected number of statements", statements.size() == 4);
+				
+				toMove= (Statement) statements.get(1);
+				toCopy= (Statement) statements.get(3);
+			}
+			{
+				MethodDeclaration methodDecl= findMethodDeclaration(type, "gee");
+				assertTrue("Cannot find gee()", methodDecl != null);
+				Block body= methodDecl.getBody();
+				assertTrue("No body", body != null);
+				List statements= body.statements();
+				assertTrue("Has statements", statements.isEmpty());
+				
+				ASTNode insertNodeForMove= rewrite.createMoveTarget(toMove);
+				ASTNode insertNodeForCopy= rewrite.createCopyTarget(toCopy);
+				
+				rewrite.getListRewrite(body, Block.STATEMENTS_PROPERTY).insertLast(insertNodeForCopy, null);
+				rewrite.getListRewrite(body, Block.STATEMENTS_PROPERTY).insertLast(insertNodeForMove, null);
+			}	
+		}			
+					
+
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E extends Exception implements Runnable, Serializable {\n");
+		buf.append("    private /* inner comment */ int i;\n");
+		buf.append("    private int k;\n");
+		buf.append("    public E() {\n");
+		buf.append("        super();\n");		
+		buf.append("        k= 9;\n");
+		buf.append("        if (System.out == null) {\n");
+		buf.append("            gee(); // cool\n");
+		buf.append("        }\n");
+		buf.append("    }\n");
+		buf.append("    public void gee() {\n");
+		buf.append("        if (System.out == null) {\n");
+		buf.append("            gee(); // cool\n");
+		buf.append("        }\n");		
+		buf.append("        i= 0;\n");
+		buf.append("    }\n");
+		buf.append("    public static class EInner {\n");
+		buf.append("        public void xee() {\n");
+		buf.append("            /* does nothing */\n");
+		buf.append("        }\n");
+		buf.append("    }\n");			
+		buf.append("}\n");
+		buf.append("interface G {\n");
+		buf.append("}\n");		
+		assertEqualString(preview, buf.toString());
+
+	}
+

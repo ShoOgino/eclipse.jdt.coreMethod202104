@@ -1,0 +1,128 @@
+	public void testTryStatement() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo(int i) {\n");
+		buf.append("        try {\n");	
+		buf.append("        } finally {\n");
+		buf.append("        }\n");		
+		buf.append("        try {\n");	
+		buf.append("        } catch (IOException e) {\n");
+		buf.append("        } finally {\n");
+		buf.append("        }\n");
+		buf.append("        try {\n");	
+		buf.append("        } catch (IOException e) {\n");
+		buf.append("        }\n");
+		buf.append("        try {\n");	
+		buf.append("        } catch (IOException e) {\n");
+		buf.append("        }\n");		
+		buf.append("    }\n");
+		buf.append("}\n");	
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+		
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		
+		AST ast= astRoot.getAST();
+		
+		assertTrue("Parse errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+		MethodDeclaration methodDecl= findMethodDeclaration(type, "foo");
+		Block block= methodDecl.getBody();
+		List blockStatements= block.statements();
+		assertTrue("Number of statements not 4", blockStatements.size() == 4);
+		{ // add catch, replace finally
+			TryStatement tryStatement= (TryStatement) blockStatements.get(0);
+			
+			CatchClause catchClause= ast.newCatchClause();
+			SingleVariableDeclaration decl= ast.newSingleVariableDeclaration();
+			decl.setType(ast.newSimpleType(ast.newSimpleName("IOException")));
+			decl.setName(ast.newSimpleName("e"));
+			catchClause.setException(decl);
+						
+			rewrite.getListRewrite(tryStatement, TryStatement.CATCH_CLAUSES_PROPERTY).insertLast(catchClause, null);
+			
+			Block body= ast.newBlock();
+			body.statements().add(ast.newReturnStatement());
+			
+			rewrite.markAsReplaced(tryStatement.getFinally(), body, null);
+		}
+		{ // replace catch, remove finally
+			TryStatement tryStatement= (TryStatement) blockStatements.get(1);
+			
+			List catchClauses= tryStatement.catchClauses();
+			
+			CatchClause catchClause= ast.newCatchClause();
+			SingleVariableDeclaration decl= ast.newSingleVariableDeclaration();
+			decl.setType(ast.newSimpleType(ast.newSimpleName("Exception")));
+			decl.setName(ast.newSimpleName("x"));
+			catchClause.setException(decl);
+			
+			rewrite.markAsReplaced((ASTNode) catchClauses.get(0), catchClause, null);
+					
+			rewrite.markAsRemoved(tryStatement.getFinally(), null);
+		}
+		{ // remove catch, add finally
+			TryStatement tryStatement= (TryStatement) blockStatements.get(2);
+			
+			List catchClauses= tryStatement.catchClauses();
+			rewrite.markAsRemoved((ASTNode) catchClauses.get(0), null);
+			
+			
+			Block body= ast.newBlock();
+			body.statements().add(ast.newReturnStatement());
+
+			rewrite.set(tryStatement, TryStatement.FINALLY_PROPERTY, body, null);
+		}
+		{ // insert catch before and after existing
+			TryStatement tryStatement= (TryStatement) blockStatements.get(3);
+			
+			CatchClause catchClause1= ast.newCatchClause();
+			SingleVariableDeclaration decl1= ast.newSingleVariableDeclaration();
+			decl1.setType(ast.newSimpleType(ast.newSimpleName("ParseException")));
+			decl1.setName(ast.newSimpleName("e"));
+			catchClause1.setException(decl1);
+			
+			rewrite.getListRewrite(tryStatement, TryStatement.CATCH_CLAUSES_PROPERTY).insertFirst(catchClause1, null);
+
+			
+			CatchClause catchClause2= ast.newCatchClause();
+			SingleVariableDeclaration decl2= ast.newSingleVariableDeclaration();
+			decl2.setType(ast.newSimpleType(ast.newSimpleName("FooException")));
+			decl2.setName(ast.newSimpleName("e"));
+			catchClause2.setException(decl2);
+			
+			rewrite.getListRewrite(tryStatement, TryStatement.CATCH_CLAUSES_PROPERTY).insertLast(catchClause2, null);
+		}				
+			
+	
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo(int i) {\n");
+		buf.append("        try {\n");
+		buf.append("        } catch (IOException e) {\n");		
+		buf.append("        } finally {\n");
+		buf.append("            return;\n");				
+		buf.append("        }\n");		
+		buf.append("        try {\n");	
+		buf.append("        } catch (Exception x) {\n");
+		buf.append("        }\n");
+		buf.append("        try {\n");	
+		buf.append("        } finally {\n");
+		buf.append("            return;\n");		
+		buf.append("        }\n");
+		buf.append("        try {\n");
+		buf.append("        } catch (ParseException e) {\n");
+		buf.append("        } catch (IOException e) {\n");
+		buf.append("        } catch (FooException e) {\n");
+		buf.append("        }\n");		
+		buf.append("    }\n");
+		buf.append("}\n");	
+		assertEqualString(preview, buf.toString());
+
+	}
+

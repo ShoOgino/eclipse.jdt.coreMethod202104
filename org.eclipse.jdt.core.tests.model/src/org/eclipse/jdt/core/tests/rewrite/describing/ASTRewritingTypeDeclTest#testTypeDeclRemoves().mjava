@@ -1,0 +1,101 @@
+	public void testTypeDeclRemoves() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E extends Exception implements Runnable, Serializable {\n");
+		buf.append("    public static class EInner {\n");
+		buf.append("        public void xee() {\n");
+		buf.append("        }\n");		
+		buf.append("    }\n");		
+		buf.append("    private int i;\n");	
+		buf.append("    private int k;\n");	
+		buf.append("    public E() {\n");
+		buf.append("    }\n");
+		buf.append("    public void gee() {\n");
+		buf.append("    }\n");
+		buf.append("    public void hee() {\n");
+		buf.append("    }\n");
+		buf.append("}\n");
+		buf.append("class F implements Runnable {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("    }\n");		
+		buf.append("}\n");
+		buf.append("interface G {\n");
+		buf.append("}\n");		
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);			
+
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		{ // change to interface, remove supertype, remove first interface, remove field
+			TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+			
+			// change flags
+			int newModifiers= 0;
+			rewrite.set(type, TypeDeclaration.MODIFIERS_PROPERTY, new Integer(newModifiers), null);
+
+			// change to interface
+			rewrite.set(type, TypeDeclaration.INTERFACE_PROPERTY, Boolean.TRUE, null);
+		
+			Name superClass= type.getSuperclass();
+			assertTrue("Has super type", superClass != null);
+			
+			rewrite.markAsRemoved(superClass, null);
+
+			List superInterfaces= type.superInterfaces();
+			assertTrue("Has super interfaces", !superInterfaces.isEmpty());
+			
+			rewrite.markAsRemoved((ASTNode) superInterfaces.get(0), null);
+			
+			List members= type.bodyDeclarations();
+			assertTrue("Has declarations", !members.isEmpty());
+					
+			rewrite.markAsRemoved((ASTNode) members.get(1), null);
+			
+			MethodDeclaration meth= findMethodDeclaration(type, "hee");
+			rewrite.markAsRemoved(meth, null);
+		}
+		{ // remove superinterface & method, change to interface & final
+			TypeDeclaration type= findTypeDeclaration(astRoot, "F");
+					
+			// change flags
+			int newModifiers= Modifier.FINAL;
+			rewrite.set(type, TypeDeclaration.MODIFIERS_PROPERTY, new Integer(newModifiers), null);
+
+			// change to interface
+			rewrite.set(type, TypeDeclaration.INTERFACE_PROPERTY, Boolean.TRUE, null);
+			
+			List superInterfaces= type.superInterfaces();
+			assertTrue("Has super interfaces", !superInterfaces.isEmpty());
+			rewrite.markAsRemoved((ASTNode) superInterfaces.get(0), null);
+			
+			List members= type.bodyDeclarations();
+			assertTrue("Has declarations", members.size() == 1);
+
+			rewrite.markAsRemoved((ASTNode) members.get(0), null);			
+		}			
+		{ // remove class G
+			TypeDeclaration type= findTypeDeclaration(astRoot, "G");
+			rewrite.markAsRemoved(type, null);		
+		}				
+
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("interface E extends Serializable {\n");
+		buf.append("    public static class EInner {\n");
+		buf.append("        public void xee() {\n");
+		buf.append("        }\n");		
+		buf.append("    }\n");		
+		buf.append("    private int k;\n");	
+		buf.append("    public E() {\n");
+		buf.append("    }\n");
+		buf.append("    public void gee() {\n");
+		buf.append("    }\n");
+		buf.append("}\n");
+		buf.append("final interface F {\n");
+		buf.append("}\n");				
+		assertEqualString(preview, buf.toString());
+
+	}
+

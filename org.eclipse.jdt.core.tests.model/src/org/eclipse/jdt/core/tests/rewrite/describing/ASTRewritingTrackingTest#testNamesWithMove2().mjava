@@ -1,0 +1,68 @@
+	public void testNamesWithMove2() throws Exception {
+		
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class C {\n");
+		buf.append("    public void foo(String s, int i) {\n");
+		buf.append("        while (i == 0) {\n");
+		buf.append("            ++i;\n");
+		buf.append("        }\n");
+		buf.append("    }\n");
+		buf.append("}\n");	
+		ICompilationUnit cu= pack1.createCompilationUnit("C.java", buf.toString(), false, null);
+	
+		CompilationUnit astRoot= createAST(cu);
+		AST ast= astRoot.getAST();
+		NewASTRewrite rewrite= new NewASTRewrite(ast);
+		
+		ArrayList names= new ArrayList();
+		ArrayList positions= new ArrayList();
+		
+		// change type name
+		TypeDeclaration typeC= findTypeDeclaration(astRoot, "C");
+		ITrackedNodePosition position= rewrite.markAsTracked(typeC.getName());
+		names.add("C");
+		positions.add(position);
+		
+		List decls= typeC.bodyDeclarations();
+		
+		MethodDeclaration method= (MethodDeclaration) decls.get(0);
+		position= rewrite.markAsTracked(method.getName());
+		names.add("foo");
+		positions.add(position);
+		
+		WhileStatement whileStatement= (WhileStatement) method.getBody().statements().get(0);
+		PrefixExpression prefixExpression= (PrefixExpression) ((ExpressionStatement) ((Block) whileStatement.getBody()).statements().get(0)).getExpression();
+		position= rewrite.markAsTracked(prefixExpression.getOperand());
+		names.add("i");
+		positions.add(position);
+
+		// move method before field
+		ASTNode placeHolder= rewrite.createMoveTarget(whileStatement);
+		
+		TryStatement tryStatement= ast.newTryStatement();
+		tryStatement.getBody().statements().add(placeHolder);
+		tryStatement.setFinally(ast.newBlock());
+		rewrite.markAsReplaced(whileStatement, tryStatement, null);
+								
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class C {\n");
+		buf.append("    public void foo(String s, int i) {\n");
+		buf.append("        try {\n");
+		buf.append("            while (i == 0) {\n");
+		buf.append("                ++i;\n");
+		buf.append("            }\n");
+		buf.append("        } finally {\n");
+		buf.append("        }\n");
+		buf.append("    }\n");
+		buf.append("}\n");	
+		String expected= buf.toString();
+		assertEqualString(preview, expected);
+		
+		assertCorrectTracking(names, positions, expected);
+	}	
+

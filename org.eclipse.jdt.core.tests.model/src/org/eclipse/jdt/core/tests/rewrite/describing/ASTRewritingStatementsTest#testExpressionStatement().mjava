@@ -1,0 +1,51 @@
+	public void testExpressionStatement() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        i= 0;\n");
+		buf.append("    }\n");
+		buf.append("}\n");	
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+		
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		
+		AST ast= astRoot.getAST();
+		
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+		MethodDeclaration methodDecl= findMethodDeclaration(type, "foo");
+		Block block= methodDecl.getBody();
+		assertTrue("Parse errors", (block.getFlags() & ASTNode.MALFORMED) == 0);
+		
+		List statements= block.statements();
+		assertTrue("Number of statements not 1", statements.size() == 1);
+		{ // replace expression
+			ExpressionStatement stmt= (ExpressionStatement) statements.get(0);
+			
+			Assignment assignment= (Assignment) stmt.getExpression();
+			Expression placeholder= (Expression) rewrite.createCopyTarget(assignment);
+									
+			Assignment newExpression= ast.newAssignment();
+			newExpression.setLeftHandSide(ast.newSimpleName("x"));
+			newExpression.setRightHandSide(placeholder);
+			newExpression.setOperator(Assignment.Operator.ASSIGN);
+	
+			rewrite.markAsReplaced(stmt.getExpression(), newExpression, null);
+		}
+				
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        x = i= 0;\n");
+		buf.append("    }\n");
+		buf.append("}\n");	
+		assertEqualString(preview, buf.toString());
+
+
+	}
+

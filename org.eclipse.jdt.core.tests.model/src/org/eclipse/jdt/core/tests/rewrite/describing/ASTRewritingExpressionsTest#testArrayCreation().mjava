@@ -1,0 +1,125 @@
+	public void testArrayCreation() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        goo(new int[] { 1, 2, 3 },\n");
+		buf.append("        new int[] { 1, 2, 3 },\n");
+		buf.append("        new int[2][][],\n");
+		buf.append("        new int[2][][],\n");
+		buf.append("        new int[2][][],\n");
+		buf.append("        new int[2][][]);\n");
+		buf.append("    }\n");
+		buf.append("}\n");	
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+		
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		
+		AST ast= astRoot.getAST();
+		
+		assertTrue("Parse errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+		MethodDeclaration methodDecl= findMethodDeclaration(type, "foo");
+		Block block= methodDecl.getBody();
+		List statements= block.statements();
+		assertTrue("Number of statements not 1", statements.size() == 1);
+		ExpressionStatement statement= (ExpressionStatement) statements.get(0);
+		MethodInvocation invocation= (MethodInvocation) statement.getExpression();
+		List args= invocation.arguments();
+		assertTrue("Number of arguments not 6", args.size() == 6);
+		
+		{	// replace the element type and increase the dimension
+			ArrayCreation arrayCreation= (ArrayCreation) args.get(0);
+			ArrayType arrayType= arrayCreation.getType();
+			
+			PrimitiveType floatType= ast.newPrimitiveType(PrimitiveType.FLOAT); 
+			ArrayType newArrayType= ast.newArrayType(floatType, 2);
+			
+			rewrite.markAsReplaced(arrayType, newArrayType, null);
+		}
+		{	// remove the initializer, add a dimension expression
+			ArrayCreation arrayCreation= (ArrayCreation) args.get(1);
+			rewrite.markAsRemoved(arrayCreation.getInitializer(), null);
+			
+			List dimensions= arrayCreation.dimensions();
+			assertTrue("Number of dimension expressions not 0", dimensions.size() == 0);
+			
+			NumberLiteral literal= ast.newNumberLiteral("10");
+			
+			rewrite.getListRewrite(arrayCreation, ArrayCreation.DIMENSIONS_PROPERTY).insertLast(literal, null);
+		}
+		{	// remove all dimension except one, no dimension expression
+			// insert the initializer: formatter problems
+			ArrayCreation arrayCreation= (ArrayCreation) args.get(2);
+			ArrayType arrayType= arrayCreation.getType();			
+			PrimitiveType intType= ast.newPrimitiveType(PrimitiveType.INT); 
+			ArrayType newArrayType= ast.newArrayType(intType, 1);
+			
+			rewrite.markAsReplaced(arrayType, newArrayType, null);
+			
+			List dimensions= arrayCreation.dimensions();
+			assertTrue("Number of dimension expressions not 1", dimensions.size() == 1);
+			
+			rewrite.markAsRemoved((ASTNode) dimensions.get(0), null);
+			
+			ArrayInitializer initializer= ast.newArrayInitializer();
+			List expressions= initializer.expressions();
+			expressions.add(ast.newNumberLiteral("10"));
+		}
+		{	// add 2 dimension expressions
+			ArrayCreation arrayCreation= (ArrayCreation) args.get(3);
+			
+			List dimensions= arrayCreation.dimensions();
+			assertTrue("Number of dimension expressions not 1", dimensions.size() == 1);
+			
+			NumberLiteral literal1= ast.newNumberLiteral("10");
+			rewrite.getListRewrite(arrayCreation, ArrayCreation.DIMENSIONS_PROPERTY).insertLast(literal1, null);
+
+			NumberLiteral literal2= ast.newNumberLiteral("11");
+			rewrite.getListRewrite(arrayCreation, ArrayCreation.DIMENSIONS_PROPERTY).insertLast(literal2, null);
+
+		}
+		{	// add 2 empty dimensions
+			ArrayCreation arrayCreation= (ArrayCreation) args.get(4);
+			ArrayType arrayType= arrayCreation.getType();
+			assertTrue("Number of dimension not 3", arrayType.getDimensions() == 3);
+			
+			PrimitiveType intType= ast.newPrimitiveType(PrimitiveType.INT); 
+			ArrayType newArrayType= ast.newArrayType(intType, 5);
+			
+			rewrite.markAsReplaced(arrayType, newArrayType, null);
+		}
+		{	// replace dimension expression, add a dimension expression
+			ArrayCreation arrayCreation= (ArrayCreation) args.get(5);
+
+			List dimensions= arrayCreation.dimensions();
+			assertTrue("Number of dimension expressions not 1", dimensions.size() == 1);
+
+			NumberLiteral literal1= ast.newNumberLiteral("10");
+			rewrite.markAsReplaced((ASTNode) dimensions.get(0), literal1, null);
+			
+			NumberLiteral literal2= ast.newNumberLiteral("11");
+			rewrite.getListRewrite(arrayCreation, ArrayCreation.DIMENSIONS_PROPERTY).insertLast(literal2, null);
+
+		}			
+				
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        goo(new float[][] { 1, 2, 3 },\n");
+		buf.append("        new int[10],\n");
+		buf.append("        new int[],\n");
+		buf.append("        new int[2][10][11],\n");
+		buf.append("        new int[2][][][][],\n");
+		buf.append("        new int[10][11][]);\n");
+		buf.append("    }\n");
+		buf.append("}\n");	
+		assertEqualString(preview, buf.toString());
+		
+	}
+

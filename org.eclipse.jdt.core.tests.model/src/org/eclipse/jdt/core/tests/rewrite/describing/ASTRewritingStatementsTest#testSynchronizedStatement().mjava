@@ -1,0 +1,57 @@
+	public void testSynchronizedStatement() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        synchronized(this) {\n");
+		buf.append("            System.beep();\n");
+		buf.append("        }\n");
+		buf.append("    }\n");
+		buf.append("}\n");	
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+		
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		
+		AST ast= astRoot.getAST();
+		
+		assertTrue("Parse errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+		MethodDeclaration methodDecl= findMethodDeclaration(type, "foo");
+		Block block= methodDecl.getBody();
+		List statements= block.statements();
+		assertTrue("Number of statements not 1", statements.size() == 1);
+
+		{ // replace expression and body
+			SynchronizedStatement statement= (SynchronizedStatement) statements.get(0);
+			ASTNode newExpression= ast.newSimpleName("obj");
+			rewrite.markAsReplaced(statement.getExpression(), newExpression, null);
+			
+			Block newBody= ast.newBlock();
+						
+			Assignment assign= ast.newAssignment();
+			assign.setLeftHandSide(ast.newSimpleName("x"));
+			assign.setRightHandSide(ast.newNumberLiteral("1"));
+			assign.setOperator(Assignment.Operator.ASSIGN);
+			
+			newBody.statements().add(ast.newExpressionStatement(assign));
+			
+			rewrite.markAsReplaced(statement.getBody(), newBody, null);
+		}		
+				
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        synchronized(obj) {\n");
+		buf.append("            x = 1;\n");
+		buf.append("        }\n");
+		buf.append("    }\n");
+		buf.append("}\n");	
+		assertEqualString(preview, buf.toString());
+
+	}
+

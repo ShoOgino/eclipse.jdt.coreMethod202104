@@ -1,0 +1,90 @@
+	public void testAnonymousClassDeclaration() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E2 {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        new Runnable() {\n");
+		buf.append("        };\n");
+		buf.append("        new Runnable() {\n");
+		buf.append("            int i= 8;\n");
+		buf.append("        };\n");
+		buf.append("        new Runnable() {\n");
+		buf.append("            int i= 8;\n");
+		buf.append("        };\n");		
+		buf.append("    }\n");
+		buf.append("}\n");	
+		ICompilationUnit cu= pack1.createCompilationUnit("E2.java", buf.toString(), false, null);
+		
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		
+		AST ast= astRoot.getAST();
+		
+		assertTrue("Parse errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E2");
+		MethodDeclaration methodDecl= findMethodDeclaration(type, "foo");
+		Block block= methodDecl.getBody();
+		List statements= block.statements();
+		assertTrue("Number of statements not 3", statements.size() == 3);
+		{	// insert body decl in AnonymousClassDeclaration
+			ExpressionStatement stmt= (ExpressionStatement) statements.get(0);
+			ClassInstanceCreation creation= (ClassInstanceCreation) stmt.getExpression();
+			AnonymousClassDeclaration anonym= creation.getAnonymousClassDeclaration();
+			assertTrue("no anonym class decl", anonym != null);
+			
+			List decls= anonym.bodyDeclarations();
+			assertTrue("Number of bodyDeclarations not 0", decls.size() == 0);
+			
+			MethodDeclaration newMethod= createNewMethod(ast, "newMethod", false);
+			rewrite.getListRewrite(anonym, AnonymousClassDeclaration.BODY_DECLARATIONS_PROPERTY).insertFirst(newMethod, null);
+		}
+		{	// remove body decl in AnonymousClassDeclaration
+			ExpressionStatement stmt= (ExpressionStatement) statements.get(1);
+			ClassInstanceCreation creation= (ClassInstanceCreation) stmt.getExpression();
+			AnonymousClassDeclaration anonym= creation.getAnonymousClassDeclaration();
+			assertTrue("no anonym class decl", anonym != null);
+			
+			List decls= anonym.bodyDeclarations();
+			assertTrue("Number of bodyDeclarations not 1", decls.size() == 1);
+
+			rewrite.markAsRemoved((ASTNode) decls.get(0), null);
+		}		
+		{	// replace body decl in AnonymousClassDeclaration
+			ExpressionStatement stmt= (ExpressionStatement) statements.get(2);
+			ClassInstanceCreation creation= (ClassInstanceCreation) stmt.getExpression();
+			AnonymousClassDeclaration anonym= creation.getAnonymousClassDeclaration();
+			assertTrue("no anonym class decl", anonym != null);
+			
+			List decls= anonym.bodyDeclarations();
+			assertTrue("Number of bodyDeclarations not 1", decls.size() == 1);
+			
+			MethodDeclaration newMethod= createNewMethod(ast, "newMethod", false);
+
+			rewrite.markAsReplaced((ASTNode) decls.get(0), newMethod, null);
+		}	
+					
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E2 {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        new Runnable() {\n");
+		buf.append("\n");
+		buf.append("            private void newMethod(String str) {\n");
+		buf.append("            }\n");	
+		buf.append("        };\n");
+		buf.append("        new Runnable() {\n");
+		buf.append("        };\n");
+		buf.append("        new Runnable() {\n");
+		buf.append("            private void newMethod(String str) {\n");
+		buf.append("            }\n");	
+		buf.append("        };\n");		
+		buf.append("    }\n");
+		buf.append("}\n");	
+			
+		assertEqualString(preview, buf.toString());
+
+	}
+

@@ -1,0 +1,79 @@
+	public void testFieldDeclaration() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class A {\n");
+		buf.append("    int i1= 1;\n");
+		buf.append("    int i2= 1, k2= 2, n2= 3;\n");
+		buf.append("    static final int i3= 1, k3= 2, n3= 3;\n");
+		buf.append("}\n");	
+		ICompilationUnit cu= pack1.createCompilationUnit("A.java", buf.toString(), false, null);
+		
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		
+		AST ast= astRoot.getAST();
+		
+		assertTrue("Parse errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		TypeDeclaration type= findTypeDeclaration(astRoot, "A");
+		
+		FieldDeclaration[] fieldDeclarations= type.getFields();
+		assertTrue("Number of fieldDeclarations not 3", fieldDeclarations.length == 3);
+		{	// add modifier, change type, add fragment
+			FieldDeclaration decl= fieldDeclarations[0];
+			
+			// add modifier
+			int newModifiers= Modifier.FINAL;
+			rewrite.set(decl, FieldDeclaration.MODIFIERS_PROPERTY, new Integer(newModifiers), null);
+			
+			PrimitiveType newType= ast.newPrimitiveType(PrimitiveType.BOOLEAN);
+			rewrite.markAsReplaced(decl.getType(), newType, null);
+					
+			VariableDeclarationFragment frag=	ast.newVariableDeclarationFragment();
+			frag.setName(ast.newSimpleName("k1"));
+			frag.setInitializer(null);
+
+			rewrite.getListRewrite(decl, FieldDeclaration.FRAGMENTS_PROPERTY).insertLast(frag, null);
+
+		}
+		{	// add modifiers, remove first two fragments, replace last
+			FieldDeclaration decl= fieldDeclarations[1];
+			
+			// add modifier
+			int newModifiers= Modifier.FINAL | Modifier.STATIC | Modifier.TRANSIENT;
+			rewrite.set(decl, FieldDeclaration.MODIFIERS_PROPERTY, new Integer(newModifiers), null);
+			
+			List fragments= decl.fragments();
+			assertTrue("Number of fragments not 3", fragments.size() == 3);
+			
+			rewrite.markAsRemoved((ASTNode) fragments.get(0), null);
+			rewrite.markAsRemoved((ASTNode) fragments.get(1), null);
+			
+			VariableDeclarationFragment frag=	ast.newVariableDeclarationFragment();
+			frag.setName(ast.newSimpleName("k2"));
+			frag.setInitializer(null);
+			
+			rewrite.markAsReplaced((ASTNode) fragments.get(2), frag, null);
+		}
+		{	// remove modifiers
+			FieldDeclaration decl= fieldDeclarations[2];
+			
+			// change modifier
+			int newModifiers= 0;
+			rewrite.set(decl, FieldDeclaration.MODIFIERS_PROPERTY, new Integer(newModifiers), null);
+		}
+				
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class A {\n");
+		buf.append("    final boolean i1= 1, k1;\n");
+		buf.append("    static final transient int k2;\n");
+		buf.append("    int i3= 1, k3= 2, n3= 3;\n");
+		buf.append("}\n");	
+		
+		assertEqualString(preview, buf.toString());
+
+	}
+

@@ -1,0 +1,63 @@
+	public void testCastExpression() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        x= (E) clone();\n");
+		buf.append("        z= y.toList();\n");
+		buf.append("    }\n");
+		buf.append("}\n");	
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+		
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		
+		AST ast= astRoot.getAST();
+		
+		assertTrue("Parse errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+		MethodDeclaration methodDecl= findMethodDeclaration(type, "foo");
+		Block block= methodDecl.getBody();
+		List statements= block.statements();
+		assertTrue("Number of statements not 2", statements.size() == 2);
+		{ // change cast type and cast expression
+			ExpressionStatement stmt= (ExpressionStatement) statements.get(0);
+			Assignment assignment= (Assignment) stmt.getExpression();
+			
+			CastExpression expression= (CastExpression) assignment.getRightHandSide();
+			SimpleType newType= ast.newSimpleType(ast.newSimpleName("SuperE"));
+			rewrite.markAsReplaced(expression.getType(), newType, null);
+			
+			SimpleName newExpression= ast.newSimpleName("a");
+			rewrite.markAsReplaced(expression.getExpression(), newExpression, null);
+		}
+		{ // create cast
+			ExpressionStatement stmt= (ExpressionStatement) statements.get(1);
+			Assignment assignment= (Assignment) stmt.getExpression();
+			
+			Expression rightHand= assignment.getRightHandSide();
+			
+			Expression placeholder= (Expression) rewrite.createCopyTarget(rightHand);
+			
+			CastExpression newCastExpression= ast.newCastExpression();
+			newCastExpression.setType(ast.newSimpleType(ast.newSimpleName("List")));
+			newCastExpression.setExpression(placeholder);
+			
+			rewrite.markAsReplaced(rightHand, newCastExpression, null);
+		}	
+				
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        x= (SuperE) a;\n");
+		buf.append("        z= (List) y.toList();\n");	
+		buf.append("    }\n");
+		buf.append("}\n");	
+		assertEqualString(preview, buf.toString());
+		
+	}
+

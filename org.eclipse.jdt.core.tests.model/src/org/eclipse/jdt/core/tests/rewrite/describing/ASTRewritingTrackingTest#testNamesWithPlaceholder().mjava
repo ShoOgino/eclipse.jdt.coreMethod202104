@@ -1,0 +1,66 @@
+	public void testNamesWithPlaceholder() throws Exception {
+		
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class C {\n");
+		buf.append("    public String foo(Object s) {\n");
+		buf.append("        return s;\n");
+		buf.append("    }\n");
+		buf.append("}\n");	
+		ICompilationUnit cu= pack1.createCompilationUnit("C.java", buf.toString(), false, null);
+	
+		CompilationUnit astRoot= createAST(cu);
+		AST ast= astRoot.getAST();
+		NewASTRewrite rewrite= new NewASTRewrite(ast);
+		
+		ArrayList names= new ArrayList();
+		ArrayList positions= new ArrayList();
+		
+		// change type name
+		TypeDeclaration typeC= findTypeDeclaration(astRoot, "C");
+		ITrackedNodePosition position= rewrite.markAsTracked(typeC.getName());
+		names.add("C");
+		positions.add(position);
+		
+		List decls= typeC.bodyDeclarations();
+		
+		MethodDeclaration method= (MethodDeclaration) decls.get(0);
+		position= rewrite.markAsTracked(method.getName());
+		names.add("foo");
+		positions.add(position);
+		
+		ReturnStatement returnStatement= (ReturnStatement) method.getBody().statements().get(0);
+		
+		CastExpression castExpression= ast.newCastExpression();
+		Type type= (Type) rewrite.createStringPlaceholder("String", NewASTRewrite.TYPE);
+		Expression expression= (Expression) rewrite.createMoveTarget(returnStatement.getExpression());
+		castExpression.setType(type);
+		castExpression.setExpression(expression);
+		
+		rewrite.markAsReplaced(returnStatement.getExpression(), castExpression, null);
+		
+		position= rewrite.markAsTracked(type);
+		names.add("String");
+		positions.add(position);
+		
+		position= rewrite.markAsTracked(expression);
+		names.add("s");
+		positions.add(position);
+		
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class C {\n");
+		buf.append("    public String foo(Object s) {\n");
+		buf.append("        return (String) s;\n");
+		buf.append("    }\n");
+		buf.append("}\n");	
+		String expected= buf.toString();
+		assertEqualString(preview, expected);
+		
+		assertCorrectTracking(names, positions, expected);
+
+	}	
+

@@ -1,0 +1,86 @@
+	public void testVariableDeclarationStatement() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class A {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        int i1= 1;\n");
+		buf.append("        int i2= 1, k2= 2, n2= 3;\n");
+		buf.append("        final int i3= 1, k3= 2, n3= 3;\n");
+		buf.append("    }\n");		
+		buf.append("}\n");	
+		ICompilationUnit cu= pack1.createCompilationUnit("A.java", buf.toString(), false, null);
+		
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		
+		AST ast= astRoot.getAST();
+		
+		assertTrue("Parse errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		TypeDeclaration type= findTypeDeclaration(astRoot, "A");
+		
+		MethodDeclaration methodDecl= findMethodDeclaration(type, "foo");
+		Block block= methodDecl.getBody();
+		assertTrue("Parse errors", (block.getFlags() & ASTNode.MALFORMED) == 0);
+		
+		List statements= block.statements();
+		assertTrue("Number of statements not 3", statements.size() == 3);
+		{	// add modifier, change type, add fragment
+			VariableDeclarationStatement decl= (VariableDeclarationStatement) statements.get(0);
+			
+			// add modifier
+			int newModifiers= Modifier.FINAL;
+			rewrite.set(decl, VariableDeclarationStatement.MODIFIERS_PROPERTY, new Integer(newModifiers), null);
+			
+			PrimitiveType newType= ast.newPrimitiveType(PrimitiveType.BOOLEAN);
+			rewrite.markAsReplaced(decl.getType(), newType, null);
+					
+			VariableDeclarationFragment frag=	ast.newVariableDeclarationFragment();
+			frag.setName(ast.newSimpleName("k1"));
+			frag.setInitializer(null);
+						
+			rewrite.getListRewrite(decl, VariableDeclarationStatement.FRAGMENTS_PROPERTY).insertLast(frag, null);
+		}
+		{	// add modifiers, remove first two fragments, replace last
+			VariableDeclarationStatement decl= (VariableDeclarationStatement) statements.get(1);
+			
+			// add modifier
+			int newModifiers= Modifier.FINAL;
+			rewrite.set(decl, VariableDeclarationStatement.MODIFIERS_PROPERTY, new Integer(newModifiers), null);
+			
+			List fragments= decl.fragments();
+			assertTrue("Number of fragments not 3", fragments.size() == 3);
+			
+			rewrite.markAsRemoved((ASTNode) fragments.get(0), null);
+			rewrite.markAsRemoved((ASTNode) fragments.get(1), null);
+			
+			VariableDeclarationFragment frag=	ast.newVariableDeclarationFragment();
+			frag.setName(ast.newSimpleName("k2"));
+			frag.setInitializer(null);
+			
+			rewrite.markAsReplaced((ASTNode) fragments.get(2), frag, null);
+		}
+		{	// remove modifiers
+			VariableDeclarationStatement decl= (VariableDeclarationStatement) statements.get(2);
+			
+			// add modifiers
+			int newModifiers= 0;
+			rewrite.set(decl, VariableDeclarationStatement.MODIFIERS_PROPERTY, new Integer(newModifiers), null);
+		}
+				
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class A {\n");
+		buf.append("    public void foo() {\n");		
+		buf.append("        final boolean i1= 1, k1;\n");
+		buf.append("        final int k2;\n");
+		buf.append("        int i3= 1, k3= 2, n3= 3;\n");
+		buf.append("    }\n");		
+		buf.append("}\n");	
+		
+		assertEqualString(preview, buf.toString());
+
+	}
+

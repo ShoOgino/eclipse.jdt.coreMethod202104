@@ -1,0 +1,116 @@
+	public void testMethodDeclChanges() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public abstract class E {\n");
+		buf.append("    public E(int p1, int p2, int p3) {}\n");
+		buf.append("    public void gee(int p1, int p2, int p3) throws IllegalArgumentException {}\n");
+		buf.append("    public void hee(int p1, int p2, int p3) throws IllegalArgumentException {}\n");
+		buf.append("    public void iee(int p1, int p2, int p3) throws IllegalArgumentException, IllegalAccessException {}\n");
+		buf.append("    public void jee(int p1, int p2, int p3) throws IllegalArgumentException, IllegalAccessException {}\n");
+		buf.append("    public abstract void kee(int p1, int p2, int p3) throws IllegalArgumentException, IllegalAccessException, SecurityException;\n");
+		buf.append("    public abstract void lee(int p1, int p2, int p3) throws IllegalArgumentException, IllegalAccessException, SecurityException;\n");
+		buf.append("}\n");	
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);	
+		
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		AST ast= astRoot.getAST();
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+		
+		{ // convert constructor to method: insert return type
+			MethodDeclaration methodDecl= findMethodDeclaration(type, "E");
+			
+			Type newReturnType= astRoot.getAST().newPrimitiveType(PrimitiveType.FLOAT);
+			
+			// from constructor to method
+			rewrite.set(methodDecl, MethodDeclaration.RETURN_TYPE_PROPERTY, newReturnType, null);
+			rewrite.set(methodDecl, MethodDeclaration.CONSTRUCTOR_PROPERTY, Boolean.FALSE, null);
+		}
+		{ // change return type
+			MethodDeclaration methodDecl= findMethodDeclaration(type, "gee");
+			assertTrue("Has no return type: gee", methodDecl.getReturnType() != null);
+			
+			Type returnType= methodDecl.getReturnType();
+			Type newReturnType= astRoot.getAST().newPrimitiveType(PrimitiveType.FLOAT);
+			rewrite.markAsReplaced(returnType, newReturnType, null);
+		}
+		{ // remove return type
+			MethodDeclaration methodDecl= findMethodDeclaration(type, "hee");
+			assertTrue("Has no return type: hee", methodDecl.getReturnType() != null);
+						
+			// from method to constructor
+			rewrite.set(methodDecl, MethodDeclaration.CONSTRUCTOR_PROPERTY, Boolean.TRUE, null);
+		}
+		{ // rename method name
+			MethodDeclaration methodDecl= findMethodDeclaration(type, "iee");
+			
+			SimpleName name= methodDecl.getName();
+			SimpleName newName= ast.newSimpleName("xii");
+			
+			rewrite.markAsReplaced(name, newName, null);
+		}				
+		{ // rename first param & last throw statement
+			MethodDeclaration methodDecl= findMethodDeclaration(type, "jee");
+			List parameters= methodDecl.parameters();
+			assertTrue("must be 3 parameters", parameters.size() == 3);
+			SingleVariableDeclaration newParam= createNewParam(ast, "m");
+			rewrite.markAsReplaced((ASTNode) parameters.get(0), newParam, null);
+						
+			List thrownExceptions= methodDecl.thrownExceptions();
+			assertTrue("must be 2 thrown exceptions", thrownExceptions.size() == 2);
+			Name newThrownException= ast.newSimpleName("ArrayStoreException");
+			rewrite.markAsReplaced((ASTNode) thrownExceptions.get(1), newThrownException, null);			
+		}
+		{ // rename first and second param & rename first and last exception
+			MethodDeclaration methodDecl= findMethodDeclaration(type, "kee");
+			List parameters= methodDecl.parameters();
+			assertTrue("must be 3 parameters", parameters.size() == 3);
+			SingleVariableDeclaration newParam1= createNewParam(ast, "m1");
+			SingleVariableDeclaration newParam2= createNewParam(ast, "m2");
+			rewrite.markAsReplaced((ASTNode) parameters.get(0), newParam1, null);
+			rewrite.markAsReplaced((ASTNode) parameters.get(1), newParam2, null);
+			
+			List thrownExceptions= methodDecl.thrownExceptions();
+			assertTrue("must be 3 thrown exceptions", thrownExceptions.size() == 3);
+			Name newThrownException1= ast.newSimpleName("ArrayStoreException");
+			Name newThrownException2= ast.newSimpleName("InterruptedException");
+			rewrite.markAsReplaced((ASTNode) thrownExceptions.get(0), newThrownException1, null);
+			rewrite.markAsReplaced((ASTNode) thrownExceptions.get(2), newThrownException2, null);
+		}		
+		{ // rename all params & rename second exception
+			MethodDeclaration methodDecl= findMethodDeclaration(type, "lee");
+			List parameters= methodDecl.parameters();
+			assertTrue("must be 3 parameters", parameters.size() == 3);
+			SingleVariableDeclaration newParam1= createNewParam(ast, "m1");
+			SingleVariableDeclaration newParam2= createNewParam(ast, "m2");			
+			SingleVariableDeclaration newParam3= createNewParam(ast, "m3");	
+			rewrite.markAsReplaced((ASTNode) parameters.get(0), newParam1, null);
+			rewrite.markAsReplaced((ASTNode) parameters.get(1), newParam2, null);
+			rewrite.markAsReplaced((ASTNode) parameters.get(2), newParam3, null);
+			
+			List thrownExceptions= methodDecl.thrownExceptions();
+			assertTrue("must be 3 thrown exceptions", thrownExceptions.size() == 3);
+			Name newThrownException= ast.newSimpleName("ArrayStoreException");
+			rewrite.markAsReplaced((ASTNode) thrownExceptions.get(1), newThrownException, null);
+		}				
+		
+					
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public abstract class E {\n");
+		buf.append("    public float E(int p1, int p2, int p3) {}\n");
+		buf.append("    public float gee(int p1, int p2, int p3) throws IllegalArgumentException {}\n");
+		buf.append("    public hee(int p1, int p2, int p3) throws IllegalArgumentException {}\n");
+		buf.append("    public void xii(int p1, int p2, int p3) throws IllegalArgumentException, IllegalAccessException {}\n");
+		buf.append("    public void jee(float m, int p2, int p3) throws IllegalArgumentException, ArrayStoreException {}\n");
+		buf.append("    public abstract void kee(float m1, float m2, int p3) throws ArrayStoreException, IllegalAccessException, InterruptedException;\n");
+		buf.append("    public abstract void lee(float m1, float m2, float m3) throws IllegalArgumentException, ArrayStoreException, SecurityException;\n");
+		buf.append("}\n");	
+			
+		assertEqualString(preview, buf.toString());
+
+	}
+

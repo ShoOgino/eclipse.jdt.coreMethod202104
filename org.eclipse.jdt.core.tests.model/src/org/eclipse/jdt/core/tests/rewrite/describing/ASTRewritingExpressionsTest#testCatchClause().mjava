@@ -1,0 +1,67 @@
+	public void testCatchClause() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        try {\n");
+		buf.append("        } catch (IOException e) {\n");
+		buf.append("        } catch (CoreException e) {\n");
+		buf.append("        }\n");			
+		buf.append("    }\n");
+		buf.append("}\n");	
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+		
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		
+		AST ast= astRoot.getAST();
+		
+		assertTrue("Parse errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+		MethodDeclaration methodDecl= findMethodDeclaration(type, "foo");
+		Block block= methodDecl.getBody();
+		List statements= block.statements();
+		assertTrue("Number of statements not 3", statements.size() == 1);
+		List catchClauses= ((TryStatement) statements.get(0)).catchClauses();
+		assertTrue("Number of catchClauses not 2", catchClauses.size() == 2);
+		{ // change exception type
+			CatchClause clause= (CatchClause) catchClauses.get(0);
+			
+			SingleVariableDeclaration exception= clause.getException();
+			
+			SingleVariableDeclaration newException= ast.newSingleVariableDeclaration();
+						
+			newException.setType(ast.newSimpleType(ast.newSimpleName("NullPointerException")));
+			newException.setName(ast.newSimpleName("ex"));
+			
+			rewrite.markAsReplaced(exception, newException, null);
+		}
+		{ // change body
+			CatchClause clause= (CatchClause) catchClauses.get(1);
+			Block body= clause.getBody();
+			
+			Block newBody= ast.newBlock();
+			ReturnStatement returnStatement= ast.newReturnStatement();
+			newBody.statements().add(returnStatement);
+			
+			rewrite.markAsReplaced(body, newBody, null);
+		}
+				
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        try {\n");
+		buf.append("        } catch (NullPointerException ex) {\n");
+		buf.append("        } catch (CoreException e) {\n");
+		buf.append("            return;\n");	
+		buf.append("        }\n");			
+		buf.append("    }\n");
+		buf.append("}\n");	
+		assertEqualString(preview, buf.toString());
+		
+	}
+

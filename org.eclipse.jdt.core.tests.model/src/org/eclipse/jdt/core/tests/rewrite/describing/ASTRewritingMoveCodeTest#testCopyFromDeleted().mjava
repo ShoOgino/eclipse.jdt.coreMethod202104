@@ -1,0 +1,56 @@
+	public void testCopyFromDeleted() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        if (System.out == null) {\n");
+		buf.append("            gee(); // cool\n");
+		buf.append("        }\n");
+		buf.append("    }\n");
+		buf.append("    public void goo() {\n");
+		buf.append("    }\n");
+		buf.append("}\n");
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+		
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		assertTrue("Code has errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+		
+		{ // delete method foo, but copy if statement to goo
+			MethodDeclaration methodDecl= findMethodDeclaration(type, "foo");
+			assertTrue("Cannot find foo", methodDecl != null);
+			
+			rewrite.markAsRemoved(methodDecl, null);
+			
+			Block body= methodDecl.getBody();
+			List statements= body.statements();
+			assertTrue("Cannot find if statement", statements.size() == 1);
+			
+			ASTNode placeHolder= rewrite.createMoveTarget((ASTNode) statements.get(0));
+			
+			
+			MethodDeclaration methodGoo= findMethodDeclaration(type, "goo");
+			assertTrue("Cannot find goo", methodGoo != null);
+			
+			rewrite.getListRewrite(methodGoo.getBody(), Block.STATEMENTS_PROPERTY).insertLast(placeHolder, null);
+		}	
+					
+
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void goo() {\n");
+		buf.append("        if (System.out == null) {\n");
+		buf.append("            gee(); // cool\n");
+		buf.append("        }\n");		
+		buf.append("    }\n");
+		buf.append("}\n");
+		assertEqualString(preview, buf.toString());
+
+	}
+

@@ -1,0 +1,76 @@
+	public void testMethodInvocation() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        foo(1, 2).goo();\n");
+		buf.append("        foo(1, 2).goo();\n");
+		buf.append("        foo(1, 2).goo();\n");
+		buf.append("    }\n");
+		buf.append("}\n");	
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+		
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		
+		AST ast= astRoot.getAST();
+		
+		assertTrue("Parse errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+		MethodDeclaration methodDecl= findMethodDeclaration(type, "foo");
+		Block block= methodDecl.getBody();
+		List statements= block.statements();
+		assertTrue("Number of statements not 3", statements.size() == 3);
+		{ // remove expression, add param, change name
+			ExpressionStatement stmt= (ExpressionStatement) statements.get(0);
+			MethodInvocation invocation= (MethodInvocation) stmt.getExpression();
+			
+			rewrite.markAsRemoved(invocation.getExpression(), null);
+			
+			SimpleName name= ast.newSimpleName("x");
+			rewrite.markAsReplaced(invocation.getName(), name, null);
+			
+			ASTNode arg= ast.newNumberLiteral("1");
+			rewrite.getListRewrite(invocation, MethodInvocation.ARGUMENTS_PROPERTY).insertLast(arg, null);
+
+		}
+		{ // insert expression, delete params
+			ExpressionStatement stmt= (ExpressionStatement) statements.get(1);
+			MethodInvocation invocation= (MethodInvocation) stmt.getExpression();
+			
+			MethodInvocation leftInvocation= (MethodInvocation) invocation.getExpression();
+			
+			SimpleName newExpression= ast.newSimpleName("x");
+			rewrite.set(leftInvocation, MethodInvocation.EXPRESSION_PROPERTY, newExpression, null);
+			
+			List args= leftInvocation.arguments();
+			rewrite.markAsRemoved((ASTNode) args.get(0), null);
+			rewrite.markAsRemoved((ASTNode) args.get(1), null);
+		}
+		{ // remove expression, add it as parameter
+			ExpressionStatement stmt= (ExpressionStatement) statements.get(2);
+			MethodInvocation invocation= (MethodInvocation) stmt.getExpression();
+			
+			ASTNode placeHolder= rewrite.createCopyTarget(invocation.getExpression());
+			
+			rewrite.set(invocation, MethodInvocation.EXPRESSION_PROPERTY, null, null);
+
+			rewrite.getListRewrite(invocation, MethodInvocation.ARGUMENTS_PROPERTY).insertLast(placeHolder, null);
+		}
+			
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        x(1);\n");
+		buf.append("        x.foo().goo();\n");		
+		buf.append("        goo(foo(1, 2));\n");
+		buf.append("    }\n");
+		buf.append("}\n");	
+		assertEqualString(preview, buf.toString());
+		
+	}
+

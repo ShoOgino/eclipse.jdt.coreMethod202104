@@ -1,0 +1,60 @@
+	public void testIfStatement_bug48988() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    void doit() {\n");
+		buf.append("        int var;\n");
+		buf.append("        if (true)\n");
+		buf.append("            var = 17;\n");
+		buf.append("        else if (var == 18)\n");
+		buf.append("            if (1 < var && var < 17)\n");
+		buf.append("                var = 1;\n");
+		buf.append("            else\n");
+		buf.append("                var++;\n");
+		buf.append("        else\n");
+		buf.append("            return;\n");
+		buf.append("    }\n");
+		buf.append("}\n");
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+		
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		AST ast= astRoot.getAST();
+		
+		TypeDeclaration typeDecl= findTypeDeclaration(astRoot, "E");
+		MethodDeclaration methDecl= findMethodDeclaration(typeDecl, "doit");
+		IfStatement outerIf= (IfStatement) methDecl.getBody().statements().get(1);
+		ASTNode node= ((IfStatement) outerIf.getElseStatement()).getThenStatement();
+		
+		assertTrue(node instanceof IfStatement);
+		
+		{ // replace else statement by a block containing the old then statement
+			IfStatement ifStatement= (IfStatement) node;
+			ASTNode placeholder = rewrite.createMoveTarget(ifStatement);
+			Block newBlock = ast.newBlock();
+			newBlock.statements().add(placeholder);
+			rewrite.markAsReplaced(ifStatement, newBlock, null);
+		}
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    void doit() {\n");
+		buf.append("        int var;\n");
+		buf.append("        if (true)\n");
+		buf.append("            var = 17;\n");
+		buf.append("        else if (var == 18) {\n");
+		buf.append("            if (1 < var && var < 17)\n");
+		buf.append("                var = 1;\n");
+		buf.append("            else\n");
+		buf.append("                var++;\n");
+		buf.append("        } else\n");
+		buf.append("            return;\n");
+		buf.append("    }\n");
+		buf.append("}\n");
+		assertEqualString(preview, buf.toString());
+
+	}
+

@@ -1,0 +1,103 @@
+	public void testMoveStatementsCD() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E extends Exception implements Runnable, Serializable {\n");
+		buf.append("    public static class EInner {\n");
+		buf.append("        public void xee() {\n");
+		buf.append("            /* does nothing */\n");
+		buf.append("        }\n");
+		buf.append("    }\n");		
+		buf.append("    private /* inner comment */ int i;\n");
+		buf.append("    private int k;\n");
+		buf.append("    public E() {\n");
+		buf.append("        super();\n");
+		buf.append("        i= 0;\n");
+		buf.append("        k= 9;\n");
+		buf.append("        if (System.out == null) {\n");
+		buf.append("            gee(); // cool\n");
+		buf.append("        }\n");
+		buf.append("    }\n");
+		buf.append("    public void gee() {\n");
+		buf.append("    }\n");
+		buf.append("}\n");
+		buf.append("interface G {\n");
+		buf.append("}\n");
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+		
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		AST ast= astRoot.getAST();
+		assertTrue("Code has errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+		
+		{ // move first statments inside an ifstatement, move second statment inside a new while statement
+		   // that is in the ifstatement
+			MethodDeclaration methodDecl= findMethodDeclaration(type, "E");
+			assertTrue("Cannot find Constructor E", methodDecl != null);
+
+			Block body= methodDecl.getBody();
+			List statements= body.statements();
+			
+			assertTrue("Cannot find if statement", statements.get(3) instanceof IfStatement);
+			
+			IfStatement ifStatement= (IfStatement) statements.get(3);
+			
+			Statement insertNodeForCopy1= (Statement) rewrite.createCopyTarget((ASTNode) statements.get(1));
+			Statement insertNodeForCopy2= (Statement) rewrite.createCopyTarget((ASTNode) statements.get(2));
+			
+			Block whileBody= ast.newBlock();
+			
+			WhileStatement whileStatement= ast.newWhileStatement();
+			whileStatement.setExpression(ast.newBooleanLiteral(true));
+			whileStatement.setBody(whileBody);
+			
+			List whileBodyStatements= whileBody.statements();
+			whileBodyStatements.add(insertNodeForCopy2);
+			
+			
+			assertTrue("if statement body not a block", ifStatement.getThenStatement() instanceof Block);
+			
+			
+			Block block= (Block)ifStatement.getThenStatement();
+			
+			rewrite.getListRewrite(block, Block.STATEMENTS_PROPERTY).insertFirst(whileStatement, null);
+			rewrite.getListRewrite(block, Block.STATEMENTS_PROPERTY).insertAfter(insertNodeForCopy1, whileStatement, null);
+			
+			rewrite.markAsRemoved((ASTNode) statements.get(1), null);
+			rewrite.markAsRemoved((ASTNode) statements.get(2), null);
+		}	
+					
+
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E extends Exception implements Runnable, Serializable {\n");
+		buf.append("    public static class EInner {\n");
+		buf.append("        public void xee() {\n");
+		buf.append("            /* does nothing */\n");
+		buf.append("        }\n");
+		buf.append("    }\n");		
+		buf.append("    private /* inner comment */ int i;\n");
+		buf.append("    private int k;\n");
+		buf.append("    public E() {\n");
+		buf.append("        super();\n");
+		buf.append("        if (System.out == null) {\n");
+		buf.append("            while (true) {\n");
+		buf.append("                k= 9;\n");
+		buf.append("            }\n");		
+		buf.append("            i= 0;\n");
+		buf.append("            gee(); // cool\n");
+		buf.append("        }\n");
+		buf.append("    }\n");
+		buf.append("    public void gee() {\n");
+		buf.append("    }\n");
+		buf.append("}\n");
+		buf.append("interface G {\n");
+		buf.append("}\n");
+		assertEqualString(preview, buf.toString());
+
+	}	
+

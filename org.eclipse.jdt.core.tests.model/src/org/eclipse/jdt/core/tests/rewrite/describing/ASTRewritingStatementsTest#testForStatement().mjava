@@ -1,0 +1,159 @@
+	public void testForStatement() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        for (int i= 0; i < len; i++) {\n");
+		buf.append("        }\n");
+		buf.append("        for (i= 0, j= 0; i < len; i++, j++) {\n");
+		buf.append("        }\n");
+		buf.append("        for (;;) {\n");
+		buf.append("        }\n");	
+		buf.append("        for (;;) {\n");
+		buf.append("        }\n");
+		buf.append("        for (i= 0; i < len; i++) {\n");
+		buf.append("        }\n");		
+		buf.append("    }\n");
+		buf.append("}\n");	
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+		
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		AST ast= astRoot.getAST();
+
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+		MethodDeclaration methodDecl= findMethodDeclaration(type, "foo");
+		Block block= methodDecl.getBody();
+		assertTrue("Parse errors", (block.getFlags() & ASTNode.MALFORMED) == 0);
+		
+		List statements= block.statements();
+		assertTrue("Number of statements not 5", statements.size() == 5);
+
+		{ // replace initializer, change expression, add updater, replace cody
+			ForStatement forStatement= (ForStatement) statements.get(0);
+			
+			List initializers= forStatement.initializers();
+			assertTrue("Number of initializers not 1", initializers.size() == 1);
+			
+			Assignment assignment= ast.newAssignment();
+			assignment.setLeftHandSide(ast.newSimpleName("i"));
+			assignment.setOperator(Assignment.Operator.ASSIGN);
+			assignment.setRightHandSide(ast.newNumberLiteral("3"));
+			
+			rewrite.markAsReplaced((ASTNode) initializers.get(0), assignment, null);
+			
+			Assignment assignment2= ast.newAssignment();
+			assignment2.setLeftHandSide(ast.newSimpleName("j"));
+			assignment2.setOperator(Assignment.Operator.ASSIGN);
+			assignment2.setRightHandSide(ast.newNumberLiteral("4"));
+			
+			rewrite.getListRewrite(forStatement, ForStatement.INITIALIZERS_PROPERTY).insertLast(assignment2, null);
+			
+			BooleanLiteral literal= ast.newBooleanLiteral(true);
+			rewrite.markAsReplaced(forStatement.getExpression(), literal, null);
+			
+			// add updater
+			PrefixExpression prefixExpression= ast.newPrefixExpression();
+			prefixExpression.setOperand(ast.newSimpleName("j"));
+			prefixExpression.setOperator(PrefixExpression.Operator.INCREMENT);
+			
+			rewrite.getListRewrite(forStatement, ForStatement.UPDATERS_PROPERTY).insertLast(prefixExpression, null);
+			
+			// replace body		
+			Block newBody= ast.newBlock();
+			
+			MethodInvocation invocation= ast.newMethodInvocation();
+			invocation.setName(ast.newSimpleName("hoo"));
+			invocation.arguments().add(ast.newNumberLiteral("11"));
+			
+			newBody.statements().add(ast.newExpressionStatement(invocation));
+			
+			rewrite.markAsReplaced(forStatement.getBody(), newBody, null);
+		}
+		{ // remove initializers, expression and updaters
+			ForStatement forStatement= (ForStatement) statements.get(1);
+			
+			List initializers= forStatement.initializers();
+			assertTrue("Number of initializers not 2", initializers.size() == 2);
+			
+			rewrite.markAsRemoved((ASTNode) initializers.get(0), null);
+			rewrite.markAsRemoved((ASTNode) initializers.get(1), null);
+			
+			rewrite.markAsRemoved(forStatement.getExpression(), null);
+			
+			List updaters= forStatement.updaters();
+			assertTrue("Number of initializers not 2", updaters.size() == 2);
+			
+			rewrite.markAsRemoved((ASTNode) updaters.get(0), null);
+			rewrite.markAsRemoved((ASTNode) updaters.get(1), null);
+		}
+		{ // insert updater
+			ForStatement forStatement= (ForStatement) statements.get(2);
+			
+			PrefixExpression prefixExpression= ast.newPrefixExpression();
+			prefixExpression.setOperand(ast.newSimpleName("j"));
+			prefixExpression.setOperator(PrefixExpression.Operator.INCREMENT);
+
+			rewrite.getListRewrite(forStatement, ForStatement.UPDATERS_PROPERTY).insertLast(prefixExpression, null);
+		}
+		
+		{ // insert updater & initializer
+			ForStatement forStatement= (ForStatement) statements.get(3);
+			
+			Assignment assignment= ast.newAssignment();
+			assignment.setLeftHandSide(ast.newSimpleName("j"));
+			assignment.setOperator(Assignment.Operator.ASSIGN);
+			assignment.setRightHandSide(ast.newNumberLiteral("3"));
+			
+			rewrite.getListRewrite(forStatement, ForStatement.INITIALIZERS_PROPERTY).insertLast(assignment, null);
+			
+			PrefixExpression prefixExpression= ast.newPrefixExpression();
+			prefixExpression.setOperand(ast.newSimpleName("j"));
+			prefixExpression.setOperator(PrefixExpression.Operator.INCREMENT);
+			
+			rewrite.getListRewrite(forStatement, ForStatement.UPDATERS_PROPERTY).insertLast(prefixExpression, null);
+		}
+		
+		{ // replace initializer: turn assignement to var decl
+			ForStatement forStatement= (ForStatement) statements.get(4);
+			
+			Assignment assignment= (Assignment) forStatement.initializers().get(0);
+			SimpleName leftHandSide= (SimpleName) assignment.getLeftHandSide();
+			
+			VariableDeclarationFragment varFragment= ast.newVariableDeclarationFragment();
+			VariableDeclarationExpression varDecl= ast.newVariableDeclarationExpression(varFragment);
+			varFragment.setName(ast.newSimpleName(leftHandSide.getIdentifier()));
+			
+			Expression placeholder= (Expression) rewrite.createCopyTarget(assignment.getRightHandSide());
+			varFragment.setInitializer(placeholder);
+			varDecl.setType(ast.newPrimitiveType(PrimitiveType.INT));
+
+			
+			rewrite.markAsReplaced(assignment, varDecl, null);
+		}	
+		
+		
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        for (i = 3, j = 4; true; i++, ++j) {\n");
+		buf.append("            hoo(11);\n");
+		buf.append("        }\n");
+		buf.append("        for (;;) {\n");
+		buf.append("        }\n");
+		buf.append("        for (;;++j) {\n");
+		buf.append("        }\n");		
+		buf.append("        for (j = 3;;++j) {\n");
+		buf.append("        }\n");
+		buf.append("        for (int i = 0; i < len; i++) {\n");
+		buf.append("        }\n");			
+		buf.append("    }\n");
+		buf.append("}\n");	
+		assertEqualString(preview, buf.toString());
+
+	}
+

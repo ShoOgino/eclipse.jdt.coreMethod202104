@@ -1,0 +1,53 @@
+	public void testSwap() throws Exception {
+		IPackageFragment pack1= fSourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        goo(xoo(/*hello*/), k * 2);\n");
+		buf.append("    }\n");
+		buf.append("}\n");
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+		
+		CompilationUnit astRoot= createAST(cu);
+		NewASTRewrite rewrite= new NewASTRewrite(astRoot.getAST());
+		assertTrue("Code has errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+		
+		{ // swap the two arguments
+			MethodDeclaration methodDecl= findMethodDeclaration(type, "foo");
+			assertTrue("Cannot find foo", methodDecl != null);
+			
+			List fooStatements= methodDecl.getBody().statements();
+			assertTrue("More statements than expected", fooStatements.size() == 1);
+			
+			ExpressionStatement statement= (ExpressionStatement) fooStatements.get(0);
+			MethodInvocation invocation= (MethodInvocation) statement.getExpression();
+			
+			List arguments= invocation.arguments();
+			assertTrue("More arguments than expected", arguments.size() == 2);
+			
+			ASTNode arg0= (ASTNode) arguments.get(0);
+			ASTNode arg1= (ASTNode) arguments.get(1);
+			
+			ASTNode placeHolder0= rewrite.createMoveTarget(arg0);
+			ASTNode placeHolder1= rewrite.createMoveTarget(arg1);
+			
+			rewrite.markAsReplaced(arg0, placeHolder1, null); // replace instead of remove
+			rewrite.markAsReplaced(arg1, placeHolder0, null); // replace instead of remove
+		}	
+					
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        goo(k * 2, xoo(/*hello*/));\n");
+		buf.append("    }\n");
+		buf.append("}\n");
+		assertEqualString(preview, buf.toString());
+
+	}	
+
