@@ -1,5 +1,5 @@
 	/**
-	 * If a cycle is detected, then cycleParticipants contains all the project involved in this cycle (directly and indirectly),
+	 * If a cycle is detected, then cycleParticipants contains all the paths of projects involved in this cycle (directly and indirectly),
 	 * no cycle if the set is empty (and started empty)
 	 */
 	public void updateCycleParticipants(
@@ -7,27 +7,29 @@
 			ArrayList prereqChain, 
 			HashSet cycleParticipants, 
 			IWorkspaceRoot workspaceRoot,
-			HashSet alreadyTraversed){
-				
-		prereqChain.add(this);
+			HashSet traversed){
+
+		IPath path = this.getPath();
+		prereqChain.add(path);
+		traversed.add(path);
 		try {
 			IClasspathEntry[] classpath = preferredClasspath == null ? getResolvedClasspath(true) : preferredClasspath;
 			for (int i = 0, length = classpath.length; i < length; i++) {
 				IClasspathEntry entry = classpath[i];
 				
 				if (entry.getEntryKind() == IClasspathEntry.CPE_PROJECT){
-					IPath entryPath = entry.getPath();
-					IResource member = workspaceRoot.findMember(entryPath);
-					if (member != null && member.getType() == IResource.PROJECT){
-						JavaProject project = (JavaProject)JavaCore.create((IProject)member);
-						int index = cycleParticipants.contains(project) ? 0 : prereqChain.indexOf(project);
-						if (index >= 0) { // refer to cycle, or in cycle itself
-							for (int size = prereqChain.size(); index < size; index++) {
-								cycleParticipants.add(prereqChain.get(index)); 
-							}
-						} else {
-							if (!alreadyTraversed.contains(project)) {
-								project.updateCycleParticipants(null, prereqChain, cycleParticipants, workspaceRoot, alreadyTraversed);
+					IPath prereqProjectPath = entry.getPath();
+					int index = cycleParticipants.contains(prereqProjectPath) ? 0 : prereqChain.indexOf(prereqProjectPath);
+					if (index >= 0) { // refer to cycle, or in cycle itself
+						for (int size = prereqChain.size(); index < size; index++) {
+							cycleParticipants.add(prereqChain.get(index)); 
+						}
+					} else {
+						if (!traversed.contains(prereqProjectPath)) {
+							IResource member = workspaceRoot.findMember(prereqProjectPath);
+							if (member != null && member.getType() == IResource.PROJECT){
+								JavaProject project = (JavaProject)JavaCore.create((IProject)member);
+								project.updateCycleParticipants(null, prereqChain, cycleParticipants, workspaceRoot, traversed);
 							}
 						}
 					}
@@ -35,7 +37,6 @@
 			}
 		} catch(JavaModelException e){
 		}
-		prereqChain.remove(this);
-		alreadyTraversed.add(this);
+		prereqChain.remove(path);
 	}
 
