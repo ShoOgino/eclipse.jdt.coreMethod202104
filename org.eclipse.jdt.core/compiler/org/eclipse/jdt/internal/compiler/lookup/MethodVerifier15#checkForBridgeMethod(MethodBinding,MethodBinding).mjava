@@ -1,0 +1,40 @@
+void checkForBridgeMethod(MethodBinding currentMethod, MethodBinding inheritedMethod) {
+	MethodBinding originalInherited = inheritedMethod.original();
+	if (inheritedMethod != originalInherited) {
+		MethodBinding[] toCheck = (MethodBinding[]) this.currentMethods.get(currentMethod.selector);
+		if (toCheck.length > 1) {
+			// must check to see if a bridge method will collide with another current method (see 77861)
+			for (int i = 0, length = toCheck.length; i < length; i++) {
+				if (currentMethod != toCheck[i] && toCheck[i].areParameterErasuresEqual(originalInherited)) {
+					problemReporter(toCheck[i]).methodNameClash(toCheck[i], originalInherited); // bridge method will collide
+					return;
+				}
+			}
+		}
+	}
+
+	// so the parameters are equal and the return type is compatible b/w the currentMethod & the substituted inheritedMethod
+	// then when do you need a bridge method?
+	if (originalInherited.returnType != currentMethod.returnType) {
+		TypeBinding inheritedReturnType = originalInherited.returnType.leafComponentType();
+		TypeBinding returnType = currentMethod.returnType.leafComponentType();
+		switch (inheritedReturnType.bindingType()) {
+			case Binding.RAW_TYPE :
+				if (returnType.isParameterizedType() && hasBoundedParameters((ParameterizedTypeBinding) returnType)) {
+					problemReporter(currentMethod).methodNameClash(currentMethod, originalInherited);
+					return;
+				}
+				break;
+			case Binding.PARAMETERIZED_TYPE :
+				if (!returnType.isParameterizedType())
+					problemReporter(currentMethod).unsafeReturnTypeOverride(currentMethod, originalInherited, ((MethodDeclaration) currentMethod.sourceMethod()).returnType);
+				break;
+			case Binding.TYPE_PARAMETER :
+				if (!returnType.isTypeVariable())
+					problemReporter(currentMethod).unsafeReturnTypeOverride(currentMethod, originalInherited, ((MethodDeclaration) currentMethod.sourceMethod()).returnType);
+				break;
+		}   
+	}
+	this.type.addSyntheticBridgeMethod(originalInherited, currentMethod);
+}
+

@@ -1,0 +1,32 @@
+MethodBinding computeSubstituteMethod(MethodBinding inheritedMethod, MethodBinding currentMethod) {
+	if (inheritedMethod == null) return null;
+
+	// due to hierarchy & compatibility checks, we need to ensure these 2 methods are resolved
+	// should we push these tests to where they're needed? returnType.isCompatibleWith && parameter isEquivalentTo ?
+	if (currentMethod.declaringClass instanceof BinaryTypeBinding)
+		((BinaryTypeBinding) currentMethod.declaringClass).resolveTypesFor(currentMethod);
+	if (inheritedMethod.declaringClass instanceof BinaryTypeBinding)
+		((BinaryTypeBinding) inheritedMethod.declaringClass).resolveTypesFor(inheritedMethod);
+
+	TypeVariableBinding[] inheritedTypeVariables = inheritedMethod.typeVariables();
+	if (inheritedTypeVariables == NoTypeVariables) return inheritedMethod;
+	TypeVariableBinding[] typeVariables = currentMethod == null ? NoTypeVariables : currentMethod.typeVariables;
+
+	int inheritedLength = inheritedTypeVariables.length;
+	int length = typeVariables.length;
+	TypeBinding[] arguments = new TypeBinding[inheritedLength];
+	if (inheritedLength <= length) {
+		System.arraycopy(typeVariables, 0, arguments, 0, inheritedLength);
+	} else {
+		System.arraycopy(typeVariables, 0, arguments, 0, length);
+		for (int i = length; i < inheritedLength; i++)
+			arguments[i] = inheritedTypeVariables[i].erasure();
+	}
+	ParameterizedGenericMethodBinding substitute =
+		new ParameterizedGenericMethodBinding(inheritedMethod, arguments, this.environment);
+	for (int i = 0; i < inheritedLength; i++)
+	    if (!inheritedTypeVariables[i].boundCheck(substitute, arguments[i]))
+	    	return inheritedMethod; // incompatible due to bound check
+   return substitute;
+}
+
