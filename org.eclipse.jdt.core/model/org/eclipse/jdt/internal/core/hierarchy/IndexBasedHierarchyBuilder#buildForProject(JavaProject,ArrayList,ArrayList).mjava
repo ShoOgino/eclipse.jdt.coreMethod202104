@@ -1,16 +1,4 @@
 private void buildForProject(JavaProject project, ArrayList infos, ArrayList units) throws JavaModelException {
-	IType focusType = this.getType();
-	if (focusType != null && focusType.getJavaProject().equals(project)) {
-		// add focus type
-		try {
-			infos.add(((JavaElement) focusType).getRawInfo());
-		} catch (JavaModelException e) {
-			// if the focus type is not present, or if cannot get workbench path
-			// we cannot create the hierarchy
-			return;
-		}
-	}
-	
 	// copy vectors into arrays
 	IGenericType[] genericTypes;
 	int infosSize = infos.size();
@@ -32,25 +20,32 @@ private void buildForProject(JavaProject project, ArrayList infos, ArrayList uni
 	// resolve
 	if (infosSize > 0 || unitsSize > 0) {
 		this.searchableEnvironment = (SearchableEnvironment)project.getSearchableNameEnvironment();
+		IType focusType = this.getType();
+		this.nameLookup = project.getNameLookup();
 		boolean inProjectOfFocusType = focusType != null && focusType.getJavaProject().equals(project);
 		if (inProjectOfFocusType) {
-			this.searchableEnvironment.unitToLookInside = (CompilationUnit)focusType.getCompilationUnit();
-		}
-		this.nameLookup = project.getNameLookup();
-		this.hierarchyResolver = 
-			new HierarchyResolver(this.searchableEnvironment, JavaCore.getOptions(), this, new DefaultProblemFactory());
-		if (focusType != null) {
-			char[] fullyQualifiedName = focusType.getFullyQualifiedName().toCharArray();
-			ReferenceBinding focusTypeBinding = this.hierarchyResolver.setFocusType(CharOperation.splitOn('.', fullyQualifiedName));
-			if (focusTypeBinding == null 
-				|| (!inProjectOfFocusType && (focusTypeBinding.tagBits & TagBits.HierarchyHasProblems) > 0)) {
-				// focus type is not visible in this project: no need to go further
-				return;
+			org.eclipse.jdt.core.ICompilationUnit unitToLookInside = focusType.getCompilationUnit();
+			if (unitToLookInside != null) {
+				this.nameLookup.setUnitsToLookInside(new IWorkingCopy[] {unitToLookInside});
 			}
 		}
-		this.hierarchyResolver.resolve(genericTypes, compilationUnits);
-		if (inProjectOfFocusType) {
-			this.searchableEnvironment.unitToLookInside = null;
+		try {
+			this.hierarchyResolver = 
+				new HierarchyResolver(this.searchableEnvironment, JavaCore.getOptions(), this, new DefaultProblemFactory());
+			if (focusType != null) {
+				char[] fullyQualifiedName = focusType.getFullyQualifiedName().toCharArray();
+				ReferenceBinding focusTypeBinding = this.hierarchyResolver.setFocusType(CharOperation.splitOn('.', fullyQualifiedName));
+				if (focusTypeBinding == null 
+					|| (!inProjectOfFocusType && (focusTypeBinding.tagBits & TagBits.HierarchyHasProblems) > 0)) {
+					// focus type is not visible in this project: no need to go further
+					return;
+				}
+			}
+			this.hierarchyResolver.resolve(genericTypes, compilationUnits);
+		} finally {
+			if (inProjectOfFocusType) {
+				this.nameLookup.setUnitsToLookInside(null);
+			}
 		}
 	}
 }
