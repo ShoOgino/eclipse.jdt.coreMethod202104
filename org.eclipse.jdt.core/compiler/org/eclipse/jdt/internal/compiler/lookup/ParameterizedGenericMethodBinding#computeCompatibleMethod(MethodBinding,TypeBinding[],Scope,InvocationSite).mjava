@@ -7,90 +7,63 @@
 		TypeVariableBinding[] typeVariables = originalMethod.typeVariables;
 		TypeBinding[] substitutes = invocationSite.genericTypeArguments();
 		
-		if (substitutes != null) {
-			if (substitutes.length != typeVariables.length) {
-		        // incompatible due to wrong arity
-		        return new ProblemMethodBinding(originalMethod, originalMethod.selector, substitutes, TypeParameterArityMismatch);
+		computeSubstitutes: {
+			if (substitutes != null) {
+				// explicit type arguments got supplied
+				if (substitutes.length != typeVariables.length) {
+			        // incompatible due to wrong arity
+			        return new ProblemMethodBinding(originalMethod, originalMethod.selector, substitutes, TypeParameterArityMismatch);
+				}
+				methodSubstitute = new ParameterizedGenericMethodBinding(originalMethod, substitutes, scope.environment());
+				break computeSubstitutes;
 			}
-			methodSubstitute = new ParameterizedGenericMethodBinding(originalMethod, substitutes, scope.environment());
-		} else {
-			// perform type inference based on argument types and expected type
 			
-			// collect substitutes by pattern matching parameters and arguments
+			// perform type argument inference (15.12.2.7)
+				
+			// initializes the map of substitutes (var --> type[][]{ equal, extends, super}
 			TypeBinding[] parameters = originalMethod.parameters;
 			int varLength = typeVariables.length;
-			HashMap collectedSubstitutes = new HashMap(varLength);
+			Map collectedSubstitutes = new HashMap(varLength);
 			for (int i = 0; i < varLength; i++)
-				collectedSubstitutes.put(typeVariables[i], new TypeBinding[1]);
+				collectedSubstitutes.put(typeVariables[i], new TypeBinding[3][]);
 			
-			// collect argument type mapping, handling varargs
-			if (originalMethod.isVarargs()) {
-				int paramLength = parameters.length;
-				int minArgLength = paramLength - 1;
-				int argLength = arguments.length;
-				// process mandatory arguments
-				for (int i = 0; i < minArgLength; i++)
-					parameters[i].collectSubstitutes(arguments[i], collectedSubstitutes);
-				// process optional arguments
-				if (minArgLength < argLength) {
-					TypeBinding varargType = parameters[minArgLength]; // last arg type - as is ?
-					if (paramLength != argLength // argument is passed as is ?
-							||  (arguments[minArgLength] != NullBinding
-									&& (arguments[minArgLength].dimensions() == 0))) { 
-						varargType = ((ArrayBinding)varargType).elementsType(); // eliminate one array dimension
-					}
-					for (int i = minArgLength; i < argLength; i++)
-						varargType.collectSubstitutes(arguments[i], collectedSubstitutes);
-				}
-			} else {
-				int paramLength = parameters.length;
-				for (int i = 0; i < paramLength; i++)
-					parameters[i].collectSubstitutes(arguments[i], collectedSubstitutes);
-			}
-			boolean needReturnTypeInference = false;
-			if (collectedSubstitutes.isEmpty()) {
-				// raw generic method inferred
-				methodSubstitute = new ParameterizedGenericMethodBinding(originalMethod, (RawTypeBinding)null, scope.environment());
-			} else {
-				substitutes = new TypeBinding[varLength];
-				for (int i = 0; i < varLength; i++) {
-					TypeBinding[] variableSubstitutes = (TypeBinding[]) collectedSubstitutes.get(typeVariables[i]);
-					TypeBinding mostSpecificSubstitute = scope.lowerUpperBound(variableSubstitutes);
-					if (mostSpecificSubstitute == null)
-						return null; // incompatible
-					if (mostSpecificSubstitute == VoidBinding) {
-						needReturnTypeInference = true;
-					    mostSpecificSubstitute = typeVariables[i];
-					}				
-					substitutes[i] = mostSpecificSubstitute;
-				}
-				// apply inferred variable substitutions
-				methodSubstitute = new ParameterizedGenericMethodBinding(originalMethod, substitutes, scope.environment());
-			}
-	
-			if (needReturnTypeInference && invocationSite instanceof MessageSend) {
-				MessageSend message = (MessageSend) invocationSite;
-				TypeBinding expectedType = message.expectedType;
+			substitutes = new TypeBinding[varLength];
+			methodSubstitute = inferFromArgumentTypes(scope, originalMethod, arguments, parameters, collectedSubstitutes, substitutes);
+			if (methodSubstitute == null) 
+				return null;
+			// substitutes may hold null to denote unresolved vars, but null arguments got replaced with respective original variable in param method
+			
+			// 15.12.2.8 - inferring unresolved type arguments
+			if (hasUnresolvedTypeArgument(substitutes)) {
+				TypeBinding expectedType = null;
+				// if message invocation has expected type
+				if (invocationSite instanceof MessageSend) {
+					MessageSend message = (MessageSend) invocationSite;
+					expectedType = message.expectedType;
+				} 
 				if (expectedType == null) {
-					// 15.12.2.8 - if no expected type, then assume Object
-					// actually it rather seems to handle the returned variable case by expecting its erasure instead
 					if (methodSubstitute.returnType.isTypeVariable()) {
+						// should be: if no expected type, then assume Object
+						// actually it rather seems to handle the returned variable case by expecting its erasure instead
 						expectedType = methodSubstitute.returnType.erasure();
 					} else {
-						expectedType =scope.getJavaLangObject(); 
+						expectedType = scope.getJavaLangObject(); 
 					}
 				}
-				methodSubstitute.inferFromExpectedType(expectedType, scope);
+				methodSubstitute = methodSubstitute.inferFromExpectedType(scope, expectedType, collectedSubstitutes, substitutes);
+				if (methodSubstitute == null) 
+					return null;
 			}
 		}
-		// check bounds
+
+		// bounds check
 		if (!methodSubstitute.isRaw) {
 			for (int i = 0, length = typeVariables.length; i < length; i++) {
 			    TypeVariableBinding typeVariable = typeVariables[i];
-			    TypeBinding substitute = substitutes[i];
+			    TypeBinding substitute = methodSubstitute.typeArguments[i];
 			    if (!typeVariable.boundCheck(methodSubstitute, substitute))
 			        // incompatible due to bound check
-			        return new ProblemMethodBinding(methodSubstitute, originalMethod.selector, new TypeBinding[]{substitutes[i], typeVariables[i] }, ParameterBoundMismatch);
+			        return new ProblemMethodBinding(methodSubstitute, originalMethod.selector, new TypeBinding[]{substitute, typeVariables[i] }, ParameterBoundMismatch);
 			}
 		}
 

@@ -1,0 +1,57 @@
+	/**
+	 * Given some type expectation, and type variable bounds, perform some inference.
+	 * Returns true if still had unresolved type variable at the end of the operation
+	 */
+	private ParameterizedGenericMethodBinding inferFromExpectedType(Scope scope, TypeBinding expectedType, Map collectedSubstitutes, TypeBinding[] substitutes) {
+	    TypeVariableBinding[] originalVariables = this.originalMethod.typeVariables; // immediate parent (could be a parameterized method)
+		int varLength = originalVariables.length;
+		
+		computeSubstitutes: {
+		    // infer from expected return type
+			if (expectedType != null) {
+			    returnType.collectSubstitutes(scope, expectedType, collectedSubstitutes, CONSTRAINT_SUPER);
+			}
+		    // infer from bounds of type parameters
+			for (int i = 0; i < varLength; i++) {
+				TypeVariableBinding originalVariable = originalVariables[i];
+				TypeBinding argument = this.typeArguments[i];
+				if (originalVariable.firstBound == originalVariable.superclass) {
+					Scope.substitute(this, originalVariable.firstBound) // substitue original bound with resolved variables
+						.collectSubstitutes(scope, argument, collectedSubstitutes, CONSTRAINT_EXTENDS);
+				}
+				for (int j = 0, max = originalVariable.superInterfaces.length; j < max; j++) {
+					Scope.substitute(this, originalVariable.superInterfaces[j]) // substitue original bound with resolved variables
+						.collectSubstitutes(scope, argument, collectedSubstitutes, CONSTRAINT_EXTENDS);
+				}
+			}
+			substitutes = resolveSubstituteConstraints(scope, originalVariables, substitutes, true/*consider Ti<:Uk*/, collectedSubstitutes);
+			if (substitutes == null) 
+				return null; // incompatible
+			if (substitutes.length == 0) {
+		    	// raw generic method inferred
+		    	this.isRaw = true;
+		    	for (int i = 0; i < varLength; i++) {
+		    		this.typeArguments[i] = originalVariables[i].erasure();
+		    	}
+		    	break computeSubstitutes;
+			}
+			// this.typeArguments = substitutes; - no op since side effects got performed during #resolveSubstituteConstraints
+	    	for (int i = 0; i < varLength; i++) {
+	    		TypeBinding substitute = substitutes[i];
+	    		if (substitute != null) {
+	    			this.typeArguments[i] = substitutes[i];
+	    		} else {
+	    			// remaining unresolved variable are considered to be Object (or their bound actually)
+		    		this.typeArguments[i] = originalVariables[i].erasure();
+		    	}
+	    	}
+		}		
+		// adjust method types to reflect latest inference
+		TypeBinding oldReturnType = this.returnType;
+		this.returnType = Scope.substitute(this, this.returnType);
+		this.inferredReturnType = this.returnType != oldReturnType;
+	    this.parameters = Scope.substitute(this, this.parameters);
+	    this.thrownExceptions = Scope.substitute(this, this.thrownExceptions);
+	    return this;
+	}
+

@@ -1,0 +1,74 @@
+	private static TypeBinding[] resolveSubstituteConstraints(Scope scope, TypeVariableBinding[] typeVariables, TypeBinding[] substitutes, boolean considerEXTENDSConstraints, Map collectedSubstitutes) {
+		if (collectedSubstitutes.isEmpty()) {
+			// raw generic method inferred
+			return NoTypes; // empty array
+		}
+		int varLength = typeVariables.length;
+		
+		// check Tj=U constraints
+		nextTypeParameter: 
+			for (int i = 0; i < varLength; i++) {
+				TypeVariableBinding current = typeVariables[i];
+				TypeBinding substitute = substitutes[i];
+				if (substitute != null) continue nextTypeParameter; // already inferred previously
+				TypeBinding[][] variableSubstitutes = (TypeBinding[][]) collectedSubstitutes.get(current);
+				TypeBinding [] equalSubstitutes = variableSubstitutes[CONSTRAINT_EQUAL];
+				if (equalSubstitutes != null) {
+					nextConstraint:
+						for (int j = 0, equalLength = equalSubstitutes.length; j < equalLength; j++) {
+							TypeBinding equalSubstitute = equalSubstitutes[j];
+							if (equalSubstitute == null) continue nextConstraint;
+//							if (equalSubstitute == current) continue nextConstraint;
+//							if (equalSubstitute.isTypeVariable()) {
+//								TypeVariableBinding variable = (TypeVariableBinding) equalSubstitute;
+//								// substituted by a variable of the same method, ignore
+//								if (variable.rank < varLength && typeVariables[variable.rank] == variable) {
+//									// TODO (philippe) rewrite all other constraints to use current instead.
+//									continue nextConstraint;
+//								}
+//							}
+							substitutes[i] = equalSubstitute;
+							continue nextTypeParameter; // pick first match, applicability check will rule out invalid scenario where others were present
+						}
+				}
+			}
+		if (hasUnresolvedTypeArgument(substitutes)) {
+			// check Tj>:U constraints
+			nextTypeParameter: 
+				for (int i = 0; i < varLength; i++) {
+					TypeVariableBinding current = typeVariables[i];
+					TypeBinding substitute = substitutes[i];
+					if (substitute != null) continue nextTypeParameter; // already inferred previously
+					TypeBinding[][] variableSubstitutes = (TypeBinding[][]) collectedSubstitutes.get(current);
+					TypeBinding [] bounds = variableSubstitutes[CONSTRAINT_SUPER];
+					if (bounds == null) continue nextTypeParameter;
+					TypeBinding mostSpecificSubstitute = scope.lowerUpperBound(bounds);
+					if (mostSpecificSubstitute == null)
+						return null; // incompatible
+					if (mostSpecificSubstitute != VoidBinding) {
+						substitutes[i] = mostSpecificSubstitute;
+					}
+				}
+		}
+		if (considerEXTENDSConstraints && hasUnresolvedTypeArgument(substitutes)) {
+			// check Tj<:U constraints
+			nextTypeParameter: 
+				for (int i = 0; i < varLength; i++) {
+					TypeVariableBinding current = typeVariables[i];
+					TypeBinding substitute = substitutes[i];
+					if (substitute != null) continue nextTypeParameter; // already inferred previously
+					TypeBinding[][] variableSubstitutes = (TypeBinding[][]) collectedSubstitutes.get(current);
+					TypeBinding [] bounds = variableSubstitutes[CONSTRAINT_EXTENDS];
+					if (bounds == null) continue nextTypeParameter;
+					TypeBinding[] glb = scope.greaterLowerBound(bounds);
+					TypeBinding mostSpecificSubstitute = null;
+					if (glb != null) mostSpecificSubstitute = glb[0]; // TODO (philippe) need to improve
+						//TypeBinding mostSpecificSubstitute = scope.greaterLowerBound(bounds);
+						if (mostSpecificSubstitute != null) {
+							substitutes[i] = mostSpecificSubstitute;
+						}
+					} 
+		}
+		return substitutes;
+	}
+
