@@ -1,0 +1,42 @@
+	protected void deleteResource(
+		IPackageFragmentRoot root,
+		IClasspathEntry rootEntry)
+		throws JavaModelException {
+		final char[][] exclusionPatterns = ((ClasspathEntry)rootEntry).fullExclusionPatternChars();
+		IResource rootResource = root.getResource();
+		if (rootEntry.getEntryKind() != IClasspathEntry.CPE_SOURCE || exclusionPatterns == null) {
+			try {
+				rootResource.delete(this.updateResourceFlags, fMonitor);
+			} catch (CoreException e) {
+				throw new JavaModelException(e);
+			}
+		} else {
+			final IPath[] nestedFolders = getNestedFolders(root);
+			// TODO: Use IResourceProxyVisitor when bug 30268 is fixed
+			IResourceVisitor visitor = new IResourceVisitor() {
+				public boolean visit(IResource resource) throws CoreException {
+					if (resource.getType() == IResource.FOLDER) {
+						IPath path = resource.getFullPath();
+						if (prefixesOneOf(path, nestedFolders)) {
+							// equals if nested source folder
+							return !equalsOneOf(path, nestedFolders);
+						} else {
+							// subtree doesn't contain any nested source folders
+							resource.delete(updateResourceFlags, fMonitor);
+							return false;
+						}
+					} else {
+						resource.delete(updateResourceFlags, fMonitor);
+						return false;
+					}
+				}
+			};
+			try {
+				rootResource.accept(visitor);
+			} catch (CoreException e) {
+				throw new JavaModelException(e);
+			}
+		}
+		this.setAttribute(HAS_MODIFIED_RESOURCE_ATTR, TRUE); 
+	}
+
