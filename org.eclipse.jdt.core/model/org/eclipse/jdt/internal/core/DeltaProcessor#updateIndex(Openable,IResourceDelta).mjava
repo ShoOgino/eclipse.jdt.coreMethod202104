@@ -1,5 +1,6 @@
-	protected void updateIndex(Openable element, IResourceDelta delta) {
+protected void updateIndex(Openable element, IResourceDelta delta) {
 
+	try {		
 		if (indexManager == null)
 			return;
 
@@ -8,12 +9,59 @@
 				switch (delta.getKind()) {
 					case IResourceDelta.ADDED :
 					case IResourceDelta.OPEN :
-						indexManager.indexAll((IProject) delta.getResource());
+						indexManager.indexAll(element.getJavaProject().getProject());
+						break;
+				}
+				break;
+			case IJavaElement.PACKAGE_FRAGMENT_ROOT :
+				switch (delta.getKind()) {
+					case IResourceDelta.ADDED:
+					case IResourceDelta.CHANGED:
+						if (element instanceof JarPackageFragmentRoot) {
+							JarPackageFragmentRoot root = (JarPackageFragmentRoot)element;
+							// index jar file only once (if the root is in its declaring project)
+							if (root.getJavaProject().getProject().getFullPath().isPrefixOf(root.getPath())) {
+								indexManager.indexJarFile(root.getPath(), root.getJavaProject().getElementName());
+							}
+						}
+						break;
+					case IResourceDelta.REMOVED:
+						// keep index in case it is added back later in this session
+						break;
+				}
+				// don't break as packages of the package fragment root can be indexed below
+			case IJavaElement.PACKAGE_FRAGMENT :
+				switch (delta.getKind()) {
+					case IResourceDelta.ADDED:
+					case IResourceDelta.REMOVED:
+						IPackageFragment pkg = null;
+						if (element instanceof IPackageFragmentRoot) {
+							IPackageFragmentRoot root = (IPackageFragmentRoot)element;
+							pkg = root.getPackageFragment("");
+						} else {
+							pkg = (IPackageFragment)element;
+						}
+						String name = pkg.getElementName();
+						IResourceDelta[] children = delta.getAffectedChildren();
+						for (int i = 0, length = children.length; i < length; i++) {
+							IResourceDelta child = children[i];
+							IResource resource = child.getResource();
+							if (resource instanceof IFile) {
+								String extension = resource.getFileExtension();
+								if ("java".equalsIgnoreCase(extension)) { //$NON-NLS-1$
+									Openable cu = (Openable)pkg.getCompilationUnit(resource.getName());
+									this.updateIndex(cu, child);
+								} else if ("class".equalsIgnoreCase(extension)) { //$NON-NLS-1$
+									Openable classFile = (Openable)pkg.getClassFile(resource.getName());
+									this.updateIndex(classFile, child);
+								}
+							}
+						}
 						break;
 				}
 				break;
 			case IJavaElement.CLASS_FILE :
-				IFile file = (IFile) delta.getResource();
+				IFile file = (IFile) element.getUnderlyingResource();
 				IJavaProject project = element.getJavaProject();
 				IResource binaryFolder;
 				try {
@@ -56,5 +104,8 @@
 						break;
 				}
 		}
+	} catch (CoreException e) {
+		// ignore: index won't be updated
 	}
+}
 

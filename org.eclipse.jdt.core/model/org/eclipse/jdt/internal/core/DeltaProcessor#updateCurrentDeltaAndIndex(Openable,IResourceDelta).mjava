@@ -1,13 +1,59 @@
-private void updateCurrentDeltaAndIndex(Openable element, IResourceDelta delta) {
+/*
+ * Update the current delta (ie. add/remove/change the given element) and update the correponding index.
+ * Returns whether the children of the given delta must be processed.
+ */
+private boolean updateCurrentDeltaAndIndex(Openable element, IResourceDelta delta) {
 	switch (delta.getKind()) {
 		case IResourceDelta.ADDED :
 			updateIndex(element, delta);
 			elementAdded(element, delta);
-			break;
+			if (element instanceof IPackageFragmentRoot) {
+				element = (Openable)((IPackageFragmentRoot)element).getPackageFragment("");
+			}
+			if (element instanceof IPackageFragment) {
+				// add subpackages
+				PackageFragmentRoot root = element.getPackageFragmentRoot();
+				String name = element.getElementName();
+				IResourceDelta[] children = delta.getAffectedChildren();
+				for (int i = 0, length = children.length; i < length; i++) {
+					IResourceDelta child = children[i];
+					IResource resource = child.getResource();
+					if (resource instanceof IFolder) {
+						String subpkgName = 
+							name.length() == 0 ? 
+								resource.getName() : 
+								name + "." + resource.getName(); //$NON-NLS-1$
+						Openable subpkg = (Openable)root.getPackageFragment(subpkgName);
+						this.updateCurrentDeltaAndIndex(subpkg, child);
+					}
+				}
+			}
+			return false;
 		case IResourceDelta.REMOVED :
 			updateIndex(element, delta);
 			elementRemoved(element, delta);
-			break;
+			if (element instanceof IPackageFragmentRoot) {
+				element = (Openable)((IPackageFragmentRoot)element).getPackageFragment("");
+			}
+			if (element instanceof IPackageFragment) {
+				// remove subpackages
+				PackageFragmentRoot root = element.getPackageFragmentRoot();
+				String name = element.getElementName();
+				IResourceDelta[] children = delta.getAffectedChildren();
+				for (int i = 0, length = children.length; i < length; i++) {
+					IResourceDelta child = children[i];
+					IResource resource = child.getResource();
+					if (resource instanceof IFolder) {
+						String subpkgName = 
+							name.length() == 0 ? 
+								resource.getName() : 
+								name + "." + resource.getName(); //$NON-NLS-1$
+						Openable subpkg = (Openable)root.getPackageFragment(subpkgName);
+						this.updateCurrentDeltaAndIndex(subpkg, child);
+					}
+				}
+			}
+			return false;
 		case IResourceDelta.CHANGED :
 			int flags = delta.getFlags();
 			if ((flags & IResourceDelta.CONTENT) != 0) {
@@ -20,8 +66,10 @@ private void updateCurrentDeltaAndIndex(Openable element, IResourceDelta delta) 
 				} else {
 					elementClosed(element, delta);
 				}
+				return false; // when a project is open/closed don't process children
 			}
-			break;
+			return true;
 	}
+	return true;
 }
 
