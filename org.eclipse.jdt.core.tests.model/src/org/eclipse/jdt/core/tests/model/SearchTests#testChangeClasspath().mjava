@@ -1,0 +1,45 @@
+/*
+ * Ensure that changing the classpath in the middle of reindexing
+ * a project causes another request to reindex.
+ */
+public void testChangeClasspath() throws CoreException {
+	IndexManager indexManager = JavaModelManager.getJavaModelManager().getIndexManager();
+	WaitingJob job = new WaitingJob();
+	try {
+		// setup: suspend indexing and create a project (prj=src) with one cu
+		indexManager.disable();
+		JavaCore.run(new IWorkspaceRunnable() {
+			public void run(IProgressMonitor monitor) throws CoreException {
+				createJavaProject("P");
+				createFile(
+					"/P/X.java",
+					"public class X {\n" +
+					"}"
+				);
+			}
+		}, null);
+		
+		// add waiting job and wait for it to be executed
+		indexManager.request(job);
+		indexManager.enable();
+		job.waitForJobToStart();
+		
+		// remove source folder from classpath
+		getJavaProject("P").setRawClasspath(
+			new IClasspathEntry[0], 
+			null);
+			
+		// resume waiting job
+		job.resume();
+		
+		assertAllTypes(
+			"Unexpected all types after removing source folder",
+			""
+		);
+	} finally {
+		job.resume();
+		deleteProject("P");
+		indexManager.enable();
+	}
+}
+
