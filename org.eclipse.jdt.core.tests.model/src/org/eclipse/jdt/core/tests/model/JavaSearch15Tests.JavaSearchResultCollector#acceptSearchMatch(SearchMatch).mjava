@@ -1,0 +1,135 @@
+		public void acceptSearchMatch(SearchMatch match) throws CoreException {
+			try {
+				if (results.length() > 0) results.append("\n");
+				IResource resource = match.getResource();
+				IJavaElement element = (IJavaElement) match.getElement();
+				boolean lineStarted = false;
+				if (this.showResource) {
+					results.append(getPathString(resource, element));
+					lineStarted = true;
+				}
+				if (this.showProject) {
+					IProject project = element.getJavaProject().getProject();
+					if (lineStarted) results.append(" ");
+					results.append("[in ");
+					results.append(project.getName());
+					results.append("]");
+					lineStarted = true;
+				}
+				ICompilationUnit unit = null;
+				if (element instanceof IMethod) {
+					if (lineStarted) results.append(" ");
+					IMethod method = (IMethod)element;
+					append(method);
+					unit = method.getCompilationUnit();
+					lineStarted = true;
+				} else if (element instanceof IType) {
+					if (lineStarted) results.append(" ");
+					IType type = (IType)element;
+					append(type);
+					unit = type.getCompilationUnit();
+					lineStarted = true;
+				} else if (element instanceof IField) {
+					if (lineStarted) results.append(" ");
+					IField field = (IField)element;
+					append(field);
+					unit = field.getCompilationUnit();
+					lineStarted = true;
+				} else if (element instanceof IInitializer) {
+					if (lineStarted) results.append(" ");
+					IInitializer initializer = (IInitializer)element;
+					append(initializer);
+					unit = initializer.getCompilationUnit();
+					lineStarted = true;
+				} else if (element instanceof IPackageFragment) {
+					if (lineStarted) results.append(" ");
+					append((IPackageFragment)element);
+					lineStarted = true;
+				} else if (element instanceof ILocalVariable) {
+					if (lineStarted) results.append(" ");
+					ILocalVariable localVar = (ILocalVariable)element;
+					IJavaElement parent = localVar.getParent();
+					if (parent instanceof IInitializer) {
+						IInitializer initializer = (IInitializer)parent;
+						append(initializer);
+					} else { // IMethod
+						IMethod method = (IMethod)parent;
+						append(method);
+					}
+					results.append(".");
+					results.append(localVar.getElementName());
+					unit = (ICompilationUnit)localVar.getAncestor(IJavaElement.COMPILATION_UNIT);
+					lineStarted = true;
+				}
+				if (resource instanceof IFile) {
+					char[] contents = getSource(resource, element, unit);
+					int start = match.getOffset();
+					int end = start + match.getLength();
+					if (start == -1 || (contents != null && contents.length > 0)) { // retrieving attached source not implemented here
+						if (lineStarted) results.append(" ");
+						results.append("[");
+						if (start > -1) {
+							if (this.showContext) {
+								int lineStart1 = CharOperation.lastIndexOf('\n', contents, 0, start);
+								int lineStart2 = CharOperation.lastIndexOf('\r', contents, 0, start);
+								int lineStart = Math.max(lineStart1, lineStart2) + 1;
+								results.append(CharOperation.subarray(contents, lineStart, start));
+								results.append("<");
+							}
+							results.append(CharOperation.subarray(contents, start, end));
+							if (this.showContext) {
+								results.append(">");
+								int lineEnd1 = CharOperation.indexOf('\n', contents, end);
+								int lineEnd2 = CharOperation.indexOf('\r', contents, end);
+								int lineEnd = lineEnd1 > 0 && lineEnd2 > 0 ? Math.min(lineEnd1, lineEnd2) : Math.max(lineEnd1, lineEnd2);
+								if (lineEnd == -1) lineEnd = contents.length;
+								results.append(CharOperation.subarray(contents, end, lineEnd));
+							}
+						} else {
+							results.append("No source");
+						}
+						results.append("]");
+						lineStarted = true;
+					}
+				}
+				if (this.showAccuracy) {
+					switch (match.getAccuracy()) {
+						case SearchMatch.A_ACCURATE:
+							if (lineStarted) results.append(" ");
+							results.append("EXACT_MATCH");
+							lineStarted = true;
+							break;
+						case SearchMatch.A_INACCURATE:
+							if (lineStarted) results.append(" ");
+							results.append("POTENTIAL_MATCH");
+							lineStarted = true;
+							break;
+					}
+				}
+				if (this.showInsideDoc) {
+					if (match.isInsideDocComment()) {
+						if (lineStarted) results.append(" ");
+						results.append("INSIDE_JAVADOC");
+						lineStarted = true;
+					} else {
+						if (lineStarted) results.append(" ");
+						results.append("OUTSIDE_JAVADOC");
+						lineStarted = true;
+					}
+				}
+				if (this.showSynthetic) {
+					if (match instanceof MethodReferenceMatch) {
+						MethodReferenceMatch methRef = (MethodReferenceMatch) match;
+						if (methRef.isSynthetic()) {
+							if (lineStarted) results.append(" ");
+							results.append("SYNTHETIC");
+							lineStarted = true;
+						}
+					}
+				}
+			} catch (JavaModelException e) {
+				results.append("\n");
+				results.append(e.toString());
+			}
+		}
+

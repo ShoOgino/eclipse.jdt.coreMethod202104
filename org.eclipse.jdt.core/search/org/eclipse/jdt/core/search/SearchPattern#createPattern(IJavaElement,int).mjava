@@ -17,6 +17,18 @@
 	 *		 <li><code>IJavaSearchConstants.IMPLEMENTORS</code>: for interface, will find all types which implements a given interface.</li>
 	 *	</ul>
 	 * @return a search pattern for a Java element or <code>null</code> if the given element is ill-formed
+	 * 
+	 * SEARCH_15
+	 * 	Modified to handle generics.
+	 * 	Note that no change are done for declaration patterns as the search works well for generics
+	 * 	without any additional information.
+	 * 		1) Field defined on parameterized types
+	 * 			In this case, we need to split the erasure name and type argument names.
+	 * 			Erasure name is used as type simple name and type argument names
+	 * 			are stored in field reference pattern.
+	 * 		2) Generic types declaration
+	 * 			In this case, type arguments names are got from IType and stored
+	 * 			in instanciated type reference pattern.
 	 */
 	public static SearchPattern createPattern(IJavaElement element, int limitTo) {
 		SearchPattern searchPattern = null;
@@ -33,17 +45,34 @@
 				char[] name = field.getElementName().toCharArray();
 				char[] typeSimpleName;
 				char[] typeQualification;
+				char[][] typeNames = null;
 				try {
-					String typeSignature = Signature.toString(field.getTypeSignature()).replace('$', '.');
-					if ((lastDot = typeSignature.lastIndexOf('.')) == -1) {
-						typeSimpleName = typeSignature.toCharArray();
+					char[] typeSignature = field.getTypeSignature().toCharArray();
+					// SEARCH_15 (start)
+					char[] typeErasure = null;
+					if (CharOperation.indexOf(Signature.C_GENERIC_START, typeSignature) == -1) {
+						typeErasure = Signature.toCharArray(typeSignature);
+					} else {
+						typeErasure = Signature.toCharArray(Signature.getTypeErasure(typeSignature));
+						CharOperation.replace(typeErasure, '$', '.');
+						if ((typeNames = Signature.getTypeArguments(typeSignature)) != null) {
+							int length = typeNames.length;
+							for (int i=0; i<length; i++) {
+								typeNames[i] = Signature.toCharArray(typeNames[i]);
+							}
+						}
+					}
+					// end
+					if ((lastDot = CharOperation.lastIndexOf('.', typeErasure)) == -1) {
+						typeSimpleName = typeErasure;
 						typeQualification = null;
 					} else {
-						typeSimpleName = typeSignature.substring(lastDot + 1).toCharArray();
-						typeQualification = field.isBinary()
-							? typeSignature.substring(0, lastDot).toCharArray()
+						typeSimpleName = CharOperation.subarray(typeErasure, 0, lastDot + 1);
+						typeQualification = CharOperation.subarray(typeErasure, 0, lastDot);
+						if (!field.isBinary()) {
 							// prefix with a '*' as the full qualification could be bigger (because of an import)
-							: CharOperation.concat(IIndexConstants.ONE_STAR, typeSignature.substring(0, lastDot).toCharArray());
+							CharOperation.concat(IIndexConstants.ONE_STAR, typeQualification);
+						}
 					}
 				} catch (JavaModelException e) {
 					return null;
@@ -60,6 +89,7 @@
 								declaringSimpleName, 
 								typeQualification, 
 								typeSimpleName,
+								typeNames,
 								R_EXACT_MATCH | R_CASE_SENSITIVE);
 						break;
 					case IJavaSearchConstants.REFERENCES :
@@ -73,6 +103,7 @@
 								declaringSimpleName, 
 								typeQualification, 
 								typeSimpleName,
+								typeNames,
 								R_EXACT_MATCH | R_CASE_SENSITIVE);
 						break;
 					case IJavaSearchConstants.READ_ACCESSES :
@@ -86,6 +117,7 @@
 								declaringSimpleName, 
 								typeQualification, 
 								typeSimpleName,
+								typeNames,
 								R_EXACT_MATCH | R_CASE_SENSITIVE);
 						break;
 					case IJavaSearchConstants.WRITE_ACCESSES :
@@ -99,6 +131,7 @@
 								declaringSimpleName, 
 								typeQualification, 
 								typeSimpleName,
+								typeNames,
 								R_EXACT_MATCH | R_CASE_SENSITIVE);
 						break;
 					case IJavaSearchConstants.ALL_OCCURRENCES :
@@ -112,6 +145,7 @@
 								declaringSimpleName, 
 								typeQualification, 
 								typeSimpleName,
+								typeNames,
 								R_EXACT_MATCH | R_CASE_SENSITIVE);
 						break;
 				}
@@ -129,6 +163,10 @@
 							elementName.substring(lastDot+1).toCharArray(),
 							elementName.substring(0, lastDot).toCharArray(),
 							null,
+							// SEARCH_15 (start)
+							null,
+							false,
+							// end
 							limitTo);
 				}
 				break;
@@ -317,12 +355,15 @@
 				break;
 			case IJavaElement.TYPE :
 				IType type = (IType)element;
-				searchPattern = 
-					createTypePattern(
-						type.getElementName().toCharArray(), 
-						type.getPackageFragment().getElementName().toCharArray(),
-						enclosingTypeNames(type),
-						limitTo);
+				searchPattern = 	createTypePattern(
+							type.getElementName().toCharArray(), 
+							type.getPackageFragment().getElementName().toCharArray(),
+							enclosingTypeNames(type),
+							// SEARCH_15 (start)
+							typeParameterNames(type),
+							true, /* generic type */
+							// end
+							limitTo);
 				break;
 			case IJavaElement.PACKAGE_DECLARATION :
 			case IJavaElement.PACKAGE_FRAGMENT :
