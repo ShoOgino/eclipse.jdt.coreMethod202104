@@ -1,0 +1,39 @@
+	/*
+	 * Creates working copies from the given path and sources.
+	 * Resolves a dummy cu as a batch and on the first accept, create a binding with the expected key.
+	 * Ensures that the returned binding corresponds to the expected key.
+	 */
+	private void assertBindingCreated(String[] pathAndSources, final String expectedKey) throws JavaModelException {
+		ICompilationUnit[] workingCopies = null;
+		try {
+			workingCopies = createWorkingCopies(pathAndSources);
+			class Requestor extends TestASTRequestor {
+				String createdBindingKey;
+				public void acceptAST(CompilationUnit cu, ICompilationUnit source) {
+					super.acceptAST(cu, source);
+					IBinding[] bindings = createBindings(new String[] {expectedKey});
+					if (bindings != null && bindings.length > 0 && bindings[0] != null)
+						this.createdBindingKey = bindings[0].getKey();
+				}
+			};
+			Requestor requestor = new Requestor();
+			ICompilationUnit[] dummyWorkingCopies = null;
+			try {
+				dummyWorkingCopies = createWorkingCopies(new String[] {
+					"/P/Test.java",
+					"public class Test {\n" +
+					"}"
+				});
+				resolveASTs(dummyWorkingCopies, new String[] {}, requestor);
+			} finally {
+				discardWorkingCopies(dummyWorkingCopies);
+			}
+			
+			if (!expectedKey.equals(requestor.createdBindingKey))
+				System.out.println(Util.displayString(requestor.createdBindingKey, 3));
+			assertEquals("Unexpected created binding", expectedKey, requestor.createdBindingKey);
+		} finally {
+			discardWorkingCopies(workingCopies);
+		}
+	}
+
