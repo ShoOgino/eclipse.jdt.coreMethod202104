@@ -2,150 +2,139 @@
 	 * Returns an element handle corresponding to the given ASTNode in the given parsed unit.
 	 * Returns null if the given ASTNode could not be found.
 	 */
-	public IJavaElement createElement(final ASTNode toBeFound, CompilationUnitDeclaration parsedUnit, final Openable openable) {
+	public IJavaElement createElement(final ASTNode toBeFound, CompilationUnitDeclaration parsedUnit, Openable openable) {
 		class EndVisit extends RuntimeException {
 			// marker to stop traversing ast
 		}
 		class Visitor extends ASTVisitor {
-			IJavaElement currentElement = openable;
-			HashSet knownElements = new HashSet();
+		    ASTNode[] nodeStack = new ASTNode[10];
+		    int nodeIndex = -1;
 			
+		    public void push(ASTNode node) {
+		        try {
+		            this.nodeStack[++this.nodeIndex] = node;
+		        } catch (IndexOutOfBoundsException e) {
+		            System.arraycopy(this.nodeStack, 0, this.nodeStack = new ASTNode[this.nodeStack.length*2], 0, this.nodeIndex-1);
+		            this.nodeStack[this.nodeIndex] = node;
+		        }
+		    }
+		    
+		    public void pop(ASTNode node) {
+		    	while (this.nodeIndex >= 0 && this.nodeStack[this.nodeIndex--] != node);
+		    }
+		    
 			public boolean visit(Argument node, BlockScope scope) {
-				if (node == toBeFound) {
-					currentElement = 
-						new LocalVariable(
-							(JavaElement)currentElement, 
-							new String(node.name), 
-							node.declarationSourceStart,
-							node.declarationSourceEnd,
-							node.sourceStart,
-							node.sourceEnd,
-							Util.typeSignature(node.type));
-					// NB: no need to update occurence count as the variable is defined by its positions
-					throw new EndVisit();
-				}
+			    push(node);
+				if (node == toBeFound) throw new EndVisit();
 				return true;
 			}
+			public void endVisit(Argument node, BlockScope scope) {
+			    pop(node);
+            }
 
 			public boolean visit(ConstructorDeclaration node, ClassScope scope) {
-				currentElement = 
-					((IType)currentElement).getMethod(
-						currentElement.getElementName(), 
-						Util.typeParameterSignatures(node));
+			    push(node);
 				if (node == toBeFound) throw new EndVisit();
 				return true;
 			}
 			public void endVisit(ConstructorDeclaration node, ClassScope scope) {
-				currentElement = currentElement.getParent();
+				pop(node);
 			}
 
 			public boolean visit(FieldDeclaration node, MethodScope scope) {
-				currentElement = ((IType)currentElement).getField(new String(node.name));
+			    push(node);
 				if (node == toBeFound) throw new EndVisit();
 				return true;
 			}
 			public void endVisit(FieldDeclaration node, MethodScope scope) {
-				currentElement = currentElement.getParent();
+			    pop(node);
 			}
 
 			public boolean visit(Initializer node, MethodScope scope) {
-				currentElement = updateOccurenceCount(((IType)currentElement).getInitializer(1));
+			    push(node);
 				if (node == toBeFound) throw new EndVisit();
 				return true;
 			}
-			public void endVisit(Initializer node, MethodScope scope) {
-				currentElement = currentElement.getParent();
-			}
+			// don't pop initializers (used to count how many occurrences are in the type)
 
 			public boolean visit(LocalDeclaration node, BlockScope scope) {
-				if (node == toBeFound) {
-					currentElement = 
-						new LocalVariable(
-							(JavaElement)currentElement, 
-							new String(node.name), 
-							node.declarationSourceStart,
-							node.declarationSourceEnd,
-							node.sourceStart,
-							node.sourceEnd,
-							Util.typeSignature(node.type));
-					// NB: no need to update occurence count as the variable is defined by its positions
-					throw new EndVisit();
-				}
+			    push(node);
+				if (node == toBeFound) throw new EndVisit();
 				return true;
 			}
+			public void endVisit(LocalDeclaration node, BlockScope scope) {
+			    pop(node);
+            }
 
 			public boolean visit(TypeDeclaration node, BlockScope scope) {
-				if ((node.bits & ASTNode.IsAnonymousTypeMASK) != 0) {
-					currentElement = updateOccurenceCount(((IMember)currentElement).getType("", 1)); //$NON-NLS-1$
-				} else {
-					currentElement = updateOccurenceCount(((IMember)currentElement).getType(new String(node.name), 1));
-				}
+			    push(node);
 				if (node == toBeFound) throw new EndVisit();
 				return true;
 			}
 			public void endVisit(TypeDeclaration node, BlockScope scope) {
 				if ((node.bits & ASTNode.IsMemberTypeMASK) != 0) {
-					currentElement = ((IType)currentElement).getDeclaringType();
-				} else {
-					currentElement = currentElement.getParent();
+				    pop(node);
 				}
+				// don't pop local/anonymous types (used to count how many occurrences are in the method)
 			}
 
 			public boolean visit(TypeDeclaration node, ClassScope scope) {
-				currentElement = ((IType)currentElement).getType(new String(node.name));
+			    push(node);
 				if (node == toBeFound) throw new EndVisit();
 				return true;
 			}
 			public void endVisit(TypeDeclaration node, ClassScope scope) {
 				if ((node.bits & ASTNode.IsMemberTypeMASK) != 0) {
-					currentElement = ((IType)currentElement).getDeclaringType();
-				} else {
-					currentElement = currentElement.getParent();
+				    pop(node);
 				}
+				// don't pop local/anonymous types (used to count how many occurrences are in the initializer)
 			}
 
 			public boolean visit(MethodDeclaration node, ClassScope scope) {
-				currentElement = 
-					((IType)currentElement).getMethod(
-						new String(node.selector), 
-						Util.typeParameterSignatures(node));
+			    push(node);
 				if (node == toBeFound) throw new EndVisit();
 				return true;
 			}
 			public void endVisit(MethodDeclaration node, ClassScope scope) {
-				currentElement = currentElement.getParent();
+				pop(node);
 			}
 
 			public boolean visit(TypeDeclaration node, CompilationUnitScope scope) {
-				if (currentElement instanceof ICompilationUnit) {
-					currentElement = ((ICompilationUnit)currentElement).getType(new String(node.name));
-				} else {
-					try {
-						currentElement = ((IClassFile)currentElement).getType();
-					} catch (JavaModelException e) {
-						// class file doesn't exit: ignore
-					}
-				}
+			    push(node);
 				if (node == toBeFound) throw new EndVisit();
 				return true;
 			}
 			public void endVisit(TypeDeclaration node, CompilationUnitScope scope) {
-				currentElement = currentElement.getParent();
+				pop(node);
 			}
 
-			private IJavaElement updateOccurenceCount(IJavaElement element) {
-				while (knownElements.contains(element)) {
-					((JavaElement)element).occurrenceCount++;
-				}
-				knownElements.add(element);
-				return element;
-			}
 		}
 		Visitor visitor = new Visitor();
 		try {
 			parsedUnit.traverse(visitor, parsedUnit.scope);
 		} catch (EndVisit e) {
-			return visitor.currentElement;
+		    ASTNode[] nodeStack = visitor.nodeStack;
+		    int end = visitor.nodeIndex;
+		    int start = 0;
+		    
+		    // find the inner most type declaration if binary type
+		    ASTNode typeDecl = null;
+		    if (openable instanceof ClassFile) {
+				for (int i = end; i >= 0; i--) {
+				    if (nodeStack[i] instanceof TypeDeclaration) {
+				        typeDecl = nodeStack[i];
+				        start = i;
+				        break;
+				    }
+				}
+		    }
+			
+			// find the openable corresponding to this type declaration
+			if (typeDecl != null) {
+			    openable = getOpenable(typeDecl, openable);
+			}
+			
+			return createElement(nodeStack, start, end, openable);
 		}
 		return null;
 	}
