@@ -1,0 +1,101 @@
+	/* (non-Javadoc)
+	 * @see org.eclipse.jdt.core.dom.ASTVisitor#visit(TypeDeclaration)
+	 */
+	public boolean visit(TypeDeclaration node) {
+		if (!hasChildrenChanges(node)) {
+			return doVisitUnchangedChildren(node);
+		}
+		int pos= rewriteJavadoc(node, TypeDeclaration.JAVADOC_PROPERTY);
+		rewriteModifiers(node, TypeDeclaration.MODIFIERS_PROPERTY, pos);
+		
+		boolean isInterface= ((Boolean) getOriginalValue(node, TypeDeclaration.INTERFACE_PROPERTY)).booleanValue();
+		// modifiers & class/interface
+		boolean invertType= isChanged(node, TypeDeclaration.INTERFACE_PROPERTY);
+		if (invertType) {
+			try {
+				int typeToken= isInterface ? ITerminalSymbols.TokenNameinterface : ITerminalSymbols.TokenNameclass;
+				getScanner().readToToken(typeToken, node.getStartPosition());
+				
+				String str= isInterface ? "class" : "interface"; //$NON-NLS-1$ //$NON-NLS-2$
+				int start= getScanner().getCurrentStartOffset();
+				int end= getScanner().getCurrentEndOffset();
+				
+				doTextReplace(start, end - start, str, getEditGroup(node, TypeDeclaration.INTERFACE_PROPERTY));
+			} catch (CoreException e) {
+				// ignore
+			}			
+		}
+		
+		// name
+		pos= rewriteRequiredNode(node, TypeDeclaration.NAME_PROPERTY);
+		
+		// superclass
+		if (!isInterface || invertType) {
+			RewriteEvent superClassEvent= getEvent(node, TypeDeclaration.SUPERCLASS_PROPERTY);
+			
+			int changeKind= superClassEvent != null ? superClassEvent.getChangeKind() : RewriteEvent.UNCHANGED;
+			switch (changeKind) {
+				case RewriteEvent.INSERTED: {
+					doTextInsert(pos, " extends ", getEditGroup(superClassEvent)); //$NON-NLS-1$
+					doTextInsert(pos, (ASTNode) superClassEvent.getNewValue(), 0, false, getEditGroup(superClassEvent));
+					break;
+				}
+				case RewriteEvent.REMOVED: {
+					ASTNode superClass= (ASTNode) superClassEvent.getOriginalValue();
+					int endPos= getExtendedEnd(superClass);
+					doTextRemoveAndVisit(pos, endPos - pos, superClass, getEditGroup(superClassEvent));
+					pos= endPos;
+					break;
+				}
+				case RewriteEvent.REPLACED: {
+					ASTNode superClass= (ASTNode) superClassEvent.getOriginalValue();
+					int offset= getExtendedOffset(superClass);
+					int length= getExtendedLength(superClass);
+					doTextRemoveAndVisit(offset, length, superClass, getEditGroup(superClassEvent));
+					doTextInsert(offset, (ASTNode) superClassEvent.getNewValue(), 0, false, getEditGroup(superClassEvent));
+					pos= offset + length;
+					break;
+				}
+				case RewriteEvent.UNCHANGED: {
+					pos= doVisit(node, TypeDeclaration.SUPERCLASS_PROPERTY, pos);
+				}
+			}
+		}
+		// extended interfaces
+		RewriteEvent interfaceEvent= getEvent(node, TypeDeclaration.SUPER_INTERFACES_PROPERTY);
+		if (interfaceEvent == null || interfaceEvent.getChangeKind() == RewriteEvent.UNCHANGED) {
+			if (invertType) {
+				List originalNodes= (List) getOriginalValue(node, TypeDeclaration.SUPER_INTERFACES_PROPERTY);
+				if (!originalNodes.isEmpty()) {
+					String keyword= isInterface ? " implements " : " extends "; //$NON-NLS-1$ //$NON-NLS-2$
+					ASTNode firstNode= (ASTNode) originalNodes.get(0);
+					doTextReplace(pos, firstNode.getStartPosition() - pos, keyword, getEditGroup(node, TypeDeclaration.INTERFACE_PROPERTY));
+				}
+			}
+			pos= doVisit(node, TypeDeclaration.SUPER_INTERFACES_PROPERTY, pos);
+		} else {
+			String keyword= (isInterface == invertType) ? " implements " : " extends "; //$NON-NLS-1$ //$NON-NLS-2$
+			if (invertType) {
+				List newNodes= (List) getNewValue(node, TypeDeclaration.SUPER_INTERFACES_PROPERTY);
+				if (!newNodes.isEmpty()) {
+					List origNodes= (List) getOriginalValue(node, TypeDeclaration.SUPER_INTERFACES_PROPERTY);
+					int firstStart= pos;
+					if (!origNodes.isEmpty()) {
+						firstStart= ((ASTNode) origNodes.get(0)).getStartPosition();
+					}
+					doTextReplace(pos, firstStart - pos, keyword, getEditGroup(node, TypeDeclaration.INTERFACE_PROPERTY));
+					keyword= ""; //$NON-NLS-1$
+					pos= firstStart;
+				}
+			}
+			pos= rewriteNodeList(node, TypeDeclaration.SUPER_INTERFACES_PROPERTY, pos, keyword, ", "); //$NON-NLS-1$
+		}
+		
+		// type members
+		// startPos : find position after left brace of type, be aware that bracket might be missing
+		int startIndent= getIndent(node.getStartPosition()) + 1;
+		int startPos= getPosAfterLeftBrace(pos);
+		rewriteParagraphList(node, TypeDeclaration.BODY_DECLARATIONS_PROPERTY, startPos, startIndent, -1, 2);
+		return false;
+	}
+
