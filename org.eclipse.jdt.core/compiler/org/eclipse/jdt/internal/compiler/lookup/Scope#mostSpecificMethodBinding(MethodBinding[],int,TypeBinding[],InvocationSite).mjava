@@ -1,44 +1,30 @@
 	protected final MethodBinding mostSpecificMethodBinding(MethodBinding[] visible, int visibleSize, TypeBinding[] argumentTypes, InvocationSite invocationSite) {
-		boolean varargsStatus = visible[0].isVarargs();
-		for (int i = 1; i < visibleSize; i++) {
-			if (visible[i].isVarargs() != varargsStatus) {
-				// visible can be a mix of fixed & variable arity methods, so re-check the varargs methods but consider their last arg as a fixed array
-				MethodBinding[] temp = new MethodBinding[visibleSize];
-				int newSize = 0;
-				int argLength = argumentTypes.length;
-				for (int j = 0; j < visibleSize; j++) {
-					if (visible[j].isVarargs())
-						if (visible[j].parameters.length != argLength
-							|| !argumentTypes[argLength - 1].isCompatibleWith(visible[j].parameters[argLength - 1]))
-								continue; // forget this varargs method since its last arg is not an exact match
-					temp[newSize++] = visible[j];
-				}
-				visible = temp;
-				visibleSize = newSize;
-				break;
-			}
-		}
+		int[] compatibilityLevels = new int[visibleSize];
+		for (int i = 0; i < visibleSize; i++)
+			compatibilityLevels[i] = parameterCompatibilityLevel(visible[i], argumentTypes);
 
-		MethodBinding method = null;
-		nextVisible : for (int i = 0; i < visibleSize; i++) {
-			method = visible[i];
-			for (int j = 0; j < visibleSize; j++) {
-				if (i == j) continue;
-				// tiebreak generic methods using variant where type params are substituted by their erasures
-				if (!visible[j].tiebreakMethod().areParametersCompatibleWith(method.tiebreakMethod().parameters)) {
-					if (method.isVarargs() && visible[j].isVarargs()) {
-						int paramLength = method.parameters.length;
-						if (paramLength == visible[j].parameters.length && paramLength == argumentTypes.length + 1) {
-							TypeBinding elementsType = ((ArrayBinding) visible[j].parameters[paramLength - 1]).elementsType();
-							if (method.parameters[paramLength - 1].isCompatibleWith(elementsType))
-								continue; // special case to choose between 2 varargs methods when the last arg is missing
+		for (int level = 0; level <= 2; level++) {
+			nextVisible : for (int i = 0; i < visibleSize; i++) {
+				if (compatibilityLevels[i] != level) continue nextVisible; // skip this method for now
+				MethodBinding method = visible[i];
+				for (int j = 0; j < visibleSize; j++) {
+					if (i == j || compatibilityLevels[j] != level) continue;
+					// tiebreak generic methods using variant where type params are substituted by their erasures
+					if (!visible[j].tiebreakMethod().areParametersCompatibleWith(method.tiebreakMethod().parameters)) {
+						if (method.isVarargs() && visible[j].isVarargs()) {
+							int paramLength = method.parameters.length;
+							if (paramLength == visible[j].parameters.length && paramLength == argumentTypes.length + 1) {
+								TypeBinding elementsType = ((ArrayBinding) visible[j].parameters[paramLength - 1]).elementsType();
+								if (method.parameters[paramLength - 1].isCompatibleWith(elementsType))
+									continue; // special case to choose between 2 varargs methods when the last arg is missing
+							}
 						}
+						continue nextVisible;
 					}
-					continue nextVisible;
 				}
+				compilationUnitScope().recordTypeReferences(method.thrownExceptions);
+				return method;
 			}
-			compilationUnitScope().recordTypeReferences(method.thrownExceptions);
-			return method;
 		}
 		return new ProblemMethodBinding(visible[0].selector, visible[0].parameters, Ambiguous);
 	}	
