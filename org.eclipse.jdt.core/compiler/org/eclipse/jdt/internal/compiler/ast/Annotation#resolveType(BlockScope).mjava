@@ -16,6 +16,7 @@
 		MethodBinding[] methods = annotationType.methods();
 		// clone valuePairs to keep track of unused ones
 		MemberValuePair[] valuePairs = memberValuePairs();
+		MemberValuePair valueAttribute = null; // remember the first 'value' pair
 		MemberValuePair[] usedValuePairs;
 		int pairsLength = valuePairs.length;
 		System.arraycopy(valuePairs, 0, usedValuePairs = new MemberValuePair[pairsLength], 0, pairsLength);
@@ -29,6 +30,9 @@
 				if (valuePair == null) continue nextPair;
 				char[] memberName = valuePair.name;
 				if (CharOperation.equals(memberName, selector)) {
+					if (valueAttribute == null && CharOperation.equals(memberName, TypeConstants.VALUE)) {
+						valueAttribute = valuePair;
+					}
 					valuePair.binding = method;
 					usedValuePairs[j] = null; // consumed
 					foundValue = true;
@@ -56,6 +60,73 @@
 		for (int i = 0; i < pairsLength; i++) {
 			if (usedValuePairs[i] != null) {
 				scope.problemReporter().undefinedAnnotationValue(annotationType, usedValuePairs[i]);
+			}
+		}
+		// recognize standard annotations ?
+		long tagBits = detectStandardAnnotation(scope, annotationType, valueAttribute);
+		if (this.recipient != null) {
+			if (tagBits != 0) {
+				// tag bits onto recipient
+				switch (this.recipient.kind()) {
+					case Binding.PACKAGE :
+						// TODO (philippe) need support for package annotations
+						break;
+					case Binding.TYPE :
+					case Binding.GENERIC_TYPE :
+					case Binding.TYPE_PARAMETER :
+						((ReferenceBinding)this.recipient).tagBits |= tagBits;
+						break;
+					case Binding.METHOD :
+						((MethodBinding)this.recipient).tagBits |= tagBits;
+						break;
+					case Binding.FIELD :
+						((FieldBinding)this.recipient).tagBits |= tagBits;
+						break;
+					case Binding.LOCAL :
+						((LocalVariableBinding)this.recipient).tagBits |= tagBits;
+						break;
+				}			
+			}
+			// check (meta)target compatibility
+			checkTargetCompatibility: {
+				long metaTagBits = annotationType.tagBits;
+				if ((metaTagBits & TagBits.AnnotationTargetMASK) == 0) // does not specify any target restriction
+					break checkTargetCompatibility;
+					
+				switch (recipient.kind()) {
+					case Binding.PACKAGE :
+						if ((metaTagBits & TagBits.AnnotationForPackage) != 0)
+							break checkTargetCompatibility;
+						break;
+					case Binding.TYPE :
+					case Binding.GENERIC_TYPE :
+						if (((ReferenceBinding)this.recipient).isAnnotationType()) {
+							if ((metaTagBits & TagBits.AnnotationForAnnotationType) != 0)
+							break checkTargetCompatibility;
+						} else 	if ((metaTagBits & TagBits.AnnotationForType) != 0) 
+								break checkTargetCompatibility;
+						break;
+					case Binding.TYPE_PARAMETER :
+						if ((metaTagBits & TagBits.AnnotationForParameter) != 0)
+							break checkTargetCompatibility;
+						break;
+					case Binding.METHOD :
+						if (((MethodBinding)this.recipient).isConstructor()) {
+							if ((metaTagBits & TagBits.AnnotationForConstructor) != 0)
+								break checkTargetCompatibility;
+						} else 	if ((metaTagBits & TagBits.AnnotationForMethod) != 0)
+							break checkTargetCompatibility;
+						break;
+					case Binding.FIELD :
+						if ((metaTagBits & TagBits.AnnotationForField) != 0)
+							break checkTargetCompatibility;
+						break;
+					case Binding.LOCAL :
+						if ((annotationType.tagBits & TagBits.AnnotationForLocalVariable) != 0)
+							break checkTargetCompatibility;
+						break;
+				}			
+				scope.problemReporter().incompatibleTargetForAnnotation(this);
 			}
 		}
 		return this.resolvedType;
