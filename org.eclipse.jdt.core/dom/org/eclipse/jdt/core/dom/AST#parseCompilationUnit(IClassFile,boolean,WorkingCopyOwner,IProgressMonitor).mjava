@@ -1,8 +1,9 @@
 	/**
-	 * Parses the source string of the given Java model compilation unit element
-	 * and creates and returns a corresponding abstract syntax tree. The source 
-	 * string is obtained from the Java model element using
-	 * <code>ICompilationUnit.getSource()</code>.
+	 * Parses the source string corresponding to the given Java class file
+	 * element and creates and returns a corresponding abstract syntax tree.
+	 * The source string is obtained from the Java model element using
+	 * <code>IClassFile.getSource()</code>, and is only available for a class
+	 * files with attached source.
 	 * <p>
 	 * The returned compilation unit node is the root node of a new AST.
 	 * Each node in the subtree carries source range(s) information relating back
@@ -49,11 +50,12 @@
 	 * up names and drawing the connections.
 	 * </p>
 	 * 
-	 * @param unit the Java model compilation unit whose source code is to be parsed
+	 * @param classFile the Java model compilation unit whose source code is to be parsed
 	 * @param resolveBindings <code>true</code> if bindings are wanted, 
 	 *   and <code>false</code> if bindings are not of interest
 	 * @param owner the owner of working copies that take precedence over underlying 
 	 *   compilation units
+	 * @param monitor the progress monitor used to check if the AST creation needs to be canceled
 	 * @return the compilation unit node
 	 * @exception IllegalArgumentException if the given Java element does not 
 	 * exist or if its source string cannot be obtained
@@ -63,14 +65,70 @@
 	 * @see ASTNode#getLength()
 	 * @see WorkingCopyOwner
 	 * @since 3.0
-	 * @deprecated use parseCompilationUnit(ICompilationUnit, boolean, WorkingCopyOwner, IProgressMonitor) instead
-	 * TODO (jerome) remove after 3.0 M7
 	 */
 	public static CompilationUnit parseCompilationUnit(
-		ICompilationUnit unit,
+		IClassFile classFile,
 		boolean resolveBindings,
-		WorkingCopyOwner owner) {
+		WorkingCopyOwner owner,
+		IProgressMonitor monitor) {
+			
+		if (classFile == null) {
+			throw new IllegalArgumentException();
+		}
+		if (owner == null) {
+			throw new IllegalArgumentException();
+		}
+		char[] source = null;
+		String sourceString = null;
+		try {
+			sourceString = classFile.getSource();
+		} catch (JavaModelException e) {
+			throw new IllegalArgumentException();
+		}
+		if (sourceString == null) {
+			throw new IllegalArgumentException();
+		}
+		source = sourceString.toCharArray();
+		if (!resolveBindings) {
+			return AST.parseCompilationUnit(source);
+		}
+		StringBuffer buffer = new StringBuffer(SuffixConstants.SUFFIX_STRING_java);
 		
-		return parseCompilationUnit(unit, resolveBindings, owner, null);
+		String classFileName = classFile.getElementName(); // this includes the trailing .class
+		buffer.insert(0, classFileName.toCharArray(), 0, classFileName.indexOf('.'));
+		IJavaProject project = classFile.getJavaProject();
+		CompilationUnitDeclaration compilationUnitDeclaration = null;
+		try {
+			// parse and resolve
+			compilationUnitDeclaration =
+				CompilationUnitResolver.resolve(
+					source,
+					CharOperation.splitOn('.', classFile.getType().getPackageFragment().getElementName().toCharArray()),
+					buffer.toString(),
+					project,
+					false/*don't cleanup*/,
+					owner,
+					monitor);
+			ASTConverter converter = new ASTConverter(project.getOptions(true), true, monitor);
+			AST ast = new AST();
+			BindingResolver resolver = new DefaultBindingResolver(compilationUnitDeclaration.scope);
+			ast.setBindingResolver(resolver);
+			converter.setAST(ast);
+		
+			CompilationUnit cu = converter.convert(compilationUnitDeclaration, source);
+			cu.setLineEndTable(compilationUnitDeclaration.compilationResult.lineSeparatorPositions);
+			resolver.storeModificationCount(ast.modificationCount());
+			return cu;
+		} catch(JavaModelException e) {
+			/* if a JavaModelException is thrown trying to retrieve the name environment
+			 * then we simply do a parsing without creating bindings.
+			 * Therefore all binding resolution will return null.
+			 */
+			return parseCompilationUnit(source);			
+		} finally {
+			if (compilationUnitDeclaration != null) {
+				compilationUnitDeclaration.cleanUp();
+			}
+		}
 	}
 

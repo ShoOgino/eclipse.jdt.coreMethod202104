@@ -63,6 +63,7 @@
 	 *    <code>null</code> if bindings are not resolved
 	 * @param owner the owner of working copies that take precedence over underlying 
 	 *   compilation units
+	 * @param monitor the progress monitor used to check if the AST creation needs to be canceled
 	 * @return the compilation unit node
 	 * @see ASTNode#getFlags()
 	 * @see ASTNode#MALFORMED
@@ -70,15 +71,59 @@
 	 * @see ASTNode#getLength()
 	 * @see WorkingCopyOwner
 	 * @since 3.0
-	 * @deprecated use parseCompilationUnit(char[], String, IJavaProject, WorkingCopyOwner, IProgressMonitor) instead
-	 * TODO (jerome) remove after 3.0 M7
 	 */
 	public static CompilationUnit parseCompilationUnit(
 		char[] source,
 		String unitName,
 		IJavaProject project,
-		WorkingCopyOwner owner) {
+		WorkingCopyOwner owner,
+		IProgressMonitor monitor) {
+			
+		if (source == null) {
+			throw new IllegalArgumentException();
+		}
+		if (unitName == null && project != null) {
+			throw new IllegalArgumentException();
+		}
+		if (project == null) {
+			// this just reduces to the other simplest case
+			return parseCompilationUnit(source);
+		}
+		if (owner == null) {
+			throw new IllegalArgumentException();
+		}
+	
+		CompilationUnitDeclaration compilationUnitDeclaration = null;
+		try {
+			// parse and resolve
+			compilationUnitDeclaration =
+				CompilationUnitResolver.resolve(
+					source,
+					unitName,
+					project,
+					false/*don't cleanup*/,
+					owner,
+					monitor);
+			ASTConverter converter = new ASTConverter(project.getOptions(true), true, monitor);
+			AST ast = new AST();
+			BindingResolver resolver = new DefaultBindingResolver(compilationUnitDeclaration.scope);
+			ast.setBindingResolver(resolver);
+			converter.setAST(ast);
 		
-		return parseCompilationUnit(source, unitName, project, owner, null);
+			CompilationUnit cu = converter.convert(compilationUnitDeclaration, source);
+			cu.setLineEndTable(compilationUnitDeclaration.compilationResult.lineSeparatorPositions);
+			resolver.storeModificationCount(ast.modificationCount());
+			return cu;
+		} catch(JavaModelException e) {
+			/* if a JavaModelException is thrown trying to retrieve the name environment
+			 * then we simply do a parsing without creating bindings.
+			 * Therefore all binding resolution will return null.
+			 */
+			return parseCompilationUnit(source);			
+		} finally {
+			if (compilationUnitDeclaration != null) {
+				compilationUnitDeclaration.cleanUp();
+			}
+		}
 	}
 

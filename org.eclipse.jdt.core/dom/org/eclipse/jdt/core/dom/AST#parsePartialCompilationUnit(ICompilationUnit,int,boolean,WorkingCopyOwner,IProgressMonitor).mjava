@@ -87,6 +87,7 @@
 	 *   and <code>false</code> if bindings are not of interest
 	 * @param owner the owner of working copies that take precedence over underlying 
 	 *   compilation units
+	 * @param monitor the progress monitor used to check if the AST creation needs to be canceled
 	 * @return the abridged compilation unit node
 	 * @exception IllegalArgumentException if the given Java element does not 
 	 * exist or the source range is null or if its source string cannot be obtained
@@ -95,15 +96,95 @@
 	 * @see ASTNode#getStartPosition()
 	 * @see ASTNode#getLength()
 	 * @since 3.0
-	 * @deprecated use parsePartialCompilationUnit(ICompilationUnit, int, boolean, WorkingCopyOwner, IProgressMonitor) instead
-	 * TODO (jerome) remove after 3.0 M7
 	 */
 	public static CompilationUnit parsePartialCompilationUnit(
 		ICompilationUnit unit,
 		int position,
 		boolean resolveBindings,
-		WorkingCopyOwner owner) {
+		WorkingCopyOwner owner,
+		IProgressMonitor monitor) {
+				
+		if (unit == null) {
+			throw new IllegalArgumentException();
+		}
+		if (owner == null) {
+			throw new IllegalArgumentException();
+		}
 		
-		return parsePartialCompilationUnit(unit, position, resolveBindings, owner, null);
+		char[] source = null;
+		try {
+			source = unit.getSource().toCharArray();
+		} catch(JavaModelException e) {
+			// no source, then we cannot build anything
+			throw new IllegalArgumentException();
+		}
+
+		NodeSearcher searcher = new NodeSearcher(position);
+
+		final Map options = unit.getJavaProject().getOptions(true);
+		if (resolveBindings) {
+			CompilationUnitDeclaration compilationUnitDeclaration = null;
+			try {
+				// parse and resolve
+				compilationUnitDeclaration = CompilationUnitResolver.resolve(
+					unit,
+					searcher,
+					false/*don't cleanup*/,
+					source,
+					owner,
+					monitor);
+				
+				ASTConverter converter = new ASTConverter(options, true, monitor);
+				AST ast = new AST();
+				BindingResolver resolver = new DefaultBindingResolver(compilationUnitDeclaration.scope);
+				ast.setBindingResolver(resolver);
+				converter.setAST(ast);
+			
+				CompilationUnit compilationUnit = converter.convert(compilationUnitDeclaration, source);
+				compilationUnit.setLineEndTable(compilationUnitDeclaration.compilationResult.lineSeparatorPositions);
+				resolver.storeModificationCount(ast.modificationCount());
+				return compilationUnit;
+			} catch(JavaModelException e) {
+				/* if a JavaModelException is thrown trying to retrieve the name environment
+				 * then we simply do a parsing without creating bindings.
+				 * Therefore all binding resolution will return null.
+				 */
+				CompilationUnitDeclaration compilationUnitDeclaration2 = CompilationUnitResolver.parse(
+					source,
+					searcher,
+					options);
+				
+				ASTConverter converter = new ASTConverter(options, false, monitor);
+				AST ast = new AST();
+				final BindingResolver resolver = new BindingResolver();
+				ast.setBindingResolver(resolver);
+				converter.setAST(ast);
+	
+				CompilationUnit compilationUnit = converter.convert(compilationUnitDeclaration2, source);
+				compilationUnit.setLineEndTable(compilationUnitDeclaration2.compilationResult.lineSeparatorPositions);
+				resolver.storeModificationCount(ast.modificationCount());
+				return compilationUnit;
+			} finally {
+				if (compilationUnitDeclaration != null) {
+					compilationUnitDeclaration.cleanUp();
+				}
+			}
+		} else {
+			CompilationUnitDeclaration compilationUnitDeclaration = CompilationUnitResolver.parse(
+				source,
+				searcher,
+				options);
+			
+			ASTConverter converter = new ASTConverter(options, false, monitor);
+			AST ast = new AST();
+			final BindingResolver resolver = new BindingResolver();
+			ast.setBindingResolver(resolver);
+			converter.setAST(ast);
+
+			CompilationUnit compilationUnit = converter.convert(compilationUnitDeclaration, source);
+			compilationUnit.setLineEndTable(compilationUnitDeclaration.compilationResult.lineSeparatorPositions);
+			resolver.storeModificationCount(ast.modificationCount());
+			return compilationUnit;
+		}
 	}
 
