@@ -4,9 +4,7 @@
 	 *
 	 * @exception JavaModelException if the operation is unable to
 	 * complete
-	 * @deprecated marked deprecated to suppress JDOM-related deprecation warnings
 	 */
-    // TODO - JDOM - remove once model ported off of JDOM
 	private void processPackageFragmentResource(PackageFragment source, PackageFragmentRoot root, String newName) throws JavaModelException {
 		try {
 			String[] newFragName = (newName == null) ? source.names : Util.getTrimmedSimpleNames(newName);
@@ -33,18 +31,18 @@
 				}	
 			}
 			boolean containsReadOnlySubPackageFragments = createNeededPackageFragments((IContainer) source.getParent().getResource(), root, newFragName, shouldMoveFolder);
-			boolean sourceIsReadOnly = srcFolder.isReadOnly();
+			boolean sourceIsReadOnly = Util.isReadOnly(srcFolder);
 	
 			// Process resources
 			if (shouldMoveFolder) {
 				// move underlying resource
 				// TODO Revisit once bug 43044 is fixed
 				if (sourceIsReadOnly) {
-					srcFolder.setReadOnly(false);
+					Util.setReadOnly(srcFolder, false);
 				}
 				srcFolder.move(destPath, force, true /* keep history */, getSubProgressMonitor(1));
 				if (sourceIsReadOnly) {
-					srcFolder.setReadOnly(true);
+					Util.setReadOnly(srcFolder, true);
 				}
 				this.setAttribute(HAS_MODIFIED_RESOURCE_ATTR, TRUE); 
 			} else {
@@ -99,24 +97,10 @@
 						// we only consider potential compilation units
 						ICompilationUnit cu = newFrag.getCompilationUnit(resourceName);
 						if (Util.isExcluded(cu.getPath(), inclusionPatterns, exclusionPatterns, false/*not a folder*/)) continue;
-						IDOMCompilationUnit domCU = fFactory.createCompilationUnit(cu.getSource(), cu.getElementName());
-						if (domCU != null) {
-							updatePackageStatement(domCU, newFragName);
-							IBuffer buffer = cu.getBuffer();
-							if (buffer == null) continue;
-							String bufferContents = buffer.getContents();
-							if (bufferContents == null) continue;
-							String domCUContents = domCU.getContents();
-							String cuContents = null;
-							if (domCUContents != null) {
-								cuContents = Util.normalizeCRs(domCU.getContents(), bufferContents);
-							} else {
-								// See PR http://dev.eclipse.org/bugs/show_bug.cgi?id=11285
-								cuContents = bufferContents;//$NON-NLS-1$
-							}
-							buffer.setContents(cuContents);
-							cu.save(null, false);
-						}
+						this.parser.setSource(cu);
+						CompilationUnit astCU = (CompilationUnit) this.parser.createAST(this.progressMonitor);
+						updatePackageStatement(astCU, newFragName, getDocument(cu));
+						cu.save(null, false);
 					}
 				}
 			}
@@ -132,8 +116,8 @@
 					for (int i = 0, length = remaining.length; i < length; i++) {
 						IResource file = remaining[i];
 						if (file instanceof IFile) {
-							if (file.isReadOnly()) {
-								file.setReadOnly(false);
+							if (Util.isReadOnly(file)) {
+								Util.setReadOnly(file, false);
 							}
 							this.deleteResource(file, IResource.FORCE | IResource.KEEP_HISTORY);
 						} else {
@@ -164,8 +148,6 @@
 				IJavaProject destProject = newFrag.getJavaProject();
 				getDeltaFor(destProject).movedTo(newFrag, source);
 			}
-		} catch (DOMException dom) {
-			throw new JavaModelException(dom, IJavaModelStatusConstants.DOM_EXCEPTION);
 		} catch (JavaModelException e) {
 			throw e;
 		} catch (CoreException ce) {

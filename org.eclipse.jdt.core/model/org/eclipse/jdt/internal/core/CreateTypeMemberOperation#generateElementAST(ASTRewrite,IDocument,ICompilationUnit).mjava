@@ -1,0 +1,45 @@
+protected ASTNode generateElementAST(ASTRewrite rewriter, IDocument document, ICompilationUnit cu) throws JavaModelException {
+	if (this.createdNode == null) {
+		this.source = removeIndentAndNewLines(this.source, document, cu);
+		ASTParser parser = ASTParser.newParser(AST.JLS3);
+		parser.setSource(this.source.toCharArray());
+		parser.setProject(getCompilationUnit().getJavaProject());
+		parser.setKind(ASTParser.K_CLASS_BODY_DECLARATIONS);
+		ASTNode node = parser.createAST(this.progressMonitor);
+		String createdNodeSource;
+		if (node.getNodeType() != ASTNode.TYPE_DECLARATION) {
+			createdNodeSource = generateSyntaxIncorrectAST();
+			if (this.createdNode == null)
+				throw new JavaModelException(new JavaModelStatus(IJavaModelStatusConstants.INVALID_CONTENTS));
+		} else {
+			TypeDeclaration typeDeclaration = (TypeDeclaration) node;
+			this.createdNode = (ASTNode) typeDeclaration.bodyDeclarations().iterator().next();
+			createdNodeSource = this.source;
+		}
+		if (this.alteredName != null) {
+			SimpleName newName = this.createdNode.getAST().newSimpleName(this.alteredName);
+			SimpleName oldName = rename(this.createdNode, newName);
+			int nameStart = oldName.getStartPosition();
+			int nameEnd = nameStart + oldName.getLength();
+			StringBuffer newSource = new StringBuffer();
+			if (this.source.equals(createdNodeSource)) {
+				newSource.append(createdNodeSource.substring(0, nameStart));
+				newSource.append(this.alteredName);
+				newSource.append(createdNodeSource.substring(nameEnd));
+			} else {
+				// syntacticaly incorrect source
+				int createdNodeStart = this.createdNode.getStartPosition();
+				int createdNodeEnd = createdNodeStart + this.createdNode.getLength();
+				newSource.append(createdNodeSource.substring(createdNodeStart, nameStart));
+				newSource.append(this.alteredName);
+				newSource.append(createdNodeSource.substring(nameEnd, createdNodeEnd));
+				
+			}
+			this.source = newSource.toString();
+		}
+	}
+	if (rewriter == null) return this.createdNode;
+	// return a string place holder (instead of the created node) so has to not lose comments and formatting
+	return rewriter.createStringPlaceholder(this.source, this.createdNode.getNodeType());
+}
+
