@@ -5,17 +5,49 @@
 		AbstractMethodDeclaration method,
 		char[][] definingTypeNames) {
 		IType type = this.createTypeHandle(definingTypeNames);
+		if (type == null) return null;
 		Argument[] arguments = method.arguments;
 		int length = arguments == null ? 0 : arguments.length;
-		String[] parameterTypeSignatures = new String[length];
-		for (int i = 0; i < length; i++) {
-			TypeReference parameterType = arguments[i].type;
-			char[] typeName = CharOperation.concatWith(parameterType.getTypeName(), '.');
-			for (int j = 0; j < parameterType.dimensions(); j++) {
-				typeName = CharOperation.concat(typeName, "[]" .toCharArray()); //$NON-NLS-1$
+		if (type.isBinary()) {
+			String selector = new String(method.selector);
+			IMethod[] methods;
+			try {
+				methods = type.getMethods();
+			} catch (JavaModelException e) {
+				return null;
 			}
-			parameterTypeSignatures[i] = Signature.createTypeSignature(typeName, false);
+			for (int i = 0; i < methods.length; i++) {
+				IMethod methodHandle = methods[i];
+				if (methodHandle.getElementName().equals(selector) && length == methodHandle.getNumberOfParameters()) {
+					boolean sameParameters = true;
+					String[] parameterTypes = methodHandle.getParameterTypes();
+					for (int j = 0; j < length; j++) {
+						TypeReference parameterType = arguments[j].type;
+						char[] typeName = CharOperation.concatWith(parameterType.getTypeName(), '.');
+						for (int k = 0; k < parameterType.dimensions(); k++) {
+							typeName = CharOperation.concat(typeName, "[]" .toCharArray()); //$NON-NLS-1$
+						}
+						String parameterTypeName = parameterTypes[j];
+						if (!Signature.toString(parameterTypeName).endsWith(new String(typeName))) {
+							sameParameters = false;
+							break;
+						}
+					}
+					if (sameParameters) return methodHandle;
+				}
+			}
+			return null;
+		} else {
+			String[] parameterTypeSignatures = new String[length];
+			for (int i = 0; i < length; i++) {
+				TypeReference parameterType = arguments[i].type;
+				char[] typeName = CharOperation.concatWith(parameterType.getTypeName(), '.');
+				for (int j = 0; j < parameterType.dimensions(); j++) {
+					typeName = CharOperation.concat(typeName, "[]" .toCharArray()); //$NON-NLS-1$
+				}
+				parameterTypeSignatures[i] = Signature.createTypeSignature(typeName, false);
+			}
+			return type.getMethod(new String(method.selector), parameterTypeSignatures);
 		}
-		return type.getMethod(new String(method.selector), parameterTypeSignatures);
 	}
 
