@@ -1,0 +1,53 @@
+void matchReportReference(Expression expr, IJavaElement element, int accuracy, int start, int end, int lastIndex, TypeBinding refBinding, MatchLocator locator) throws CoreException {
+
+	// Look if there's a need to special report for parameterized type
+	int rule = SearchPattern.R_EXACT_MATCH;
+	int refinedAccuracy = accuracy;
+	boolean patternHasParameters = false;
+	if (this.pattern.isParameterized()) {
+		patternHasParameters = this.pattern.typeArguments[0] != null && this.pattern.typeArguments[0].length != 0;
+	}
+	if (refBinding.isParameterizedType() || refBinding.isRawType()) {
+
+		// Try to refine accuracy
+		ParameterizedTypeBinding parameterizedBinding = (ParameterizedTypeBinding)refBinding;
+		refinedAccuracy = refineAccuracy(accuracy, parameterizedBinding, this.pattern.typeArguments, this.pattern.typeSignatures==null, 0, locator);
+		if (refinedAccuracy == -1 || (refinedAccuracy == SearchMatch.A_ERASURE && !this.isErasureMatch)) {
+			// refined accuracy shows an impossible match...
+			return;
+		}
+
+		// Set rule
+		rule |= refinedAccuracy & SearchMatch.RULE_MASK;
+		refinedAccuracy = refinedAccuracy & (~SearchMatch.RULE_MASK);
+
+		// Make a special report for parameterized types if necessary
+		 if (refBinding.isParameterizedType() && this.pattern.isParameterized())  {
+			TypeReference typeRef = null;
+			TypeReference[] typeArguments = null;
+			if (expr instanceof ParameterizedQualifiedTypeReference) {
+				typeRef = (ParameterizedQualifiedTypeReference) expr;
+				typeArguments = ((ParameterizedQualifiedTypeReference) expr).typeArguments[lastIndex];
+			}
+			else if (expr instanceof ParameterizedSingleTypeReference) {
+				typeRef = (ParameterizedSingleTypeReference) expr;
+				typeArguments = ((ParameterizedSingleTypeReference) expr).typeArguments;
+			}
+			if (typeRef != null) {
+				locator.reportAccurateParameterizedTypeReference(typeRef, start, lastIndex, typeArguments, element, refinedAccuracy, rule);
+				return;
+			}
+		}
+	} else if (patternHasParameters) { // binding has no type params, compatible erasure if pattern does
+		rule = SearchMatch.A_ERASURE;
+	}
+
+	// Report match
+	if (expr instanceof ArrayTypeReference)
+		locator.reportAccurateTypeReference(expr, this.pattern.simpleName, element, refinedAccuracy, rule);
+	else {
+		SearchMatch match = locator.newTypeReferenceMatch(element, refinedAccuracy, start, end-start+1, rule, expr);
+		locator.report(match);
+	}
+}
+

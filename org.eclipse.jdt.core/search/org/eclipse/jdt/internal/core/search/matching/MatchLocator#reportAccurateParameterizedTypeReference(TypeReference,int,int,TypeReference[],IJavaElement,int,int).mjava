@@ -1,0 +1,56 @@
+/**
+ * @since 3.1
+ * Finds the accurate positions of the sequence of tokens given by qualifiedName
+ * in the source and reports a reference to this parameterized type name
+ * to the search requestor.
+ */
+protected void reportAccurateParameterizedTypeReference(TypeReference typeRef, int start, int index, TypeReference[] typeArguments, IJavaElement element, int accuracy, int rule) throws CoreException {
+	if (accuracy == -1) return;
+	if (!encloses(element)) return;
+
+	// If there's type arguments, look for end (ie. char '>') of last one.
+	int end = typeRef.sourceEnd;
+	if (typeArguments != null) {
+		// Initialize scanner
+		Scanner scanner = this.parser.scanner;
+		char[] source = this.currentPossibleMatch.getContents();
+		scanner.setSource(source);
+
+		
+		JavaSearchPattern javaSearchPattern = (JavaSearchPattern)this.pattern;
+		if (javaSearchPattern.isErasureMatch || javaSearchPattern.typeSignatures == null) {
+			// if pattern is erasure only, then select the end of the reference
+			if (typeRef instanceof QualifiedTypeReference && index >= 0) {
+				long[] positions = ((QualifiedTypeReference) typeRef).sourcePositions;
+				end = (int) positions[index];
+			} else if (typeRef instanceof ArrayTypeReference) {
+				end = ((ArrayTypeReference) typeRef).originalSourceEnd;
+			}
+		}  else {
+			// Set scanner position at end of last type argument
+			scanner.resetTo(end, source.length-1);
+			int depth = 0;
+			for (int i=typeArguments.length-1; i>=0; i--) {
+				if (typeArguments[i] != null) {
+					depth = resetScannerAfterLastTypeArgumentEnd(typeArguments[i], scanner, depth)+1;
+					break;
+				}
+			}
+	
+			// Now, scan to search next closing '>'
+			while (depth-- > 0) {
+				while (!scanner.atEnd()) {
+					if (scanner.getNextChar() == '>') {
+						end = scanner.currentPosition - 1;
+						break;
+					}
+				}
+			}
+	 	}
+	}
+	
+	// Report match
+	SearchMatch match = newTypeReferenceMatch(element, accuracy, start, end-start+1, rule, typeRef);
+	report(match);
+}
+
