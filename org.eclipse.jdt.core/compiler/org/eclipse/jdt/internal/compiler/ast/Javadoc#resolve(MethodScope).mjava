@@ -2,19 +2,60 @@
 	 * Resolve method javadoc while a method scope
 	 */
 	public void resolve(MethodScope methScope) {
+		
+		// get method declaration
+		AbstractMethodDeclaration methDecl = methScope.referenceMethod();
+
+		// @see tags
+		int seeTagsNbre = references == null ? 0 : references.length;
+		boolean superRef = false;
+		for (int i = 0; i < seeTagsNbre; i++) {
+			TypeBinding binding = references[i].resolveType(methScope);
+			if (!superRef && binding != null && binding.isValidBinding()) {
+				// if binding is valid then look if we have a reference to an overriden method/constructor
+				if (references[i] instanceof JavadocMessageSend) {
+					JavadocMessageSend messageSend = (JavadocMessageSend) references[i];
+					if (methDecl.binding.declaringClass.isCompatibleWith(messageSend.qualifyingType) &&
+						CharOperation.equals(messageSend.selector, methDecl.selector) &&
+						(messageSend.binding.returnType == methDecl.binding.returnType)) {
+						if (messageSend.arguments == null && methDecl.arguments == null) {
+							superRef = true;
+						}
+						else if (messageSend.arguments != null && methDecl.arguments != null) {
+							superRef = methDecl.binding.areParametersEqual(messageSend.binding);
+						}
+					}
+				}
+				else if (references[i] instanceof JavadocAllocationExpression) {
+					JavadocAllocationExpression allocationExpr = (JavadocAllocationExpression) references[i];
+					TypeBinding constructorBinding = allocationExpr.type.resolvedType;
+					if (methDecl.binding.declaringClass.isCompatibleWith(constructorBinding)) {
+						if (allocationExpr.arguments == null && methDecl.arguments == null) {
+							superRef = true;
+						}
+						else if (allocationExpr.arguments != null && methDecl.arguments != null) {
+							superRef = methDecl.binding.areParametersEqual(allocationExpr.binding);
+						}
+					}
+				}
+			}
+		}
+		
+		// Store if a reference exists to an overriden method/constructor or the method is in a local type,
+		boolean reportMissing = !(superRef || (methDecl.binding.declaringClass != null && methDecl.binding.declaringClass.isLocalType()));
 
 		// @param tags
-		resolveParamTags(methScope);
+		resolveParamTags(methScope, reportMissing);
 
 		// @return tags
 		if (this.returnStatement == null) {
-			AbstractMethodDeclaration md = methScope.referenceMethod();
-			if (!md.isConstructor() && !md.isClinit()) {
-				MethodDeclaration meth = (MethodDeclaration) md;
-				if (meth.binding.returnType != VoidBinding) {
-					// method with return should have @return tag
-					//int end = md.sourceStart + md.selector.length - 1;
-					methScope.problemReporter().javadocInvalidReturnTag(meth.returnType.sourceStart, meth.returnType.sourceEnd, true);
+			if (reportMissing) {
+				if (!methDecl.isConstructor() && !methDecl.isClinit()) {
+					MethodDeclaration meth = (MethodDeclaration) methDecl;
+					if (meth.binding.returnType != VoidBinding) {
+						// method with return should have @return tag
+						methScope.problemReporter().javadocMissingReturnTag(meth.returnType.sourceStart, meth.returnType.sourceEnd);
+					}
 				}
 			}
 		} else {
@@ -22,12 +63,6 @@
 		}
 
 		// @throws/@exception tags
-		resolveThrowsTags(methScope);
-
-		// @see tags
-		int seeTagsNbre = references == null ? 0 : references.length;
-		for (int i = 0; i < seeTagsNbre; i++) {
-			references[i].resolveType(methScope);
-		}
+		resolveThrowsTags(methScope, reportMissing);
 	}
 
