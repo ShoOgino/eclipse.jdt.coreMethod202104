@@ -1,8 +1,9 @@
 /**
 	 * Returns the package fragment root that corresponds to the given jar path.
 	 * See createOpenable(...) for the format of the jar path string.
+	 * If not null, uses the given scope as a hint for getting Java project handles.
 	 */
-	private IPackageFragmentRoot getJarPkgFragmentRoot(String jarPathString) {
+	private IPackageFragmentRoot getJarPkgFragmentRoot(String jarPathString, IJavaSearchScope scope) {
 
 		IPath jarPath= new Path(jarPathString);
 		
@@ -26,33 +27,35 @@
 			}
 		}
 		
-		// walk all projects and find the first one that has the given jar path in its classpath
+		// walk projects in the scope and find the first one that has the given jar path in its classpath
 		IJavaProject[] projects;
+		if (scope != null) {
+			IPath[] enclosingProjectsAndJars = scope.enclosingProjectsAndJars();
+			int length = enclosingProjectsAndJars.length;
+			projects = new IJavaProject[length];
+			int index = 0;
+			for (int i = 0; i < length; i++) {
+				IPath path = enclosingProjectsAndJars[i];
+				if (!Util.isArchiveFileName(path.lastSegment())) {
+					projects[index++] = this.javaModel.getJavaProject(path.segment(0));
+				}
+			}
+			if (index < length) {
+				System.arraycopy(projects, 0, projects = new IJavaProject[index], 0, index);
+			}
+			IPackageFragmentRoot root = getJarPkgFragmentRoot(jarPathString, jarPath, target, projects);
+			if (root != null) {
+				return root;
+			}
+		} 
+		
+		// not found in the scope, walk all projects
 		try {
 			projects = this.javaModel.getJavaProjects();
 		} catch (JavaModelException e) {
 			// java model is not accessible
 			return null;
 		}
-		for (int i= 0, projectCount= projects.length; i < projectCount; i++) {
-			try {
-				JavaProject javaProject= (JavaProject)projects[i];
-				IClasspathEntry[] classpathEntries= javaProject.getResolvedClasspath(true);
-				for (int j= 0, entryCount= classpathEntries.length; j < entryCount; j++) {
-					if (classpathEntries[j].getPath().equals(jarPath)) {
-						if (target instanceof IFile) {
-							// internal jar
-							return javaProject.getPackageFragmentRoot((IFile)target);
-						} else {
-							// external jar
-							return javaProject.getPackageFragmentRoot0(jarPathString);
-						}
-					}
-				}
-			} catch (JavaModelException e) {
-				// JavaModelException from getResolvedClasspath - a problem occured while accessing project: nothing we can do, ignore
-			}
-		}
-		return null;
+		return getJarPkgFragmentRoot(jarPathString, jarPath, target, projects);
 	}
 
