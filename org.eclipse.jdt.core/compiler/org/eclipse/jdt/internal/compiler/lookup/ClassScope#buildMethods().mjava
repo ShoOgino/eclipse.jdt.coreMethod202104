@@ -1,32 +1,47 @@
 	private void buildMethods() {
-		if (referenceContext.methods == null) {
-			referenceContext.binding.methods = NoMethods;
-			return;
+		
+		// iterate the method declarations to create the bindings
+		int bindingCount;
+		AbstractMethodDeclaration[] methods = referenceContext.methods;
+		int size = methods == null ? 0 : methods.length;
+		boolean isEnum = referenceContext.getKind() == IGenericType.ENUM;
+		if (isEnum) {
+			// reserve 2 slots for special enum methods: #values() and #valueOf(String)
+			bindingCount = 2;
+		} else {
+			if (size == 0) {
+				referenceContext.binding.methods = NoMethods;
+				return;
+			}
+			bindingCount = 0;
 		}
 
-		// iterate the method declarations to create the bindings
-		AbstractMethodDeclaration[] methods = referenceContext.methods;
-		int size = methods.length;
+		// look for <clinit> method
 		int clinitIndex = -1;
 		for (int i = 0; i < size; i++) {
-			if (methods[i] instanceof Clinit) {
+			if (methods[i].isClinit()) {
 				clinitIndex = i;
 				break;
 			}
 		}
-		MethodBinding[] methodBindings = new MethodBinding[clinitIndex == -1 ? size : size - 1];
-
-		int count = 0;
+		MethodBinding[] methodBindings = new MethodBinding[(clinitIndex == -1 ? size : size - 1) + bindingCount/*reserve room for special enum methods*/];
+		// create special methods for enums
+		if (isEnum) {
+		    SourceTypeBinding sourceType = referenceContext.binding;
+			methodBindings[0] = sourceType.addSyntheticEnumMethod(TypeConstants.VALUES); // add <EnumType>[] values() 
+			methodBindings[1] = sourceType.addSyntheticEnumMethod(TypeConstants.VALUEOF); // add <EnumType> valueOf() 
+		}
+		// create bindings for source methods
 		for (int i = 0; i < size; i++) {
 			if (i != clinitIndex) {
 				MethodScope scope = new MethodScope(this, methods[i], false);
 				MethodBinding methodBinding = scope.createMethod(methods[i]);
 				if (methodBinding != null) // is null if binding could not be created
-					methodBindings[count++] = methodBinding;
+					methodBindings[bindingCount++] = methodBinding;
 			}
 		}
-		if (count != methodBindings.length)
-			System.arraycopy(methodBindings, 0, methodBindings = new MethodBinding[count], 0, count);
+		if (bindingCount != methodBindings.length)
+			System.arraycopy(methodBindings, 0, methodBindings = new MethodBinding[bindingCount], 0, bindingCount);
 
 		referenceContext.binding.methods = methodBindings;
 		referenceContext.binding.modifiers |= AccUnresolved; // until methods() is sent

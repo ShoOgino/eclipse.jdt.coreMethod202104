@@ -9,11 +9,22 @@
 		/*
 		 * Type name
 		 */
-		if (typeDeclaration.isInterface()) {
-			this.scribe.printNextToken(TerminalTokens.TokenNameinterface, true); 
-		} else {
-			this.scribe.printNextToken(TerminalTokens.TokenNameclass, true); 
-		}
+        switch(typeDeclaration.getKind()) {
+        	case IGenericType.CLASS :
+				this.scribe.printNextToken(TerminalTokens.TokenNameclass, true); 
+        		break;
+        	case IGenericType.INTERFACE :
+				this.scribe.printNextToken(TerminalTokens.TokenNameinterface, true); 
+        		break;
+        	case IGenericType.ENUM :
+				this.scribe.printNextToken(TerminalTokens.TokenNameenum, true); 
+        		break;
+        	case IGenericType.ANNOTATION_TYPE :
+        		// TODO (olivier) need to be merged with format(AnnotationTypeDecl)
+				this.scribe.printNextToken(TerminalTokens.TokenNameAT, this.preferences.insert_space_before_at_in_annotation_type_declaration);
+				this.scribe.printNextToken(TerminalTokens.TokenNameinterface, this.preferences.insert_space_after_at_in_annotation_type_declaration); 
+        		break;
+        }
 		this.scribe.printNextToken(TerminalTokens.TokenNameIdentifier, true); 
 
 		TypeParameter[] typeParameters = typeDeclaration.typeParameters;
@@ -70,11 +81,19 @@
 		 */
 		final TypeReference[] superInterfaces = typeDeclaration.superInterfaces;
 		if (superInterfaces != null) {
-			
+			int alignment_for_superinterfaces;
+			switch(typeDeclaration.getKind()) {
+				case IGenericType.ENUM :
+					alignment_for_superinterfaces = this.preferences.alignment_for_superinterfaces_in_enum_declaration;
+					break;
+				default:
+					alignment_for_superinterfaces = this.preferences.alignment_for_superinterfaces_in_type_declaration;
+					break;
+			}
 			int superInterfaceLength = superInterfaces.length;
 			Alignment interfaceAlignment =this.scribe.createAlignment(
 					"superInterfaces",//$NON-NLS-1$
-					this.preferences.alignment_for_superinterfaces_in_type_declaration,
+					alignment_for_superinterfaces,
 					superInterfaceLength+1,  // implements token is first fragment
 					this.scribe.scanner.currentPosition);
 			this.scribe.enterAlignment(interfaceAlignment);
@@ -82,7 +101,7 @@
 			do {
 				try {
 					this.scribe.alignFragment(interfaceAlignment, 0);
-					if (typeDeclaration.isInterface()) {
+					if (typeDeclaration.getKind() == IGenericType.INTERFACE) {
 						this.scribe.printNextToken(TerminalTokens.TokenNameextends, true);
 					} else  {
 						this.scribe.printNextToken(TerminalTokens.TokenNameimplements, true);
@@ -113,20 +132,69 @@
 		/*
 		 * Type body
 		 */
-		String class_declaration_brace = this.preferences.brace_position_for_type_declaration;
-
+		String class_declaration_brace;
+		boolean space_before_opening_brace;
+		switch(typeDeclaration.getKind()) {
+			case IGenericType.ENUM :
+				class_declaration_brace = this.preferences.brace_position_for_enum_declaration;
+				space_before_opening_brace = this.preferences.insert_space_before_opening_brace_in_enum_declaration;
+				break;
+			default:
+				class_declaration_brace = this.preferences.brace_position_for_type_declaration;
+				space_before_opening_brace = this.preferences.insert_space_before_opening_brace_in_type_declaration;
+				break;
+		}
         formatLeftCurlyBrace(line, class_declaration_brace);
-		formatTypeOpeningBrace(class_declaration_brace, this.preferences.insert_space_before_opening_brace_in_type_declaration, typeDeclaration);
+		formatTypeOpeningBrace(class_declaration_brace, space_before_opening_brace, typeDeclaration);
 		
-		if (this.preferences.indent_body_declarations_compare_to_type_header) {
+		
+		boolean indent_body_declarations_compare_to_header;
+		switch(typeDeclaration.getKind()) {
+			case IGenericType.ENUM :
+				indent_body_declarations_compare_to_header = this.preferences.indent_body_declarations_compare_to_enum_declaration_header;
+				break;
+			default:
+				indent_body_declarations_compare_to_header = this.preferences.indent_body_declarations_compare_to_type_header;
+				break;
+		}		
+		if (indent_body_declarations_compare_to_header) {
 			this.scribe.indent();
+		}
+		
+		if (typeDeclaration.getKind() == IGenericType.ENUM) {
+			FieldDeclaration[] fieldDeclarations = typeDeclaration.fields;
+			if (fieldDeclarations != null) {
+				int length = fieldDeclarations.length;
+				loop: for (int i = 0; i < length; i++) {
+					FieldDeclaration fieldDeclaration = fieldDeclarations[i];
+					if (fieldDeclaration.getKind() != AbstractVariableDeclaration.ENUM_CONSTANT) {
+						break loop;
+					}
+					if (i < length) {
+						fieldDeclaration.traverse(this, typeDeclaration.initializerScope);
+					}
+					if (isNextToken(TerminalTokens.TokenNameCOMMA)) {
+						this.scribe.printNextToken(TerminalTokens.TokenNameCOMMA, this.preferences.insert_space_before_comma_in_enum_declarations);
+						if (this.preferences.insert_space_after_comma_in_enum_declarations) {
+							this.scribe.space();
+						}
+						this.scribe.printTrailingComment();
+					}
+				}
+			} else {
+				this.scribe.printNewLine();
+			}
+			if (isNextToken(TerminalTokens.TokenNameSEMICOLON)) {
+				this.scribe.printNextToken(TerminalTokens.TokenNameSEMICOLON, this.preferences.insert_space_before_semicolon);
+				this.scribe.printTrailingComment();
+			}
 		}
 
 		formatTypeMembers(typeDeclaration);
 
 		this.scribe.printComment();
 		
-		if (this.preferences.indent_body_declarations_compare_to_type_header) {
+		if (indent_body_declarations_compare_to_header) {
 			this.scribe.unIndent();
 		}
 		
