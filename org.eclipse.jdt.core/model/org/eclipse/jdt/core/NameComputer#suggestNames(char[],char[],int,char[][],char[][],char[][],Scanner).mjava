@@ -1,0 +1,104 @@
+	private static char[][] suggestNames(
+		char[] packageName,
+		char[] qualifiedTypeName,
+		int dim,
+		char[][] prefixes,
+		char[][] suffixes,
+		char[][] excludedNames,
+		Scanner nameScanner){
+			
+		if(qualifiedTypeName == null || qualifiedTypeName.length == 0)
+			return CharOperation.NO_CHAR_CHAR;
+			
+		char[] typeName = CharOperation.lastSegment(qualifiedTypeName, '.');
+		
+		if(prefixes == null || prefixes.length == 0) {
+			prefixes = new char[1][0];
+		}
+		if(suffixes == null || suffixes.length == 0) {
+			suffixes = new char[1][0];
+		}
+		
+		char[][] names = new char[5][];
+		int namesCount = 0;
+		
+		char[][] tempNames = null;
+		
+		// compute variable name for base type
+		try{
+			nameScanner.setSource(typeName);
+			switch (nameScanner.getNextToken()) {
+				case ITerminalSymbols.TokenNameint :
+				case ITerminalSymbols.TokenNamebyte :
+				case ITerminalSymbols.TokenNameshort :
+				case ITerminalSymbols.TokenNamechar :
+				case ITerminalSymbols.TokenNamelong :
+				case ITerminalSymbols.TokenNamefloat :
+				case ITerminalSymbols.TokenNamedouble :
+				case ITerminalSymbols.TokenNameboolean :	
+					char[] name = computeBaseNames(typeName[0], prefixes, excludedNames);
+					if(name != null) {
+						tempNames =  new char[][]{name};
+					}
+					break;
+			}	
+		} catch(InvalidInputException e){
+		}
+
+		// compute variable name for non base type
+		if(tempNames == null) {
+			tempNames = computeNames(typeName);
+		}
+		
+		for (int i = 0; i < tempNames.length; i++) {
+			char[] tempName = tempNames[i];
+			if(dim > 0) {
+				int length = tempName.length;
+				if (tempName[length-1] == 's'){
+					System.arraycopy(tempName, 0, tempName = new char[length + 2], 0, length);
+					tempName[length] = 'e';
+					tempName[length+1] = 's';
+				} else {
+					System.arraycopy(tempName, 0, tempName = new char[length + 1], 0, length);
+					tempName[length] = 's';
+				}
+			}
+			
+			for (int j = 0; j < prefixes.length; j++) {
+				if(prefixes[j].length > 0
+					&& Character.isLetterOrDigit(prefixes[j][prefixes[j].length - 1])) {
+					tempName[0] = Character.toUpperCase(tempName[0]);
+				} else {
+					tempName[0] = Character.toLowerCase(tempName[0]);
+				}
+				char[] prefixName = CharOperation.concat(prefixes[j], tempName);
+				for (int k = 0; k < suffixes.length; k++) {
+					char[] suffixName = CharOperation.concat(prefixName, suffixes[k]);
+					int count = 2;
+					int m = 0;
+					while (m < excludedNames.length) {
+						if(CharOperation.equals(suffixName, excludedNames[m], false)) {
+							suffixName = CharOperation.concat(
+								prefixName,
+								String.valueOf(count++).toCharArray(),
+								suffixes[k]
+							);
+							m = 0;
+						} else {
+							m++;
+						}
+					}
+					if(JavaConventions.validateFieldName(new String(suffixName)).isOK()) {
+						names[namesCount++] = suffixName;
+					}
+					if(namesCount == names.length) {
+						System.arraycopy(names, 0, names = new char[namesCount * 2][], 0, namesCount);
+					}
+				}
+				
+			}
+		}
+		System.arraycopy(names, 0, names = new char[namesCount][], 0, namesCount);
+		return names;
+	}
+
