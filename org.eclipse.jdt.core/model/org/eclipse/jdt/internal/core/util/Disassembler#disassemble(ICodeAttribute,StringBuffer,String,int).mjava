@@ -1,16 +1,6 @@
 	private void disassemble(ICodeAttribute codeAttribute, StringBuffer buffer, String lineSeparator, int tabNumber) {
-		buffer
-			.append(Util.bind("disassembler.commentstart")) //$NON-NLS-1$
-			.append(Util.bind("classfileformat.maxStack")) //$NON-NLS-1$
-			.append(codeAttribute.getMaxStack())
-			.append(Util.bind("disassembler.comma")) //$NON-NLS-1$
-			.append(Util.bind("classfileformat.maxLocals")) //$NON-NLS-1$
-			.append(codeAttribute.getMaxLocals())
-			.append(Util.bind("disassembler.commentend")); //$NON-NLS-1$
-		writeNewLine(buffer, lineSeparator, tabNumber + 1);
-		buffer.append(Util.bind("disassembler.codeattributeheader")); //$NON-NLS-1$
 		writeNewLine(buffer, lineSeparator, tabNumber - 1);
-		DefaultBytecodeVisitor visitor = new DefaultBytecodeVisitor(codeAttribute.getCodeLength(), buffer, lineSeparator, tabNumber + 1);
+		DefaultBytecodeVisitor visitor = new DefaultBytecodeVisitor(codeAttribute.getCodeLength(), buffer, lineSeparator, tabNumber);
 		try {
 			codeAttribute.traverse(visitor);
 		} catch(ClassFormatException e) {
@@ -20,11 +10,12 @@
 		}
 		int exceptionTableLength = codeAttribute.getExceptionTableLength();
 		if (exceptionTableLength != 0) {
-			writeNewLine(buffer, lineSeparator, tabNumber + 1);
+			final int tabNumberForExceptionAttribute = tabNumber + 2;
+			dumpTab(tabNumberForExceptionAttribute, buffer);
 			IExceptionTableEntry[] exceptionTableEntries = codeAttribute.getExceptionTable();
 			buffer.append(Util.bind("disassembler.exceptiontableheader")); //$NON-NLS-1$
-			writeNewLine(buffer, lineSeparator, tabNumber + 2);
-			for (int i = 0; i < exceptionTableLength; i++) {
+			writeNewLine(buffer, lineSeparator, tabNumberForExceptionAttribute + 1);
+			for (int i = 0; i < exceptionTableLength - 1; i++) {
 				IExceptionTableEntry exceptionTableEntry = exceptionTableEntries[i];
 				buffer
 					.append(Util.bind("classfileformat.exceptiontablefrom")) //$NON-NLS-1$
@@ -41,15 +32,33 @@
 					CharOperation.replace(catchType, '/', '.');
 					buffer.append(catchType);
 				}
-				writeNewLine(buffer, lineSeparator, tabNumber + 2);
+				writeNewLine(buffer, lineSeparator, tabNumberForExceptionAttribute + 1);
 			}
+			IExceptionTableEntry exceptionTableEntry = exceptionTableEntries[exceptionTableLength - 1];
+			buffer
+				.append(Util.bind("classfileformat.exceptiontablefrom")) //$NON-NLS-1$
+				.append(exceptionTableEntry.getStartPC())
+				.append(Util.bind("classfileformat.exceptiontableto")) //$NON-NLS-1$
+				.append(exceptionTableEntry.getEndPC())
+				.append(Util.bind("classfileformat.exceptiontablegoto")) //$NON-NLS-1$
+				.append(exceptionTableEntry.getHandlerPC())
+				.append(Util.bind("classfileformat.exceptiontablewhen")); //$NON-NLS-1$
+			if (exceptionTableEntry.getCatchTypeIndex() == 0) {
+				buffer.append(ANY_EXCEPTION);
+			} else {
+				char[] catchType = exceptionTableEntry.getCatchType();
+				CharOperation.replace(catchType, '/', '.');
+				buffer.append(catchType);
+			}
+			writeNewLine(buffer, lineSeparator, 0);
 		}
 		ILineNumberAttribute lineNumberAttribute = codeAttribute.getLineNumberAttribute();
 		int lineAttributeLength = lineNumberAttribute == null ? 0 : lineNumberAttribute.getLineNumberTableLength();
 		if (lineAttributeLength != 0) {
-			writeNewLine(buffer, lineSeparator, tabNumber + 1);
+			int tabNumberForLineAttribute = tabNumber + 2;
+			dumpTab(tabNumberForLineAttribute, buffer);
 			buffer.append(Util.bind("disassembler.linenumberattributeheader")); //$NON-NLS-1$
-			writeNewLine(buffer, lineSeparator, tabNumber + 2);
+			writeNewLine(buffer, lineSeparator, tabNumberForLineAttribute + 1);
 			int[][] lineattributesEntries = lineNumberAttribute.getLineNumberTable();
 			for (int i = 0; i < lineAttributeLength - 1; i++) {
 				buffer
@@ -58,7 +67,7 @@
 					.append(Util.bind("classfileformat.linenumbertableto")) //$NON-NLS-1$
 					.append(lineattributesEntries[i][1])
 					.append(Util.bind("classfileformat.linenumbertableclose")); //$NON-NLS-1$
-				writeNewLine(buffer, lineSeparator, tabNumber + 2);
+				writeNewLine(buffer, lineSeparator, tabNumberForLineAttribute + 1);
 			}
 			buffer
 				.append(Util.bind("classfileformat.linenumbertablefrom")) //$NON-NLS-1$
@@ -70,16 +79,16 @@
 		ILocalVariableAttribute localVariableAttribute = codeAttribute.getLocalVariableAttribute();
 		int localVariableAttributeLength = localVariableAttribute == null ? 0 : localVariableAttribute.getLocalVariableTableLength();
 		if (localVariableAttributeLength != 0) {
-			writeNewLine(buffer, lineSeparator, tabNumber + 1);
+			int tabNumberForLocalVariableAttribute = tabNumber + 2;
+			writeNewLine(buffer, lineSeparator, tabNumberForLocalVariableAttribute);
 			buffer.append(Util.bind("disassembler.localvariabletableattributeheader")); //$NON-NLS-1$
-			writeNewLine(buffer, lineSeparator, tabNumber + 2);
+			writeNewLine(buffer, lineSeparator, tabNumberForLocalVariableAttribute + 1);
 			ILocalVariableTableEntry[] localVariableTableEntries = localVariableAttribute.getLocalVariableTable();
 			for (int i = 0; i < localVariableAttributeLength - 1; i++) {
 				ILocalVariableTableEntry localVariableTableEntry = localVariableTableEntries[i];
+				int index= localVariableTableEntry.getIndex();
 				int startPC = localVariableTableEntry.getStartPC();
 				int length  = localVariableTableEntry.getLength();
-				char[] exceptionType = Signature.toCharArray(localVariableTableEntry.getDescriptor());
-				CharOperation.replace(exceptionType, '/', '.');
 				buffer
 					.append(Util.bind("classfileformat.localvariabletablefrom")) //$NON-NLS-1$
 					.append(startPC)
@@ -88,16 +97,15 @@
 					.append(Util.bind("classfileformat.localvariabletablelocalname")) //$NON-NLS-1$
 					.append(localVariableTableEntry.getName())
 					.append(Util.bind("classfileformat.localvariabletablelocalindex")) //$NON-NLS-1$
-					.append(localVariableTableEntry.getIndex())
-					.append(Util.bind("classfileformat.localvariabletablelocaltype")) //$NON-NLS-1$
-					.append(exceptionType);
-				writeNewLine(buffer, lineSeparator, tabNumber + 2);
+					.append(index)
+					.append(Util.bind("classfileformat.localvariabletablelocaltype")); //$NON-NLS-1$
+				buffer.append(localVariableTableEntry.getDescriptor());
+				writeNewLine(buffer, lineSeparator, tabNumberForLocalVariableAttribute + 1);
 			}
 			ILocalVariableTableEntry localVariableTableEntry = localVariableTableEntries[localVariableAttributeLength - 1];
+			int index= localVariableTableEntry.getIndex();
 			int startPC = localVariableTableEntry.getStartPC();
 			int length  = localVariableTableEntry.getLength();
-			char[] exceptionType = Signature.toCharArray(localVariableTableEntry.getDescriptor());
-			CharOperation.replace(exceptionType, '/', '.');
 			buffer
 				.append(Util.bind("classfileformat.localvariabletablefrom")) //$NON-NLS-1$
 				.append(startPC)
@@ -106,9 +114,51 @@
 				.append(Util.bind("classfileformat.localvariabletablelocalname")) //$NON-NLS-1$
 				.append(localVariableTableEntry.getName())
 				.append(Util.bind("classfileformat.localvariabletablelocalindex")) //$NON-NLS-1$
-				.append(localVariableTableEntry.getIndex())
+				.append(index)
+				.append(Util.bind("classfileformat.localvariabletablelocaltype")); //$NON-NLS-1$
+			buffer.append(localVariableTableEntry.getDescriptor());
+		} 
+		ILocalVariableTypeTableAttribute localVariableTypeAttribute= getLocalVariableTypeAttribute(codeAttribute);
+		int localVariableTypeTableLength = localVariableTypeAttribute == null ? 0 : localVariableTypeAttribute.getLocalVariableTypeTableLength();
+		if (localVariableTypeTableLength != 0) {
+			int tabNumberForLocalVariableAttribute = tabNumber + 2;
+			writeNewLine(buffer, lineSeparator, tabNumberForLocalVariableAttribute);
+			buffer.append(Util.bind("disassembler.localvariabletypetableattributeheader")); //$NON-NLS-1$
+			writeNewLine(buffer, lineSeparator, tabNumberForLocalVariableAttribute + 1);
+			ILocalVariableTypeTableEntry[] localVariableTypeTableEntries = localVariableTypeAttribute.getLocalVariableTypeTable();
+			for (int i = 0; i < localVariableTypeTableLength - 1; i++) {
+				ILocalVariableTypeTableEntry localVariableTypeTableEntry = localVariableTypeTableEntries[i];
+				int index= localVariableTypeTableEntry.getIndex();
+				int startPC = localVariableTypeTableEntry.getStartPC();
+				int length  = localVariableTypeTableEntry.getLength();
+				buffer
+					.append(Util.bind("classfileformat.localvariabletablefrom")) //$NON-NLS-1$
+					.append(startPC)
+					.append(Util.bind("classfileformat.localvariabletableto")) //$NON-NLS-1$
+					.append(startPC + length)
+					.append(Util.bind("classfileformat.localvariabletablelocalname")) //$NON-NLS-1$
+					.append(localVariableTypeTableEntry.getName())
+					.append(Util.bind("classfileformat.localvariabletablelocalindex")) //$NON-NLS-1$
+					.append(index)
+					.append(Util.bind("classfileformat.localvariabletablelocaltype")); //$NON-NLS-1$
+				buffer.append(localVariableTypeTableEntry.getSignature());
+				writeNewLine(buffer, lineSeparator, tabNumberForLocalVariableAttribute + 1);
+			}
+			ILocalVariableTypeTableEntry localVariableTypeTableEntry = localVariableTypeTableEntries[localVariableTypeTableLength - 1];
+			int index= localVariableTypeTableEntry.getIndex();
+			int startPC = localVariableTypeTableEntry.getStartPC();
+			int length  = localVariableTypeTableEntry.getLength();
+			buffer
+				.append(Util.bind("classfileformat.localvariabletablefrom")) //$NON-NLS-1$
+				.append(startPC)
+				.append(Util.bind("classfileformat.localvariabletableto")) //$NON-NLS-1$
+				.append(startPC + length)
+				.append(Util.bind("classfileformat.localvariabletablelocalname")) //$NON-NLS-1$
+				.append(localVariableTypeTableEntry.getName())
+				.append(Util.bind("classfileformat.localvariabletablelocalindex")) //$NON-NLS-1$
+				.append(index)
 				.append(Util.bind("classfileformat.localvariabletablelocaltype")) //$NON-NLS-1$
-				.append(exceptionType);
+				.append(localVariableTypeTableEntry.getSignature());
 		} 
 	}
 

@@ -2,23 +2,48 @@
 	 * Disassemble a method info header
 	 */
 	private void disassemble(IClassFileReader classFileReader, IMethodInfo methodInfo, StringBuffer buffer, String lineSeparator, int tabNumber, int mode) {
-		ICodeAttribute codeAttribute = methodInfo.getCodeAttribute();
 		writeNewLine(buffer, lineSeparator, tabNumber);
+		ICodeAttribute codeAttribute = methodInfo.getCodeAttribute();
 		char[] methodDescriptor = methodInfo.getDescriptor();
-		if (mode == ClassFileBytesDisassembler.DETAILED) {
-			CharOperation.replace(methodDescriptor, '.', '/');
+		IClassFileAttribute classFileAttribute = Util.getAttribute(methodInfo, IAttributeNamesConstants.SIGNATURE);
+		ISignatureAttribute signatureAttribute = (ISignatureAttribute) classFileAttribute;
+		if (mode == DETAILED) {
 			buffer
-				.append(Util.bind("disassembler.commentstart")) //$NON-NLS-1$
+				.append(Util.bind("disassembler.begincommentline")) //$NON-NLS-1$
 				.append(Util.bind("classfileformat.methoddescriptor")) //$NON-NLS-1$
 				.append(Util.bind("disassembler.constantpoolindex")) //$NON-NLS-1$
 				.append(methodInfo.getDescriptorIndex())
 				.append(Util.bind("disassembler.space")) //$NON-NLS-1$
-				.append(methodDescriptor)
-				.append(Util.bind("disassembler.commentend")); //$NON-NLS-1$
+				.append(methodDescriptor);
+			if (methodInfo.isDeprecated()) {
+				buffer.append(Util.bind("disassembler.deprecated"));//$NON-NLS-1$
+			}			
+			writeNewLine(buffer, lineSeparator, tabNumber);
+			if (signatureAttribute != null) {
+				buffer
+					.append(Util.bind("disassembler.begincommentline"))	 //$NON-NLS-1$
+					.append(Util.bind("disassembler.signatureattributeheader")) //$NON-NLS-1$
+					.append(signatureAttribute.getSignature());
+				writeNewLine(buffer, lineSeparator, tabNumber);
+			}
+			if (codeAttribute != null) {
+				buffer
+					.append(Util.bind("disassembler.begincommentline")) //$NON-NLS-1$
+					.append(Util.bind("classfileformat.maxStack")) //$NON-NLS-1$
+					.append(codeAttribute.getMaxStack())
+					.append(Util.bind("disassembler.comma"))//$NON-NLS-1$
+					.append(Util.bind("disassembler.space"))//$NON-NLS-1$
+					.append(Util.bind("classfileformat.maxLocals")) //$NON-NLS-1$
+					.append(codeAttribute.getMaxLocals());
+				writeNewLine(buffer, lineSeparator, tabNumber);
+			}
 		}		
-		writeNewLine(buffer, lineSeparator, tabNumber);
 		int accessFlags = methodInfo.getAccessFlags();
 		decodeModifiersForMethod(buffer, accessFlags);
+		if (methodInfo.isSynthetic()) {
+			buffer.append("synthetic"); //$NON-NLS-1$
+			buffer.append(Util.bind("disassembler.space")); //$NON-NLS-1$
+		}
 		CharOperation.replace(methodDescriptor, '/', '.');
 		char[] methodName = null;
 		if (methodInfo.isConstructor()) {
@@ -41,28 +66,33 @@
 				CharOperation.replace(exceptionName, '/', '.');
 				buffer
 					.append(exceptionName)
-					.append(Util.bind("disassembler.comma")); //$NON-NLS-1$
+					.append(Util.bind("disassembler.comma"))//$NON-NLS-1$
+					.append(Util.bind("disassembler.space")); //$NON-NLS-1$
 			}
 			char[] exceptionName = exceptionNames[length - 1];
 			CharOperation.replace(exceptionName, '/', '.');
 			buffer.append(exceptionName);
 		}
 		buffer.append(Util.bind("disassembler.endofmethodheader")); //$NON-NLS-1$
-		writeNewLine(buffer, lineSeparator, tabNumber + 1);
-		IClassFileAttribute[] attributes = methodInfo.getAttributes();
-		int length = attributes.length;
-		if (length != 0) {
-			for (int i = 0; i < length; i++) {
-				IClassFileAttribute attribute = attributes[i];
-				if ((attribute != codeAttribute) && (attribute != exceptionAttribute)) {
-					disassemble(attribute, buffer, lineSeparator, tabNumber);
-					writeNewLine(buffer, lineSeparator, tabNumber);
+		if (mode == DETAILED) {
+			IClassFileAttribute[] attributes = methodInfo.getAttributes();
+			int length = attributes.length;
+			if (length != 0) {
+				for (int i = 0; i < length; i++) {
+					IClassFileAttribute attribute = attributes[i];
+					if (attribute != codeAttribute
+							&& attribute != exceptionAttribute
+							&& attribute != signatureAttribute
+							&& !CharOperation.equals(attribute.getAttributeName(), IAttributeNamesConstants.DEPRECATED)
+							&& !CharOperation.equals(attribute.getAttributeName(), IAttributeNamesConstants.SYNTHETIC)) {
+						disassemble(attribute, buffer, lineSeparator, tabNumber);
+						writeNewLine(buffer, lineSeparator, tabNumber);
+					}
 				}
 			}
-		}
-		if (codeAttribute != null) {
-			disassemble(codeAttribute, buffer, lineSeparator, tabNumber);
-			writeNewLine(buffer, lineSeparator, tabNumber);
+			if (codeAttribute != null) {
+				disassemble(codeAttribute, buffer, lineSeparator, tabNumber);
+			}
 		}
 	}
 
