@@ -1,0 +1,48 @@
+	/*
+	 * Convert an initializerinfo into a parsed initializer declaration
+	 */
+	private Initializer convert(InitializerElementInfo initializerInfo, CompilationResult compilationResult) {
+
+		Block block = new Block(0);
+		Initializer initializer = new Initializer(block, IConstants.AccDefault);
+
+		int start = initializerInfo.getNameSourceStart();
+		int end = initializerInfo.getNameSourceEnd();
+
+		initializer.name = initializerInfo.getName();
+		initializer.sourceStart = start;
+		initializer.sourceEnd = end;
+		initializer.declarationSourceStart = initializerInfo.getDeclarationSourceStart();
+		initializer.declarationSourceEnd = initializerInfo.getDeclarationSourceEnd();
+		initializer.modifiers = initializerInfo.getModifiers();
+
+		/* convert local and anonymous types */
+		IJavaElement[] children = initializerInfo.getChildren();
+		int typesLength = children.length;
+		if (typesLength > 0) {
+			Statement[] statements = new Statement[typesLength];
+			for (int i = 0; i < typesLength; i++) {
+				JavaElement type = (JavaElement)children[i];
+				try {
+					TypeDeclaration localType = convert((SourceTypeElementInfo)type.getElementInfo(), compilationResult);
+					if (localType instanceof AnonymousLocalTypeDeclaration) {
+						AnonymousLocalTypeDeclaration anonymousLocalTypeDeclaration = (AnonymousLocalTypeDeclaration)localType;
+						QualifiedAllocationExpression expression = new QualifiedAllocationExpression(anonymousLocalTypeDeclaration);
+						expression.type = anonymousLocalTypeDeclaration.superclass;
+						anonymousLocalTypeDeclaration.superclass = null;
+						anonymousLocalTypeDeclaration.superInterfaces = null;
+						anonymousLocalTypeDeclaration.allocation = expression;
+						statements[i] = expression;
+					} else {
+						statements[i] = localType;
+					}
+				} catch (JavaModelException e) {
+					// ignore
+				}
+			}
+			block.statements = statements;
+		}
+		
+		return initializer;
+	}
+
