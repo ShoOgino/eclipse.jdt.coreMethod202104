@@ -1,24 +1,20 @@
-	// Helper method for findMethods(char[], TypeBinding[], ReferenceBinding, Scope, ObjectVector, boolean, boolean, boolean)
-	private void findLocalMethods(
+	// Helper method for findMethods(char[], MethodBinding[], Scope, ObjectVector, boolean, boolean, boolean, TypeBinding)
+	private void findLocalMethodDeclarations(
 		char[] methodName,
-		TypeBinding[] argTypes,
 		MethodBinding[] methods,
 		Scope scope,
 		ObjectVector methodsFound,
+		//	boolean noVoidReturnType, how do you know?
 		boolean onlyStaticMethods,
 		boolean exactMatch,
-		TypeBinding receiverType,
-		InvocationSite invocationSite) {
+		ReferenceBinding receiverType) {
 
 		// Inherited methods which are hidden by subclasses are filtered out
 		// No visibility checks can be performed without the scope & invocationSite
-
 		int methodLength = methodName.length;
-		int minArgLength = argTypes == null ? 0 : argTypes.length;
-
 		next : for (int f = methods.length; --f >= 0;) {
-			MethodBinding method = methods[f];
 
+			MethodBinding method = methods[f];
 			if (method.isConstructor())
 				continue next;
 
@@ -27,7 +23,7 @@
 				continue next;
 
 			if (options.checkVisibility()
-				&& !method.canBeSeenBy(receiverType, invocationSite, scope))
+				&& !method.canBeSeenBy(receiverType, false, scope))
 				continue next;
 
 			if (exactMatch) {
@@ -45,16 +41,7 @@
 					))
 					continue next;
 			}
-			if (minArgLength > method.parameters.length)
-				continue next;
 
-			for (int a = minArgLength; --a >= 0;){
-				if (argTypes[a] != null){ // can be null if it could not be resolved properly
-					if (!scope.areTypesCompatible(argTypes[a], method.parameters[a])) {
-						continue next;
-					}
-				}
-			}
 			for (int i = methodsFound.size; --i >= 0;) {
 
 				MethodBinding otherMethod = (MethodBinding) methodsFound.elementAt(i);
@@ -76,29 +63,75 @@
 			}
 
 			methodsFound.add(method);
+			
 			int length = method.parameters.length;
 			char[][] parameterPackageNames = new char[length][];
 			char[][] parameterTypeNames = new char[length][];
-
+			
 			for (int i = 0; i < length; i++) {
 				TypeBinding type = method.parameters[i];
 				parameterPackageNames[i] = type.qualifiedPackageName();
 				parameterTypeNames[i] = type.qualifiedSourceName();
 			}
-			char[][] parameterNames = findMethodParameterNames(method,parameterTypeNames);
 
-			char[] completion = TypeConstants.NoChar;
-			// nothing to insert - do not want to replace the existing selector & arguments
+			char[][] parameterNames = findMethodParameterNames(method,parameterTypeNames);
+			
+			StringBuffer completion = new StringBuffer(10);
+			// flush uninteresting modifiers
+			int insertedModifiers = method.modifiers & ~(CompilerModifiers.AccNative | CompilerModifiers.AccAbstract);
+
 			if (!exactMatch) {
-				if (source != null
-					&& source.length > endPosition
-					&& source[endPosition] == '(')
-					completion = method.selector;
-				else
-					completion = CharOperation.concat(method.selector, new char[] { '(', ')' });
+				if(insertedModifiers != CompilerModifiers.AccDefault){
+					completion.append(AstNode.modifiersString(insertedModifiers));
+				}
+				completion.append(method.returnType.sourceName());
+				completion.append(' ');
+				completion.append(method.selector);
+				completion.append('(');
+
+				for(int i = 0; i < length ; i++){
+					if(mustQualifyType(CharOperation.splitOn('.',parameterPackageNames[i]), parameterTypeNames[i])){
+						completion.append(parameterPackageNames[i]);
+						completion.append('.');
+					}
+					completion.append(parameterTypeNames[i]);
+					completion.append(' ');
+					if(parameterNames != null){
+						completion.append(parameterNames[i]);
+					} else {
+						completion.append('%');
+					}
+					if(i != (length - 1))
+						completion.append(',');	
+				}
+				completion.append(')');
+				
+				ReferenceBinding[] exceptions = method.thrownExceptions;
+				int exceptionCount =0;
+				if (exceptions != null && (( exceptionCount = exceptions.length) > 0)){
+					completion.append(' ');
+					completion.append(THROWS);
+					completion.append(' ');
+					for(int i = 0; i < exceptionCount ; i++){
+						ReferenceBinding exception = exceptions[i];
+						char[] typeName = exception.qualifiedSourceName();
+						char[] packageName = exception.qualifiedPackageName();
+							
+						if(mustQualifyType(CharOperation.splitOn('.',packageName), typeName)){
+							completion.append(packageName);
+							completion.append('.');
+						}
+						completion.append(typeName);
+						
+						if(i != (exceptionCount - 1)){
+							completion.append(',');
+							completion.append(' ');
+						}
+					}
+				}
 			}
 
-			requestor.acceptMethod(
+			requestor.acceptMethodDeclaration(
 				method.declaringClass.qualifiedPackageName(),
 				method.declaringClass.qualifiedSourceName(),
 				method.selector,
@@ -107,7 +140,7 @@
 				parameterNames,
 				method.returnType.qualifiedPackageName(),
 				method.returnType.qualifiedSourceName(),
-				completion,
+				completion.toString().toCharArray(),
 				method.modifiers,
 				startPosition,
 				endPosition);
