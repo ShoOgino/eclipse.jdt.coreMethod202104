@@ -1,0 +1,59 @@
+/**
+ * Starting at this folder, create package fragments and add the fragments that are not exclused
+ * to the collection of children.
+ * 
+ * @exception JavaModelException  The resource associated with this package fragment does not exist
+ */
+protected void computeFolderChildren(IContainer folder, boolean isIncluded, String prefix, ArrayList vChildren, char[][] inclusionPatterns, char[][] exclusionPatterns) throws JavaModelException {
+
+	if (isIncluded) {
+	    IPackageFragment pkg = getPackageFragment(prefix);
+		vChildren.add(pkg);
+	}
+	try {
+		JavaProject javaProject = (JavaProject)getJavaProject();
+		IResource[] members = folder.members();
+		boolean hasIncluded = isIncluded;
+		for (int i = 0, max = members.length; i < max; i++) {
+			IResource member = members[i];
+			String memberName = member.getName();
+			
+			switch(member.getType()) {
+			    
+			    case IResource.FOLDER:
+					if (Util.isValidFolderNameForPackage(memberName)) {
+					    boolean isMemberIncluded = !Util.isExcluded(member, inclusionPatterns, exclusionPatterns);
+						// keep looking inside as long as included already, or may have child included due to inclusion patterns
+					    if (isMemberIncluded || inclusionPatterns != null) { 
+							// eliminate binary output only if nested inside direct subfolders
+							if (javaProject.contains(member)) {
+								String newPrefix;
+								if (prefix.length() == 0) {
+									newPrefix = memberName;
+								} else {
+									newPrefix = prefix + "." + memberName; //$NON-NLS-1$
+								}
+								computeFolderChildren((IFolder) member, isMemberIncluded, newPrefix, vChildren, inclusionPatterns, exclusionPatterns);
+							}
+						}
+					}
+			    	break;
+			    case IResource.FILE:
+			        // inclusion filter may only include files, in which case we still want to include the immediate parent package (lazily)
+					if (!hasIncluded
+								&& Util.isValidCompilationUnitName(memberName)
+								&& !Util.isExcluded(member, inclusionPatterns, exclusionPatterns)) {
+						hasIncluded = true;
+					    IPackageFragment pkg = getPackageFragment(prefix);
+					    vChildren.add(pkg); 
+					}
+			        break;
+			}
+		}
+	} catch(IllegalArgumentException e){
+		throw new JavaModelException(e, IJavaModelStatusConstants.ELEMENT_DOES_NOT_EXIST); // could be thrown by ElementTree when path is not found
+	} catch (CoreException e) {
+		throw new JavaModelException(e);
+	}
+}
+
