@@ -1,0 +1,63 @@
+	public FlowInfo analyseCode(
+		BlockScope currentScope,
+		FlowContext flowContext,
+		FlowInfo flowInfo) {
+		// initialize break and continue labels
+		breakLabel = new Label();
+		continueLabel = new Label();
+
+		// process the element variable and collection
+		flowInfo = this.elementVariable.analyseCode(scope, flowContext, flowInfo);
+		flowInfo = this.collection.analyseCode(scope, flowContext, flowInfo);
+
+		// element variable will be assigned when iterating
+		flowInfo.markAsDefinitelyAssigned(this.elementVariable.binding);
+
+		this.postCollectionInitStateIndex = currentScope.methodScope().recordInitializationStates(flowInfo);
+		
+		// process the action
+		LoopingFlowContext loopingContext = new LoopingFlowContext(flowContext, this, breakLabel, continueLabel, scope);
+		FlowInfo actionInfo = flowInfo.initsWhenTrue().copy();
+		if (!(action == null || (action.isEmptyBlock() 
+		        	&& currentScope.environment().options.complianceLevel <= ClassFileConstants.JDK1_3))) {
+
+			if (!this.action.complainIfUnreachable(actionInfo, scope, false)) {
+				actionInfo = action.analyseCode(scope, loopingContext, actionInfo);
+			}
+
+			// code generation can be optimized when no need to continue in the loop
+			if (!actionInfo.isReachable() && !loopingContext.initsOnContinue.isReachable()) {
+				continueLabel = null;
+			} else {
+				actionInfo = actionInfo.mergedWith(loopingContext.initsOnContinue.unconditionalInits());
+				loopingContext.complainOnFinalAssignmentsInLoop(scope, actionInfo);
+			}
+		}
+
+		// we need the variable to iterate the collection even if the 
+		// element variable is not used
+		if (!(this.action == null
+				|| this.action.isEmptyBlock()
+				|| ((this.action.bits & IsUsefulEmptyStatementMASK) != 0))) {
+			switch(this.kind) {
+				case ARRAY :
+					this.collectionVariable.useFlag = LocalVariableBinding.USED;
+					this.indexVariable.useFlag = LocalVariableBinding.USED;
+					this.maxVariable.useFlag = LocalVariableBinding.USED;
+					break;
+				case RAW_ITERABLE :
+				case GENERIC_ITERABLE :
+					this.indexVariable.useFlag = LocalVariableBinding.USED;
+					break;
+			}
+		}
+		//end of loop
+		FlowInfo mergedInfo = FlowInfo.mergedOptimizedBranches(
+				loopingContext.initsOnBreak, 
+				false, 
+				flowInfo.initsWhenFalse(), 
+				false, 
+				true /*for(;;){}while(true); unreachable(); */);
+		return mergedInfo;
+	}
+

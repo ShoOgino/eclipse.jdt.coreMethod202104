@@ -1,0 +1,165 @@
+	/**
+	 * INTERNAL USE-ONLY
+	 * This methods generate all the attributes for the receiver.
+	 * For a class they could be:
+	 * - source file attribute
+	 * - inner classes attribute
+	 * - deprecated attribute
+	 */
+	public void addAttributes() {
+		// update the method count
+		contents[methodCountOffset++] = (byte) (methodCount >> 8);
+		contents[methodCountOffset] = (byte) methodCount;
+
+		int attributeNumber = 0;
+		// leave two bytes for the number of attributes and store the current offset
+		int attributeOffset = contentsOffset;
+		contentsOffset += 2;
+
+		// source attribute
+		if ((produceDebugAttributes & CompilerOptions.Source) != 0) {
+			String fullFileName =
+				new String(referenceBinding.scope.referenceCompilationUnit().getFileName());
+			fullFileName = fullFileName.replace('\\', '/');
+			int lastIndex = fullFileName.lastIndexOf('/');
+			if (lastIndex != -1) {
+				fullFileName = fullFileName.substring(lastIndex + 1, fullFileName.length());
+			}
+			// check that there is enough space to write all the bytes for the field info corresponding
+			// to the @fieldBinding
+			if (contentsOffset + 8 >= contents.length) {
+				resizeContents(8);
+			}
+			int sourceAttributeNameIndex =
+				constantPool.literalIndex(AttributeNamesConstants.SourceName);
+			contents[contentsOffset++] = (byte) (sourceAttributeNameIndex >> 8);
+			contents[contentsOffset++] = (byte) sourceAttributeNameIndex;
+			// The length of a source file attribute is 2. This is a fixed-length
+			// attribute
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 2;
+			// write the source file name
+			int fileNameIndex = constantPool.literalIndex(fullFileName.toCharArray());
+			contents[contentsOffset++] = (byte) (fileNameIndex >> 8);
+			contents[contentsOffset++] = (byte) fileNameIndex;
+			attributeNumber++;
+		}
+		// Deprecated attribute
+		if (referenceBinding.isDeprecated()) {
+			// check that there is enough space to write all the bytes for the field info corresponding
+			// to the @fieldBinding
+			if (contentsOffset + 6 >= contents.length) {
+				resizeContents(6);
+			}
+			int deprecatedAttributeNameIndex =
+				constantPool.literalIndex(AttributeNamesConstants.DeprecatedName);
+			contents[contentsOffset++] = (byte) (deprecatedAttributeNameIndex >> 8);
+			contents[contentsOffset++] = (byte) deprecatedAttributeNameIndex;
+			// the length of a deprecated attribute is equals to 0
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			attributeNumber++;
+		}
+		// Inner class attribute
+		if (numberOfInnerClasses != 0) {
+			// Generate the inner class attribute
+			int exSize = 8 * numberOfInnerClasses + 8;
+			if (exSize + contentsOffset >= this.contents.length) {
+				resizeContents(exSize);
+			}
+			// Now we now the size of the attribute and the number of entries
+			// attribute name
+			int attributeNameIndex =
+				constantPool.literalIndex(AttributeNamesConstants.InnerClassName);
+			contents[contentsOffset++] = (byte) (attributeNameIndex >> 8);
+			contents[contentsOffset++] = (byte) attributeNameIndex;
+			int value = (numberOfInnerClasses << 3) + 2;
+			contents[contentsOffset++] = (byte) (value >> 24);
+			contents[contentsOffset++] = (byte) (value >> 16);
+			contents[contentsOffset++] = (byte) (value >> 8);
+			contents[contentsOffset++] = (byte) value;
+			contents[contentsOffset++] = (byte) (numberOfInnerClasses >> 8);
+			contents[contentsOffset++] = (byte) numberOfInnerClasses;
+			for (int i = 0; i < numberOfInnerClasses; i++) {
+				ReferenceBinding innerClass = innerClassesBindings[i];
+				int accessFlags = innerClass.getAccessFlags();
+				int innerClassIndex = constantPool.literalIndex(innerClass);
+				// inner class index
+				contents[contentsOffset++] = (byte) (innerClassIndex >> 8);
+				contents[contentsOffset++] = (byte) innerClassIndex;
+				// outer class index: anonymous and local have no outer class index
+				if (innerClass.isMemberType()) {
+					// member or member of local
+					int outerClassIndex = constantPool.literalIndex(innerClass.enclosingType());
+					contents[contentsOffset++] = (byte) (outerClassIndex >> 8);
+					contents[contentsOffset++] = (byte) outerClassIndex;
+				} else {
+					// equals to 0 if the innerClass is not a member type
+					contents[contentsOffset++] = 0;
+					contents[contentsOffset++] = 0;
+				}
+				// name index
+				if (!innerClass.isAnonymousType()) {
+					int nameIndex = constantPool.literalIndex(innerClass.sourceName());
+					contents[contentsOffset++] = (byte) (nameIndex >> 8);
+					contents[contentsOffset++] = (byte) nameIndex;
+				} else {
+					// equals to 0 if the innerClass is an anonymous type
+					contents[contentsOffset++] = 0;
+					contents[contentsOffset++] = 0;
+				}
+				// access flag
+				if (innerClass.isAnonymousType()) {
+					accessFlags |= AccPrivate;
+				} else
+					if (innerClass.isLocalType() && !innerClass.isMemberType()) {
+						accessFlags |= AccPrivate;
+					}
+				contents[contentsOffset++] = (byte) (accessFlags >> 8);
+				contents[contentsOffset++] = (byte) accessFlags;
+			}
+			attributeNumber++;
+		}
+		// add signature attribute
+		char[] genericSignature = referenceBinding.genericSignature();
+		if (genericSignature != null) {
+			// check that there is enough space to write all the bytes for the field info corresponding
+			// to the @fieldBinding
+			if (contentsOffset + 8 >= contents.length) {
+				resizeContents(8);
+			}
+			int signatureAttributeNameIndex =
+				constantPool.literalIndex(AttributeNamesConstants.SignatureName);
+			contents[contentsOffset++] = (byte) (signatureAttributeNameIndex >> 8);
+			contents[contentsOffset++] = (byte) signatureAttributeNameIndex;
+			// the length of a signature attribute is equals to 2
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 2;
+			int signatureIndex =
+				constantPool.literalIndex(genericSignature);
+			contents[contentsOffset++] = (byte) (signatureIndex >> 8);
+			contents[contentsOffset++] = (byte) signatureIndex;
+			attributeNumber++;
+		}
+		
+		// update the number of attributes
+		if (attributeOffset + 2 >= this.contents.length) {
+			resizeContents(2);
+		}
+		contents[attributeOffset++] = (byte) (attributeNumber >> 8);
+		contents[attributeOffset] = (byte) attributeNumber;
+
+		// resynchronize all offsets of the classfile
+		header = constantPool.poolContent;
+		headerOffset = constantPool.currentOffset;
+		int constantPoolCount = constantPool.currentIndex;
+		header[constantPoolOffset++] = (byte) (constantPoolCount >> 8);
+		header[constantPoolOffset] = (byte) constantPoolCount;
+	}
+

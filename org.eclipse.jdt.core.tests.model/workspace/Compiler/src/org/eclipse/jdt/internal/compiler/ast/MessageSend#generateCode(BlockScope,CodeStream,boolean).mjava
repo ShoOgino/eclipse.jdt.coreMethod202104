@@ -1,0 +1,67 @@
+/**
+ * MessageSend code generation
+ *
+ * @param currentScope org.eclipse.jdt.internal.compiler.lookup.BlockScope
+ * @param codeStream org.eclipse.jdt.internal.compiler.codegen.CodeStream
+ * @param valueRequired boolean
+ */ 
+public void generateCode(BlockScope currentScope, CodeStream codeStream, boolean valueRequired) {
+
+	int pc = codeStream.position;
+
+	// generate receiver/enclosing instance access
+	boolean isStatic = this.codegenBinding.isStatic();
+	// outer access ?
+	if (!isStatic && ((bits & DepthMASK) != 0) && receiver.isImplicitThis()){
+		// outer method can be reached through emulation if implicit access
+		ReferenceBinding targetType = currentScope.enclosingSourceType().enclosingTypeAt((bits & DepthMASK) >> DepthSHIFT);		
+		Object[] path = currentScope.getEmulationPath(targetType, true /*only exact match*/, false/*consider enclosing arg*/);
+		codeStream.generateOuterAccess(path, this, targetType, currentScope);
+	} else {
+		receiver.generateCode(currentScope, codeStream, !isStatic);
+	}
+	// generate arguments
+	if (arguments != null){
+		for (int i = 0, max = arguments.length; i < max; i++){
+			arguments[i].generateCode(currentScope, codeStream, true);
+		}
+	}
+	// actual message invocation
+	if (syntheticAccessor == null){
+		if (isStatic){
+			codeStream.invokestatic(this.codegenBinding);
+		} else {
+			if( (receiver.isSuper()) || this.codegenBinding.isPrivate()){
+				codeStream.invokespecial(this.codegenBinding);
+			} else {
+				if (this.codegenBinding.declaringClass.isInterface()){
+					codeStream.invokeinterface(this.codegenBinding);
+				} else {
+					codeStream.invokevirtual(this.codegenBinding);
+				}
+			}
+		}
+	} else {
+		codeStream.invokestatic(syntheticAccessor);
+	}
+	// operation on the returned value
+	if (valueRequired){
+		// implicit conversion if necessary
+		codeStream.generateImplicitConversion(implicitConversion);
+		if (this.genericCast != null) codeStream.checkcast(this.genericCast);
+	} else {
+		// pop return value if any
+		switch(binding.returnType.id){
+			case T_long :
+			case T_double :
+				codeStream.pop2();
+				break;
+			case T_void :
+				break;
+			default:
+				codeStream.pop();
+		}
+	}
+	codeStream.recordPositionsFrom(pc, (int)(this.nameSourcePosition >>> 32)); // highlight selector
+}
+

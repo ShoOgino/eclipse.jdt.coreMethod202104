@@ -1,0 +1,55 @@
+	/*
+	 * Parse a method reference in @see tag
+	 */
+	private Object parseMember(Object receiver) throws InvalidInputException {
+		// Init
+		this.identifierPtr = -1;
+		this.identifierLengthPtr = -1;
+		int start = this.scanner.getCurrentTokenStartPosition();
+		this.memberStart = start;
+	
+		// Get member identifier
+		if (readToken() == TerminalTokens.TokenNameIdentifier) {
+			consumeToken();
+			pushIdentifier(true);
+			// Look for next token to know whether it's a field or method reference
+			int previousPosition = this.index;
+			if (readToken() == TerminalTokens.TokenNameLPAREN) {
+				consumeToken();
+				start = this.scanner.getCurrentTokenStartPosition();
+				try {
+					return parseArguments(receiver);
+				} catch (InvalidInputException e) {
+					int end = this.scanner.getCurrentTokenEndPosition() < this.lineEnd ?
+							this.scanner.getCurrentTokenEndPosition() :
+							this.scanner.getCurrentTokenStartPosition();
+					end = end < this.lineEnd ? end : this.lineEnd;
+					if (this.sourceParser != null) this.sourceParser.problemReporter().javadocInvalidSeeReferenceArgs(start, end);
+				}
+				return null;
+			}
+	
+			// Reset position: we want to rescan last token
+			this.index = previousPosition;
+			this.scanner.currentPosition = previousPosition;
+			this.currentTokenType = -1;
+	
+			// Verify character(s) after identifier (expecting space or end comment)
+			if (!verifySpaceOrEndComment()) {
+				int end = this.starPosition == -1 ? this.lineEnd : this.starPosition;
+				if (this.source[end]=='\n') end--;
+				if (this.sourceParser != null) this.sourceParser.problemReporter().javadocMalformedSeeReference(start, end);
+				return null;
+			}
+			return createFieldReference(receiver);
+		}
+		int end = getTokenEndPosition() - 1;
+		end = start > end ? start : end;
+		if (this.sourceParser != null) this.sourceParser.problemReporter().javadocInvalidReference(start, end);
+		// Reset position: we want to rescan last token
+		this.index = this.tokenPreviousPosition;
+		this.scanner.currentPosition = this.tokenPreviousPosition;
+		this.currentTokenType = -1;
+		return null;
+	}
+

@@ -1,0 +1,100 @@
+	//
+//		This routine is invoked when an error is encountered.  It
+//	   tries to diagnose the error and recover from it.  If it is
+//	   successful, the state stack, the current token and the buffer
+//	   are readjusted; i.e., after a successful recovery,
+//	   state_stack_top points to the location in the state stack
+//	   that contains the state on which to recover; curtok
+//	   identifies the symbol on which to recover.
+//
+//	   Up to three configurations may be available when this routine
+//	   is invoked. PREV_STACK may contain the sequence of states
+//	   preceding any action on prevtok, STACK always contains the
+//	   sequence of states preceding any action on curtok, and
+//	   NEXT_STACK may contain the sequence of states preceding any
+//	   action on the successor of curtok.
+//
+	private RepairCandidate errorRecovery(int error_token, boolean forcedError) {
+		this.errorToken = error_token;
+		this.errorTokenStart = lexStream.start(error_token);
+		
+		int prevtok = lexStream.previous(error_token);
+		int prevtokKind = lexStream.kind(prevtok);
+		
+		if(forcedError) {
+			int name_index = Parser.terminal_index[TokenNameLBRACE];
+
+			reportError(INSERTION_CODE, name_index, prevtok, prevtok);
+			
+			RepairCandidate candidate = new RepairCandidate();
+			candidate.symbol = TokenNameLBRACE;
+			candidate.location = error_token;
+			lexStream.reset(error_token);
+			
+			stateStackTop = nextStackTop;
+			for (int j = 0; j <= stateStackTop; j++) {
+				stack[j] = nextStack[j];
+			}
+			locationStack[stateStackTop] = error_token;
+			locationStartStack[stateStackTop] = lexStream.start(error_token);
+			
+			return candidate;
+		}
+
+		//
+		// Try primary phase recoveries. If not successful, try secondary
+		// phase recoveries.  If not successful and we are at end of the
+		// file, we issue the end-of-file error and quit. Otherwise, ...
+		//
+		RepairCandidate candidate = primaryPhase(error_token);
+		if (candidate.symbol != 0) {
+			return candidate;
+		}
+
+		candidate = secondaryPhase(error_token);
+		if (candidate.symbol != 0) {
+			return candidate;
+		}
+
+		if (lexStream.kind(error_token) == EOFT_SYMBOL) {
+			reportError(EOF_CODE,
+						Parser.terminal_index[EOFT_SYMBOL],
+						prevtok,
+						prevtok);
+			candidate.symbol = 0;
+			candidate.location = error_token;
+			return candidate;
+		}
+
+		//
+		// At this point, primary and (initial attempt at) secondary
+		// recovery did not work.  We will now get into "panic mode" and
+		// keep trying secondary phase recoveries until we either find
+		// a successful recovery or have consumed the remaining input
+		// tokens.
+		//
+		while(lexStream.kind(buffer[BUFF_UBOUND]) != EOFT_SYMBOL) {
+			candidate = secondaryPhase(buffer[MAX_DISTANCE - MIN_DISTANCE + 2]);
+			if (candidate.symbol != 0) {
+				return candidate;
+			}
+		}
+
+		//
+		// We reached the end of the file while panicking. Delete all
+		// remaining tokens in the input.
+		//
+		int i;
+		for (i = BUFF_UBOUND; lexStream.kind(buffer[i]) == EOFT_SYMBOL; i--){/*empty*/}
+
+		reportError(DELETION_CODE,
+					Parser.terminal_index[prevtokKind],//Parser.terminal_index[lexStream.kind(prevtok)],
+					error_token,
+					buffer[i]);
+
+		candidate.symbol = 0;
+		candidate.location = buffer[i];
+
+		return candidate;
+	}
+

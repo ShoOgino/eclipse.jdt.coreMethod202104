@@ -1,0 +1,82 @@
+public final void scanEscapeCharacter() throws InvalidInputException {
+	// the string with "\\u" is a legal string of two chars \ and u
+	//thus we use a direct access to the source (for regular cases).
+
+	if (this.unicodeAsBackSlash) {
+		// consume next character
+		this.unicodeAsBackSlash = false;
+		if (((this.currentCharacter = this.source[this.currentPosition++]) == '\\') && (this.source[this.currentPosition] == 'u')) {
+			getNextUnicodeChar();
+		} else {
+			if (this.withoutUnicodePtr != 0) {
+				unicodeStoreAt(++this.withoutUnicodePtr);
+			}
+		}
+	} else
+		this.currentCharacter = this.source[this.currentPosition++];
+	switch (this.currentCharacter) {
+		case 'b' :
+			this.currentCharacter = '\b';
+			break;
+		case 't' :
+			this.currentCharacter = '\t';
+			break;
+		case 'n' :
+			this.currentCharacter = '\n';
+			break;
+		case 'f' :
+			this.currentCharacter = '\f';
+			break;
+		case 'r' :
+			this.currentCharacter = '\r';
+			break;
+		case '\"' :
+			this.currentCharacter = '\"';
+			break;
+		case '\'' :
+			this.currentCharacter = '\'';
+			break;
+		case '\\' :
+			this.currentCharacter = '\\';
+			break;
+		default :
+			// -----------octal escape--------------
+			// OctalDigit
+			// OctalDigit OctalDigit
+			// ZeroToThree OctalDigit OctalDigit
+
+			int number = Character.getNumericValue(this.currentCharacter);
+			if (number >= 0 && number <= 7) {
+				boolean zeroToThreeNot = number > 3;
+				if (isDigit(this.currentCharacter = this.source[this.currentPosition++])) {
+					int digit = Character.getNumericValue(this.currentCharacter);
+					if (digit >= 0 && digit <= 7) {
+						number = (number * 8) + digit;
+						if (isDigit(this.currentCharacter = this.source[this.currentPosition++])) {
+							if (zeroToThreeNot) {// has read \NotZeroToThree OctalDigit Digit --> ignore last character
+								this.currentPosition--;
+							} else {
+								digit = Character.getNumericValue(this.currentCharacter);
+								if (digit >= 0 && digit <= 7){ // has read \ZeroToThree OctalDigit OctalDigit
+									number = (number * 8) + digit;
+								} else {// has read \ZeroToThree OctalDigit NonOctalDigit --> ignore last character
+									this.currentPosition--;
+								}
+							}
+						} else { // has read \OctalDigit NonDigit--> ignore last character
+							this.currentPosition--;
+						}
+					} else { // has read \OctalDigit NonOctalDigit--> ignore last character						
+						this.currentPosition--;
+					}
+				} else { // has read \OctalDigit --> ignore last character
+					this.currentPosition--;
+				}
+				if (number > 255)
+					throw new InvalidInputException(INVALID_ESCAPE);
+				this.currentCharacter = (char) number;
+			} else
+				throw new InvalidInputException(INVALID_ESCAPE);
+	}
+}
+

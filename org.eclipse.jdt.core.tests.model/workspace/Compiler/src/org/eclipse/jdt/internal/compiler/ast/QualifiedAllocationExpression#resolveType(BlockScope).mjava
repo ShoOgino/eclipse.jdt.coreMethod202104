@@ -1,0 +1,143 @@
+	public TypeBinding resolveType(BlockScope scope) {
+
+		// added for code assist...cannot occur with 'normal' code
+		if (this.anonymousType == null && this.enclosingInstance == null) {
+			return super.resolveType(scope);
+		}
+
+		// Propagate the type checking to the arguments, and checks if the constructor is defined.
+		// ClassInstanceCreationExpression ::= Primary '.' 'new' SimpleName '(' ArgumentListopt ')' ClassBodyopt
+		// ClassInstanceCreationExpression ::= Name '.' 'new' SimpleName '(' ArgumentListopt ')' ClassBodyopt
+		
+		constant = NotAConstant;
+		TypeBinding enclosingInstanceType = null;
+		TypeBinding receiverType = null;
+		boolean hasError = false;
+		boolean enclosingInstanceContainsCast = false;
+		boolean argsContainCast = false;
+		
+		if (enclosingInstance != null) {
+			if (enclosingInstance instanceof CastExpression) {
+				enclosingInstance.bits |= IgnoreNeedForCastCheckMASK; // will check later on
+				enclosingInstanceContainsCast = true;
+			}
+			if ((enclosingInstanceType = enclosingInstance.resolveType(scope)) == null){
+				hasError = true;
+			} else if (enclosingInstanceType.isBaseType() || enclosingInstanceType.isArrayType()) {
+				scope.problemReporter().illegalPrimitiveOrArrayTypeForEnclosingInstance(
+					enclosingInstanceType,
+					enclosingInstance);
+				hasError = true;
+			} else if (type instanceof QualifiedTypeReference) {
+				scope.problemReporter().illegalUsageOfQualifiedTypeReference((QualifiedTypeReference)type);
+				hasError = true;
+			} else {
+				receiverType = ((SingleTypeReference) type).resolveTypeEnclosing(scope, (ReferenceBinding) enclosingInstanceType);
+				if (receiverType != null && enclosingInstanceContainsCast) {
+					CastExpression.checkNeedForEnclosingInstanceCast(scope, enclosingInstance, enclosingInstanceType, receiverType);
+				}
+			}
+		} else {
+			receiverType = type.resolveType(scope);
+		}
+		if (receiverType == null) {
+			hasError = true;
+		} else if (((ReferenceBinding) receiverType).isFinal() && this.anonymousType != null) {
+			scope.problemReporter().anonymousClassCannotExtendFinalClass(type, receiverType);
+			hasError = true;
+		}
+		// resolve type arguments (for generic constructor call)
+		if (this.typeArguments != null) {
+			int length = this.typeArguments.length;
+			this.genericTypeArguments = new TypeBinding[length];
+			for (int i = 0; i < length; i++) {
+				TypeBinding argType = this.typeArguments[i].resolveType(scope);
+				if (argType == null) return null; // error already reported
+				this.genericTypeArguments[i] = argType;
+			}
+		}
+		
+		// will check for null after args are resolved
+		TypeBinding[] argumentTypes = NoParameters;
+		if (arguments != null) {
+			int length = arguments.length;
+			argumentTypes = new TypeBinding[length];
+			for (int i = 0; i < length; i++) {
+				Expression argument = this.arguments[i];
+				if (argument instanceof CastExpression) {
+					argument.bits |= IgnoreNeedForCastCheckMASK; // will check later on
+					argsContainCast = true;
+				}
+				if ((argumentTypes[i] = argument.resolveType(scope)) == null){
+					hasError = true;
+				}
+			}
+		}
+		// limit of fault-tolerance
+		if (hasError) return this.resolvedType = receiverType;
+		if (this.anonymousType == null) {
+			// qualified allocation with no anonymous type
+			ReferenceBinding allocationType = (ReferenceBinding) receiverType;
+			if (!receiverType.canBeInstantiated()) {
+				scope.problemReporter().cannotInstantiate(type, receiverType);
+				return this.resolvedType = receiverType;
+			}
+			if ((this.binding = scope.getConstructor(allocationType, argumentTypes, this)).isValidBinding()) {
+				if (isMethodUseDeprecated(binding, scope)) {
+					scope.problemReporter().deprecatedMethod(this.binding, this);
+				}
+				if (this.arguments != null)
+					checkInvocationArguments(scope, null, allocationType, binding, this.arguments, argumentTypes, argsContainCast, this);
+			} else {
+				if (this.binding.declaringClass == null) {
+					this.binding.declaringClass = allocationType;
+				}
+				scope.problemReporter().invalidConstructor(this, this.binding);
+				return this.resolvedType = receiverType;
+			}
+
+			// The enclosing instance must be compatible with the innermost enclosing type
+			ReferenceBinding expectedType = this.binding.declaringClass.enclosingType();
+			if (enclosingInstanceType.isCompatibleWith(expectedType)) {
+				enclosingInstance.computeConversion(scope, expectedType, enclosingInstanceType);
+				return receiverType;
+			}
+			scope.problemReporter().typeMismatchError(enclosingInstanceType, expectedType, this.enclosingInstance);
+			return this.resolvedType = receiverType;
+		}
+
+		// anonymous type scenario
+		// an anonymous class inherits from java.lang.Object when declared "after" an interface
+		this.superTypeBinding = receiverType.isInterface() ? scope.getJavaLangObject() : (ReferenceBinding) receiverType;
+		// insert anonymous type in scope
+		scope.addAnonymousType(this.anonymousType, (ReferenceBinding) receiverType);
+		this.anonymousType.resolve(scope);		
+		
+		// find anonymous super constructor
+		MethodBinding inheritedBinding = scope.getConstructor(this.superTypeBinding, argumentTypes, this);
+		if (!inheritedBinding.isValidBinding()) {
+			if (inheritedBinding.declaringClass == null) {
+				inheritedBinding.declaringClass = this.superTypeBinding;
+			}
+			scope.problemReporter().invalidConstructor(this, inheritedBinding);
+			return this.resolvedType = anonymousType.binding;
+		}
+		if (enclosingInstance != null) {
+			ReferenceBinding targetEnclosing = inheritedBinding.declaringClass.enclosingType();
+			if (targetEnclosing == null) {
+				scope.problemReporter().unnecessaryEnclosingInstanceSpecification(enclosingInstance, (ReferenceBinding)receiverType);
+				return this.resolvedType = anonymousType.binding;
+			} else 	if (!enclosingInstanceType.isCompatibleWith(targetEnclosing)) {
+				scope.problemReporter().typeMismatchError(enclosingInstanceType, targetEnclosing, enclosingInstance);
+				return this.resolvedType = anonymousType.binding;
+			}
+			enclosingInstance.computeConversion(scope, targetEnclosing, enclosingInstanceType);
+		}
+		if (this.arguments != null)
+			checkInvocationArguments(scope, null, this.superTypeBinding, inheritedBinding, this.arguments, argumentTypes, argsContainCast, this);
+		
+		// Update the anonymous inner class : superclass, interface  
+		binding = anonymousType.createsInternalConstructorWithBinding(inheritedBinding);
+		return this.resolvedType = anonymousType.binding; // 1.2 change
+	}
+

@@ -1,0 +1,58 @@
+	// Internal use only
+	public MethodBinding findMethodForArray(
+		ArrayBinding receiverType,
+		char[] selector,
+		TypeBinding[] argumentTypes,
+		InvocationSite invocationSite) {
+
+		TypeBinding leafType = receiverType.leafComponentType();
+		if (leafType instanceof ReferenceBinding) {
+			if (!((ReferenceBinding) leafType).canBeSeenBy(this))
+				return new ProblemMethodBinding(selector, TypeConstants.NoParameters, (ReferenceBinding)leafType, ReceiverTypeNotVisible);
+		}
+
+		ReferenceBinding object = getJavaLangObject();
+		MethodBinding methodBinding = object.getExactMethod(selector, argumentTypes);
+		if (methodBinding != null) {
+			// handle the method clone() specially... cannot be protected or throw exceptions
+			if (argumentTypes == NoParameters) {
+			    switch (selector[0]) {
+			        case 'c': 
+			            if (CharOperation.equals(selector, CLONE))
+							return new UpdatedMethodBinding(
+								environment().options.targetJDK >= ClassFileConstants.JDK1_4 ? (TypeBinding)receiverType : (TypeBinding)object, // remember its array type for codegen purpose on target>=1.4.0
+								(methodBinding.modifiers ^ AccProtected) | AccPublic,
+								CLONE,
+								methodBinding.returnType,
+								argumentTypes,
+								null,
+								object);
+			            break;
+			        case 'g': 
+			            if (CharOperation.equals(selector, GETCLASS) && methodBinding.returnType.isParameterizedType()/*1.5*/) {
+							return ParameterizedMethodBinding.instantiateGetClass(receiverType, methodBinding, this);
+			            }
+			            break;
+			    }
+			}
+			if (methodBinding.canBeSeenBy(receiverType, invocationSite, this))
+				return methodBinding;
+		}
+		// answers closest approximation, may not check argumentTypes or visibility
+		methodBinding = findMethod(object, selector, argumentTypes, invocationSite);
+		if (methodBinding == null)
+			return new ProblemMethodBinding(selector, argumentTypes, NotFound);
+		if (methodBinding.isValidBinding()) {
+			MethodBinding compatibleMethod = computeCompatibleMethod(methodBinding, argumentTypes, invocationSite);
+			if (compatibleMethod == null)
+				return new ProblemMethodBinding(methodBinding, selector, argumentTypes, NotFound);
+			if (!compatibleMethod.isValidBinding())
+				return compatibleMethod;
+
+			methodBinding = compatibleMethod;
+			if (!methodBinding.canBeSeenBy(receiverType, invocationSite, this))
+				return new ProblemMethodBinding(methodBinding, selector, methodBinding.parameters, NotVisible);
+		}
+		return methodBinding;
+	}
+

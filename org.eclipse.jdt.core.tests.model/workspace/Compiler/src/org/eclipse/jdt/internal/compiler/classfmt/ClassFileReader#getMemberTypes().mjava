@@ -1,0 +1,57 @@
+/**
+ * Answer the receiver's nested types or null if the array is empty.
+ *
+ * This nested type info is extracted from the inner class attributes.
+ * Ask the name environment to find a member type using its compound name
+ * @return org.eclipse.jdt.internal.compiler.api.IBinaryNestedType[]
+ */
+public IBinaryNestedType[] getMemberTypes() {
+	// we might have some member types of the current type
+	if (this.innerInfos == null) return null;
+
+	int length = this.innerInfos.length;
+	int startingIndex = this.innerInfo != null ? this.innerInfoIndex + 1 : 0;
+	if (length != startingIndex) {
+		IBinaryNestedType[] memberTypes = 
+			new IBinaryNestedType[length - this.innerInfoIndex]; 
+		int memberTypeIndex = 0;
+		for (int i = startingIndex; i < length; i++) {
+			InnerClassInfo currentInnerInfo = this.innerInfos[i];
+			int outerClassNameIdx = currentInnerInfo.outerClassNameIndex;
+			int innerNameIndex = currentInnerInfo.innerNameIndex;
+			/*
+			 * Checking that outerClassNameIDx is different from 0 should be enough to determine if an inner class
+			 * attribute entry is a member class, but due to the bug:
+			 * http://dev.eclipse.org/bugs/show_bug.cgi?id=14592
+			 * we needed to add an extra check. So we check that innerNameIndex is different from 0 as well.
+			 * 
+			 * https://bugs.eclipse.org/bugs/show_bug.cgi?id=49879
+			 * From JavaMail 1.2, the class javax.mail.Folder contains an anonymous class in the
+			 * terminateQueue() method for which the inner attribute is boggus.
+			 * outerClassNameIdx is not 0, innerNameIndex is not 0, but the sourceName length is 0.
+			 * So I added this extra check to filter out this anonymous class from the 
+			 * member types.
+			 */
+			if (outerClassNameIdx != 0
+				&& innerNameIndex != 0
+				&& outerClassNameIdx == this.classNameIndex
+				&& currentInnerInfo.getSourceName().length != 0) {
+				memberTypes[memberTypeIndex++] = currentInnerInfo;
+			}
+		}
+		if (memberTypeIndex == 0) return null;
+		if (memberTypeIndex != memberTypes.length) {
+			// we need to resize the memberTypes array. Some local or anonymous classes
+			// are present in the current class.
+			System.arraycopy(
+				memberTypes, 
+				0, 
+				(memberTypes = new IBinaryNestedType[memberTypeIndex]), 
+				0, 
+				memberTypeIndex); 
+		}
+		return memberTypes;
+	}
+	return null;
+}
+

@@ -1,0 +1,43 @@
+private FieldBinding resolveTypeFor(FieldBinding field) {
+	if ((field.modifiers & AccUnresolved) == 0)
+		return field;
+
+	FieldDeclaration[] fieldDecls = scope.referenceContext.fields;
+	for (int f = 0, length = fieldDecls.length; f < length; f++) {
+		if (fieldDecls[f].binding != field)
+			continue;
+
+			MethodScope initializationScope = field.isStatic() 
+				? scope.referenceContext.staticInitializerScope 
+				: scope.referenceContext.initializerScope;
+			FieldBinding previousField = initializationScope.initializedField;
+			try {
+				initializationScope.initializedField = field;
+				TypeBinding fieldType = fieldDecls[f].type.resolveType(initializationScope);
+				field.type = fieldType;
+				field.modifiers ^= AccUnresolved;
+				if (fieldType == null) {
+					fieldDecls[f].binding = null;
+					return null;
+				}
+				if (fieldType == VoidBinding) {
+					scope.problemReporter().variableTypeCannotBeVoid(fieldDecls[f]);
+					fieldDecls[f].binding = null;
+					return null;
+				}
+				if (fieldType.isArrayType() && ((ArrayBinding) fieldType).leafComponentType == VoidBinding) {
+					scope.problemReporter().variableTypeCannotBeVoidArray(fieldDecls[f]);
+					fieldDecls[f].binding = null;
+					return null;
+				}
+				if (fieldType instanceof ReferenceBinding && (((ReferenceBinding)fieldType).modifiers & AccGenericSignature) != 0) {
+					field.modifiers |= AccGenericSignature;
+				}				
+			} finally {
+			    initializationScope.initializedField = previousField;
+			}
+		return field;
+	}
+	return null; // should never reach this point
+}
+

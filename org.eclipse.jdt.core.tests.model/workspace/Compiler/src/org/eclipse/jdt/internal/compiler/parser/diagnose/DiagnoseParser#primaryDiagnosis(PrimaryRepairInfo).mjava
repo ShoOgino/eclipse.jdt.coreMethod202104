@@ -1,0 +1,125 @@
+//
+//	   This procedure is invoked to issue a diagnostic message and
+//	   adjust the input buffer.  The recovery in question is either
+//	   the insertion of one or more scopes, the merging of the error
+//	   token with its successor, the deletion of the error token,
+//	   the insertion of a single token in front of the error token
+//	   or the substitution of another token for the error token.
+//
+	private RepairCandidate primaryDiagnosis(PrimaryRepairInfo repair) {
+		int name_index;
+
+		//
+		//  Issue diagnostic.
+		//
+		int prevtok = buffer[repair.bufferPosition - 1];
+		int	curtok  = buffer[repair.bufferPosition];
+
+		switch(repair.code) {
+			case INSERTION_CODE:
+			case BEFORE_CODE: {
+				if (repair.symbol > NT_OFFSET)
+					 name_index = getNtermIndex(stack[stateStackTop],
+												repair.symbol,
+												repair.bufferPosition);
+				else name_index = getTermIndex(stack,
+											   stateStackTop,
+											   repair.symbol,
+											   repair.bufferPosition);
+
+				int t = (repair.code == INSERTION_CODE ? prevtok : curtok);
+				reportError(repair.code, name_index, t, t);
+				break;
+			}
+			case INVALID_CODE: {
+				name_index = getNtermIndex(stack[stateStackTop],
+										   repair.symbol,
+										   repair.bufferPosition + 1);
+				reportError(repair.code, name_index, curtok, curtok);
+				break;
+			}
+			case SUBSTITUTION_CODE: {
+				if (repair.misspellIndex >= 6)
+					name_index = Parser.terminal_index[repair.symbol];
+				else
+				{
+					name_index = getTermIndex(stack, stateStackTop,
+											  repair.symbol,
+											  repair.bufferPosition + 1);
+					if (name_index != Parser.terminal_index[repair.symbol])
+						repair.code = INVALID_CODE;
+				}
+				reportError(repair.code, name_index, curtok, curtok);
+				break;
+			}
+			case MERGE_CODE: {
+				reportError(repair.code,
+							 Parser.terminal_index[repair.symbol],
+							 curtok,
+							 lexStream.next(curtok));
+				break;
+			}
+			case SCOPE_CODE: {
+	            for (int i = 0; i < scopeStackTop; i++) {
+	                reportError(repair.code,
+	                            -scopeIndex[i],
+	                            locationStack[scopePosition[i]],
+	                            prevtok,
+	                            Parser.non_terminal_index[Parser.scope_lhs[scopeIndex[i]]]);
+	            }
+	
+	            repair.symbol = Parser.scope_lhs[scopeIndex[scopeStackTop]] + NT_OFFSET;
+	            stateStackTop = scopePosition[scopeStackTop];
+	            reportError(repair.code,
+	                        -scopeIndex[scopeStackTop],
+	                        locationStack[scopePosition[scopeStackTop]],
+	                        prevtok,
+	                        getNtermIndex(stack[stateStackTop],
+	                                      repair.symbol,
+	                                      repair.bufferPosition)
+	                       );
+	            break;
+	        }
+			default: {// deletion
+				reportError(repair.code, Parser.terminal_index[ERROR_SYMBOL], curtok, curtok);
+			}
+		}
+
+		//
+		//  Update buffer.
+		//
+		RepairCandidate candidate = new RepairCandidate();
+		switch (repair.code) {
+			case INSERTION_CODE:
+			case BEFORE_CODE:
+			case SCOPE_CODE: {
+				candidate.symbol = repair.symbol;
+				candidate.location = buffer[repair.bufferPosition];
+				lexStream.reset(buffer[repair.bufferPosition]);
+				break;
+			}
+			case INVALID_CODE:
+			case SUBSTITUTION_CODE: {
+				candidate.symbol = repair.symbol;
+				candidate.location = buffer[repair.bufferPosition];
+				lexStream.reset(buffer[repair.bufferPosition + 1]);
+				break;
+			}
+			case MERGE_CODE: {
+				candidate.symbol = repair.symbol;
+				candidate.location = buffer[repair.bufferPosition];
+				lexStream.reset(buffer[repair.bufferPosition + 2]);
+				break;
+			}
+			default: {// deletion
+				candidate.location = buffer[repair.bufferPosition + 1];
+				candidate.symbol =
+						  lexStream.kind(buffer[repair.bufferPosition + 1]);
+				lexStream.reset(buffer[repair.bufferPosition + 2]);
+				break;
+			}
+		}
+
+		return candidate;
+	}
+

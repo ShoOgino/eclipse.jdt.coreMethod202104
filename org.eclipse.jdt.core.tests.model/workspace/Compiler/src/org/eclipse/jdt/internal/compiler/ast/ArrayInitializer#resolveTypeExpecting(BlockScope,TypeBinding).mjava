@@ -1,0 +1,69 @@
+	public TypeBinding resolveTypeExpecting(BlockScope scope, TypeBinding expectedTb) {
+		// Array initializers can only occur on the right hand side of an assignment
+		// expression, therefore the expected type contains the valid information
+		// concerning the type that must be enforced by the elements of the array initializer.
+	
+		// this method is recursive... (the test on isArrayType is the stop case)
+	
+		constant = NotAConstant;
+		if (expectedTb.isArrayType()) {
+			binding = (ArrayBinding) expectedTb;
+			if (expressions == null)
+				return binding;
+			TypeBinding expectedElementsTb = binding.elementsType();
+			if (expectedElementsTb.isBaseType()) {
+				for (int i = 0, length = expressions.length; i < length; i++) {
+					Expression expression = expressions[i];
+					TypeBinding expressionTb =
+						(expression instanceof ArrayInitializer)
+							? expression.resolveTypeExpecting(scope, expectedElementsTb)
+							: expression.resolveType(scope);
+					if (expressionTb == null)
+						return null;
+	
+					// Compile-time conversion required?
+					if (expression.isConstantValueOfTypeAssignableToType(expressionTb, expectedElementsTb)) {
+						expression.computeConversion(scope, expectedElementsTb, expressionTb);
+					} else if (BaseTypeBinding.isWidening(expectedElementsTb.id, expressionTb.id)) {
+						expression.computeConversion(scope, expectedElementsTb, expressionTb);
+					} else {
+						scope.problemReporter().typeMismatchError(expressionTb, expectedElementsTb, expression);
+						return null;
+					}
+				}
+			} else {
+				for (int i = 0, length = expressions.length; i < length; i++)
+					if (expressions[i].resolveTypeExpecting(scope, expectedElementsTb) == null)
+						return null;
+			}
+			return binding;
+		}
+		
+		// infer initializer type for error reporting based on first element
+		TypeBinding leafElementType = null;
+		int dim = 1;
+		if (expressions == null) {
+			leafElementType = scope.getJavaLangObject();
+		} else {
+			Expression currentExpression = expressions[0];
+			while(currentExpression != null && currentExpression instanceof ArrayInitializer) {
+				dim++;
+				Expression[] subExprs = ((ArrayInitializer) currentExpression).expressions;
+				if (subExprs == null){
+					leafElementType = scope.getJavaLangObject();
+					currentExpression = null;
+					break;
+				}
+				currentExpression = ((ArrayInitializer) currentExpression).expressions[0];
+			}
+			if (currentExpression != null) {
+				leafElementType = currentExpression.resolveType(scope);
+			}
+		}
+		if (leafElementType != null) {
+			TypeBinding probableTb = scope.createArrayType(leafElementType, dim);
+			scope.problemReporter().typeMismatchError(probableTb, expectedTb, this);
+		}
+		return null;
+	}
+

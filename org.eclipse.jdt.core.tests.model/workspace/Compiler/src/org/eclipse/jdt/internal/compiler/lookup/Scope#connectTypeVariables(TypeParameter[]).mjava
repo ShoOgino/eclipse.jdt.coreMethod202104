@@ -1,0 +1,73 @@
+	protected boolean connectTypeVariables(TypeParameter[] typeParameters) {
+		boolean noProblems = true;
+		if (typeParameters == null || environment().options.sourceLevel < ClassFileConstants.JDK1_5) return true;
+
+		nextVariable : for (int i = 0, paramLength = typeParameters.length; i < paramLength; i++) {
+			TypeParameter typeParameter = typeParameters[i];
+			TypeVariableBinding typeVariable = typeParameter.binding;
+			if (typeVariable == null) return false;
+
+			typeVariable.superclass = getJavaLangObject();
+			typeVariable.superInterfaces = NoSuperInterfaces;
+			// set firstBound to the binding of the first explicit bound in parameter declaration
+			typeVariable.firstBound = null; // first bound used to compute erasure
+
+			TypeReference typeRef = typeParameter.type;
+			if (typeRef == null)
+				continue nextVariable;
+			ReferenceBinding superType = this.kind == METHOD_SCOPE
+				? (ReferenceBinding) typeRef.resolveType((BlockScope)this)
+				: (ReferenceBinding) typeRef.resolveType((ClassScope)this);
+			if (superType == null) {
+				typeVariable.tagBits |= HierarchyHasProblems;
+				noProblems = false;
+				continue nextVariable;
+			}
+			if (superType.isTypeVariable()) {
+				TypeVariableBinding varSuperType = (TypeVariableBinding) superType;
+				if (varSuperType.rank >= typeVariable.rank && varSuperType.declaringElement == typeVariable.declaringElement) {
+					problemReporter().forwardTypeVariableReference(typeParameter, varSuperType);
+					typeVariable.tagBits |= HierarchyHasProblems;
+					noProblems = false;
+					continue nextVariable;
+				}
+			}
+			if (superType.isFinal())
+				problemReporter().finalVariableBound(typeVariable, typeRef);
+			typeRef.resolvedType = superType; // hold onto the problem type
+			if (superType.isClass()) {
+				typeVariable.superclass = superType;
+			} else {
+				typeVariable.superInterfaces = new ReferenceBinding[] {superType};
+				typeVariable.modifiers |= AccInterface;
+			}
+			typeVariable.firstBound = superType; // first bound used to compute erasure
+
+			TypeReference[] boundRefs = typeParameter.bounds;
+			if (boundRefs != null) {
+				for (int j = 0, k = boundRefs.length; j < k; j++) {
+					typeRef = boundRefs[j];
+					superType = this.kind == METHOD_SCOPE
+						? (ReferenceBinding) typeRef.resolveType((BlockScope)this)
+						: (ReferenceBinding) typeRef.resolveType((ClassScope)this);
+					if (superType == null) {
+						typeVariable.tagBits |= HierarchyHasProblems;
+						noProblems = false;
+						continue nextVariable;
+					}
+					typeRef.resolvedType = superType; // hold onto the problem type
+					if (superType.isClass()) {
+						problemReporter().boundsMustBeAnInterface(typeRef, superType);
+						typeVariable.tagBits |= HierarchyHasProblems;
+						noProblems = false;
+						continue nextVariable;
+					}
+					int size = typeVariable.superInterfaces.length;
+					System.arraycopy(typeVariable.superInterfaces, 0, typeVariable.superInterfaces = new ReferenceBinding[size + 1], 0, size);
+					typeVariable.superInterfaces[size] = superType;
+				}
+			}
+		}
+		return noProblems;
+	}
+

@@ -1,0 +1,62 @@
+	/*
+	 * Fill associated comment fields with ast nodes information stored in stack.
+	 */
+	protected void updateDocComment() {
+		
+		// Set inherited flag
+		this.docComment.inherited = this.inherited;
+
+		// Set return node if present
+		if (this.returnStatement != null) {
+			this.docComment.returnStatement = (JavadocReturnStatement) this.returnStatement;
+		}
+		
+		// Copy array of invalid syntax param tags
+		if (this.invalidParamReferencesPtr >= 0) {
+			this.docComment.invalidParameters = new JavadocSingleNameReference[this.invalidParamReferencesPtr+1];
+			System.arraycopy(this.invalidParamReferencesStack, 0, this.docComment.invalidParameters, 0, this.invalidParamReferencesPtr+1);
+		}
+
+		// If no nodes stored return
+		if (this.astLengthPtr == -1) {
+			return;
+		}
+
+		// Initialize arrays
+		int[] sizes = new int[ORDERED_TAGS_NUMBER];
+		for (int i=0; i<=this.astLengthPtr; i++) {
+			sizes[i%ORDERED_TAGS_NUMBER] += this.astLengthStack[i];
+		}
+		this.docComment.references = new Expression[sizes[SEE_TAG_EXPECTED_ORDER]];
+		this.docComment.thrownExceptions = new TypeReference[sizes[THROWS_TAG_EXPECTED_ORDER]];
+		this.docComment.parameters = new JavadocSingleNameReference[sizes[PARAM_TAG_EXPECTED_ORDER]];
+
+		// Store nodes in arrays
+		while (this.astLengthPtr >= 0) {
+			int ptr = this.astLengthPtr % ORDERED_TAGS_NUMBER;
+			// Starting with the stack top, so get references (eg. Expression) coming from @see declarations
+			if (ptr == SEE_TAG_EXPECTED_ORDER) {
+				int size = this.astLengthStack[this.astLengthPtr--];
+				for (int i=0; i<size; i++) {
+					this.docComment.references[--sizes[ptr]] = (Expression) this.astStack[this.astPtr--];
+				}
+			}
+
+			// Then continuing with class names (eg. TypeReference) coming from @throw/@exception declarations
+			else if (ptr == THROWS_TAG_EXPECTED_ORDER) {
+				int size = this.astLengthStack[this.astLengthPtr--];
+				for (int i=0; i<size; i++) {
+					this.docComment.thrownExceptions[--sizes[ptr]] = (TypeReference) this.astStack[this.astPtr--];
+				}
+			}
+
+			// Finally, finishing with parameters nales (ie. Argument) coming from @param declaration
+			else if (ptr == PARAM_TAG_EXPECTED_ORDER) {
+				int size = this.astLengthStack[this.astLengthPtr--];
+				for (int i=0; i<size; i++) {
+					this.docComment.parameters[--sizes[ptr]] = (JavadocSingleNameReference) this.astStack[this.astPtr--];
+				}
+			}
+		}
+	}
+

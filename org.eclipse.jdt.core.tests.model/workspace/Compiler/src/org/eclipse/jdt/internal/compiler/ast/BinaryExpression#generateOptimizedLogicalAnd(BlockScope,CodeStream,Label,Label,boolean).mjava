@@ -1,0 +1,138 @@
+	/**
+	 * Boolean generation for &
+	 */
+	public void generateOptimizedLogicalAnd(
+		BlockScope currentScope,
+		CodeStream codeStream,
+		Label trueLabel,
+		Label falseLabel,
+		boolean valueRequired) {
+			
+		Constant condConst;
+		if ((left.implicitConversion & 0xF) == T_boolean) {
+			if ((condConst = left.optimizedBooleanConstant()) != NotAConstant) {
+				if (condConst.booleanValue() == true) {
+					// <something equivalent to true> & x
+					left.generateOptimizedBoolean(
+						currentScope,
+						codeStream,
+						trueLabel,
+						falseLabel,
+						false);
+					if ((bits & OnlyValueRequiredMASK) != 0) {
+						right.generateCode(currentScope, codeStream, valueRequired);
+					} else {
+						right.generateOptimizedBoolean(
+							currentScope,
+							codeStream,
+							trueLabel,
+							falseLabel,
+							valueRequired);
+					}
+				} else {
+					// <something equivalent to false> & x
+					left.generateOptimizedBoolean(
+						currentScope,
+						codeStream,
+						trueLabel,
+						falseLabel,
+						false);
+					Label internalTrueLabel = new Label(codeStream);
+					right.generateOptimizedBoolean(
+						currentScope,
+						codeStream,
+						trueLabel,
+						falseLabel,
+						false);
+					internalTrueLabel.place();
+					if (valueRequired) {
+						if ((bits & OnlyValueRequiredMASK) != 0) {
+							codeStream.iconst_0();
+						} else {
+							if (falseLabel != null) {
+								// implicit falling through the TRUE case
+								codeStream.goto_(falseLabel);
+							}
+						}
+					}
+					// reposition the endPC
+					codeStream.updateLastRecordedEndPC(codeStream.position);					
+				}
+				return;
+			}
+			if ((condConst = right.optimizedBooleanConstant()) != NotAConstant) {
+				if (condConst.booleanValue() == true) {
+					// x & <something equivalent to true>
+					if ((bits & OnlyValueRequiredMASK) != 0) {
+						left.generateCode(currentScope, codeStream, valueRequired);
+					} else {
+						left.generateOptimizedBoolean(
+							currentScope,
+							codeStream,
+							trueLabel,
+							falseLabel,
+							valueRequired);
+					}
+					right.generateOptimizedBoolean(
+						currentScope,
+						codeStream,
+						trueLabel,
+						falseLabel,
+						false);
+				} else {
+					// x & <something equivalent to false>
+					Label internalTrueLabel = new Label(codeStream);
+					left.generateOptimizedBoolean(
+						currentScope,
+						codeStream,
+						internalTrueLabel,
+						falseLabel,
+						false);
+					internalTrueLabel.place();
+					right.generateOptimizedBoolean(
+						currentScope,
+						codeStream,
+						trueLabel,
+						falseLabel,
+						false);
+					if (valueRequired) {
+						if ((bits & OnlyValueRequiredMASK) != 0) {
+							codeStream.iconst_0();
+						} else {
+							if (falseLabel != null) {
+								// implicit falling through the TRUE case
+								codeStream.goto_(falseLabel);
+							}
+						}
+					}
+					// reposition the endPC
+					codeStream.updateLastRecordedEndPC(codeStream.position);					
+				}
+				return;
+			}
+		}
+		// default case
+		left.generateCode(currentScope, codeStream, valueRequired);
+		right.generateCode(currentScope, codeStream, valueRequired);
+		if (valueRequired) {
+			codeStream.iand();
+			if ((bits & OnlyValueRequiredMASK) == 0) {
+				if (falseLabel == null) {
+					if (trueLabel != null) {
+						// implicit falling through the FALSE case
+						codeStream.ifne(trueLabel);
+					}
+				} else {
+					// implicit falling through the TRUE case
+					if (trueLabel == null) {
+						codeStream.ifeq(falseLabel);
+					} else {
+						// no implicit fall through TRUE/FALSE --> should never occur
+					}
+				}
+			}
+		}
+		// reposition the endPC
+		codeStream.updateLastRecordedEndPC(codeStream.position);					
+	}
+

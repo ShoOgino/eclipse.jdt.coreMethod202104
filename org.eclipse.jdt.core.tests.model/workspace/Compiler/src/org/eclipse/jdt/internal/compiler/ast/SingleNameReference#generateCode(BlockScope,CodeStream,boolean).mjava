@@ -1,0 +1,58 @@
+	public void generateCode(BlockScope currentScope, CodeStream codeStream, boolean valueRequired) {
+		int pc = codeStream.position;
+		if (constant != NotAConstant) {
+			if (valueRequired) {
+				codeStream.generateConstant(constant, implicitConversion);
+			}
+		} else {
+			switch (bits & RestrictiveFlagMASK) {
+				case FIELD : // reading a field
+					FieldBinding fieldBinding;
+					if (valueRequired) {
+						if (!(fieldBinding = (FieldBinding) this.codegenBinding).isConstantValue()) { // directly use inlined value for constant fields
+							boolean isStatic;
+							if (!(isStatic = fieldBinding.isStatic())) {
+								if ((bits & DepthMASK) != 0) {
+									ReferenceBinding targetType = currentScope.enclosingSourceType().enclosingTypeAt((bits & DepthMASK) >> DepthSHIFT);
+									Object[] emulationPath = currentScope.getEmulationPath(targetType, true /*only exact match*/, false/*consider enclosing arg*/);
+									codeStream.generateOuterAccess(emulationPath, this, targetType, currentScope);
+								} else {
+									generateReceiver(codeStream);
+								}
+							}
+							// managing private access							
+							if ((syntheticAccessors == null) || (syntheticAccessors[READ] == null)) {
+								if (isStatic) {
+									codeStream.getstatic(fieldBinding);
+								} else {
+									codeStream.getfield(fieldBinding);
+								}
+							} else {
+								codeStream.invokestatic(syntheticAccessors[READ]);
+							}
+							codeStream.generateImplicitConversion(implicitConversion);
+							if (this.genericCast != null) codeStream.checkcast(this.genericCast);
+					} else { // directly use the inlined value
+							codeStream.generateConstant(fieldBinding.constant(), implicitConversion);
+						}
+					}
+					break;
+				case LOCAL : // reading a local
+					LocalVariableBinding localBinding = (LocalVariableBinding) this.codegenBinding;
+					if (valueRequired) {
+						// outer local?
+						if ((bits & DepthMASK) != 0) {
+							// outer local can be reached either through a synthetic arg or a synthetic field
+							VariableBinding[] path = currentScope.getEmulationPath(localBinding);
+							codeStream.generateOuterAccess(path, this, localBinding, currentScope);
+						} else {
+							// regular local variable read
+							codeStream.load(localBinding);
+						}
+						codeStream.generateImplicitConversion(implicitConversion);
+					}
+			}
+		}
+		codeStream.recordPositionsFrom(pc, this.sourceStart);
+	}
+

@@ -1,0 +1,91 @@
+	public FlowInfo analyseCode(
+		BlockScope currentScope,
+		FlowContext flowContext,
+		FlowInfo flowInfo) {
+
+		breakLabel = new Label();
+		continueLabel = new Label(); 
+
+		Constant cst = this.condition.constant;
+		boolean isConditionTrue = cst != NotAConstant && cst.booleanValue() == true;
+		boolean isConditionFalse = cst != NotAConstant && cst.booleanValue() == false;
+
+		cst = this.condition.optimizedBooleanConstant();
+		boolean isConditionOptimizedTrue = cst != NotAConstant && cst.booleanValue() == true;
+		boolean isConditionOptimizedFalse = cst != NotAConstant && cst.booleanValue() == false;
+		
+		preCondInitStateIndex =
+			currentScope.methodScope().recordInitializationStates(flowInfo);
+		LoopingFlowContext condLoopContext;
+		FlowInfo postCondInfo =
+			this.condition.analyseCode(
+				currentScope,
+				(condLoopContext =
+					new LoopingFlowContext(flowContext, this, null, null, currentScope)),
+				flowInfo);
+
+		LoopingFlowContext loopingContext;
+		FlowInfo actionInfo;
+		if (action == null 
+			|| (action.isEmptyBlock() && currentScope.environment().options.complianceLevel <= ClassFileConstants.JDK1_3)) {
+			condLoopContext.complainOnFinalAssignmentsInLoop(currentScope, postCondInfo);
+			if (isConditionTrue) {
+				return FlowInfo.DEAD_END;
+			} else {
+				FlowInfo mergedInfo = postCondInfo.initsWhenFalse().unconditionalInits();
+				if (isConditionOptimizedTrue){
+					mergedInfo.setReachMode(FlowInfo.UNREACHABLE);
+				}
+				mergedInitStateIndex =
+					currentScope.methodScope().recordInitializationStates(mergedInfo);
+				return mergedInfo;
+			}
+		} else {
+			// in case the condition was inlined to false, record the fact that there is no way to reach any 
+			// statement inside the looping action
+			loopingContext =
+				new LoopingFlowContext(
+					flowContext,
+					this,
+					breakLabel,
+					continueLabel,
+					currentScope);
+			if (isConditionFalse) {
+				actionInfo = FlowInfo.DEAD_END;
+			} else {
+				actionInfo = postCondInfo.initsWhenTrue().copy();
+				if (isConditionOptimizedFalse){
+					actionInfo.setReachMode(FlowInfo.UNREACHABLE);
+				}
+			}
+
+			// for computing local var attributes
+			condIfTrueInitStateIndex =
+				currentScope.methodScope().recordInitializationStates(
+					postCondInfo.initsWhenTrue());
+
+			if (!this.action.complainIfUnreachable(actionInfo, currentScope, false)) {
+				actionInfo = this.action.analyseCode(currentScope, loopingContext, actionInfo);
+			}
+
+			// code generation can be optimized when no need to continue in the loop
+			if (!actionInfo.isReachable() && !loopingContext.initsOnContinue.isReachable()) {
+				continueLabel = null;
+			} else {
+				condLoopContext.complainOnFinalAssignmentsInLoop(currentScope, postCondInfo);
+				actionInfo = actionInfo.mergedWith(loopingContext.initsOnContinue.unconditionalInits());
+				loopingContext.complainOnFinalAssignmentsInLoop(currentScope, actionInfo);
+			}
+		}
+
+		// end of loop
+		FlowInfo mergedInfo = FlowInfo.mergedOptimizedBranches(
+				loopingContext.initsOnBreak, 
+				isConditionOptimizedTrue, 
+				postCondInfo.initsWhenFalse(), 
+				isConditionOptimizedFalse,
+				!isConditionTrue /*while(true); unreachable(); */);
+		mergedInitStateIndex = currentScope.methodScope().recordInitializationStates(mergedInfo);
+		return mergedInfo;
+	}
+

@@ -1,0 +1,74 @@
+	/*
+	 * Parse a qualified name and built a type reference if the syntax is valid.
+	 */
+	protected Object parseQualifiedName(boolean reset) throws InvalidInputException {
+
+		// Reset identifier stack if requested
+		if (reset) {
+			this.identifierPtr = -1;
+			this.identifierLengthPtr = -1;
+		}
+
+		// Scan tokens
+		int primitiveToken = -1;
+		nextToken : for (int iToken = 0; ; iToken++) {
+			int token = readToken();
+			switch (token) {
+				case TerminalTokens.TokenNameIdentifier :
+					if (((iToken % 2) > 0)) { // identifiers must be odd tokens
+						break nextToken;
+					}
+					pushIdentifier(iToken == 0);
+					consumeToken();
+					break;
+
+				case TerminalTokens.TokenNameDOT :
+					if ((iToken % 2) == 0) { // dots must be even tokens
+						throw new InvalidInputException();
+					}
+					consumeToken();
+					break;
+
+				case TerminalTokens.TokenNamevoid :
+				case TerminalTokens.TokenNameboolean :
+				case TerminalTokens.TokenNamebyte :
+				case TerminalTokens.TokenNamechar :
+				case TerminalTokens.TokenNamedouble :
+				case TerminalTokens.TokenNamefloat :
+				case TerminalTokens.TokenNameint :
+				case TerminalTokens.TokenNamelong :
+				case TerminalTokens.TokenNameshort :
+					if (iToken > 0) {
+						throw new InvalidInputException();
+					}
+					pushIdentifier(true);
+					primitiveToken = token;
+					consumeToken();
+					break nextToken;
+
+				default :
+					if (iToken == 0) {
+						return null;
+					}
+					if ((iToken % 2) == 0) { // cannot leave on a dot
+						// Reset position: we want to rescan last token
+						if (this.kind == DOM_PARSER && this.currentTokenType != -1) {
+							this.index = this.tokenPreviousPosition;
+							this.scanner.currentPosition = this.tokenPreviousPosition;
+							this.currentTokenType = -1;
+						}
+						throw new InvalidInputException();
+					}
+					break nextToken;
+			}
+		}
+		// Reset position: we want to rescan last token
+		if (this.currentTokenType != -1) {
+			this.index = this.tokenPreviousPosition;
+			this.scanner.currentPosition = this.tokenPreviousPosition;
+			this.currentTokenType = -1;
+		}
+		this.lastIdentifierEndPosition = (int) this.identifierPositionStack[this.identifierPtr];
+		return createTypeReference(primitiveToken);
+	}
+

@@ -1,0 +1,49 @@
+void checkAndSetImports() {
+	if (referenceContext.imports == null) {
+		imports = getDefaultImports();
+		return;
+	}
+
+	// allocate the import array, add java.lang.* by default
+	int numberOfStatements = referenceContext.imports.length;
+	int numberOfImports = numberOfStatements + 1;
+	for (int i = 0; i < numberOfStatements; i++) {
+		ImportReference importReference = referenceContext.imports[i];
+		if (importReference.onDemand && CharOperation.equals(JAVA_LANG, importReference.tokens)) {
+			numberOfImports--;
+			break;
+		}
+	}
+	ImportBinding[] resolvedImports = new ImportBinding[numberOfImports];
+	resolvedImports[0] = getDefaultImports()[0];
+	int index = 1;
+
+	nextImport : for (int i = 0; i < numberOfStatements; i++) {
+		ImportReference importReference = referenceContext.imports[i];
+		char[][] compoundName = importReference.tokens;
+
+		// skip duplicates or imports of the current package
+		for (int j = 0; j < index; j++)
+			if (resolvedImports[j].onDemand == importReference.onDemand)
+				if (CharOperation.equals(compoundName, resolvedImports[j].compoundName))
+					continue nextImport;
+		if (importReference.onDemand == true)
+			if (CharOperation.equals(compoundName, currentPackageName))
+				continue nextImport;
+
+		if (importReference.onDemand) {
+			Binding importBinding = findOnDemandImport(compoundName);
+			if (!importBinding.isValidBinding())
+				continue nextImport;	// we report all problems in faultInImports()
+			resolvedImports[index++] = new ImportBinding(compoundName, true, importBinding, importReference);
+		} else {
+			resolvedImports[index++] = new ImportBinding(compoundName, false, null, importReference);
+		}
+	}
+
+	// shrink resolvedImports... only happens if an error was reported
+	if (resolvedImports.length > index)
+		System.arraycopy(resolvedImports, 0, resolvedImports = new ImportBinding[index], 0, index);
+	imports = resolvedImports;
+}
+

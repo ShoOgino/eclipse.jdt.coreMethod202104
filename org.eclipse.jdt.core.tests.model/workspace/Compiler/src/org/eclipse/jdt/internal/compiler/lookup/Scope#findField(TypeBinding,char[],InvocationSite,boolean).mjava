@@ -1,0 +1,125 @@
+	// Internal use only
+	/*	Answer the field binding that corresponds to fieldName.
+		Start the lookup at the receiverType.
+		InvocationSite implements
+			isSuperAccess(); this is used to determine if the discovered field is visible.
+		Only fields defined by the receiverType or its supertypes are answered;
+		a field of an enclosing type will not be found using this API.
+	
+		If no visible field is discovered, null is answered.
+	*/
+	public FieldBinding findField(TypeBinding receiverType, char[] fieldName, InvocationSite invocationSite, boolean needResolve) {
+		if (receiverType.isBaseType()) return null;
+		if (receiverType.isArrayType()) {
+			TypeBinding leafType = receiverType.leafComponentType();
+			if (leafType instanceof ReferenceBinding) {
+				if (!((ReferenceBinding) leafType).canBeSeenBy(this))
+					return new ProblemFieldBinding((ReferenceBinding)leafType, fieldName, ReceiverTypeNotVisible);
+			}
+			if (CharOperation.equals(fieldName, LENGTH))
+				return ArrayBinding.ArrayLength;
+			return null;
+		}
+
+		compilationUnitScope().recordTypeReference(receiverType);
+
+		ReferenceBinding currentType = (ReferenceBinding) receiverType;
+		if (!currentType.canBeSeenBy(this))
+			return new ProblemFieldBinding(currentType, fieldName, ReceiverTypeNotVisible);
+
+		FieldBinding field = currentType.getField(fieldName, true /*resolve*/);
+		if (field != null) {
+			if (field.canBeSeenBy(currentType, invocationSite, this))
+				return field;
+			return new ProblemFieldBinding(field /* closest match*/, field.declaringClass, fieldName, NotVisible);
+		}
+		// collect all superinterfaces of receiverType until the field is found in a supertype
+		ReferenceBinding[][] interfacesToVisit = null;
+		int lastPosition = -1;
+		FieldBinding visibleField = null;
+		boolean keepLooking = true;
+		boolean notVisible = false;
+		// we could hold onto the not visible field for extra error reporting
+		while (keepLooking) {
+			ReferenceBinding[] itsInterfaces = currentType.superInterfaces();
+			if (itsInterfaces != NoSuperInterfaces) {
+				if (interfacesToVisit == null)
+					interfacesToVisit = new ReferenceBinding[5][];
+				if (++lastPosition == interfacesToVisit.length)
+					System.arraycopy(
+						interfacesToVisit,
+						0,
+						interfacesToVisit = new ReferenceBinding[lastPosition * 2][],
+						0,
+						lastPosition);
+				interfacesToVisit[lastPosition] = itsInterfaces;
+			}
+			if ((currentType = currentType.superclass()) == null)
+				break;
+
+			compilationUnitScope().recordTypeReference(currentType);
+			if ((field = currentType.getField(fieldName, needResolve)) != null) {
+				keepLooking = false;
+				if (field.canBeSeenBy(receiverType, invocationSite, this)) {
+					if (visibleField == null)
+						visibleField = field;
+					else
+						return new ProblemFieldBinding(visibleField /* closest match*/, visibleField.declaringClass, fieldName, Ambiguous);
+				} else {
+					notVisible = true;
+				}
+			}
+		}
+
+		// walk all visible interfaces to find ambiguous references
+		if (interfacesToVisit != null) {
+			ProblemFieldBinding ambiguous = null;
+			done : for (int i = 0; i <= lastPosition; i++) {
+				ReferenceBinding[] interfaces = interfacesToVisit[i];
+				for (int j = 0, length = interfaces.length; j < length; j++) {
+					ReferenceBinding anInterface = interfaces[j];
+					if ((anInterface.tagBits & InterfaceVisited) == 0) {
+						// if interface as not already been visited
+						anInterface.tagBits |= InterfaceVisited;
+						compilationUnitScope().recordTypeReference(anInterface);
+						if ((field = anInterface.getField(fieldName, true /*resolve*/)) != null) {
+							if (visibleField == null) {
+								visibleField = field;
+							} else {
+								ambiguous = new ProblemFieldBinding(visibleField /* closest match*/, visibleField.declaringClass, fieldName, Ambiguous);
+								break done;
+							}
+						} else {
+							ReferenceBinding[] itsInterfaces = anInterface.superInterfaces();
+							if (itsInterfaces != NoSuperInterfaces) {
+								if (++lastPosition == interfacesToVisit.length)
+									System.arraycopy(
+										interfacesToVisit,
+										0,
+										interfacesToVisit = new ReferenceBinding[lastPosition * 2][],
+										0,
+										lastPosition);
+								interfacesToVisit[lastPosition] = itsInterfaces;
+							}
+						}
+					}
+				}
+			}
+
+			// bit reinitialization
+			for (int i = 0; i <= lastPosition; i++) {
+				ReferenceBinding[] interfaces = interfacesToVisit[i];
+				for (int j = 0, length = interfaces.length; j < length; j++)
+					interfaces[j].tagBits &= ~InterfaceVisited;
+			}
+			if (ambiguous != null)
+				return ambiguous;
+		}
+
+		if (visibleField != null)
+			return visibleField;
+		if (notVisible)
+			return new ProblemFieldBinding(currentType, fieldName, NotVisible);
+		return null;
+	}
+

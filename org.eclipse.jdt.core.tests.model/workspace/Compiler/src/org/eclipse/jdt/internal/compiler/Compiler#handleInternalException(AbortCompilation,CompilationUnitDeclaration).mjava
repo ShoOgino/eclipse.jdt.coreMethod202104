@@ -1,0 +1,62 @@
+	/*
+	 * Compiler recovery in case of internal AbortCompilation event
+	 */
+	protected void handleInternalException(
+		AbortCompilation abortException,
+		CompilationUnitDeclaration unit) {
+
+		/* special treatment for SilentAbort: silently cancelling the compilation process */
+		if (abortException.isSilent) {
+			if (abortException.silentException == null) {
+				return;
+			}
+			throw abortException.silentException;
+		}
+
+		/* uncomment following line to see where the abort came from */
+		// abortException.printStackTrace(); 
+
+		// Exception may tell which compilation result it is related, and which problem caused it
+		CompilationResult result = abortException.compilationResult;
+		if ((result == null) && (unit != null)) {
+			result = unit.compilationResult; // current unit being processed ?
+		}
+		// Lookup environment may be in middle of connecting types
+		if ((result == null) && lookupEnvironment.unitBeingCompleted != null) {
+		    result = lookupEnvironment.unitBeingCompleted.compilationResult;
+		}
+		if ((result == null) && (unitsToProcess != null) && (totalUnits > 0))
+			result = unitsToProcess[totalUnits - 1].compilationResult;
+		// last unit in beginToCompile ?
+		if (result != null && !result.hasBeenAccepted) {
+			/* distant problem which could not be reported back there? */
+			if (abortException.problem != null) {
+				recordDistantProblem: {
+					IProblem distantProblem = abortException.problem;
+					IProblem[] knownProblems = result.problems;
+					for (int i = 0; i < result.problemCount; i++) {
+						if (knownProblems[i] == distantProblem) { // already recorded
+							break recordDistantProblem;
+						}
+					}
+					if (distantProblem instanceof DefaultProblem) { // fixup filename TODO (philippe) should improve API to make this official
+						((DefaultProblem) distantProblem).setOriginatingFileName(result.getFileName());
+					}
+					result	.record(distantProblem, unit);
+				}
+			} else {
+				/* distant internal exception which could not be reported back there */
+				if (abortException.exception != null) {
+					this.handleInternalException(abortException.exception, null, result);
+					return;
+				}
+			}
+			/* hand back the compilation result */
+			if (!result.hasBeenAccepted) {
+				requestor.acceptResult(result.tagAsAccepted());
+			}
+		} else {
+			abortException.printStackTrace();
+		}
+	}
+

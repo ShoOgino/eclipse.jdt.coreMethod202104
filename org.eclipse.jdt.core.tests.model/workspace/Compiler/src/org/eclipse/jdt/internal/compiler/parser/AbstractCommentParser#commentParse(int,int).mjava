@@ -1,0 +1,200 @@
+	/* (non-Javadoc)
+	 * Returns true if tag @deprecated is present in javadoc comment.
+	 * 
+	 * If javadoc checking is enabled, will also construct an Javadoc node, which will be stored into Parser.javadoc
+	 * slot for being consumed later on.
+	 */
+	protected boolean commentParse(int javadocStart, int javadocEnd) {
+
+		boolean validComment = true;
+		try {
+			// Init scanner position
+			this.scanner.resetTo(javadocStart, javadocEnd);
+			this.endComment = javadocEnd;
+			this.index = javadocStart;
+			readChar(); // starting '/'
+			int previousPosition = this.index;
+			readChar(); // first '*'
+			char nextCharacter= readChar(); // second '*'
+			
+			// Init local variables
+			this.astLengthPtr = -1;
+			this.astPtr = -1;
+			this.currentTokenType = -1;
+			this.inlineTagStarted = false;
+			this.inlineTagStart = -1;
+			this.lineStarted = false;
+			this.returnStatement = null;
+			this.inherited = false;
+			this.deprecated = false;
+			this.linePtr = getLineNumber(javadocStart);
+			this.lastLinePtr = getLineNumber(javadocEnd);
+			this.lineEnd = (this.linePtr == this.lastLinePtr) ? this.endComment : this.scanner.getLineEnd(this.linePtr);
+			this.textStart = -1;
+			char previousChar = 0;
+			int invalidTagLineEnd = -1;
+			int invalidInlineTagLineEnd = -1;
+			
+			// Loop on each comment character
+			while (this.index < this.endComment) {
+				previousPosition = this.index;
+				previousChar = nextCharacter;
+				
+				// Calculate line end (cannot use this.scanner.linePtr as scanner does not parse line ends again)
+				if (this.index > (this.lineEnd+1)) {
+					updateLineEnd();
+				}
+				
+				// Read next char only if token was consumed
+				if (this.currentTokenType < 0) {
+					nextCharacter = readChar(); // consider unicodes
+				} else {
+					previousPosition = this.scanner.getCurrentTokenStartPosition();
+					switch (this.currentTokenType) {
+						case TerminalTokens.TokenNameRBRACE:
+							nextCharacter = '}';
+							break;
+						case TerminalTokens.TokenNameMULTIPLY:
+							nextCharacter = '*';
+							break;
+					default:
+							nextCharacter = this.scanner.currentCharacter;
+					}
+					consumeToken();
+				}
+			
+				if (this.index >= this.endComment) {
+					break;
+				}
+				
+				switch (nextCharacter) {
+					case '@' :
+						// Start tag parsing only if we are on line beginning or at inline tag beginning
+						if ((!this.lineStarted || previousChar == '{')) {
+							this.lineStarted = true;
+							if (this.inlineTagStarted) {
+								this.inlineTagStarted = false;
+								// bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=53279
+								// Cannot have @ inside inline comment
+								if (this.sourceParser != null) {
+									int end = previousPosition<invalidInlineTagLineEnd ? previousPosition : invalidInlineTagLineEnd;
+									this.sourceParser.problemReporter().javadocUnterminatedInlineTag(this.inlineTagStart, end);
+								}
+								validComment = false;
+								if (this.lineStarted && this.textStart != -1 && this.textStart < previousPosition) {
+									pushText(this.textStart, previousPosition);
+								}
+								if (this.kind == DOM_PARSER) refreshInlineTagPosition(previousPosition);
+							}
+							if (previousChar == '{') {
+								if (this.textStart != -1 && this.textStart < this.inlineTagStart) {
+									pushText(this.textStart, this.inlineTagStart);
+								}
+								this.inlineTagStarted = true;
+								invalidInlineTagLineEnd = this.lineEnd;
+							} else if (this.textStart != -1 && this.textStart < invalidTagLineEnd) {
+								pushText(this.textStart, invalidTagLineEnd);
+							}
+							this.scanner.resetTo(this.index, this.endComment);
+							this.currentTokenType = -1; // flush token cache at line begin
+							try {
+								if (!parseTag(previousPosition)) {
+									// bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=51600
+									// do not stop the inline tag when error is encountered to get text after
+									validComment = false;
+									// bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=51600
+									// for DOM AST node, store tag as text in case of invalid syntax
+									if (this.kind == DOM_PARSER) {
+										createTag();
+										this.textStart = this.tagSourceEnd+1;
+										invalidTagLineEnd  = this.lineEnd;
+									}
+								}
+							} catch (InvalidInputException e) {
+								consumeToken();
+							}
+						}
+						break;
+					case '\r':
+					case '\n':
+						if (this.lineStarted && this.textStart < previousPosition) {
+							pushText(this.textStart, previousPosition);
+						}
+						this.lineStarted = false;
+						// Fix bug 51650
+						this.textStart = -1;
+						break;
+					case '}' :
+						if (this.inlineTagStarted) {
+							if (this.lineStarted && this.textStart != -1 && this.textStart < previousPosition) {
+								pushText(this.textStart, previousPosition);
+							}
+							if (this.kind == DOM_PARSER) refreshInlineTagPosition(previousPosition);
+							this.textStart = this.index;
+							this.inlineTagStarted = false;
+						} else {
+							if (!this.lineStarted) {
+								this.textStart = previousPosition;
+							}
+						}
+						this.lineStarted = true;
+						break;
+					case '{' :
+						if (this.inlineTagStarted) {
+							this.inlineTagStarted = false;
+							// bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=53279
+							// Cannot have opening brace in inline comment
+							if (this.sourceParser != null) {
+								int end = previousPosition<invalidInlineTagLineEnd ? previousPosition : invalidInlineTagLineEnd;
+								this.sourceParser.problemReporter().javadocUnterminatedInlineTag(this.inlineTagStart, end);
+							}
+							if (this.lineStarted && this.textStart != -1 && this.textStart < previousPosition) {
+								pushText(this.textStart, previousPosition);
+							}
+							if (this.kind == DOM_PARSER) refreshInlineTagPosition(previousPosition);
+						}
+						if (!this.lineStarted) {
+							this.textStart = previousPosition;
+						}
+						this.lineStarted = true;
+						this.inlineTagStart = previousPosition;
+						break;
+					case '*' :
+					case '\u000c' :	/* FORM FEED               */
+					case ' ' :			/* SPACE                   */
+					case '\t' :			/* HORIZONTAL TABULATION   */
+						// do nothing for space or '*' characters
+						break;
+					default :
+						if (!this.lineStarted) {
+							this.textStart = previousPosition;
+						}
+						this.lineStarted = true;
+						break;
+				}
+			}
+			// bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=53279
+			// Cannot leave comment inside inline comment
+			if (this.inlineTagStarted) {
+				this.inlineTagStarted = false;
+				if (this.sourceParser != null) {
+					int end = previousPosition<invalidInlineTagLineEnd ? previousPosition : invalidInlineTagLineEnd;
+					if (this.index >= this.endComment) end = invalidInlineTagLineEnd;
+					this.sourceParser.problemReporter().javadocUnterminatedInlineTag(this.inlineTagStart, end);
+				}
+				if (this.lineStarted && this.textStart != -1 && this.textStart < previousPosition) {
+					pushText(this.textStart, previousPosition);
+				}
+				if (this.kind == DOM_PARSER) {
+					refreshInlineTagPosition(previousPosition);
+				}
+			} else if (this.lineStarted && this.textStart < previousPosition) {
+				pushText(this.textStart, previousPosition);
+			}
+			updateDocComment();
+		} catch (Exception ex) {
+			validComment = false;
+		}
+		return validComment;
+	}
+

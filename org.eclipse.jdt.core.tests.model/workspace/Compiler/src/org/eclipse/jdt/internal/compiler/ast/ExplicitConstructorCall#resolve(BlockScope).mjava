@@ -1,0 +1,96 @@
+	public void resolve(BlockScope scope) {
+		// the return type should be void for a constructor.
+		// the test is made into getConstructor
+
+		// mark the fact that we are in a constructor call.....
+		// unmark at all returns
+		MethodScope methodScope = scope.methodScope();
+		try {
+			AbstractMethodDeclaration methodDeclaration = methodScope.referenceMethod();
+			if (methodDeclaration == null 
+					|| !methodDeclaration.isConstructor()
+					|| ((ConstructorDeclaration) methodDeclaration).constructorCall != this) {
+				scope.problemReporter().invalidExplicitConstructorCall(this);
+				return;
+			}
+			methodScope.isConstructorCall = true;
+			ReferenceBinding receiverType = scope.enclosingSourceType();
+			if (accessMode != This)
+				receiverType = receiverType.superclass();
+
+			if (receiverType == null) {
+				return;
+			}
+
+			// qualification should be from the type of the enclosingType
+			if (qualification != null) {
+				if (accessMode != Super) {
+					scope.problemReporter().unnecessaryEnclosingInstanceSpecification(
+						qualification,
+						receiverType);
+				}
+				ReferenceBinding enclosingType = receiverType.enclosingType();
+				if (enclosingType == null) {
+					scope.problemReporter().unnecessaryEnclosingInstanceSpecification(
+						qualification,
+						receiverType);
+					discardEnclosingInstance = true;
+				} else {
+					TypeBinding qTb = qualification.resolveTypeExpecting(scope, enclosingType);
+					qualification.computeConversion(scope, qTb, qTb);
+				}
+			}
+			// resolve type arguments (for generic constructor call)
+			if (this.typeArguments != null) {
+				int length = this.typeArguments.length;
+				boolean argHasError = false; // typeChecks all arguments
+				this.genericTypeArguments = new TypeBinding[length];
+				for (int i = 0; i < length; i++) {
+					if ((this.genericTypeArguments[i] = this.typeArguments[i].resolveType(scope)) == null) {
+						argHasError = true;
+					}
+				}
+				if (argHasError) {
+					return;
+				}
+			}			
+	
+			// arguments buffering for the method lookup
+			TypeBinding[] argumentTypes = NoParameters;
+			boolean argsContainCast = false;
+			if (arguments != null) {
+				boolean argHasError = false; // typeChecks all arguments
+				int length = arguments.length;
+				argumentTypes = new TypeBinding[length];
+				for (int i = 0; i < length; i++) {
+					Expression argument = this.arguments[i];
+					if (argument instanceof CastExpression) {
+						argument.bits |= IgnoreNeedForCastCheckMASK; // will check later on
+						argsContainCast = true;
+					}
+					if ((argumentTypes[i] = argument.resolveType(scope)) == null) {
+						argHasError = true;
+					}
+				}
+				if (argHasError) {
+					return;
+				}
+			}
+			if ((binding = scope.getConstructor(receiverType, argumentTypes, this)).isValidBinding()) {
+				if (isMethodUseDeprecated(binding, scope))
+					scope.problemReporter().deprecatedMethod(binding, this);
+				if (this.arguments != null)
+					checkInvocationArguments(scope, null, receiverType, binding, this.arguments, argumentTypes, argsContainCast, this);
+				if (binding.isPrivate()) {
+					binding.original().modifiers |= AccPrivateUsed;
+				}				
+			} else {
+				if (binding.declaringClass == null)
+					binding.declaringClass = receiverType;
+				scope.problemReporter().invalidConstructor(this, binding);
+			}
+		} finally {
+			methodScope.isConstructorCall = false;
+		}
+	}
+

@@ -1,0 +1,98 @@
+	/**
+	 * INTERNAL USE-ONLY
+	 * This methods creates a new instance of the receiver.
+	 *
+	 * @param aType org.eclipse.jdt.internal.compiler.lookup.SourceTypeBinding
+	 * @param enclosingClassFile org.eclipse.jdt.internal.compiler.ClassFile
+	 * @param creatingProblemType <CODE>boolean</CODE>
+	 */
+	public ClassFile(
+		SourceTypeBinding aType,
+		ClassFile enclosingClassFile,
+		boolean creatingProblemType) {
+	    
+		this.referenceBinding = aType;
+		initByteArrays();
+
+		// generate the magic numbers inside the header
+		header[headerOffset++] = (byte) (0xCAFEBABEL >> 24);
+		header[headerOffset++] = (byte) (0xCAFEBABEL >> 16);
+		header[headerOffset++] = (byte) (0xCAFEBABEL >> 8);
+		header[headerOffset++] = (byte) (0xCAFEBABEL >> 0);
+		
+		final CompilerOptions options = aType.scope.environment().options;
+		this.targetJDK = options.targetJDK;
+		header[headerOffset++] = (byte) (this.targetJDK >> 8); // minor high
+		header[headerOffset++] = (byte) (this.targetJDK >> 0); // minor low
+		header[headerOffset++] = (byte) (this.targetJDK >> 24); // major high
+		header[headerOffset++] = (byte) (this.targetJDK >> 16); // major low
+
+		constantPoolOffset = headerOffset;
+		headerOffset += 2;
+		constantPool = new ConstantPool(this);
+		
+		// Modifier manipulations for classfile
+		int accessFlags = aType.getAccessFlags();
+		if (aType.isPrivate()) { // rewrite private to non-public
+			accessFlags &= ~AccPublic;
+		}
+		if (aType.isProtected()) { // rewrite protected into public
+			accessFlags |= AccPublic;
+		}
+		// clear all bits that are illegal for a class or an interface
+		accessFlags
+			&= ~(
+				AccStrictfp
+					| AccProtected
+					| AccPrivate
+					| AccStatic
+					| AccSynchronized
+					| AccNative);
+					
+		// set the AccSuper flag (has to be done after clearing AccSynchronized - since same value)
+		if (aType.isClass()) {
+			accessFlags |= AccSuper;
+		}
+		
+		this.enclosingClassFile = enclosingClassFile;
+		// innerclasses get their names computed at code gen time
+
+		// now we continue to generate the bytes inside the contents array
+		contents[contentsOffset++] = (byte) (accessFlags >> 8);
+		contents[contentsOffset++] = (byte) accessFlags;
+		int classNameIndex = constantPool.literalIndex(aType);
+		contents[contentsOffset++] = (byte) (classNameIndex >> 8);
+		contents[contentsOffset++] = (byte) classNameIndex;
+		int superclassNameIndex;
+		if (aType.isInterface()) {
+			superclassNameIndex = constantPool.literalIndexForJavaLangObject();
+		} else {
+			superclassNameIndex =
+				(aType.superclass == null ? 0 : constantPool.literalIndex(aType.superclass));
+		}
+		contents[contentsOffset++] = (byte) (superclassNameIndex >> 8);
+		contents[contentsOffset++] = (byte) superclassNameIndex;
+		ReferenceBinding[] superInterfacesBinding = aType.superInterfaces();
+		int interfacesCount = superInterfacesBinding.length;
+		contents[contentsOffset++] = (byte) (interfacesCount >> 8);
+		contents[contentsOffset++] = (byte) interfacesCount;
+		for (int i = 0; i < interfacesCount; i++) {
+			int interfaceIndex = constantPool.literalIndex(superInterfacesBinding[i]);
+			contents[contentsOffset++] = (byte) (interfaceIndex >> 8);
+			contents[contentsOffset++] = (byte) interfaceIndex;
+		}
+		produceDebugAttributes = options.produceDebugAttributes;
+		innerClassesBindings = new ReferenceBinding[INNER_CLASSES_SIZE];
+		this.creatingProblemType = creatingProblemType;
+		codeStream = new CodeStream(this, this.targetJDK);
+
+		// retrieve the enclosing one guaranteed to be the one matching the propagated flow info
+		// 1FF9ZBU: LFCOM:ALL - Local variable attributes busted (Sanity check)
+		ClassFile outermostClassFile = this.outerMostEnclosingClassFile();
+		if (this == outermostClassFile) {
+			codeStream.maxFieldCount = aType.scope.referenceType().maxFieldCount;
+		} else {
+			codeStream.maxFieldCount = outermostClassFile.codeStream.maxFieldCount;
+		}
+	}
+

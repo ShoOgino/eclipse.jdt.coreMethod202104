@@ -1,0 +1,84 @@
+protected void consumeConstructorDeclaration() {
+	// ConstructorDeclaration ::= ConstructorHeader ConstructorBody
+
+	/*
+	this.astStack : MethodDeclaration statements
+	this.identifierStack : name
+	 ==>
+	this.astStack : MethodDeclaration
+	this.identifierStack :
+	*/
+
+	//must provide a default constructor call when needed
+
+	int length;
+
+	// pop the position of the {  (body of the method) pushed in block decl
+	this.intPtr--;
+	this.intPtr--;
+
+	//statements
+	this.realBlockPtr--;
+	ExplicitConstructorCall constructorCall = null;
+	Statement[] statements = null;
+	if ((length = this.astLengthStack[this.astLengthPtr--]) != 0) {
+		this.astPtr -= length;
+		if (this.astStack[this.astPtr + 1] instanceof ExplicitConstructorCall) {
+			//avoid a isSomeThing that would only be used here BUT what is faster between two alternatives ?
+			System.arraycopy(
+				this.astStack, 
+				this.astPtr + 2, 
+				statements = new Statement[length - 1], 
+				0, 
+				length - 1); 
+			constructorCall = (ExplicitConstructorCall) this.astStack[this.astPtr + 1];
+		} else { //need to add explicitly the super();
+			System.arraycopy(
+				this.astStack, 
+				this.astPtr + 1, 
+				statements = new Statement[length], 
+				0, 
+				length); 
+			constructorCall = SuperReference.implicitSuperConstructorCall();
+		}
+	} else {
+		boolean insideFieldInitializer = false;
+		if (this.diet) {
+			for (int i = this.nestedType; i > 0; i--){
+				if (this.variablesCounter[i] > 0) {
+					insideFieldInitializer = true;
+					break;
+				}
+			}
+		}
+		
+		if (!this.diet || insideFieldInitializer){
+			// add it only in non-diet mode, if diet_bodies, then constructor call will be added elsewhere.
+			constructorCall = SuperReference.implicitSuperConstructorCall();
+		}
+	}
+
+	// now we know that the top of stack is a constructorDeclaration
+	ConstructorDeclaration cd = (ConstructorDeclaration) this.astStack[this.astPtr];
+	cd.constructorCall = constructorCall;
+	cd.statements = statements;
+
+	//highlight of the implicit call on the method name
+	if (constructorCall != null && cd.constructorCall.sourceEnd == 0) {
+		cd.constructorCall.sourceEnd = cd.sourceEnd;
+		cd.constructorCall.sourceStart = cd.sourceStart;
+	}
+
+	if (!this.diet && (statements == null && constructorCall.isImplicitSuper())) {
+		if (!containsComment(cd.bodyStart, this.endPosition)) {
+			cd.bits |= ASTNode.UndocumentedEmptyBlockMASK;
+		}
+	}
+
+	//watch for } that could be given as a unicode ! ( u007D is '}' )
+	// store the this.endPosition (position just before the '}') in case there is
+	// a trailing comment behind the end of the method
+	cd.bodyEnd = this.endPosition;
+	cd.declarationSourceEnd = flushCommentsDefinedPriorTo(this.endStatementPosition); 
+}
+

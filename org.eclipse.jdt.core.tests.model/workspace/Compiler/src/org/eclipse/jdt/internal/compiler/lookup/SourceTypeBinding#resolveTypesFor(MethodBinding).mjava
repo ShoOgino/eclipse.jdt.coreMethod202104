@@ -1,0 +1,99 @@
+private MethodBinding resolveTypesFor(MethodBinding method) {
+    
+	if ((method.modifiers & AccUnresolved) == 0)
+		return method;
+
+	AbstractMethodDeclaration methodDecl = method.sourceMethod();
+	if (methodDecl == null) return null; // method could not be resolved in previous iteration
+	
+	TypeParameter[] typeParameters = methodDecl.typeParameters();
+	if (typeParameters != null) methodDecl.scope.connectTypeVariables(typeParameters);
+	TypeReference[] exceptionTypes = methodDecl.thrownExceptions;
+	if (exceptionTypes != null) {
+		int size = exceptionTypes.length;
+		method.thrownExceptions = new ReferenceBinding[size];
+		ReferenceBinding throwable = scope.getJavaLangThrowable();
+		int count = 0;
+		ReferenceBinding resolvedExceptionType;
+		for (int i = 0; i < size; i++) {
+			resolvedExceptionType = (ReferenceBinding) exceptionTypes[i].resolveType(methodDecl.scope);
+			if (resolvedExceptionType == null) {
+				continue;
+			}
+			if (resolvedExceptionType.isGenericType() || resolvedExceptionType.isParameterizedType()) {
+				methodDecl.scope.problemReporter().invalidParameterizedExceptionType(resolvedExceptionType, exceptionTypes[i]);
+				continue;
+			}
+			if (throwable != resolvedExceptionType && !throwable.isSuperclassOf(resolvedExceptionType)) {
+				methodDecl.scope.problemReporter().cannotThrowType(this, methodDecl, exceptionTypes[i], resolvedExceptionType);
+				continue;
+			}
+		    if ((resolvedExceptionType.modifiers & AccGenericSignature) != 0) {
+				method.modifiers |= AccGenericSignature;
+			}
+			method.thrownExceptions[count++] = resolvedExceptionType;
+		}
+		if (count < size)
+			System.arraycopy(method.thrownExceptions, 0, method.thrownExceptions = new ReferenceBinding[count], 0, count);
+	}
+
+	boolean foundArgProblem = false;
+	Argument[] arguments = methodDecl.arguments;
+	if (arguments != null) {
+		int size = arguments.length;
+		method.parameters = new TypeBinding[size];
+		for (int i = 0; i < size; i++) {
+			Argument arg = arguments[i];
+			TypeBinding parameterType = arg.type.resolveType(methodDecl.scope);
+			if (parameterType == null) {
+				foundArgProblem = true;
+			} else if (parameterType == VoidBinding) {
+				methodDecl.scope.problemReporter().argumentTypeCannotBeVoid(this, methodDecl, arg);
+				foundArgProblem = true;
+			} else if (parameterType.isArrayType() && ((ArrayBinding) parameterType).leafComponentType == VoidBinding) {
+				methodDecl.scope.problemReporter().argumentTypeCannotBeVoidArray(this, methodDecl, arg);
+				foundArgProblem = true;
+			} else {
+			    if (parameterType instanceof ReferenceBinding && (((ReferenceBinding)parameterType).modifiers & AccGenericSignature) != 0) {
+					method.modifiers |= AccGenericSignature;
+				}
+				method.parameters[i] = parameterType;
+			}
+		}
+	}
+
+	boolean foundReturnTypeProblem = false;
+	if (!method.isConstructor()) {
+		TypeReference returnType = methodDecl instanceof MethodDeclaration
+			? ((MethodDeclaration) methodDecl).returnType
+			: ((AnnotationTypeMemberDeclaration) methodDecl).returnType;
+		if (returnType == null) {
+			methodDecl.scope.problemReporter().missingReturnType(methodDecl);
+			method.returnType = null;
+			foundReturnTypeProblem = true;
+		} else {
+		    TypeBinding methodType = returnType.resolveType(methodDecl.scope);
+			if (methodType == null) {
+				foundReturnTypeProblem = true;
+			} else if (methodType.isArrayType() && ((ArrayBinding) methodType).leafComponentType == VoidBinding) {
+				methodDecl.scope.problemReporter().returnTypeCannotBeVoidArray(this, (MethodDeclaration) methodDecl);
+				foundReturnTypeProblem = true;
+			} else {
+				method.returnType = methodType;
+				if (methodType instanceof ReferenceBinding && (((ReferenceBinding)methodType).modifiers & AccGenericSignature) != 0) {
+					method.modifiers |= AccGenericSignature;
+				}
+			}
+		}
+	}
+	if (foundArgProblem) {
+		methodDecl.binding = null;
+		return null;
+	}
+	if (foundReturnTypeProblem)
+		return method; // but its still unresolved with a null return type & is still connected to its method declaration
+
+	method.modifiers ^= AccUnresolved;
+	return method;
+}
+

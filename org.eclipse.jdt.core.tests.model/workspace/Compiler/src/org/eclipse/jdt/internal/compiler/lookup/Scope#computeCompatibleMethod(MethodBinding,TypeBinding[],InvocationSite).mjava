@@ -1,0 +1,46 @@
+	/**
+	 * Internal use only
+	 * Given a method, returns null if arguments cannot be converted to parameters.
+	 * Will answer a subsituted method in case the method was generic and type inference got triggered;
+	 * in case the method was originally compatible, then simply answer it back.
+	 */
+	protected final MethodBinding computeCompatibleMethod(MethodBinding method, TypeBinding[] arguments, InvocationSite invocationSite) {
+
+		TypeBinding[] genericTypeArguments = invocationSite.genericTypeArguments();
+		TypeBinding[] parameters = method.parameters;
+		if (parameters == arguments 
+				&& (method.returnType.tagBits & HasTypeVariable) == 0 
+				&& genericTypeArguments == null)
+			return method;
+
+		int argLength = arguments.length;
+		if (argLength != parameters.length)
+			return null; // incompatible
+
+		TypeVariableBinding[] typeVariables = method.typeVariables;
+		if (typeVariables != NoTypeVariables) { // generic method
+			method = ParameterizedGenericMethodBinding.computeCompatibleMethod(method, arguments, this, invocationSite);
+			if (method == null) return null; // incompatible
+			if (!method.isValidBinding()) return method; // bound check issue is taking precedence
+			parameters = method.parameters; // reacquire them after type inference has performed
+		} else if (genericTypeArguments != null) {
+			if (method instanceof ParameterizedGenericMethodBinding) {
+				if (method.declaringClass.isRawType())
+					return new ProblemMethodBinding(method, method.selector, genericTypeArguments, TypeArgumentsForRawGenericMethod); // attempt to invoke generic method of raw type with type hints <String>foo()
+			} else {
+				return new ProblemMethodBinding(method, method.selector, genericTypeArguments, TypeParameterArityMismatch);
+			}
+		}
+		
+		argumentCompatibility: {
+			for (int i = 0; i < argLength; i++)
+				if (parameters[i] != arguments[i] && !arguments[i].isCompatibleWith(parameters[i]))
+					break argumentCompatibility;
+			return method; // compatible
+		}
+		if (genericTypeArguments != null) {
+			return new ProblemMethodBinding(method, method.selector, arguments, ParameterizedMethodTypeMismatch);
+		}
+		return null; // incompatible
+	}
+

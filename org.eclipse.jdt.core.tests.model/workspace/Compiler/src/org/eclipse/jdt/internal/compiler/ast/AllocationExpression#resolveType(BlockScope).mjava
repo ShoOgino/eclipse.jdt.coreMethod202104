@@ -1,0 +1,64 @@
+	public TypeBinding resolveType(BlockScope scope) {
+
+		// Propagate the type checking to the arguments, and check if the constructor is defined.
+		constant = NotAConstant;
+		this.resolvedType = type.resolveType(scope);
+		// will check for null after args are resolved
+
+		// resolve type arguments (for generic constructor call)
+		if (this.typeArguments != null) {
+			int length = this.typeArguments.length;
+			boolean argHasError = false; // typeChecks all arguments
+			this.genericTypeArguments = new TypeBinding[length];
+			for (int i = 0; i < length; i++) {
+				if ((this.genericTypeArguments[i] = this.typeArguments[i].resolveType(scope)) == null) {
+					argHasError = true;
+				}
+			}
+			if (argHasError) {
+				return null;
+			}
+		}
+		
+		// buffering the arguments' types
+		boolean argsContainCast = false;
+		TypeBinding[] argumentTypes = NoParameters;
+		if (arguments != null) {
+			boolean argHasError = false;
+			int length = arguments.length;
+			argumentTypes = new TypeBinding[length];
+			for (int i = 0; i < length; i++) {
+				Expression argument = this.arguments[i];
+				if (argument instanceof CastExpression) {
+					argument.bits |= IgnoreNeedForCastCheckMASK; // will check later on
+					argsContainCast = true;
+				}
+				if ((argumentTypes[i] = argument.resolveType(scope)) == null) {
+					argHasError = true;
+				}
+			}
+			if (argHasError) {
+				return this.resolvedType;
+			}
+		}
+		if (this.resolvedType == null)
+			return null;
+
+		if (!this.resolvedType.canBeInstantiated()) {
+			scope.problemReporter().cannotInstantiate(type, this.resolvedType);
+			return this.resolvedType;
+		}
+		ReferenceBinding allocationType = (ReferenceBinding) this.resolvedType;
+		if (!(binding = scope.getConstructor(allocationType, argumentTypes, this)).isValidBinding()) {
+			if (binding.declaringClass == null)
+				binding.declaringClass = allocationType;
+			scope.problemReporter().invalidConstructor(this, binding);
+			return this.resolvedType;
+		}
+		if (isMethodUseDeprecated(binding, scope))
+			scope.problemReporter().deprecatedMethod(binding, this);
+		if (this.arguments != null)
+			checkInvocationArguments(scope, null, allocationType, this.binding, this.arguments, argumentTypes, argsContainCast, this);
+		return allocationType;
+	}
+

@@ -1,0 +1,105 @@
+	public FlowInfo analyseCode(
+		BlockScope currentScope,
+		FlowContext flowContext,
+		FlowInfo flowInfo) {
+			
+		breakLabel = new Label();
+		continueLabel = new Label();
+
+		// process the initializations
+		if (initializations != null) {
+			for (int i = 0, count = initializations.length; i < count; i++) {
+				flowInfo = initializations[i].analyseCode(scope, flowContext, flowInfo);
+			}
+		}
+		preCondInitStateIndex =
+			currentScope.methodScope().recordInitializationStates(flowInfo);
+
+		Constant cst = this.condition == null ? null : this.condition.constant;
+		boolean isConditionTrue = cst == null || (cst != NotAConstant && cst.booleanValue() == true);
+		boolean isConditionFalse = cst != null && (cst != NotAConstant && cst.booleanValue() == false);
+
+		cst = this.condition == null ? null : this.condition.optimizedBooleanConstant();
+		boolean isConditionOptimizedTrue = cst == null ||  (cst != NotAConstant && cst.booleanValue() == true);
+		boolean isConditionOptimizedFalse = cst != null && (cst != NotAConstant && cst.booleanValue() == false);
+		
+		// process the condition
+		LoopingFlowContext condLoopContext = null;
+		if (condition != null) {
+			if (!isConditionTrue) {
+				flowInfo =
+					condition.analyseCode(
+						scope,
+						(condLoopContext =
+							new LoopingFlowContext(flowContext, this, null, null, scope)),
+						flowInfo);
+			}
+		}
+
+		// process the action
+		LoopingFlowContext loopingContext;
+		FlowInfo actionInfo;
+		if (action == null 
+			|| (action.isEmptyBlock() && currentScope.environment().options.complianceLevel <= ClassFileConstants.JDK1_3)) {
+			if (condLoopContext != null)
+				condLoopContext.complainOnFinalAssignmentsInLoop(scope, flowInfo);
+			if (isConditionTrue) {
+				return FlowInfo.DEAD_END;
+			} else {
+				if (isConditionFalse){
+					continueLabel = null; // for(;false;p());
+				}
+				actionInfo = flowInfo.initsWhenTrue().copy();
+				loopingContext =
+					new LoopingFlowContext(flowContext, this, breakLabel, continueLabel, scope);
+			}
+		} else {
+			loopingContext =
+				new LoopingFlowContext(flowContext, this, breakLabel, continueLabel, scope);
+			FlowInfo initsWhenTrue = flowInfo.initsWhenTrue();
+			condIfTrueInitStateIndex =
+				currentScope.methodScope().recordInitializationStates(initsWhenTrue);
+
+				if (isConditionFalse) {
+					actionInfo = FlowInfo.DEAD_END;
+				} else {
+					actionInfo = initsWhenTrue.copy();
+					if (isConditionOptimizedFalse){
+						actionInfo.setReachMode(FlowInfo.UNREACHABLE);
+					}
+				}
+			if (!this.action.complainIfUnreachable(actionInfo, scope, false)) {
+				actionInfo = action.analyseCode(scope, loopingContext, actionInfo);
+			}
+
+			// code generation can be optimized when no need to continue in the loop
+			if (!actionInfo.isReachable() && !loopingContext.initsOnContinue.isReachable()) {
+				continueLabel = null;
+			} else {
+				if (condLoopContext != null)
+					condLoopContext.complainOnFinalAssignmentsInLoop(scope, flowInfo);
+				actionInfo = actionInfo.mergedWith(loopingContext.initsOnContinue.unconditionalInits());
+				loopingContext.complainOnFinalAssignmentsInLoop(scope, actionInfo);
+			}
+		}
+		// for increments
+		if ((continueLabel != null) && (increments != null)) {
+			LoopingFlowContext loopContext =
+				new LoopingFlowContext(flowContext, this, null, null, scope);
+			for (int i = 0, count = increments.length; i < count; i++) {
+				actionInfo = increments[i].analyseCode(scope, loopContext, actionInfo);
+			}
+			loopContext.complainOnFinalAssignmentsInLoop(scope, actionInfo);
+		}
+
+		//end of loop
+		FlowInfo mergedInfo = FlowInfo.mergedOptimizedBranches(
+				loopingContext.initsOnBreak, 
+				isConditionOptimizedTrue, 
+				flowInfo.initsWhenFalse(), 
+				isConditionOptimizedFalse, 
+				!isConditionTrue /*for(;;){}while(true); unreachable(); */);
+		mergedInitStateIndex = currentScope.methodScope().recordInitializationStates(mergedInfo);
+		return mergedInfo;
+	}
+

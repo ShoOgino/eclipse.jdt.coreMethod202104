@@ -1,0 +1,49 @@
+	public TypeBinding resolveType(BlockScope scope) {
+		// for code gen, harm the restrictiveFlag 	
+	
+		this.actualReceiverType = this.receiverType = scope.enclosingSourceType();
+		
+		if ((this.codegenBinding = this.binding = scope.getBinding(token, bits & RestrictiveFlagMASK, this, true /*resolve*/)).isValidBinding()) {
+			switch (bits & RestrictiveFlagMASK) {
+				case VARIABLE : // =========only variable============
+				case VARIABLE | TYPE : //====both variable and type============
+					if (binding instanceof VariableBinding) {
+						VariableBinding variable = (VariableBinding) binding;
+						if (binding instanceof LocalVariableBinding) {
+							bits &= ~RestrictiveFlagMASK;  // clear bits
+							bits |= LOCAL;
+							if ((this.bits & IsStrictlyAssignedMASK) == 0) {
+								constant = variable.constant();
+							} else {
+								constant = NotAConstant;
+							}
+							if (!variable.isFinal() && (bits & DepthMASK) != 0) {
+								scope.problemReporter().cannotReferToNonFinalOuterLocal((LocalVariableBinding)variable, this);
+							}
+							return this.resolvedType = variable.type;
+						}
+						// a field
+						FieldBinding field = (FieldBinding) this.binding;
+						if (!field.isStatic() && scope.environment().options.getSeverity(CompilerOptions.UnqualifiedFieldAccess) != ProblemSeverities.Ignore) {
+							scope.problemReporter().unqualifiedFieldAccess(this, field);
+						}
+						return this.resolvedType = checkFieldAccess(scope);
+					}
+	
+					// thus it was a type
+					bits &= ~RestrictiveFlagMASK;  // clear bits
+					bits |= TYPE;
+				case TYPE : //========only type==============
+					constant = Constant.NotAConstant;
+					//deprecated test
+					TypeBinding type = (TypeBinding)binding;
+					if (isTypeUseDeprecated(type, scope))
+						scope.problemReporter().deprecatedType(type, this);
+					return this.resolvedType = scope.convertToRawType(type);
+			}
+		}
+	
+		// error scenarii
+		return this.resolvedType = this.reportError(scope);
+	}
+

@@ -1,0 +1,160 @@
+public void invalidConstructor(Statement statement, MethodBinding targetConstructor) {
+
+	boolean insideDefaultConstructor = 
+		(this.referenceContext instanceof ConstructorDeclaration)
+			&& ((ConstructorDeclaration)this.referenceContext).isDefaultConstructor();
+	boolean insideImplicitConstructorCall =
+		(statement instanceof ExplicitConstructorCall)
+			&& (((ExplicitConstructorCall) statement).accessMode == ExplicitConstructorCall.ImplicitSuper);
+
+	int id = IProblem.UndefinedConstructor; //default...
+    MethodBinding shownConstructor = targetConstructor;
+	switch (targetConstructor.problemId()) {
+		case NotFound :
+			if (insideDefaultConstructor){
+				id = IProblem.UndefinedConstructorInDefaultConstructor;
+			} else if (insideImplicitConstructorCall){
+				id = IProblem.UndefinedConstructorInImplicitConstructorCall;
+			} else {
+				id = IProblem.UndefinedConstructor;
+			}
+			break;
+		case NotVisible :
+			if (insideDefaultConstructor){
+				id = IProblem.NotVisibleConstructorInDefaultConstructor;
+			} else if (insideImplicitConstructorCall){
+				id = IProblem.NotVisibleConstructorInImplicitConstructorCall;
+			} else {
+				id = IProblem.NotVisibleConstructor;
+			}
+			ProblemMethodBinding problemConstructor = (ProblemMethodBinding) targetConstructor;
+			if (problemConstructor.closestMatch != null) {
+			    shownConstructor = problemConstructor.closestMatch.original();
+		    }					
+			break;
+		case Ambiguous :
+			if (insideDefaultConstructor){
+				id = IProblem.AmbiguousConstructorInDefaultConstructor;
+			} else if (insideImplicitConstructorCall){
+				id = IProblem.AmbiguousConstructorInImplicitConstructorCall;
+			} else {
+				id = IProblem.AmbiguousConstructor;
+			}
+			break;
+		case ParameterBoundMismatch :
+			problemConstructor = (ProblemMethodBinding) targetConstructor;
+			ParameterizedGenericMethodBinding substitutedConstructor = (ParameterizedGenericMethodBinding) problemConstructor.closestMatch;
+			shownConstructor = substitutedConstructor.original();
+			TypeBinding typeArgument = targetConstructor.parameters[0];
+			TypeVariableBinding typeParameter = (TypeVariableBinding) targetConstructor.parameters[1];
+			this.handle(
+				IProblem.GenericConstructorTypeArgumentMismatch,
+				new String[] { 
+				        new String(shownConstructor.declaringClass.sourceName()),
+				        parametersAsString(shownConstructor.parameters, false), 
+				        new String(shownConstructor.declaringClass.readableName()), 
+				        parametersAsString(substitutedConstructor.parameters, false), 
+				        new String(typeArgument.readableName()), 
+				        new String(typeParameter.sourceName), 
+				        parameterBoundAsString(typeParameter, false) },
+				new String[] { 
+				        new String(shownConstructor.declaringClass.sourceName()),
+				        parametersAsString(shownConstructor.parameters, true), 
+				        new String(shownConstructor.declaringClass.shortReadableName()), 
+				        parametersAsString(substitutedConstructor.parameters, true), 
+				        new String(typeArgument.shortReadableName()), 
+				        new String(typeParameter.sourceName), 
+				        parameterBoundAsString(typeParameter, true) },
+				statement.sourceStart,
+				statement.sourceEnd);		    
+			return;		    
+			
+		case TypeParameterArityMismatch :
+			problemConstructor = (ProblemMethodBinding) targetConstructor;
+			shownConstructor = problemConstructor.closestMatch;
+			if (shownConstructor.typeVariables == TypeConstants.NoTypeVariables) {
+				this.handle(
+					IProblem.NonGenericConstructor,
+					new String[] { 
+					        new String(shownConstructor.declaringClass.sourceName()),
+					        parametersAsString(shownConstructor.parameters, false), 
+					        new String(shownConstructor.declaringClass.readableName()), 
+					        parametersAsString(targetConstructor.parameters, false) },
+					new String[] { 
+					        new String(shownConstructor.declaringClass.sourceName()),
+					        parametersAsString(shownConstructor.parameters, true), 
+					        new String(shownConstructor.declaringClass.shortReadableName()), 
+					        parametersAsString(targetConstructor.parameters, true) },
+					statement.sourceStart,
+					statement.sourceEnd);		    
+			} else {
+				this.handle(
+					IProblem.IncorrectArityForParameterizedConstructor  ,
+					new String[] { 
+					        new String(shownConstructor.declaringClass.sourceName()),
+					        parametersAsString(shownConstructor.parameters, false), 
+					        new String(shownConstructor.declaringClass.readableName()), 
+							parametersAsString(shownConstructor.typeVariables, false),
+					        parametersAsString(targetConstructor.parameters, false) },
+					new String[] { 
+					        new String(shownConstructor.declaringClass.sourceName()),
+					        parametersAsString(shownConstructor.parameters, true), 
+					        new String(shownConstructor.declaringClass.shortReadableName()), 
+							parametersAsString(shownConstructor.typeVariables, true),
+					        parametersAsString(targetConstructor.parameters, true) },
+					statement.sourceStart,
+					statement.sourceEnd);		    
+			}
+			return;
+		case ParameterizedMethodTypeMismatch :
+			problemConstructor = (ProblemMethodBinding) targetConstructor;
+			shownConstructor = problemConstructor.closestMatch;
+			this.handle(
+				IProblem.ParameterizedConstructorArgumentTypeMismatch,
+				new String[] { 
+				        new String(shownConstructor.declaringClass.sourceName()),
+				        parametersAsString(shownConstructor.parameters, false), 
+				        new String(shownConstructor.declaringClass.readableName()), 
+						parametersAsString(((ParameterizedGenericMethodBinding)shownConstructor).typeArguments, false),
+				        parametersAsString(targetConstructor.parameters, false) },
+				new String[] { 
+				        new String(shownConstructor.declaringClass.sourceName()),
+				        parametersAsString(shownConstructor.parameters, true), 
+				        new String(shownConstructor.declaringClass.shortReadableName()), 
+						parametersAsString(((ParameterizedGenericMethodBinding)shownConstructor).typeArguments, true),
+				        parametersAsString(targetConstructor.parameters, true) },
+				statement.sourceStart,
+				statement.sourceEnd);		    
+			return;
+		case TypeArgumentsForRawGenericMethod :
+			problemConstructor = (ProblemMethodBinding) targetConstructor;
+			shownConstructor = problemConstructor.closestMatch;
+			this.handle(
+				IProblem.TypeArgumentsForRawGenericConstructor,
+				new String[] { 
+				        new String(shownConstructor.declaringClass.sourceName()),
+				        parametersAsString(shownConstructor.parameters, false), 
+				        new String(shownConstructor.declaringClass.readableName()), 
+				        parametersAsString(targetConstructor.parameters, false) },
+				new String[] { 
+				        new String(shownConstructor.declaringClass.sourceName()),
+				        parametersAsString(shownConstructor.parameters, true), 
+				        new String(shownConstructor.declaringClass.shortReadableName()), 
+				        parametersAsString(targetConstructor.parameters, true) },
+				statement.sourceStart,
+				statement.sourceEnd);	
+			return;
+		case NoError : // 0
+		default :
+			needImplementation(); // want to fail to see why we were here...
+			break;
+	}
+
+	this.handle(
+		id,
+		new String[] {new String(targetConstructor.declaringClass.readableName()), parametersAsString(shownConstructor.parameters, false)},
+		new String[] {new String(targetConstructor.declaringClass.shortReadableName()), parametersAsString(shownConstructor.parameters, true)},
+		statement.sourceStart,
+		statement.sourceEnd);
+}
+

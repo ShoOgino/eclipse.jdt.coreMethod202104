@@ -1,0 +1,73 @@
+	/* Answer the type binding corresponding to the compoundName.
+	*
+	* NOTE: If a problem binding is returned, senders should extract the compound name
+	* from the binding & not assume the problem applies to the entire compoundName.
+	*/
+	public final TypeBinding getType(char[][] compoundName, int typeNameLength) {
+		if (typeNameLength == 1) {
+			// Would like to remove this test and require senders to specially handle base types
+			TypeBinding binding = getBaseType(compoundName[0]);
+			if (binding != null) return binding;
+		}
+
+		compilationUnitScope().recordQualifiedReference(compoundName);
+		Binding binding =
+			getTypeOrPackage(compoundName[0], typeNameLength == 1 ? TYPE : TYPE | PACKAGE);
+		if (binding == null)
+			return new ProblemReferenceBinding(compoundName[0], NotFound);
+		if (!binding.isValidBinding())
+			return (ReferenceBinding) binding;
+
+		int currentIndex = 1;
+		boolean checkVisibility = false;
+		if (binding instanceof PackageBinding) {
+			PackageBinding packageBinding = (PackageBinding) binding;
+			while (currentIndex < typeNameLength) {
+				binding = packageBinding.getTypeOrPackage(compoundName[currentIndex++]); // does not check visibility
+				if (binding == null)
+					return new ProblemReferenceBinding(
+						CharOperation.subarray(compoundName, 0, currentIndex),
+						NotFound);
+				if (!binding.isValidBinding())
+					return new ProblemReferenceBinding(
+						CharOperation.subarray(compoundName, 0, currentIndex),
+						binding.problemId());
+				if (!(binding instanceof PackageBinding))
+					break;
+				packageBinding = (PackageBinding) binding;
+			}
+			if (binding instanceof PackageBinding)
+				return new ProblemReferenceBinding(
+					CharOperation.subarray(compoundName, 0, currentIndex),
+					NotFound);
+			checkVisibility = true;
+		}
+
+		// binding is now a ReferenceBinding
+		ReferenceBinding typeBinding = (ReferenceBinding) binding;
+		compilationUnitScope().recordTypeReference(typeBinding);
+		if (checkVisibility) // handles the fall through case
+			if (!typeBinding.canBeSeenBy(this))
+				return new ProblemReferenceBinding(
+					CharOperation.subarray(compoundName, 0, currentIndex),
+					typeBinding,
+					NotVisible);
+
+		while (currentIndex < typeNameLength) {
+			typeBinding = getMemberType(compoundName[currentIndex++], typeBinding);
+			if (!typeBinding.isValidBinding()) {
+				if (typeBinding instanceof ProblemReferenceBinding) {
+					ProblemReferenceBinding problemBinding = (ProblemReferenceBinding) typeBinding;
+					return new ProblemReferenceBinding(
+						CharOperation.subarray(compoundName, 0, currentIndex),
+						problemBinding.original,
+						typeBinding.problemId());
+				}
+				return new ProblemReferenceBinding(
+					CharOperation.subarray(compoundName, 0, currentIndex),
+					typeBinding.problemId());
+			}
+		}
+		return typeBinding;
+	}
+

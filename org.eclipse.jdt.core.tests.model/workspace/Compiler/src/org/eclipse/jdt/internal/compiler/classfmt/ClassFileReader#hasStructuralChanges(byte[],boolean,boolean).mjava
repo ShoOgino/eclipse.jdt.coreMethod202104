@@ -1,0 +1,118 @@
+/**
+ * Check if the receiver has structural changes compare to the byte array in argument.
+ * Structural changes are:
+ * - modifiers changes for the class, the this.fields or the this.methods
+ * - signature changes for this.fields or this.methods.
+ * - changes in the number of this.fields or this.methods
+ * - changes for field constants
+ * - changes for thrown exceptions
+ * - change for the super class or any super interfaces.
+ * - changes for member types name or modifiers
+ * If any of these changes occurs, the method returns true. false otherwise.
+ * @param newBytes the bytes of the .class file we want to compare the receiver to
+ * @param orderRequired a boolean indicating whether the members should be sorted or not
+ * @param excludesSynthetic a boolean indicating whether the synthetic members should be used in the comparison
+ * @return boolean Returns true is there is a structural change between the two .class files, false otherwise
+ */
+public boolean hasStructuralChanges(byte[] newBytes, boolean orderRequired, boolean excludesSynthetic) {
+	try {
+		ClassFileReader newClassFile =
+			new ClassFileReader(newBytes, this.classFileName);
+		// type level comparison
+		// modifiers
+		if (this.getModifiers() != newClassFile.getModifiers())
+			return true;
+		// superclass
+		if (!CharOperation.equals(this.getSuperclassName(), newClassFile.getSuperclassName()))
+			return true;
+		// interfaces
+		char[][] newInterfacesNames = newClassFile.getInterfaceNames();
+		if (this.interfaceNames != newInterfacesNames) { // TypeConstants.NoSuperInterfaces
+			int newInterfacesLength = newInterfacesNames == null ? 0 : newInterfacesNames.length;
+			if (newInterfacesLength != this.interfacesCount)
+				return true;
+			for (int i = 0, max = this.interfacesCount; i < max; i++)
+				if (!CharOperation.equals(this.interfaceNames[i], newInterfacesNames[i]))
+					return true;
+		}
+
+		// member types
+		IBinaryNestedType[] currentMemberTypes = this.getMemberTypes();
+		IBinaryNestedType[] otherMemberTypes = newClassFile.getMemberTypes();
+		if (currentMemberTypes != otherMemberTypes) { // TypeConstants.NoMemberTypes
+			int currentMemberTypeLength = currentMemberTypes == null ? 0 : currentMemberTypes.length;
+			int otherMemberTypeLength = otherMemberTypes == null ? 0 : otherMemberTypes.length;
+			if (currentMemberTypeLength != otherMemberTypeLength)
+				return true;
+			for (int i = 0; i < currentMemberTypeLength; i++)
+				if (!CharOperation.equals(currentMemberTypes[i].getName(), otherMemberTypes[i].getName())
+					|| currentMemberTypes[i].getModifiers() != otherMemberTypes[i].getModifiers())
+						return true;
+		}
+
+		// fields
+		FieldInfo[] otherFieldInfos = (FieldInfo[]) newClassFile.getFields();
+		int otherFieldInfosLength = otherFieldInfos == null ? 0 : otherFieldInfos.length;
+		boolean compareFields = true;
+		if (this.fieldsCount == otherFieldInfosLength) {
+			int i = 0;
+			for (; i < this.fieldsCount; i++)
+				if (hasStructuralFieldChanges(this.fields[i], otherFieldInfos[i])) break;
+			if ((compareFields = i != this.fieldsCount) && !orderRequired && !excludesSynthetic)
+				return true;
+		}
+		if (compareFields) {
+			if (this.fieldsCount != otherFieldInfosLength && !excludesSynthetic)
+				return true;
+			if (orderRequired) {
+				if (this.fieldsCount != 0)
+					Arrays.sort(this.fields);
+				if (otherFieldInfosLength != 0)
+					Arrays.sort(otherFieldInfos);
+			}
+			if (excludesSynthetic) {
+				if (hasNonSyntheticFieldChanges(this.fields, otherFieldInfos))
+					return true;
+			} else {
+				for (int i = 0; i < this.fieldsCount; i++)
+					if (hasStructuralFieldChanges(this.fields[i], otherFieldInfos[i]))
+						return true;
+			}
+		}
+		
+		// methods
+		MethodInfo[] otherMethodInfos = (MethodInfo[]) newClassFile.getMethods();
+		int otherMethodInfosLength = otherMethodInfos == null ? 0 : otherMethodInfos.length;
+		boolean compareMethods = true;
+		if (this.methodsCount == otherMethodInfosLength) {
+			int i = 0;
+			for (; i < this.methodsCount; i++)
+				if (hasStructuralMethodChanges(this.methods[i], otherMethodInfos[i])) break;
+			if ((compareMethods = i != this.methodsCount) && !orderRequired && !excludesSynthetic)
+				return true;
+		}
+		if (compareMethods) {
+			if (this.methodsCount != otherMethodInfosLength && !excludesSynthetic)
+				return true;
+			if (orderRequired) {
+				if (this.methodsCount != 0)
+					Arrays.sort(this.methods);
+				if (otherMethodInfosLength != 0)
+					Arrays.sort(otherMethodInfos);	
+			}
+			if (excludesSynthetic) {
+				if (hasNonSyntheticMethodChanges(this.methods, otherMethodInfos))
+					return true;
+			} else {
+				for (int i = 0; i < this.methodsCount; i++)
+					if (hasStructuralMethodChanges(this.methods[i], otherMethodInfos[i]))
+						return true;
+			}
+		}
+
+		return false;
+	} catch (ClassFormatException e) {
+		return true;
+	}
+}
+

@@ -1,0 +1,94 @@
+/*
+ * Update the corresponding parse node from parser state which
+ * is about to disappear because of restarting recovery
+ */
+public void updateFromParserState(){
+
+	if(this.bodyStartsAtHeaderEnd()){
+		Parser parser = this.parser();
+		/* might want to recover arguments or thrown exceptions */
+		if (parser.listLength > 0 && parser.astLengthPtr > 0){ // awaiting interface type references
+			/* has consumed the arguments - listed elements must be thrown exceptions */
+			if (methodDeclaration.sourceEnd == parser.rParenPos) {
+				
+				// protection for bugs 15142
+				int length = parser.astLengthStack[parser.astLengthPtr];
+				int astPtr = parser.astPtr - length;
+				boolean canConsume = astPtr >= 0;
+				if(canConsume) {
+					if((!(parser.astStack[astPtr] instanceof AbstractMethodDeclaration))) {
+						canConsume = false;
+					}
+					for (int i = 1, max = length + 1; i < max; i++) {
+						if(!(parser.astStack[astPtr + i ] instanceof TypeReference)) {
+							canConsume = false;
+						}
+					}
+				}
+				if (canConsume){
+					parser.consumeMethodHeaderThrowsClause(); 
+					// will reset typeListLength to zero
+					// thus this check will only be performed on first errorCheck after void foo() throws X, Y,
+				} else {
+					parser.listLength = 0;
+				}
+			} else {
+				/* has not consumed arguments yet, listed elements must be arguments */
+				if (parser.currentToken == TokenNameLPAREN || parser.currentToken == TokenNameSEMICOLON){
+					/* if currentToken is parenthesis this last argument is a method/field signature */
+					parser.astLengthStack[parser.astLengthPtr] --; 
+					parser.astPtr --; 
+					parser.listLength --;
+					parser.currentToken = 0;
+				}
+				int argLength = parser.astLengthStack[parser.astLengthPtr];
+				int argStart = parser.astPtr - argLength + 1;
+				boolean needUpdateRParenPos = parser.rParenPos < parser.lParenPos; // 12387 : rParenPos will be used
+				// to compute bodyStart, and thus used to set next checkpoint.
+				int count;
+				for (count = 0; count < argLength; count++){
+					Argument argument = (Argument)parser.astStack[argStart+count];
+					/* cannot be an argument if non final */
+					char[][] argTypeName = argument.type.getTypeName();
+					if ((argument.modifiers & ~AccFinal) != 0
+						|| (argTypeName.length == 1
+							&& CharOperation.equals(argTypeName[0], VoidBinding.sourceName()))){
+						parser.astLengthStack[parser.astLengthPtr] = count; 
+						parser.astPtr = argStart+count-1; 
+						parser.listLength = count;
+						parser.currentToken = 0;
+						break;
+					}
+					if (needUpdateRParenPos) parser.rParenPos = argument.sourceEnd + 1;
+				}
+				if (parser.listLength > 0 && parser.astLengthPtr > 0){
+					
+					// protection for bugs 15142
+					int length = parser.astLengthStack[parser.astLengthPtr];
+					int astPtr = parser.astPtr - length;
+					boolean canConsume = astPtr >= 0;
+					if(canConsume) {
+						if((!(parser.astStack[astPtr] instanceof AbstractMethodDeclaration))) {
+							canConsume = false;
+						}
+						for (int i = 1, max = length + 1; i < max; i++) {
+							if(!(parser.astStack[astPtr + i ] instanceof Argument)) {
+								canConsume = false;
+							}
+						}
+					}
+					if(canConsume) {
+						parser.consumeMethodHeaderRightParen();
+						/* fix-up positions, given they were updated against rParenPos, which did not get set */
+						if (parser.currentElement == this){ // parameter addition might have added an awaiting (no return type) method - see 1FVXQZ4 */
+							methodDeclaration.sourceEnd = methodDeclaration.arguments[methodDeclaration.arguments.length-1].sourceEnd;
+							methodDeclaration.bodyStart = methodDeclaration.sourceEnd+1;
+							parser.lastCheckPoint = methodDeclaration.bodyStart;
+						}
+					}
+				}
+			}
+		}
+	}
+}
+

@@ -1,0 +1,67 @@
+	public void resolve(BlockScope upperScope) {
+	
+	    try {
+			TypeBinding testType = expression.resolveType(upperScope);
+			if (testType == null)
+				return;
+			expression.computeConversion(upperScope, testType, testType);
+			if (!(expression.isConstantValueOfTypeAssignableToType(testType, IntBinding))) {
+				if (!testType.isCompatibleWith(IntBinding)) {
+					upperScope.problemReporter().incorrectSwitchType(expression, testType);
+					return;
+				}
+			}
+			if (statements != null) {
+				scope = explicitDeclarations == 0 ? upperScope : new BlockScope(upperScope);
+				int length;
+				// collection of cases is too big but we will only iterate until caseCount
+				cases = new CaseStatement[length = statements.length];
+				int[] casesValues = new int[length];
+				CaseStatement[] duplicateCaseStatements = null;
+				int duplicateCaseStatementsCounter = 0;
+				int counter = 0;
+				for (int i = 0; i < length; i++) {
+					Constant constant;
+					final Statement statement = statements[i];
+					if ((constant = statement.resolveCase(scope, testType, this)) != null) {
+						//----check for duplicate case statement------------
+						if (constant != NotAConstant) {
+							int key = constant.intValue();
+							for (int j = 0; j < counter; j++) {
+								if (casesValues[j] == key) {
+									final CaseStatement currentCaseStatement = (CaseStatement) statement;
+									if (duplicateCaseStatements == null) {
+										scope.problemReporter().duplicateCase(cases[j]);
+										scope.problemReporter().duplicateCase(currentCaseStatement);
+										duplicateCaseStatements = new CaseStatement[length];
+										duplicateCaseStatements[duplicateCaseStatementsCounter++] = cases[j];
+										duplicateCaseStatements[duplicateCaseStatementsCounter++] = currentCaseStatement;
+									} else {
+										boolean found = false;
+										searchReportedDuplicate: for (int k = 2; k < duplicateCaseStatementsCounter; k++) {
+											if (duplicateCaseStatements[k] == statement) {
+												found = true;
+												break searchReportedDuplicate;
+											}
+										}
+										if (!found) {
+											scope.problemReporter().duplicateCase(currentCaseStatement);
+											duplicateCaseStatements[duplicateCaseStatementsCounter++] = currentCaseStatement;
+										}
+									}
+								}
+							}
+							casesValues[counter++] = key;
+						}
+					}
+				}
+			} else {
+				if ((this.bits & UndocumentedEmptyBlockMASK) != 0) {
+					upperScope.problemReporter().undocumentedEmptyBlock(this.blockStart, this.sourceEnd);
+				}
+			}
+	    } finally {
+	        if (this.scope != null) this.scope.switchCase = null; // no longer inside switch case block
+	    }
+	}
+

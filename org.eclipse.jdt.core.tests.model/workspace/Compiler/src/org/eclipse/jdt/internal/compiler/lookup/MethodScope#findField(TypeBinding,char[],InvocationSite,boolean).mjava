@@ -1,0 +1,47 @@
+	/* Overridden to detect the error case inside an explicit constructor call:
+	
+	class X {
+		int i;
+		X myX;
+		X(X x) {
+			this(i, myX.i, x.i); // same for super calls... only the first 2 field accesses are errors
+		}
+	}
+	*/
+	public FieldBinding findField(
+		TypeBinding receiverType,
+		char[] fieldName,
+		InvocationSite invocationSite,
+		boolean needResolve) {
+
+		FieldBinding field = super.findField(receiverType, fieldName, invocationSite, needResolve);
+		if (field == null)
+			return null;
+		if (!field.isValidBinding())
+			return field; // answer the error field
+		if (field.isStatic())
+			return field; // static fields are always accessible
+
+		if (!isConstructorCall || receiverType != enclosingSourceType())
+			return field;
+
+		if (invocationSite instanceof SingleNameReference)
+			return new ProblemFieldBinding(
+				field, // closest match
+				field.declaringClass,
+				fieldName,
+				NonStaticReferenceInConstructorInvocation);
+		if (invocationSite instanceof QualifiedNameReference) {
+			// look to see if the field is the first binding
+			QualifiedNameReference name = (QualifiedNameReference) invocationSite;
+			if (name.binding == null)
+				// only true when the field is the fieldbinding at the beginning of name's tokens
+				return new ProblemFieldBinding(
+					field, // closest match
+					field.declaringClass,
+					fieldName,
+					NonStaticReferenceInConstructorInvocation);
+		}
+		return field;
+	}
+

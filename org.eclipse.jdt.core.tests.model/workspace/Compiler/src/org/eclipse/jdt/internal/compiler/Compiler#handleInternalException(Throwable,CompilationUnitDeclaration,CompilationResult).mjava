@@ -1,0 +1,54 @@
+	/*
+	 * Compiler crash recovery in case of unexpected runtime exceptions
+	 */
+	protected void handleInternalException(
+		Throwable internalException,
+		CompilationUnitDeclaration unit,
+		CompilationResult result) {
+
+		/* find a compilation result */
+		if ((unit != null)) // basing result upon the current unit if available
+			result = unit.compilationResult; // current unit being processed ?
+		if ((result == null) && (unitsToProcess != null) && (totalUnits > 0))
+			result = unitsToProcess[totalUnits - 1].compilationResult;
+		// last unit in beginToCompile ?
+
+		boolean needToPrint = true;
+		if (result != null) {
+			/* create and record a compilation problem */
+			StringWriter stringWriter = new StringWriter();
+			PrintWriter writer = new PrintWriter(stringWriter);
+			internalException.printStackTrace(writer);
+			StringBuffer buffer = stringWriter.getBuffer();
+
+			String[] pbArguments = new String[] {
+				Util.bind("compilation.internalError" ) //$NON-NLS-1$
+					+ "\n"  //$NON-NLS-1$
+					+ buffer.toString()};
+
+			result
+				.record(
+					problemReporter
+					.createProblem(
+						result.getFileName(),
+						IProblem.Unclassified,
+						pbArguments,
+						pbArguments,
+						Error, // severity
+						0, // source start
+						0, // source end
+						0), // line number		
+					unit);
+
+			/* hand back the compilation result */
+			if (!result.hasBeenAccepted) {
+				requestor.acceptResult(result.tagAsAccepted());
+				needToPrint = false;
+			}
+		}
+		if (needToPrint) {
+			/* dump a stack trace to the console */
+			internalException.printStackTrace();
+		}
+	}
+

@@ -1,0 +1,85 @@
+	/**
+	 * For statement code generation
+	 *
+	 * @param currentScope org.eclipse.jdt.internal.compiler.lookup.BlockScope
+	 * @param codeStream org.eclipse.jdt.internal.compiler.codegen.CodeStream
+	 */
+	public void generateCode(BlockScope currentScope, CodeStream codeStream) {
+
+		if ((bits & IsReachableMASK) == 0) {
+			return;
+		}
+		int pc = codeStream.position;
+
+		// generate the initializations
+		if (initializations != null) {
+			for (int i = 0, max = initializations.length; i < max; i++) {
+				initializations[i].generateCode(scope, codeStream);
+			}
+		}
+
+		// label management
+		Label actionLabel = new Label(codeStream);
+		Label conditionLabel = new Label(codeStream);
+		breakLabel.initialize(codeStream);
+		if (continueLabel != null) {
+			continueLabel.initialize(codeStream);
+		}
+		// jump over the actionBlock
+		if ((condition != null)
+			&& (condition.constant == NotAConstant)
+			&& !((action == null || action.isEmptyBlock()) && (increments == null))) {
+			int jumpPC = codeStream.position;
+			codeStream.goto_(conditionLabel);
+			codeStream.recordPositionsFrom(jumpPC, condition.sourceStart);
+		}
+		// generate the loop action
+		actionLabel.place();
+		if (action != null) {
+			// Required to fix 1PR0XVS: LFRE:WINNT - Compiler: variable table for method appears incorrect
+			if (condIfTrueInitStateIndex != -1) {
+				// insert all locals initialized inside the condition into the action generated prior to the condition
+				codeStream.addDefinitelyAssignedVariables(
+					currentScope,
+					condIfTrueInitStateIndex);
+			}
+			action.generateCode(scope, codeStream);
+		}
+		// continuation point
+		if (continueLabel != null) {
+			continueLabel.place();
+			// generate the increments for next iteration
+			if (increments != null) {
+				for (int i = 0, max = increments.length; i < max; i++) {
+					increments[i].generateCode(scope, codeStream);
+				}
+			}
+		}
+
+		// May loose some local variable initializations : affecting the local variable attributes
+		if (preCondInitStateIndex != -1) {
+			codeStream.removeNotDefinitelyAssignedVariables(currentScope, preCondInitStateIndex);
+		}
+
+		// generate the condition
+		conditionLabel.place();
+		if ((condition != null) && (condition.constant == NotAConstant)) {
+			condition.generateOptimizedBoolean(scope, codeStream, actionLabel, null, true);
+		} else {
+			if (continueLabel != null) {
+				codeStream.goto_(actionLabel);
+			}
+		}
+		breakLabel.place();
+
+		// May loose some local variable initializations : affecting the local variable attributes
+		if (neededScope) {
+			codeStream.exitUserScope(scope);
+		}
+		if (mergedInitStateIndex != -1) {
+			codeStream.removeNotDefinitelyAssignedVariables(currentScope, mergedInitStateIndex);
+			codeStream.addDefinitelyAssignedVariables(currentScope, mergedInitStateIndex);
+		}
+		codeStream.recordPositionsFrom(pc, this.sourceStart);
+	}
+

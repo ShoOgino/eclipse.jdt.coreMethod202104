@@ -1,0 +1,76 @@
+	public void generatePostIncrement(BlockScope currentScope, CodeStream codeStream, CompoundAssignment postIncrement, boolean valueRequired) {
+		switch (bits & RestrictiveFlagMASK) {
+			case FIELD : // assigning to a field
+				FieldBinding fieldBinding;
+				if ((fieldBinding = (FieldBinding) this.codegenBinding).isStatic()) {
+					if ((syntheticAccessors == null) || (syntheticAccessors[READ] == null)) {
+						codeStream.getstatic(fieldBinding);
+					} else {
+						codeStream.invokestatic(syntheticAccessors[READ]);
+					}
+				} else {
+					if ((bits & DepthMASK) != 0) {
+						ReferenceBinding targetType = currentScope.enclosingSourceType().enclosingTypeAt((bits & DepthMASK) >> DepthSHIFT);
+						Object[] emulationPath = currentScope.getEmulationPath(targetType, true /*only exact match*/, false/*consider enclosing arg*/);
+						codeStream.generateOuterAccess(emulationPath, this, targetType, currentScope);
+					} else {
+						codeStream.aload_0();
+					}
+					codeStream.dup();
+					if ((syntheticAccessors == null) || (syntheticAccessors[READ] == null)) {
+						codeStream.getfield(fieldBinding);
+					} else {
+						codeStream.invokestatic(syntheticAccessors[READ]);
+					}
+				}
+				if (valueRequired) {
+					if (fieldBinding.isStatic()) {
+						if ((fieldBinding.type == LongBinding) || (fieldBinding.type == DoubleBinding)) {
+							codeStream.dup2();
+						} else {
+							codeStream.dup();
+						}
+					} else { // Stack:  [owner][old field value]  ---> [old field value][owner][old field value]
+						if ((fieldBinding.type == LongBinding) || (fieldBinding.type == DoubleBinding)) {
+							codeStream.dup2_x1();
+						} else {
+							codeStream.dup_x1();
+						}
+					}
+				}
+				codeStream.generateConstant(postIncrement.expression.constant, implicitConversion);
+				codeStream.sendOperator(postIncrement.operator, fieldBinding.type.id);
+				codeStream.generateImplicitConversion(postIncrement.assignmentImplicitConversion);
+				fieldStore(codeStream, fieldBinding, syntheticAccessors == null ? null : syntheticAccessors[WRITE], false);
+				// no need for generic cast 
+				return;
+			case LOCAL : // assigning to a local variable
+				LocalVariableBinding localBinding = (LocalVariableBinding) this.codegenBinding;
+				// using incr bytecode if possible
+				if (localBinding.type == IntBinding) {
+					if (valueRequired) {
+						codeStream.load(localBinding);
+					}
+					if (postIncrement.operator == PLUS) {
+						codeStream.iinc(localBinding.resolvedPosition, 1);
+					} else {
+						codeStream.iinc(localBinding.resolvedPosition, -1);
+					}
+				} else {
+					codeStream.load(localBinding);
+					if (valueRequired){
+						if ((localBinding.type == LongBinding) || (localBinding.type == DoubleBinding)) {
+							codeStream.dup2();
+						} else {
+							codeStream.dup();
+						}
+					}
+					codeStream.generateConstant(postIncrement.expression.constant, implicitConversion);
+					codeStream.sendOperator(postIncrement.operator, localBinding.type.id);
+					codeStream.generateImplicitConversion(postIncrement.assignmentImplicitConversion);
+	
+					codeStream.store(localBinding, false);
+				}
+		}
+	}
+

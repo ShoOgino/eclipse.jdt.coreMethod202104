@@ -1,0 +1,103 @@
+void faultInImports() {
+	if (referenceContext.imports == null)
+		return;
+
+	// collect the top level type names if a single type import exists
+	int numberOfStatements = referenceContext.imports.length;
+	HashtableOfType typesBySimpleNames = null;
+	for (int i = 0; i < numberOfStatements; i++) {
+		if (!referenceContext.imports[i].onDemand) {
+			typesBySimpleNames = new HashtableOfType(topLevelTypes.length + numberOfStatements);
+			for (int j = 0, length = topLevelTypes.length; j < length; j++)
+				typesBySimpleNames.put(topLevelTypes[j].sourceName, topLevelTypes[j]);
+			break;
+		}
+	}
+
+	// allocate the import array, add java.lang.* by default
+	int numberOfImports = numberOfStatements + 1;
+	for (int i = 0; i < numberOfStatements; i++) {
+		ImportReference importReference = referenceContext.imports[i];
+		if (importReference.onDemand && CharOperation.equals(JAVA_LANG, importReference.tokens)) {
+			numberOfImports--;
+			break;
+		}
+	}
+	ImportBinding[] resolvedImports = new ImportBinding[numberOfImports];
+	resolvedImports[0] = getDefaultImports()[0];
+	int index = 1;
+
+	nextImport : for (int i = 0; i < numberOfStatements; i++) {
+		ImportReference importReference = referenceContext.imports[i];
+		char[][] compoundName = importReference.tokens;
+
+		// skip duplicates or imports of the current package
+		for (int j = 0; j < index; j++)
+			if (resolvedImports[j].onDemand == importReference.onDemand)
+				if (CharOperation.equals(compoundName, resolvedImports[j].compoundName)) {
+					problemReporter().unusedImport(importReference); // since skipped, must be reported now
+					continue nextImport;
+				}
+		if (importReference.onDemand == true)
+			if (CharOperation.equals(compoundName, currentPackageName)) {
+				problemReporter().unusedImport(importReference); // since skipped, must be reported now
+				continue nextImport;
+			}
+		if (importReference.onDemand) {
+			Binding importBinding = findOnDemandImport(compoundName);
+			if (!importBinding.isValidBinding()) {
+				problemReporter().importProblem(importReference, importBinding);
+				continue nextImport;
+			}
+			resolvedImports[index++] = new ImportBinding(compoundName, true, importBinding, importReference);
+		} else {
+			Binding typeBinding = findSingleTypeImport(compoundName);
+			if (!typeBinding.isValidBinding()) {
+				problemReporter().importProblem(importReference, typeBinding);
+				continue nextImport;
+			}
+			if (typeBinding instanceof PackageBinding) {
+				problemReporter().cannotImportPackage(importReference);
+				continue nextImport;
+			}
+			if (typeBinding instanceof ReferenceBinding) {
+				ReferenceBinding referenceBinding = (ReferenceBinding) typeBinding;
+				if (importReference.isTypeUseDeprecated(referenceBinding, this)) {
+					problemReporter().deprecatedType((TypeBinding) typeBinding, importReference);
+				}
+			}
+			ReferenceBinding existingType = typesBySimpleNames.get(compoundName[compoundName.length - 1]);
+			if (existingType != null) {
+				// duplicate test above should have caught this case, but make sure
+				if (existingType == typeBinding) {
+					continue nextImport;
+				}
+				// either the type collides with a top level type or another imported type
+				for (int j = 0, length = topLevelTypes.length; j < length; j++) {
+					if (CharOperation.equals(topLevelTypes[j].sourceName, existingType.sourceName)) {
+						problemReporter().conflictingImport(importReference);
+						continue nextImport;
+					}
+				}
+				problemReporter().duplicateImport(importReference);
+				continue nextImport;
+			}
+			resolvedImports[index++] = new ImportBinding(compoundName, false, typeBinding, importReference);
+			typesBySimpleNames.put(compoundName[compoundName.length - 1], (ReferenceBinding) typeBinding);
+		}
+	}
+
+	// shrink resolvedImports... only happens if an error was reported
+	if (resolvedImports.length > index)
+		System.arraycopy(resolvedImports, 0, resolvedImports = new ImportBinding[index], 0, index);
+	imports = resolvedImports;
+
+	int length = imports.length;
+	resolvedSingeTypeImports = new HashtableOfObject(length);
+	for (int i = 0; i < length; i++) {
+		ImportBinding binding = imports[i];
+		if (!binding.onDemand)
+			resolvedSingeTypeImports.put(binding.compoundName[binding.compoundName.length - 1], binding);
+	}
+}
+

@@ -1,0 +1,133 @@
+	public FlowInfo analyseAssignment(
+		BlockScope currentScope,
+		FlowContext flowContext,
+		FlowInfo flowInfo,
+		Assignment assignment,
+		boolean isCompound) {
+
+		// determine the rank until which we now we do not need any actual value for the field access
+		int otherBindingsCount = otherBindings == null ? 0 : otherBindings.length;
+		boolean needValue = otherBindingsCount == 0 || !this.otherBindings[0].isStatic();
+		FieldBinding lastFieldBinding = null;
+		switch (bits & RestrictiveFlagMASK) {
+			case FIELD : // reading a field
+				lastFieldBinding = (FieldBinding) binding;
+				if (needValue) {
+					manageSyntheticAccessIfNecessary(currentScope, lastFieldBinding, this.actualReceiverType, 0, flowInfo);
+				}				// check if final blank field
+				if (lastFieldBinding.isBlankFinal()
+				    && this.otherBindings != null // the last field binding is only assigned
+	 				&& currentScope.allowBlankFinalFieldAssignment(lastFieldBinding)) {
+					if (!flowInfo.isDefinitelyAssigned(lastFieldBinding)) {
+						currentScope.problemReporter().uninitializedBlankFinalField(
+							lastFieldBinding,
+							this);
+					}
+				}
+				break;
+			case LOCAL :
+				// first binding is a local variable
+				LocalVariableBinding localBinding;
+				if (!flowInfo
+					.isDefinitelyAssigned(localBinding = (LocalVariableBinding) binding)) {
+					currentScope.problemReporter().uninitializedLocalVariable(localBinding, this);
+				}
+				if (flowInfo.isReachable()) {
+					localBinding.useFlag = LocalVariableBinding.USED;
+				} else if (localBinding.useFlag == LocalVariableBinding.UNUSED) {
+					localBinding.useFlag = LocalVariableBinding.FAKE_USED;
+				}
+		}
+		
+		if (needValue) {
+			manageEnclosingInstanceAccessIfNecessary(currentScope, flowInfo);
+			// only for first binding
+		}
+		// all intermediate field accesses are read accesses
+		if (otherBindings != null) {
+			for (int i = 0; i < otherBindingsCount-1; i++) {
+				lastFieldBinding = otherBindings[i];
+				needValue = !otherBindings[i+1].isStatic();
+				if (needValue) {
+					manageSyntheticAccessIfNecessary(
+						currentScope, 
+						lastFieldBinding, 
+						i == 0 
+							? ((VariableBinding)binding).type
+							: otherBindings[i-1].type,
+						i + 1, 
+						flowInfo);
+				}
+			}
+			lastFieldBinding = otherBindings[otherBindingsCount-1];
+		}
+
+		if (isCompound) {
+			if (binding == lastFieldBinding
+				&& lastFieldBinding.isBlankFinal()
+				&& currentScope.allowBlankFinalFieldAssignment(lastFieldBinding)
+				&& (!flowInfo.isDefinitelyAssigned(lastFieldBinding))) {
+				currentScope.problemReporter().uninitializedBlankFinalField(
+					lastFieldBinding,
+					this);
+			}
+			TypeBinding lastReceiverType;
+			if (lastFieldBinding == binding){
+				lastReceiverType = this.actualReceiverType;
+			} else if (otherBindingsCount == 1){
+				lastReceiverType = ((VariableBinding)this.binding).type;
+			} else {
+				lastReceiverType = this.otherBindings[otherBindingsCount-2].type;
+			}
+			manageSyntheticAccessIfNecessary(
+				currentScope,
+				lastFieldBinding,
+				lastReceiverType,
+				lastFieldBinding == binding
+					? 0 
+					: otherBindingsCount, 
+				flowInfo);
+		}
+		
+		if (assignment.expression != null) {
+			flowInfo =
+				assignment
+					.expression
+					.analyseCode(currentScope, flowContext, flowInfo)
+					.unconditionalInits();
+		}
+		
+		// the last field access is a write access
+		if (lastFieldBinding.isFinal()) {
+			// in a context where it can be assigned?
+			if (lastFieldBinding.isBlankFinal()
+					&& !isCompound
+					&& currentScope.allowBlankFinalFieldAssignment(lastFieldBinding) 
+					&& indexOfFirstFieldBinding == 1) {
+				if (flowInfo.isPotentiallyAssigned(lastFieldBinding)) {
+					currentScope.problemReporter().duplicateInitializationOfBlankFinalField(lastFieldBinding, this);
+				} else {
+					flowContext.recordSettingFinal(lastFieldBinding, this, flowInfo);
+				}
+				flowInfo.markAsDefinitelyAssigned(lastFieldBinding);
+			} else {
+				currentScope.problemReporter().cannotAssignToFinalField(lastFieldBinding, this);
+				if (currentScope.allowBlankFinalFieldAssignment(lastFieldBinding)) { // pretend it got assigned
+					flowInfo.markAsDefinitelyAssigned(lastFieldBinding);
+				}
+			}
+		}
+		// equivalent to valuesRequired[maxOtherBindings]
+		TypeBinding lastReceiverType;
+		if (lastFieldBinding == binding){
+			lastReceiverType = this.actualReceiverType;
+		} else if (otherBindingsCount == 1){
+			lastReceiverType = ((VariableBinding)this.binding).type;
+		} else {
+			lastReceiverType = this.otherBindings[otherBindingsCount-2].type;
+		}
+		manageSyntheticAccessIfNecessary(currentScope, lastFieldBinding, lastReceiverType, -1 /*write-access*/, flowInfo);
+
+		return flowInfo;
+	}
+

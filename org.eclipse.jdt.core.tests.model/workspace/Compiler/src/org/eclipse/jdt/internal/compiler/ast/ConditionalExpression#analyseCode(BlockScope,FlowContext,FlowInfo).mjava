@@ -1,0 +1,67 @@
+	public FlowInfo analyseCode(
+		BlockScope currentScope,
+		FlowContext flowContext,
+		FlowInfo flowInfo) {
+
+		Constant cst = this.condition.optimizedBooleanConstant();
+		boolean isConditionOptimizedTrue = cst != NotAConstant && cst.booleanValue() == true;
+		boolean isConditionOptimizedFalse = cst != NotAConstant && cst.booleanValue() == false;
+
+		int mode = flowInfo.reachMode();
+		flowInfo = condition.analyseCode(currentScope, flowContext, flowInfo, cst == NotAConstant);
+		
+		// process the if-true part
+		FlowInfo trueFlowInfo = flowInfo.initsWhenTrue().copy();
+		if (isConditionOptimizedFalse) {
+			trueFlowInfo.setReachMode(FlowInfo.UNREACHABLE); 
+		}
+		trueInitStateIndex = currentScope.methodScope().recordInitializationStates(trueFlowInfo);
+		trueFlowInfo = valueIfTrue.analyseCode(currentScope, flowContext, trueFlowInfo);
+
+		// process the if-false part
+		FlowInfo falseFlowInfo = flowInfo.initsWhenFalse().copy();
+		if (isConditionOptimizedTrue) {
+			falseFlowInfo.setReachMode(FlowInfo.UNREACHABLE); 
+		}
+		falseInitStateIndex = currentScope.methodScope().recordInitializationStates(falseFlowInfo);
+		falseFlowInfo = valueIfFalse.analyseCode(currentScope, flowContext, falseFlowInfo);
+
+		// merge if-true & if-false initializations
+		FlowInfo mergedInfo;
+		if (isConditionOptimizedTrue){
+			mergedInfo = trueFlowInfo.addPotentialInitializationsFrom(falseFlowInfo);
+		} else if (isConditionOptimizedFalse) {
+			mergedInfo = falseFlowInfo.addPotentialInitializationsFrom(trueFlowInfo);
+		} else {
+			// if ((t && (v = t)) ? t : t && (v = f)) r = v;  -- ok
+			cst = this.optimizedIfTrueConstant;
+			boolean isValueIfTrueOptimizedTrue = cst != null && cst != NotAConstant && cst.booleanValue() == true;
+			boolean isValueIfTrueOptimizedFalse = cst != null && cst != NotAConstant && cst.booleanValue() == false;
+			
+			cst = this.optimizedIfFalseConstant;
+			boolean isValueIfFalseOptimizedTrue = cst != null && cst != NotAConstant && cst.booleanValue() == true;
+			boolean isValueIfFalseOptimizedFalse = cst != null && cst != NotAConstant && cst.booleanValue() == false;
+
+			UnconditionalFlowInfo trueInfoWhenTrue = trueFlowInfo.initsWhenTrue().copy().unconditionalInits();
+			if (isValueIfTrueOptimizedFalse) trueInfoWhenTrue.setReachMode(FlowInfo.UNREACHABLE); 
+
+			UnconditionalFlowInfo falseInfoWhenTrue = falseFlowInfo.initsWhenTrue().copy().unconditionalInits();
+			if (isValueIfFalseOptimizedFalse) falseInfoWhenTrue.setReachMode(FlowInfo.UNREACHABLE); 
+			
+			UnconditionalFlowInfo trueInfoWhenFalse = trueFlowInfo.initsWhenFalse().copy().unconditionalInits();
+			if (isValueIfTrueOptimizedTrue) trueInfoWhenFalse.setReachMode(FlowInfo.UNREACHABLE); 
+
+			UnconditionalFlowInfo falseInfoWhenFalse = falseFlowInfo.initsWhenFalse().copy().unconditionalInits();
+			if (isValueIfFalseOptimizedTrue) falseInfoWhenFalse.setReachMode(FlowInfo.UNREACHABLE); 
+
+			mergedInfo =
+				FlowInfo.conditional(
+					trueInfoWhenTrue.mergedWith(falseInfoWhenTrue),
+					trueInfoWhenFalse.mergedWith(falseInfoWhenFalse));
+		}
+		mergedInitStateIndex =
+			currentScope.methodScope().recordInitializationStates(mergedInfo);
+		mergedInfo.setReachMode(mode);
+		return mergedInfo;
+	}
+

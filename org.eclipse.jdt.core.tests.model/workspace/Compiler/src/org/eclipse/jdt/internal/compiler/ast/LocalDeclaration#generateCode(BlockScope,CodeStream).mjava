@@ -1,0 +1,62 @@
+	/**
+	 * Code generation for a local declaration:
+	 *	i.e.&nbsp;normal assignment to a local variable + unused variable handling 
+	 */
+	public void generateCode(BlockScope currentScope, CodeStream codeStream) {
+
+		// even if not reachable, variable must be added to visible if allocated (28298)
+		if (binding.resolvedPosition != -1) {
+			codeStream.addVisibleLocalVariable(binding);
+		}
+		if ((bits & IsReachableMASK) == 0) {
+			return;
+		}
+		int pc = codeStream.position;
+		Constant inlinedValue;
+
+		// something to initialize?
+		if (initialization != null) {
+			// initialize to constant value?
+			if ((inlinedValue = initialization.constant) != NotAConstant) {
+				// forget initializing unused or final locals set to constant value (final ones are inlined)
+				if (binding.resolvedPosition != -1) { // may need to preserve variable
+					int initPC = codeStream.position;
+					codeStream.generateConstant(inlinedValue, initialization.implicitConversion);
+					codeStream.recordPositionsFrom(initPC, initialization.sourceStart);
+					codeStream.store(binding, false);
+					binding.recordInitializationStartPC(codeStream.position);
+					//				codeStream.lastInitStateIndexWhenRemovingInits = -2; // reinitialize remove index 
+					//				codeStream.lastInitStateIndexWhenAddingInits = -2; // reinitialize add index		
+				}
+			} else { // initializing to non-constant value
+				initialization.generateCode(currentScope, codeStream, true);
+				// if binding unused generate then discard the value
+				if (binding.resolvedPosition != -1) {
+					// 26903, need extra cast to store null in array local var	
+					if (binding.type.isArrayType() 
+						&& (initialization.resolvedType == NullBinding	// arrayLoc = null
+							|| ((initialization instanceof CastExpression)	// arrayLoc = (type[])null
+								&& (((CastExpression)initialization).innermostCastedExpression().resolvedType == NullBinding)))){
+						codeStream.checkcast(binding.type); 
+					}					
+					codeStream.store(binding, false);
+					if (binding.initializationCount == 0) {
+						/* Variable may have been initialized during the code initializing it
+							e.g. int i = (i = 1);
+						*/
+						binding.recordInitializationStartPC(codeStream.position);
+						//					codeStream.lastInitStateIndexWhenRemovingInits = -2; // reinitialize remove index 
+						//					codeStream.lastInitStateIndexWhenAddingInits = -2; // reinitialize add index 
+					}
+				} else {
+					if ((binding.type == LongBinding) || (binding.type == DoubleBinding)) {
+						codeStream.pop2();
+					} else {
+						codeStream.pop();
+					}
+				}
+			}
+		}
+		codeStream.recordPositionsFrom(pc, this.sourceStart);
+	}
+

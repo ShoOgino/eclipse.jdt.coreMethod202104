@@ -1,0 +1,60 @@
+	public FlowInfo analyseCode(
+		BlockScope currentScope,
+		FlowContext flowContext,
+		FlowInfo flowInfo) {
+
+		breakLabel = new Label();
+		continueLabel = new Label();
+		LoopingFlowContext loopingContext =
+			new LoopingFlowContext(
+				flowContext,
+				this,
+				breakLabel,
+				continueLabel,
+				currentScope);
+
+		Constant cst = condition.constant;
+		boolean isConditionTrue = cst != NotAConstant && cst.booleanValue() == true;
+		cst = condition.optimizedBooleanConstant();
+		boolean isConditionOptimizedTrue = cst != NotAConstant && cst.booleanValue() == true;
+		boolean isConditionOptimizedFalse = cst != NotAConstant && cst.booleanValue() == false;
+
+		int previousMode = flowInfo.reachMode();
+				
+		if ((action != null) && !action.isEmptyBlock()) {
+			flowInfo = action.analyseCode(currentScope, loopingContext, flowInfo);
+
+			// code generation can be optimized when no need to continue in the loop
+			if (!flowInfo.isReachable() && !loopingContext.initsOnContinue.isReachable()) {
+				continueLabel = null;
+			}
+		}
+		/* Reset reach mode, to address following scenario.
+		 *   final blank;
+		 *   do { if (true) break; else blank = 0; } while(false);
+		 *   blank = 1; // may be initialized already 
+		 */
+		flowInfo.setReachMode(previousMode);
+		
+		flowInfo =
+			condition.analyseCode(
+				currentScope,
+				loopingContext,
+				(action == null
+					? flowInfo
+					: (flowInfo.mergedWith(loopingContext.initsOnContinue))));
+		if (!isConditionOptimizedFalse && continueLabel != null) {
+			loopingContext.complainOnFinalAssignmentsInLoop(currentScope, flowInfo);
+		}
+
+		// end of loop
+		FlowInfo mergedInfo = FlowInfo.mergedOptimizedBranches(
+				loopingContext.initsOnBreak, 
+				isConditionOptimizedTrue, 
+				flowInfo.initsWhenFalse(), 
+				false, // never consider opt false case for DO loop, since break can always occur (47776)
+				!isConditionTrue /*do{}while(true); unreachable(); */);
+		mergedInitStateIndex = currentScope.methodScope().recordInitializationStates(mergedInfo);
+		return mergedInfo;
+	}
+

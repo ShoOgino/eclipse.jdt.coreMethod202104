@@ -1,0 +1,130 @@
+	public FlowInfo analyseCode(
+		BlockScope currentScope,
+		FlowContext flowContext,
+		FlowInfo flowInfo) {
+
+		// Consider the try block and catch block so as to compute the intersection of initializations and	
+		// the minimum exit relative depth amongst all of them. Then consider the subroutine, and append its
+		// initialization to the try/catch ones, if the subroutine completes normally. If the subroutine does not
+		// complete, then only keep this result for the rest of the analysis
+
+		// process the finally block (subroutine) - create a context for the subroutine
+
+		preTryInitStateIndex =
+			currentScope.methodScope().recordInitializationStates(flowInfo);
+
+		if (anyExceptionVariable != null) {
+			anyExceptionVariable.useFlag = LocalVariableBinding.USED;
+		}
+		if (returnAddressVariable != null) { // TODO (philippe) if subroutine is escaping, unused
+			returnAddressVariable.useFlag = LocalVariableBinding.USED;
+		}
+		InsideSubRoutineFlowContext insideSubContext;
+		FinallyFlowContext finallyContext;
+		UnconditionalFlowInfo subInfo;
+		if (subRoutineStartLabel == null) {
+			// no finally block
+			insideSubContext = null;
+			finallyContext = null;
+			subInfo = null;
+		} else {
+			// analyse finally block first
+			insideSubContext = new InsideSubRoutineFlowContext(flowContext, this);
+			subInfo = 
+				finallyBlock
+					.analyseCode(
+						currentScope,
+						finallyContext = new FinallyFlowContext(flowContext, finallyBlock),
+						flowInfo.copy())
+					.unconditionalInits();
+			if (subInfo == FlowInfo.DEAD_END) {
+				isSubRoutineEscaping = true;
+				scope.problemReporter().finallyMustCompleteNormally(finallyBlock);
+			}
+			this.subRoutineInits = subInfo;
+		}
+		// process the try block in a context handling the local exceptions.
+		ExceptionHandlingFlowContext handlingContext =
+			new ExceptionHandlingFlowContext(
+				insideSubContext == null ? flowContext : insideSubContext,
+				tryBlock,
+				caughtExceptionTypes,
+				scope,
+				flowInfo.unconditionalInits());
+
+		FlowInfo tryInfo;
+		if (tryBlock.isEmptyBlock()) {
+			tryInfo = flowInfo;
+			tryBlockExit = false;
+		} else {
+			tryInfo = tryBlock.analyseCode(currentScope, handlingContext, flowInfo.copy());
+			tryBlockExit = !tryInfo.isReachable();
+		}
+
+		// check unreachable catch blocks
+		handlingContext.complainIfUnusedExceptionHandlers(scope, this);
+
+		// process the catch blocks - computing the minimal exit depth amongst try/catch
+		if (catchArguments != null) {
+			int catchCount;
+			catchExits = new boolean[catchCount = catchBlocks.length];
+			for (int i = 0; i < catchCount; i++) {
+				// keep track of the inits that could potentially have led to this exception handler (for final assignments diagnosis)
+				FlowInfo catchInfo =
+					flowInfo
+						.copy()
+						.unconditionalInits()
+						.addPotentialInitializationsFrom(
+							handlingContext.initsOnException(caughtExceptionTypes[i]).unconditionalInits())
+						.addPotentialInitializationsFrom(tryInfo.unconditionalInits())
+						.addPotentialInitializationsFrom(handlingContext.initsOnReturn);
+
+				// catch var is always set
+				catchInfo.markAsDefinitelyAssigned(catchArguments[i].binding);
+				/*
+				"If we are about to consider an unchecked exception handler, potential inits may have occured inside
+				the try block that need to be detected , e.g. 
+				try { x = 1; throwSomething();} catch(Exception e){ x = 2} "
+				"(uncheckedExceptionTypes notNil and: [uncheckedExceptionTypes at: index])
+				ifTrue: [catchInits addPotentialInitializationsFrom: tryInits]."
+				*/
+				// TODO (philippe) should only tag as unreachable if the catchblock cannot be reached?
+				//??? if (!handlingContext.initsOnException(caughtExceptionTypes[i]).isReachable()){
+				if (tryBlock.statements == null) {
+					catchInfo.setReachMode(FlowInfo.UNREACHABLE);
+				}
+				catchInfo =
+					catchBlocks[i].analyseCode(
+						currentScope,
+						insideSubContext == null ? flowContext : insideSubContext,
+						catchInfo);
+				catchExits[i] = !catchInfo.isReachable();
+				tryInfo = tryInfo.mergedWith(catchInfo.unconditionalInits());
+			}
+		}
+		if (subRoutineStartLabel == null) {
+			mergedInitStateIndex =
+				currentScope.methodScope().recordInitializationStates(tryInfo);
+			return tryInfo;
+		}
+
+
+		// we also need to check potential multiple assignments of final variables inside the finally block
+		// need to include potential inits from returns inside the try/catch parts - 1GK2AOF
+		finallyContext.complainOnRedundantFinalAssignments(
+			tryInfo.isReachable() 
+				? (tryInfo.addPotentialInitializationsFrom(insideSubContext.initsOnReturn))
+				: insideSubContext.initsOnReturn, 
+			currentScope);
+		if (subInfo == FlowInfo.DEAD_END) {
+			mergedInitStateIndex =
+				currentScope.methodScope().recordInitializationStates(subInfo);
+			return subInfo;
+		} else {
+			FlowInfo mergedInfo = tryInfo.addInitializationsFrom(subInfo);
+			mergedInitStateIndex =
+				currentScope.methodScope().recordInitializationStates(mergedInfo);
+			return mergedInfo;
+		}
+	}
+

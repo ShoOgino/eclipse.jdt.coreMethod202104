@@ -1,0 +1,41 @@
+	public FlowInfo analyseCode(
+		BlockScope currentScope,
+		FlowContext flowContext,
+		FlowInfo flowInfo) {
+			
+		preAssertInitStateIndex = currentScope.methodScope().recordInitializationStates(flowInfo);
+
+		Constant cst = this.assertExpression.optimizedBooleanConstant();		
+		boolean isOptimizedTrueAssertion = cst != NotAConstant && cst.booleanValue() == true;
+		boolean isOptimizedFalseAssertion = cst != NotAConstant && cst.booleanValue() == false;
+
+		FlowInfo assertInfo = flowInfo.copy();
+		if (isOptimizedTrueAssertion) {
+			assertInfo.setReachMode(FlowInfo.UNREACHABLE);
+		}
+		assertInfo = assertExpression.analyseCode(currentScope, flowContext, assertInfo).unconditionalInits();
+		
+		if (exceptionArgument != null) {
+			// only gets evaluated when escaping - results are not taken into account
+			FlowInfo exceptionInfo = exceptionArgument.analyseCode(currentScope, flowContext, assertInfo.copy()); 
+			
+			if (!isOptimizedTrueAssertion){
+				flowContext.checkExceptionHandlers(
+					currentScope.getJavaLangAssertionError(),
+					this,
+					exceptionInfo,
+					currentScope);
+			}
+		}
+		
+		if (!isOptimizedTrueAssertion){
+			// add the assert support in the clinit
+			manageSyntheticAccessIfNecessary(currentScope, flowInfo);
+		}
+		if (isOptimizedFalseAssertion) {
+			return flowInfo; // if assertions are enabled, the following code will be unreachable
+		} else {
+			return flowInfo.mergedWith(assertInfo.unconditionalInits()); 
+		}
+	}
+

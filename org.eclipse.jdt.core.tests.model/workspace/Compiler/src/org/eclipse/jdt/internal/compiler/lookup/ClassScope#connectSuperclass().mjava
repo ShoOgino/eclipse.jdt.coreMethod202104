@@ -1,0 +1,46 @@
+	/*
+		Our current belief based on available JCK tests is:
+			inherited member types are visible as a potential superclass.
+			inherited interfaces are not visible when defining a superinterface.
+	
+		Error recovery story:
+			ensure the superclass is set to java.lang.Object if a problem is detected
+			resolving the superclass.
+	
+		Answer false if an error was reported against the sourceType.
+	*/
+	private boolean connectSuperclass() {
+		SourceTypeBinding sourceType = referenceContext.binding;
+		if (sourceType.id == T_Object) { // handle the case of redefining java.lang.Object up front
+			sourceType.superclass = null;
+			sourceType.superInterfaces = NoSuperInterfaces;
+			if (referenceContext.superclass != null || referenceContext.superInterfaces != null)
+				problemReporter().objectCannotHaveSuperTypes(sourceType);
+			return true; // do not propagate Object's hierarchy problems down to every subtype
+		}
+		if (referenceContext.superclass == null) {
+			sourceType.superclass = getJavaLangObject();
+			return !detectCycle(sourceType, sourceType.superclass, null);
+		}
+		TypeReference superclassRef = referenceContext.superclass;
+		ReferenceBinding superclass = findSupertype(superclassRef);
+		if (superclass != null) { // is null if a cycle was detected cycle or a problem
+			if (superclass.isInterface()) {
+				problemReporter().superclassMustBeAClass(sourceType, superclassRef, superclass);
+			} else if (superclass.isFinal()) {
+				problemReporter().classExtendFinalClass(sourceType, superclassRef, superclass);
+			} else if ((superclass.tagBits & TagBits.HasWildcard) != 0) {
+				problemReporter().superTypeCannotUseWildcard(sourceType, superclassRef, superclass);
+			} else {
+				// only want to reach here when no errors are reported
+				sourceType.superclass = superclass;
+				return true;
+			}
+		}
+		sourceType.tagBits |= HierarchyHasProblems;
+		sourceType.superclass = getJavaLangObject();
+		if ((sourceType.superclass.tagBits & BeginHierarchyCheck) == 0)
+			detectCycle(sourceType, sourceType.superclass, null);
+		return false; // reported some error against the source type
+	}
+

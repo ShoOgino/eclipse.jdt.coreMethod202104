@@ -1,0 +1,56 @@
+protected void consumeFieldDeclaration() {
+	// See consumeLocalVariableDeclarationDefaultModifier() in case of change: duplicated code
+	// FieldDeclaration ::= Modifiersopt Type VariableDeclarators ';'
+
+	/*
+	this.astStack : 
+	this.expressionStack: Expression Expression ...... Expression
+	this.identifierStack : type  identifier identifier ...... identifier
+	this.intStack : typeDim      dim        dim               dim
+	 ==>
+	this.astStack : FieldDeclaration FieldDeclaration ...... FieldDeclaration
+	this.expressionStack :
+	this.identifierStack : 
+	this.intStack : 
+	  
+	*/
+	int variableDeclaratorsCounter = this.astLengthStack[this.astLengthPtr];
+
+	for (int i = variableDeclaratorsCounter - 1; i >= 0; i--) {
+		FieldDeclaration fieldDeclaration = (FieldDeclaration) this.astStack[this.astPtr - i];
+		fieldDeclaration.declarationSourceEnd = this.endStatementPosition; 
+		fieldDeclaration.declarationEnd = this.endStatementPosition;	// semi-colon included
+	}
+	
+	updateSourceDeclarationParts(variableDeclaratorsCounter);
+	int endPos = flushCommentsDefinedPriorTo(this.endStatementPosition);
+	if (endPos != this.endStatementPosition) {
+		for (int i = 0; i < variableDeclaratorsCounter; i++) {
+			FieldDeclaration fieldDeclaration = (FieldDeclaration) this.astStack[this.astPtr - i];
+			fieldDeclaration.declarationSourceEnd = endPos;
+		}
+	}
+	// update the this.astStack, this.astPtr and this.astLengthStack
+	int startIndex = this.astPtr - this.variablesCounter[this.nestedType] + 1;
+	System.arraycopy(
+		this.astStack, 
+		startIndex, 
+		this.astStack, 
+		startIndex - 1, 
+		variableDeclaratorsCounter); 
+	this.astPtr--; // remove the type reference
+	this.astLengthStack[--this.astLengthPtr] = variableDeclaratorsCounter;
+
+	// recovery
+	if (this.currentElement != null) {
+		this.lastCheckPoint = endPos + 1;
+		if (this.currentElement.parent != null && this.currentElement instanceof RecoveredField){
+			if (!(this.currentElement instanceof RecoveredInitializer)) {
+				this.currentElement = this.currentElement.parent;
+			}
+		}
+		this.restartRecovery = true;
+	}
+	this.variablesCounter[this.nestedType] = 0;
+}
+

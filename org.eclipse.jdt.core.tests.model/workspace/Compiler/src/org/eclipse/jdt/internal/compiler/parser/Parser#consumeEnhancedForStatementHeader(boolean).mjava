@@ -1,0 +1,61 @@
+protected void consumeEnhancedForStatementHeader(boolean hasModifiers){
+	// EnhancedForStatementHeader ::= 'for' '(' Type PushModifiers Identifier Dimsopt ':' Expression ')'
+	// EnhancedForStatementHeader ::= 'for' '(' Modifiers Type PushRealModifiers Identifier Dimsopt ':' Expression ')'
+	TypeReference type;
+
+	char[] identifierName = this.identifierStack[this.identifierPtr];
+	long namePosition = this.identifierPositionStack[this.identifierPtr];
+	
+	LocalDeclaration localDeclaration = createLocalDeclaration(identifierName, (int) (namePosition >>> 32), (int) namePosition);
+	localDeclaration.declarationSourceEnd = localDeclaration.declarationEnd;
+	
+	int extraDims = this.intStack[this.intPtr--];
+	this.identifierPtr--;
+	this.identifierLengthPtr--;
+	// remove fake modifiers/modifiers start
+	int declarationSourceStart = 0;
+	int modifiersValue  = 0;
+	if (hasModifiers) {
+		declarationSourceStart = this.intStack[this.intPtr--];
+		modifiersValue = this.intStack[this.intPtr--];
+	} else {
+		this.intPtr-=2;
+	}
+
+	//updates are on the expression stack
+	this.expressionLengthPtr--;
+	Expression collection = this.expressionStack[this.expressionPtr--];
+	
+	type = getTypeReference(this.intStack[this.intPtr--] + extraDims); // type dimension
+
+	// consume annotations
+	int length;
+	if ((length = this.expressionLengthStack[this.expressionLengthPtr--])!= 0) {
+		System.arraycopy(
+			this.expressionStack, 
+			(this.expressionPtr -= length) + 1, 
+			localDeclaration.annotations = new Annotation[length], 
+			0, 
+			length); 
+	}
+	if (hasModifiers) {
+		localDeclaration.declarationSourceStart = declarationSourceStart;
+		localDeclaration.modifiers = modifiersValue;
+	} else {
+		localDeclaration.declarationSourceStart = type.sourceStart;
+	}
+	localDeclaration.type = type;
+
+	ForeachStatement iteratorForStatement =
+		new ForeachStatement(
+			localDeclaration,
+			collection,
+			this.intStack[this.intPtr--]); 
+	pushOnAstStack(iteratorForStatement);
+	
+	if(options.sourceLevel < ClassFileConstants.JDK1_5 &&
+			this.lastErrorEndPositionBeforeRecovery < this.scanner.currentPosition) {
+		this.problemReporter().invalidUsageOfForeachStatements(localDeclaration, collection);
+	}
+}
+

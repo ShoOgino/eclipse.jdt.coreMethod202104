@@ -1,0 +1,48 @@
+	public void resolve(BlockScope scope) {
+		
+		MethodScope methodScope = scope.methodScope();
+		MethodBinding methodBinding;
+		TypeBinding methodType =
+			(methodScope.referenceContext instanceof AbstractMethodDeclaration)
+				? ((methodBinding = ((AbstractMethodDeclaration) methodScope.referenceContext).binding) == null 
+					? null 
+					: methodBinding.returnType)
+				: VoidBinding;
+		TypeBinding expressionType;
+		if (methodType == VoidBinding) {
+			// the expression should be null
+			if (expression == null)
+				return;
+			if ((expressionType = expression.resolveType(scope)) != null)
+				scope.problemReporter().attemptToReturnNonVoidExpression(this, expressionType);
+			return;
+		}
+		if (expression == null) {
+			if (methodType != null) scope.problemReporter().shouldReturn(methodType, this);
+			return;
+		}
+		expression.setExpectedType(methodType); // needed in case of generic method invocation
+		if ((expressionType = expression.resolveType(scope)) == null) return;
+		if (expressionType == VoidBinding) {
+			scope.problemReporter().attemptToReturnVoidValue(this);
+			return;
+		}
+		if (methodType == null) 
+			return;
+	
+		if (expressionType.isRawType() && (methodType.isBoundParameterizedType() || methodType.isGenericType())) {
+		    scope.problemReporter().unsafeRawConversion(this.expression, expressionType, methodType);
+		}
+		
+		if (expression.isConstantValueOfTypeAssignableToType(expressionType, methodType)) {
+			// dealing with constant
+			expression.computeConversion(scope, methodType, expressionType);
+			return;
+		}
+		if (expressionType.isCompatibleWith(methodType)) {
+			expression.computeConversion(scope, methodType, expressionType);
+			return;
+		}
+		scope.problemReporter().typeMismatchError(expressionType, methodType, expression);
+	}
+

@@ -1,0 +1,54 @@
+	private LocalTypeBinding buildLocalType(
+		SourceTypeBinding enclosingType,
+		PackageBinding packageBinding) {
+	    
+		referenceContext.scope = this;
+		referenceContext.staticInitializerScope = new MethodScope(this, referenceContext, true);
+		referenceContext.initializerScope = new MethodScope(this, referenceContext, false);
+
+		// build the binding or the local type
+		LocalTypeBinding localType = new LocalTypeBinding(this, enclosingType, this.switchCase());
+		referenceContext.binding = localType;
+		checkAndSetModifiers();
+		buildTypeVariables();
+		
+		// Look at member types
+		ReferenceBinding[] memberTypeBindings = NoMemberTypes;
+		if (referenceContext.memberTypes != null) {
+			int size = referenceContext.memberTypes.length;
+			memberTypeBindings = new ReferenceBinding[size];
+			int count = 0;
+			nextMember : for (int i = 0; i < size; i++) {
+				TypeDeclaration memberContext = referenceContext.memberTypes[i];
+				if (memberContext.isInterface()) {
+					problemReporter().nestedClassCannotDeclareInterface(memberContext);
+					continue nextMember;
+				}
+				ReferenceBinding type = localType;
+				// check that the member does not conflict with an enclosing type
+				do {
+					if (CharOperation.equals(type.sourceName, memberContext.name)) {
+						problemReporter().hidingEnclosingType(memberContext);
+						continue nextMember;
+					}
+					type = type.enclosingType();
+				} while (type != null);
+				// check the member type does not conflict with another sibling member type
+				for (int j = 0; j < i; j++) {
+					if (CharOperation.equals(referenceContext.memberTypes[j].name, memberContext.name)) {
+						problemReporter().duplicateNestedType(memberContext);
+						continue nextMember;
+					}
+				}
+				ClassScope memberScope = new ClassScope(this, referenceContext.memberTypes[i]);
+				LocalTypeBinding memberBinding = memberScope.buildLocalType(localType, packageBinding);
+				memberBinding.setAsMemberType();
+				memberTypeBindings[count++] = memberBinding;
+			}
+			if (count != size)
+				System.arraycopy(memberTypeBindings, 0, memberTypeBindings = new ReferenceBinding[count], 0, count);
+		}
+		localType.memberTypes = memberTypeBindings;
+		return localType;
+	}
+

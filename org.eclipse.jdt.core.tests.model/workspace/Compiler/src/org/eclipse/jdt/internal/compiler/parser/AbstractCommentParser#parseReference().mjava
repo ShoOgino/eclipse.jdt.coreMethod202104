@@ -1,0 +1,139 @@
+	/*
+	 * Parse a reference in @see tag
+	 */
+	protected boolean parseReference() throws InvalidInputException {
+		int currentPosition = this.scanner.currentPosition;
+		try {
+			Object typeRef = null;
+			Object reference = null;
+			int previousPosition = -1;
+			int typeRefStartPosition = -1;
+			
+			// Get reference tokens
+			nextToken : while (this.index < this.scanner.eofPosition) {
+				previousPosition = this.index;
+				int token = readToken();
+				switch (token) {
+					case TerminalTokens.TokenNameStringLiteral : // @see "string"
+						consumeToken();
+						int start = this.scanner.getCurrentTokenStartPosition();
+						if (this.tagValue == TAG_VALUE_VALUE) {
+							if (this.sourceParser != null) this.sourceParser.problemReporter().javadocInvalidValueReference(start, getTokenEndPosition());
+						} else {
+							// If typeRef != null we may raise a warning here to let user know there's an unused reference...
+							// Currently as javadoc 1.4.2 ignore it, we do the same (see bug 69302)
+							if (typeRef != null) {
+								start = this.tagSourceEnd+1;
+								previousPosition = start;
+								typeRef = null;
+							}
+							// verify end line (expecting empty or end comment)
+							if (verifyEndLine(previousPosition)) {
+								return true;
+							}
+							if (this.sourceParser != null) this.sourceParser.problemReporter().javadocUnexpectedText(this.scanner.currentPosition, this.lineEnd);
+						}
+						return false;
+					case TerminalTokens.TokenNameLESS : // @see "<a href="URL#Value">label</a>
+						consumeToken();
+						start = this.scanner.getCurrentTokenStartPosition();
+						if (parseHref()) {
+							consumeToken();
+							// If typeRef != null we may raise a warning here to let user know there's an unused reference...
+							// Currently as javadoc 1.4.2 ignore it, we do the same (see bug 69302)
+							if (typeRef != null) {
+								start = this.tagSourceEnd+1;
+								previousPosition = start;
+								typeRef = null;
+							}
+							// verify end line (expecting empty or end comment)
+							if (verifyEndLine(previousPosition)) {
+								return true;
+							}
+							if (this.tagValue != TAG_VALUE_VALUE && this.sourceParser != null) {
+//								this.sourceParser.problemReporter().javadocInvalidReference(start, this.lineEnd);
+								if (this.sourceParser != null) this.sourceParser.problemReporter().javadocUnexpectedText(this.scanner.currentPosition, this.lineEnd);
+							}
+						}
+						if (this.tagValue == TAG_VALUE_VALUE && this.sourceParser != null) {
+							this.sourceParser.problemReporter().javadocInvalidValueReference(start, getIndexPosition());
+						}
+						return false;
+					case TerminalTokens.TokenNameERROR :
+						if (this.scanner.currentCharacter == '#') { // @see ...#member
+							consumeToken();
+							reference = parseMember(typeRef);
+							if (reference != null) {
+								return pushSeeRef(reference);
+							}
+							return false;
+						}
+						break nextToken;
+					case TerminalTokens.TokenNameIdentifier :
+						if (typeRef == null) {
+							typeRefStartPosition = this.scanner.getCurrentTokenStartPosition();
+							typeRef = parseQualifiedName(true);
+							break;
+						}
+					default :
+						break nextToken;
+				}
+			}
+
+			// Verify that we got a reference
+			if (reference == null) reference = typeRef;
+			if (reference == null) {
+				this.index = this.tokenPreviousPosition;
+				this.scanner.currentPosition = this.tokenPreviousPosition;
+				this.currentTokenType = -1;
+				if (this.tagValue == TAG_VALUE_VALUE) {
+					if (this.kind == DOM_PARSER) createTag();
+					return true;
+				}
+				if (this.sourceParser != null) this.sourceParser.problemReporter().javadocMissingReference(this.tagSourceStart, this.tagSourceEnd);
+				return false;
+			}
+
+			// Reset position at the end of type reference
+			this.index = this.lastIdentifierEndPosition+1;
+			this.scanner.currentPosition = this.index;
+			this.currentTokenType = -1;
+
+			// In case of @value, we have an invalid reference (only static field refs are valid for this tag)
+			if (this.tagValue == TAG_VALUE_VALUE) {
+				if (this.sourceParser != null) this.sourceParser.problemReporter().javadocInvalidReference(typeRefStartPosition, this.lineEnd);
+				return false;
+			}
+
+			// Verify that line end does not start with an open parenthese (which could be a constructor reference wrongly written...)
+			// See bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=47215
+			char ch = peekChar();
+			if (ch == '(') {
+				if (this.sourceParser != null) this.sourceParser.problemReporter().javadocMissingHashCharacter(typeRefStartPosition, this.lineEnd, String.valueOf(this.source, typeRefStartPosition, this.lineEnd-typeRefStartPosition+1));
+				return false;
+			}
+
+			// Verify that we get white space after reference
+			if (!verifySpaceOrEndComment()) {
+				this.index = this.tokenPreviousPosition;
+				this.scanner.currentPosition = this.tokenPreviousPosition;
+				this.currentTokenType = -1;
+				int end = this.starPosition == -1 ? this.lineEnd : this.starPosition;
+				if (this.source[end]=='\n') end--;
+				if (this.sourceParser != null) this.sourceParser.problemReporter().javadocMalformedSeeReference(typeRefStartPosition, end);
+				return false;
+			}
+			
+			// Everything is OK, store reference
+			return pushSeeRef(reference);
+		}
+		catch (InvalidInputException ex) {
+			if (this.sourceParser != null) this.sourceParser.problemReporter().javadocInvalidReference(currentPosition, getTokenEndPosition());
+		}
+		// Reset position to avoid missing tokens when new line was encountered
+		this.index = this.tokenPreviousPosition;
+		this.scanner.currentPosition = this.tokenPreviousPosition;
+		this.currentTokenType = -1;
+		return false;
+	}
+

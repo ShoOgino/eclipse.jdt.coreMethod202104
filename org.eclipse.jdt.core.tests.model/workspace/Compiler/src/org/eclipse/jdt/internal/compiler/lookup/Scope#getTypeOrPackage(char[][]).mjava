@@ -1,0 +1,55 @@
+	// Added for code assist... NOT Public API
+	// DO NOT USE to resolve import references since this method assumes 'A.B' is relative to a single type import of 'p1.A'
+	// when it may actually mean the type B in the package A
+	// use CompilationUnitScope.getImport(char[][]) instead
+	public final Binding getTypeOrPackage(char[][] compoundName) {
+		int nameLength = compoundName.length;
+		if (nameLength == 1) {
+			TypeBinding binding = getBaseType(compoundName[0]);
+			if (binding != null) return binding;
+		}
+		Binding binding = getTypeOrPackage(compoundName[0], TYPE | PACKAGE);
+		if (!binding.isValidBinding()) return binding;
+
+		int currentIndex = 1;
+		boolean checkVisibility = false;
+		if (binding instanceof PackageBinding) {
+			PackageBinding packageBinding = (PackageBinding) binding;
+
+			while (currentIndex < nameLength) {
+				binding = packageBinding.getTypeOrPackage(compoundName[currentIndex++]);
+				if (binding == null)
+					return new ProblemReferenceBinding(
+						CharOperation.subarray(compoundName, 0, currentIndex),
+						NotFound);
+				if (!binding.isValidBinding())
+					return new ProblemReferenceBinding(
+						CharOperation.subarray(compoundName, 0, currentIndex),
+						binding.problemId());
+				if (!(binding instanceof PackageBinding))
+					break;
+				packageBinding = (PackageBinding) binding;
+			}
+			if (binding instanceof PackageBinding) return binding;
+			checkVisibility = true;
+		}
+		// binding is now a ReferenceBinding
+		ReferenceBinding typeBinding = (ReferenceBinding) binding;
+		if (checkVisibility) // handles the fall through case
+			if (!typeBinding.canBeSeenBy(this))
+				return new ProblemReferenceBinding(
+					CharOperation.subarray(compoundName, 0, currentIndex),
+					typeBinding,
+					NotVisible);
+
+		while (currentIndex < nameLength) {
+			typeBinding = getMemberType(compoundName[currentIndex++], typeBinding);
+			// checks visibility
+			if (!typeBinding.isValidBinding())
+				return new ProblemReferenceBinding(
+					CharOperation.subarray(compoundName, 0, currentIndex),
+					typeBinding.problemId());
+		}
+		return typeBinding;
+	}
+

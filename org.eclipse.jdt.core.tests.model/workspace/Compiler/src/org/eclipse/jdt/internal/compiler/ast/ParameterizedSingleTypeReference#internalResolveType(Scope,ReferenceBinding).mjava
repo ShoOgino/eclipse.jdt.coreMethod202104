@@ -1,0 +1,86 @@
+    /*
+     * No need to check for reference to raw type per construction
+     */
+	private TypeBinding internalResolveType(Scope scope, ReferenceBinding enclosingType) {
+
+		// handle the error here
+		this.constant = NotAConstant;
+		if (this.didResolve) { // is a shared type reference which was already resolved
+			if (this.resolvedType != null && !this.resolvedType.isValidBinding())
+				return null; // already reported error
+			return this.resolvedType;
+		} 
+	    this.didResolve = true;
+		if (enclosingType == null) {
+			this.resolvedType = scope.getType(token);
+			if (!(this.resolvedType.isValidBinding())) {
+				reportInvalidType(scope);
+				return null;
+			}
+		} else { // resolving member type (relatively to enclosingType)
+			this.resolvedType = scope.getMemberType(token, (ReferenceBinding)enclosingType.erasure());		    
+			if (!this.resolvedType.isValidBinding()) {
+				scope.problemReporter().invalidEnclosingType(this, this.resolvedType, enclosingType);
+				return null;
+			}
+			if (isTypeUseDeprecated(this.resolvedType, scope))
+				scope.problemReporter().deprecatedType(this.resolvedType, this);
+		}
+
+		// check generic and arity
+	    boolean isClassScope = scope.kind == Scope.CLASS_SCOPE;
+		ReferenceBinding currentType = (ReferenceBinding) this.resolvedType;
+		int argLength = this.typeArguments.length;
+		TypeBinding[] argTypes = new TypeBinding[argLength];
+		boolean argHasError = false;
+		for (int i = 0; i < argLength; i++) {
+		    TypeReference typeArgument = this.typeArguments[i];
+		    TypeBinding argType = isClassScope
+				? typeArgument.resolveTypeArgument((ClassScope) scope, currentType, i)
+				: typeArgument.resolveTypeArgument((BlockScope) scope, currentType, i);
+		     if (argType == null) {
+		         argHasError = true;
+		     } else {
+			    argTypes[i] = argType;
+		     }
+		}
+		if (argHasError) return null;
+// TODO (philippe)	if ((this.bits & ASTNode.IsSuperType) != 0)
+		if (isClassScope)
+			if (((ClassScope) scope).detectCycle(currentType, this, argTypes))
+				return null;
+
+		TypeVariableBinding[] typeVariables = currentType.typeVariables();
+		if (typeVariables == NoTypeVariables) { // check generic
+			scope.problemReporter().nonGenericTypeCannotBeParameterized(this, currentType, argTypes);
+			return null;
+		} else if (argLength != typeVariables.length) { // check arity
+			scope.problemReporter().incorrectArityForParameterizedType(this, currentType, argTypes);
+			return null;
+		}
+		// if generic type X<T> is referred to as parameterized X<T>, then answer itself
+		checkGeneric: {
+		    for (int i = 0; i < argLength; i++)
+				if (typeVariables[i] != argTypes[i])
+				    break checkGeneric;
+			return currentType;
+		}
+		ParameterizedTypeBinding parameterizedType = scope.createParameterizedType(currentType, argTypes, enclosingType);
+		// check argument type compatibility now if not a class scope
+		if (!isClassScope) // otherwise will do it in Scope.connectTypeVariables()
+			for (int i = 0; i < argLength; i++)
+			    if (!typeVariables[i].boundCheck(parameterizedType, argTypes[i]))
+					scope.problemReporter().typeMismatchError(argTypes[i], typeVariables[i], currentType, this.typeArguments[i]);
+
+		this.resolvedType = parameterizedType;
+		if (isTypeUseDeprecated(this.resolvedType, scope))
+			reportDeprecatedType(scope);
+		// array type ?
+		if (this.dimensions > 0) {
+			if (dimensions > 255)
+				scope.problemReporter().tooManyDimensions(this);
+			this.resolvedType = scope.createArrayType(parameterizedType, dimensions);
+		}
+		return this.resolvedType;
+	}	
+

@@ -1,0 +1,102 @@
+	public void resolve(MethodScope initializationScope) {
+
+		// the two <constant = Constant.NotAConstant> could be regrouped into
+		// a single line but it is clearer to have two lines while the reason of their
+		// existence is not at all the same. See comment for the second one.
+
+		//--------------------------------------------------------
+		if (!this.hasBeenResolved && this.binding != null && this.binding.isValidBinding()) {
+
+			this.hasBeenResolved = true;
+
+			// check if field is hiding some variable - issue is that field binding already got inserted in scope
+			// thus must lookup separately in super type and outer context
+			ClassScope classScope = initializationScope.enclosingClassScope();
+			
+			if (classScope != null) {
+				SourceTypeBinding declaringType = classScope.enclosingSourceType();
+				boolean checkLocal = true;
+				if (declaringType.superclass != null) {
+					Binding existingVariable = classScope.findField(declaringType.superclass, this.name, this,  false /*do not resolve hidden field*/);
+					if (existingVariable != null && existingVariable.isValidBinding()){
+						initializationScope.problemReporter().fieldHiding(this, existingVariable);
+						checkLocal = false; // already found a matching field
+					}
+				}
+				if (checkLocal) {
+					Scope outerScope = classScope.parent;
+					// only corner case is: lookup of outer field through static declaringType, which isn't detected by #getBinding as lookup starts
+					// from outer scope. Subsequent static contexts are detected for free.
+					Binding existingVariable = outerScope.getBinding(this.name, BindingIds.VARIABLE, this, false /*do not resolve hidden field*/);
+					if (existingVariable != null && existingVariable.isValidBinding()
+							&& (!(existingVariable instanceof FieldBinding)
+									|| ((FieldBinding) existingVariable).isStatic() 
+									|| !declaringType.isStatic())) {
+						initializationScope.problemReporter().fieldHiding(this, existingVariable);
+					}
+				}
+			}
+			
+			this.type.resolvedType = this.binding.type; // update binding for type reference
+
+			FieldBinding previousField = initializationScope.initializedField;
+			int previousFieldID = initializationScope.lastVisibleFieldID;
+			try {
+				initializationScope.initializedField = this.binding;
+				initializationScope.lastVisibleFieldID = this.binding.id;
+
+				// the resolution of the initialization hasn't been done
+				if (this.initialization == null) {
+					this.binding.setConstant(Constant.NotAConstant);
+				} else {
+					// break dead-lock cycles by forcing constant to NotAConstant
+					this.binding.setConstant(Constant.NotAConstant);
+					
+					TypeBinding fieldType = this.binding.type;
+					TypeBinding initializationType;
+					this.initialization.setExpectedType(fieldType); // needed in case of generic method invocation
+					if (this.initialization instanceof ArrayInitializer) {
+
+						if ((initializationType = this.initialization.resolveTypeExpecting(initializationScope, fieldType)) != null) {
+							((ArrayInitializer) this.initialization).binding = (ArrayBinding) initializationType;
+							this.initialization.computeConversion(initializationScope, fieldType, initializationType);
+						}
+					} else if ((initializationType = this.initialization.resolveType(initializationScope)) != null) {
+
+						if (this.initialization.isConstantValueOfTypeAssignableToType(initializationType, fieldType)
+								|| (fieldType.isBaseType() && BaseTypeBinding.isWidening(fieldType.id, initializationType.id))
+								|| initializationType.isCompatibleWith(fieldType)) {
+							this.initialization.computeConversion(initializationScope, fieldType, initializationType);
+							if (initializationType.isRawType() && (fieldType.isBoundParameterizedType() || fieldType.isGenericType())) {
+								    initializationScope.problemReporter().unsafeRawConversion(this.initialization, initializationType, fieldType);
+							}									
+						} else {
+							initializationScope.problemReporter().typeMismatchError(initializationType, fieldType, this);
+						}
+						if (this.binding.isFinal()){ // cast from constant actual type to variable type
+							this.binding.setConstant(this.initialization.constant.castTo((this.binding.type.id << 4) + this.initialization.constant.typeID()));
+						}
+					} else {
+						this.binding.setConstant(NotAConstant);
+					}
+				}
+				// Resolve Javadoc comment if one is present
+				if (this.javadoc != null) {
+					/*
+					if (classScope != null) {
+						this.javadoc.resolve(classScope);
+					}
+					*/
+					this.javadoc.resolve(initializationScope);
+				} else if (this.binding != null && this.binding.declaringClass != null && !this.binding.declaringClass.isLocalType()) {
+					initializationScope.problemReporter().javadocMissing(this.sourceStart, this.sourceEnd, this.binding.modifiers);
+				}
+			} finally {
+				initializationScope.initializedField = previousField;
+				initializationScope.lastVisibleFieldID = previousFieldID;
+				if (this.binding.constant() == null)
+					this.binding.setConstant(Constant.NotAConstant);
+			}
+		}
+	}
+

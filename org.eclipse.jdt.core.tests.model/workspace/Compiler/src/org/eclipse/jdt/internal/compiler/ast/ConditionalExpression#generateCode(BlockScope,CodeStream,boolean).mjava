@@ -1,0 +1,83 @@
+	/**
+	 * Code generation for the conditional operator ?:
+	 *
+	 * @param currentScope org.eclipse.jdt.internal.compiler.lookup.BlockScope
+	 * @param codeStream org.eclipse.jdt.internal.compiler.codegen.CodeStream
+	 * @param valueRequired boolean
+	*/
+	public void generateCode(
+		BlockScope currentScope,
+		CodeStream codeStream,
+		boolean valueRequired) {
+
+		int pc = codeStream.position;
+		Label endifLabel, falseLabel;
+		if (constant != NotAConstant) {
+			if (valueRequired)
+				codeStream.generateConstant(constant, implicitConversion);
+			codeStream.recordPositionsFrom(pc, this.sourceStart);
+			return;
+		}
+		Constant cst = condition.constant;
+		Constant condCst = condition.optimizedBooleanConstant();
+		boolean needTruePart =
+			!(((cst != NotAConstant) && (cst.booleanValue() == false))
+				|| ((condCst != NotAConstant) && (condCst.booleanValue() == false)));
+		boolean needFalsePart =
+			!(((cst != NotAConstant) && (cst.booleanValue() == true))
+				|| ((condCst != NotAConstant) && (condCst.booleanValue() == true)));
+		endifLabel = new Label(codeStream);
+
+		// Generate code for the condition
+		boolean needConditionValue = (cst == NotAConstant) && (condCst == NotAConstant);
+		condition.generateOptimizedBoolean(
+			currentScope,
+			codeStream,
+			null,
+			(falseLabel = new Label(codeStream)),
+			needConditionValue);
+
+		if (trueInitStateIndex != -1) {
+			codeStream.removeNotDefinitelyAssignedVariables(
+				currentScope,
+				trueInitStateIndex);
+			codeStream.addDefinitelyAssignedVariables(currentScope, trueInitStateIndex);
+		}
+		// Then code generation
+		if (needTruePart) {
+			valueIfTrue.generateCode(currentScope, codeStream, valueRequired);
+			if (needFalsePart) {
+				// Jump over the else part
+				int position = codeStream.position;
+				codeStream.goto_(endifLabel);
+				codeStream.updateLastRecordedEndPC(position);
+				// Tune codestream stack size
+				if (valueRequired) {
+					codeStream.decrStackSize(this.resolvedType == LongBinding || this.resolvedType == DoubleBinding ? 2 : 1);
+				}
+			}
+		}
+		if (needFalsePart) {
+			falseLabel.place();
+			if (falseInitStateIndex != -1) {
+				codeStream.removeNotDefinitelyAssignedVariables(
+					currentScope,
+					falseInitStateIndex);
+				codeStream.addDefinitelyAssignedVariables(currentScope, falseInitStateIndex);
+			}
+			valueIfFalse.generateCode(currentScope, codeStream, valueRequired);
+			// End of if statement
+			endifLabel.place();
+		}
+		// May loose some local variable initializations : affecting the local variable attributes
+		if (mergedInitStateIndex != -1) {
+			codeStream.removeNotDefinitelyAssignedVariables(
+				currentScope,
+				mergedInitStateIndex);
+		}
+		// implicit conversion
+		if (valueRequired)
+			codeStream.generateImplicitConversion(implicitConversion);
+		codeStream.recordPositionsFrom(pc, this.sourceStart);
+	}
+

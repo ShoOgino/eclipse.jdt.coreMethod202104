@@ -1,0 +1,183 @@
+public void invalidMethod(MessageSend messageSend, MethodBinding method) {
+	int id = IProblem.UndefinedMethod; //default...
+    MethodBinding shownMethod = method;
+	switch (method.problemId()) {
+		case NotFound :
+			id = IProblem.UndefinedMethod;
+			ProblemMethodBinding problemMethod = (ProblemMethodBinding) method;
+			if (problemMethod.closestMatch != null) {
+			    	shownMethod = problemMethod.closestMatch;
+					String closestParameterTypeNames = parametersAsString(shownMethod.parameters, false);
+					String parameterTypeNames = parametersAsString(method.parameters, false);
+					String closestParameterTypeShortNames = parametersAsString(shownMethod.parameters, true);
+					String parameterTypeShortNames = parametersAsString(method.parameters, true);
+					if (closestParameterTypeShortNames.equals(parameterTypeShortNames)){
+						closestParameterTypeShortNames = closestParameterTypeNames;
+						parameterTypeShortNames = parameterTypeNames;
+					}
+					this.handle(
+						IProblem.ParameterMismatch,
+						new String[] {
+							new String(shownMethod.declaringClass.readableName()),
+							new String(shownMethod.selector),
+							closestParameterTypeNames,
+							parameterTypeNames 
+						},
+						new String[] {
+							new String(shownMethod.declaringClass.shortReadableName()),
+							new String(shownMethod.selector),
+							closestParameterTypeShortNames,
+							parameterTypeShortNames
+						},
+						(int) (messageSend.nameSourcePosition >>> 32),
+						(int) messageSend.nameSourcePosition);
+					return;
+			}			
+			break;
+		case NotVisible :
+			id = IProblem.NotVisibleMethod;
+			problemMethod = (ProblemMethodBinding) method;
+			if (problemMethod.closestMatch != null) {
+			    shownMethod = problemMethod.closestMatch.original();
+		    }			
+			break;
+		case Ambiguous :
+			id = IProblem.AmbiguousMethod;
+			break;
+		case InheritedNameHidesEnclosingName :
+			id = IProblem.InheritedMethodHidesEnclosingName;
+			break;
+		case NonStaticReferenceInConstructorInvocation :
+			id = IProblem.InstanceMethodDuringConstructorInvocation;
+			break;
+		case NonStaticReferenceInStaticContext :
+			id = IProblem.StaticMethodRequested;
+			break;
+		case ReceiverTypeNotVisible :
+			this.handle(
+				IProblem.NotVisibleType,	// cannot occur in javadoc comments
+				new String[] {new String(method.declaringClass.leafComponentType().readableName())},
+				new String[] {new String(method.declaringClass.leafComponentType().shortReadableName())},
+				messageSend.receiver.sourceStart,
+				messageSend.receiver.sourceEnd);
+			return;
+		case ParameterBoundMismatch :
+			problemMethod = (ProblemMethodBinding) method;
+			ParameterizedGenericMethodBinding substitutedMethod = (ParameterizedGenericMethodBinding) problemMethod.closestMatch;
+			shownMethod = substitutedMethod.original();
+			TypeBinding typeArgument = method.parameters[0];
+			TypeVariableBinding typeParameter = (TypeVariableBinding) method.parameters[1];
+			this.handle(
+				IProblem.GenericMethodTypeArgumentMismatch,
+				new String[] { 
+				        new String(shownMethod.selector),
+				        parametersAsString(shownMethod.parameters, false), 
+				        new String(shownMethod.declaringClass.readableName()), 
+				        parametersAsString(substitutedMethod.parameters, false), 
+				        new String(typeArgument.readableName()), 
+				        new String(typeParameter.sourceName), 
+				        parameterBoundAsString(typeParameter, false) },
+				new String[] { 
+				        new String(shownMethod.selector),
+				        parametersAsString(shownMethod.parameters, true), 
+				        new String(shownMethod.declaringClass.shortReadableName()), 
+				        parametersAsString(substitutedMethod.parameters, true), 
+				        new String(typeArgument.shortReadableName()), 
+				        new String(typeParameter.sourceName), 
+				        parameterBoundAsString(typeParameter, true) },
+				(int) (messageSend.nameSourcePosition >>> 32),
+				(int) messageSend.nameSourcePosition);		    
+			return;
+		case TypeParameterArityMismatch :
+			problemMethod = (ProblemMethodBinding) method;
+			shownMethod = problemMethod.closestMatch;
+			if (shownMethod.typeVariables == TypeConstants.NoTypeVariables) {
+				this.handle(
+					IProblem.NonGenericMethod ,
+					new String[] { 
+					        new String(shownMethod.selector),
+					        parametersAsString(shownMethod.parameters, false), 
+					        new String(shownMethod.declaringClass.readableName()), 
+					        parametersAsString(method.parameters, false) },
+					new String[] { 
+					        new String(shownMethod.selector),
+					        parametersAsString(shownMethod.parameters, true), 
+					        new String(shownMethod.declaringClass.shortReadableName()), 
+					        parametersAsString(method.parameters, true) },
+					(int) (messageSend.nameSourcePosition >>> 32),
+					(int) messageSend.nameSourcePosition);		    
+			} else {
+				this.handle(
+					IProblem.IncorrectArityForParameterizedMethod  ,
+					new String[] { 
+					        new String(shownMethod.selector),
+					        parametersAsString(shownMethod.parameters, false), 
+					        new String(shownMethod.declaringClass.readableName()), 
+							parametersAsString(shownMethod.typeVariables, false),
+					        parametersAsString(method.parameters, false) },
+					new String[] { 
+					        new String(shownMethod.selector),
+					        parametersAsString(shownMethod.parameters, true), 
+					        new String(shownMethod.declaringClass.shortReadableName()), 
+							parametersAsString(shownMethod.typeVariables, true),
+					        parametersAsString(method.parameters, true) },
+					(int) (messageSend.nameSourcePosition >>> 32),
+					(int) messageSend.nameSourcePosition);		    
+			}
+			return;
+		case ParameterizedMethodTypeMismatch :
+			problemMethod = (ProblemMethodBinding) method;
+			shownMethod = problemMethod.closestMatch;
+			this.handle(
+				IProblem.ParameterizedMethodArgumentTypeMismatch,
+				new String[] { 
+				        new String(shownMethod.selector),
+				        parametersAsString(shownMethod.parameters, false), 
+				        new String(shownMethod.declaringClass.readableName()), 
+						parametersAsString(((ParameterizedGenericMethodBinding)shownMethod).typeArguments, false),
+				        parametersAsString(method.parameters, false) },
+				new String[] { 
+				        new String(shownMethod.selector),
+				        parametersAsString(shownMethod.parameters, true), 
+				        new String(shownMethod.declaringClass.shortReadableName()), 
+						parametersAsString(((ParameterizedGenericMethodBinding)shownMethod).typeArguments, true),
+				        parametersAsString(method.parameters, true) },
+				(int) (messageSend.nameSourcePosition >>> 32),
+				(int) messageSend.nameSourcePosition);		    
+			return;
+		case TypeArgumentsForRawGenericMethod :
+			problemMethod = (ProblemMethodBinding) method;
+			shownMethod = problemMethod.closestMatch;
+			this.handle(
+				IProblem.TypeArgumentsForRawGenericMethod ,
+				new String[] { 
+				        new String(shownMethod.selector),
+				        parametersAsString(shownMethod.parameters, false), 
+				        new String(shownMethod.declaringClass.readableName()), 
+				        parametersAsString(method.parameters, false) },
+				new String[] { 
+				        new String(shownMethod.selector),
+				        parametersAsString(shownMethod.parameters, true), 
+				        new String(shownMethod.declaringClass.shortReadableName()), 
+				        parametersAsString(method.parameters, true) },
+				(int) (messageSend.nameSourcePosition >>> 32),
+				(int) messageSend.nameSourcePosition);		       
+			return;
+		case NoError : // 0
+		default :
+			needImplementation(); // want to fail to see why we were here...
+			break;
+	}
+
+	this.handle(
+		id,
+		new String[] {
+			new String(method.declaringClass.readableName()),
+			new String(shownMethod.selector), parametersAsString(shownMethod.parameters, false)},
+		new String[] {
+			new String(method.declaringClass.shortReadableName()),
+			new String(shownMethod.selector), parametersAsString(shownMethod.parameters, true)},
+		(int) (messageSend.nameSourcePosition >>> 32),
+		(int) messageSend.nameSourcePosition);
+}
+

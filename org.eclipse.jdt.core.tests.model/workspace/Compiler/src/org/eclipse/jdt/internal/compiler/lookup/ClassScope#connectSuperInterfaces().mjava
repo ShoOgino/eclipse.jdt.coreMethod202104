@@ -1,0 +1,76 @@
+	/*
+		Our current belief based on available JCK 1.3 tests is:
+			inherited member types are visible as a potential superclass.
+			inherited interfaces are visible when defining a superinterface.
+	
+		Error recovery story:
+			ensure the superinterfaces contain only valid visible interfaces.
+	
+		Answer false if an error was reported against the sourceType.
+	*/
+	private boolean connectSuperInterfaces() {
+		SourceTypeBinding sourceType = referenceContext.binding;
+		sourceType.superInterfaces = NoSuperInterfaces;
+		if (referenceContext.superInterfaces == null)
+			return true;
+		if (sourceType.id == T_Object) // already handled the case of redefining java.lang.Object
+			return true;
+
+		boolean noProblems = true;
+		int length = referenceContext.superInterfaces.length;
+		ReferenceBinding[] interfaceBindings = new ReferenceBinding[length];
+		int count = 0;
+		nextInterface : for (int i = 0; i < length; i++) {
+		    TypeReference superInterfaceRef = referenceContext.superInterfaces[i];
+			ReferenceBinding superInterface = findSupertype(superInterfaceRef);
+			if (superInterface == null) { // detected cycle
+				sourceType.tagBits |= HierarchyHasProblems;
+				noProblems = false;
+				continue nextInterface;
+			}
+			superInterfaceRef.resolvedType = superInterface; // hold onto the problem type
+			// Check for a duplicate interface once the name is resolved, otherwise we may be confused (ie : a.b.I and c.d.I)
+			for (int k = 0; k < count; k++) {
+				if (interfaceBindings[k] == superInterface) {
+					// should this be treated as a warning?
+					problemReporter().duplicateSuperinterface(sourceType, referenceContext, superInterface);
+					continue nextInterface;
+				}
+			}
+			if (superInterface.isClass()) {
+				problemReporter().superinterfaceMustBeAnInterface(sourceType, superInterfaceRef, superInterface);
+				sourceType.tagBits |= HierarchyHasProblems;
+				noProblems = false;
+				continue nextInterface;
+			}
+			if ((superInterface.tagBits & TagBits.HasWildcard) != 0) {
+				problemReporter().superTypeCannotUseWildcard(sourceType, superInterfaceRef, superInterface);
+				sourceType.tagBits |= HierarchyHasProblems;
+				noProblems = false;
+				continue nextInterface;
+			}
+			ReferenceBinding invalid = findAmbiguousInterface(superInterface, sourceType);
+			if (invalid != null) {
+				ReferenceBinding generic = null;
+				if (superInterface.isParameterizedType())
+					generic = ((ParameterizedTypeBinding) superInterface).type;
+				else if (invalid.isParameterizedType())
+					generic = ((ParameterizedTypeBinding) invalid).type;
+				problemReporter().superinterfacesCollide(generic, referenceContext, superInterface, invalid);
+				sourceType.tagBits |= HierarchyHasProblems;
+				noProblems = false;
+				continue nextInterface;
+			}
+
+			// only want to reach here when no errors are reported
+			interfaceBindings[count++] = superInterface;
+		}
+		// hold onto all correctly resolved superinterfaces
+		if (count > 0) {
+			if (count != length)
+				System.arraycopy(interfaceBindings, 0, interfaceBindings = new ReferenceBinding[count], 0, count);
+			sourceType.superInterfaces = interfaceBindings;
+		}
+		return noProblems;
+	}
+

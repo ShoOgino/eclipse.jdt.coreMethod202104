@@ -1,0 +1,41 @@
+	public FlowInfo analyseCode(BlockScope currentScope, FlowContext flowContext, FlowInfo flowInfo) {
+
+		Constant cst = this.left.optimizedBooleanConstant();
+		boolean isLeftOptimizedTrue = cst != NotAConstant && cst.booleanValue() == true;
+		boolean isLeftOptimizedFalse = cst != NotAConstant && cst.booleanValue() == false;
+
+		if (isLeftOptimizedTrue) {
+			// TRUE && anything
+			// need to be careful of scenario:
+			//  (x && y) && !z, if passing the left info to the right, it would
+			// be swapped by the !
+			FlowInfo mergedInfo = left.analyseCode(currentScope, flowContext, flowInfo)
+					.unconditionalInits();
+			mergedInfo = right.analyseCode(currentScope, flowContext, mergedInfo);
+			mergedInitStateIndex = currentScope.methodScope()
+					.recordInitializationStates(mergedInfo);
+			return mergedInfo;
+		}
+
+		FlowInfo leftInfo = left.analyseCode(currentScope, flowContext, flowInfo);
+		// need to be careful of scenario:
+		//  (x && y) && !z, if passing the left info to the right, it would be
+		// swapped by the !
+		FlowInfo rightInfo = leftInfo.initsWhenTrue().unconditionalInits().copy();
+		rightInitStateIndex = currentScope.methodScope().recordInitializationStates(rightInfo);
+
+		int previousMode = rightInfo.reachMode();
+		if (isLeftOptimizedFalse) {
+			rightInfo.setReachMode(FlowInfo.UNREACHABLE);
+		}
+		rightInfo = right.analyseCode(currentScope, flowContext, rightInfo);
+		FlowInfo trueMergedInfo = rightInfo.initsWhenTrue().copy();
+		rightInfo.setReachMode(previousMode); // reset after trueMergedInfo got extracted
+		FlowInfo mergedInfo = FlowInfo.conditional(
+				trueMergedInfo, 
+				leftInfo.initsWhenFalse().copy().unconditionalInits().mergedWith(
+						rightInfo.initsWhenFalse().copy().unconditionalInits()));
+		mergedInitStateIndex = currentScope.methodScope().recordInitializationStates(mergedInfo);
+		return mergedInfo;
+	}
+

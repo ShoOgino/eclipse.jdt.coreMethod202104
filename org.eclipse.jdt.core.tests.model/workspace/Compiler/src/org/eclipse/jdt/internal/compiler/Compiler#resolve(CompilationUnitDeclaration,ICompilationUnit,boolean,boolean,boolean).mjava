@@ -1,0 +1,65 @@
+	/**
+	 * Internal API used to resolve a given compilation unit. Can run a subset of the compilation process
+	 */
+	public CompilationUnitDeclaration resolve(
+			CompilationUnitDeclaration unit, 
+			ICompilationUnit sourceUnit, 
+			boolean verifyMethods,
+			boolean analyzeCode,
+			boolean generateCode) {
+				
+		try {
+			if (unit == null) {
+				// build and record parsed units
+				parseThreshold = 0; // will request a full parse
+				beginToCompile(new ICompilationUnit[] { sourceUnit });
+				// process all units (some more could be injected in the loop by the lookup environment)
+				unit = unitsToProcess[0];
+			} else {
+				// initial type binding creation
+				lookupEnvironment.buildTypeBindings(unit);
+
+				// binding resolution
+				lookupEnvironment.completeTypeBindings();
+			}
+			this.parser.getMethodBodies(unit);
+			if (unit.scope != null) {
+				// fault in fields & methods
+				unit.scope.faultInTypes();
+				if (unit.scope != null && verifyMethods) {
+					// http://dev.eclipse.org/bugs/show_bug.cgi?id=23117
+ 					// verify inherited methods
+					unit.scope.verifyMethods(lookupEnvironment.methodVerifier());
+				}
+				// type checking
+				unit.resolve();		
+
+				// flow analysis
+				if (analyzeCode) unit.analyseCode();
+		
+				// code generation
+				if (generateCode) unit.generateCode();
+			}
+			if (unitsToProcess != null) unitsToProcess[0] = null; // release reference to processed unit declaration
+			requestor.acceptResult(unit.compilationResult.tagAsAccepted());
+			return unit;
+		} catch (AbortCompilation e) {
+			this.handleInternalException(e, unit);
+			return unit == null ? unitsToProcess[0] : unit;
+		} catch (Error e) {
+			this.handleInternalException(e, unit, null);
+			throw e; // rethrow
+		} catch (RuntimeException e) {
+			this.handleInternalException(e, unit, null);
+			throw e; // rethrow
+		} finally {
+			// No reset is performed there anymore since,
+			// within the CodeAssist (or related tools),
+			// the compiler may be called *after* a call
+			// to this resolve(...) method. And such a call
+			// needs to have a compiler with a non-empty
+			// environment.
+			// this.reset();
+		}
+	}
+

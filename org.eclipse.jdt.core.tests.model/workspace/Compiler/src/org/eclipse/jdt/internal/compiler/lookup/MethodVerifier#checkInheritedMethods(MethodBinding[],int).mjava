@@ -1,0 +1,54 @@
+void checkInheritedMethods(MethodBinding[] methods, int length) {
+	MethodBinding first = methods[0];
+	int index = length;
+	while (--index > 0 && areReturnTypesEqual(first, methods[index])){/*empty*/}
+	if (index > 0) {  // All inherited methods do NOT have the same vmSignature
+		this.problemReporter().inheritedMethodsHaveIncompatibleReturnTypes(this.type, methods, length);
+		return;
+	}
+
+	MethodBinding concreteMethod = null;
+	if (!type.isInterface()) {  // ignore concrete methods for interfaces
+		for (int i = length; --i >= 0;) {  // Remember that only one of the methods can be non-abstract
+			if (!methods[i].isAbstract()) {
+				concreteMethod = methods[i];
+				break;
+			}
+		}
+	}
+	if (concreteMethod == null) {
+		if (this.type.isClass() && !this.type.isAbstract()) {
+			for (int i = length; --i >= 0;) {
+				if (mustImplementAbstractMethod(methods[i])) {
+					TypeDeclaration typeDeclaration = this.type.scope.referenceContext;
+					if (typeDeclaration != null) {
+						MethodDeclaration missingAbstractMethod = typeDeclaration.addMissingAbstractMethodFor(methods[0]);
+						missingAbstractMethod.scope.problemReporter().abstractMethodMustBeImplemented(this.type, methods[0]);
+					} else {
+						this.problemReporter().abstractMethodMustBeImplemented(this.type, methods[0]);
+					}
+					return;
+				}
+			}
+		}
+		return;
+	}
+
+	MethodBinding[] abstractMethods = new MethodBinding[length - 1];
+	index = 0;
+	for (int i = length; --i >= 0;)
+		if (methods[i] != concreteMethod)
+			abstractMethods[index++] = methods[i];
+
+	// Remember that interfaces can only define public instance methods
+	if (concreteMethod.isStatic())
+		// Cannot inherit a static method which is specified as an instance method by an interface
+		this.problemReporter().staticInheritedMethodConflicts(type, concreteMethod, abstractMethods);	
+	if (!concreteMethod.isPublic())
+		// Cannot reduce visibility of a public method specified by an interface
+		this.problemReporter().inheritedMethodReducesVisibility(type, concreteMethod, abstractMethods);
+	if (concreteMethod.thrownExceptions != NoExceptions)
+		for (int i = abstractMethods.length; --i >= 0;)
+			this.checkExceptions(concreteMethod, abstractMethods[i]);
+}
+

@@ -1,0 +1,74 @@
+/*
+ * Similar implementation than invalidMethod(MessageSend...)
+ * Note that following problem id cannot occur for Javadoc:
+ * 	- NonStaticReferenceInStaticContext :
+ * 	- NonStaticReferenceInConstructorInvocation :
+ * 	- ReceiverTypeNotVisible :
+ */
+public void javadocInvalidMethod(MessageSend messageSend, MethodBinding method, int modifiers) {
+	if (!javadocVisibility(this.options.reportInvalidJavadocTagsVisibility, modifiers)) {
+		return;
+	}
+	int id = IProblem.JavadocUndefinedMethod; //default...
+	switch (method.problemId()) {
+		case NotFound :
+			id = IProblem.JavadocUndefinedMethod;
+			break;
+		case NotVisible :
+			id = IProblem.JavadocNotVisibleMethod;
+			break;
+		case Ambiguous :
+			id = IProblem.JavadocAmbiguousMethod;
+			break;
+		case InheritedNameHidesEnclosingName :
+			id = IProblem.JavadocInheritedMethodHidesEnclosingName;
+			break;
+		case NoError : // 0
+		default :
+			needImplementation(); // want to fail to see why we were here...
+			break;
+	}
+
+	if (id == IProblem.JavadocUndefinedMethod) {
+		ProblemMethodBinding problemMethod = (ProblemMethodBinding) method;
+		if (problemMethod.closestMatch != null) {
+				String closestParameterTypeNames = parametersAsString(problemMethod.closestMatch.parameters, false);
+				String parameterTypeNames = parametersAsString(method.parameters, false);
+				String closestParameterTypeShortNames = parametersAsString(problemMethod.closestMatch.parameters, true);
+				String parameterTypeShortNames = parametersAsString(method.parameters, true);
+				if (closestParameterTypeShortNames.equals(parameterTypeShortNames)){
+					closestParameterTypeShortNames = closestParameterTypeNames;
+					parameterTypeShortNames = parameterTypeNames;
+				}
+				this.handle(
+					IProblem.JavadocParameterMismatch,
+					new String[] {
+						new String(problemMethod.closestMatch.declaringClass.readableName()),
+						new String(problemMethod.closestMatch.selector),
+						closestParameterTypeNames,
+						parameterTypeNames 
+					},
+					new String[] {
+						new String(problemMethod.closestMatch.declaringClass.shortReadableName()),
+						new String(problemMethod.closestMatch.selector),
+						closestParameterTypeShortNames,
+						parameterTypeShortNames
+					},
+					(int) (messageSend.nameSourcePosition >>> 32),
+					(int) messageSend.nameSourcePosition);
+				return;
+		}
+	}
+
+	this.handle(
+		id,
+		new String[] {
+			new String(method.declaringClass.readableName()),
+			new String(method.selector), parametersAsString(method.parameters, false)},
+		new String[] {
+			new String(method.declaringClass.shortReadableName()),
+			new String(method.selector), parametersAsString(method.parameters, true)},
+		(int) (messageSend.nameSourcePosition >>> 32),
+		(int) messageSend.nameSourcePosition);
+}
+

@@ -1,0 +1,53 @@
+	public TypeBinding resolveType(BlockScope scope) {
+
+		// Answer the signature type of the field.
+		// constants are propaged when the field is final
+		// and initialized with a (compile time) constant 
+
+		//always ignore receiver cast, since may affect constant pool reference
+		boolean receiverCast = false;
+		if (this.receiver instanceof CastExpression) {
+			this.receiver.bits |= IgnoreNeedForCastCheckMASK; // will check later on
+			receiverCast = true;
+		}
+		this.receiverType = receiver.resolveType(scope);
+		if (this.receiverType == null) {
+			constant = NotAConstant;
+			return null;
+		}
+		if (receiverCast) {
+			 // due to change of declaring class with receiver type, only identity cast should be notified
+			if (((CastExpression)this.receiver).expression.resolvedType == this.receiverType) { 
+						scope.problemReporter().unnecessaryCast((CastExpression)this.receiver);		
+			}
+		}		
+		// the case receiverType.isArrayType and token = 'length' is handled by the scope API
+		this.codegenBinding = this.binding = scope.getField(this.receiverType, token, this);
+		if (!binding.isValidBinding()) {
+			constant = NotAConstant;
+			scope.problemReporter().invalidField(this, this.receiverType);
+			return null;
+		}
+		this.receiver.computeConversion(scope, this.receiverType, this.receiverType);
+		if (isFieldUseDeprecated(binding, scope, (this.bits & IsStrictlyAssignedMASK) !=0)) {
+			scope.problemReporter().deprecatedField(binding, this);
+		}
+		boolean isImplicitThisRcv = receiver.isImplicitThis();
+		constant = FieldReference.getConstantFor(binding, this, isImplicitThisRcv, scope);
+		if (!isImplicitThisRcv) {
+			constant = NotAConstant;
+		}
+		if (binding.isStatic()) {
+			// static field accessed through receiver? legal but unoptimal (optional warning)
+			if (!(isImplicitThisRcv
+					|| (receiver instanceof NameReference 
+						&& (((NameReference) receiver).bits & BindingIds.TYPE) != 0))) {
+				scope.problemReporter().nonStaticAccessToStaticField(this, binding);
+			}
+			if (!isImplicitThisRcv && binding.declaringClass != receiverType) {
+				scope.problemReporter().indirectAccessToStaticField(this, binding);
+			}
+		}
+		return this.resolvedType = binding.type;
+	}
+

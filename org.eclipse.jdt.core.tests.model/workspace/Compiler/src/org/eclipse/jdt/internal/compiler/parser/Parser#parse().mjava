@@ -1,0 +1,93 @@
+/*main loop of the automat
+When a rule is reduced, the method consumeRule(int) is called with the number
+of the consumed rule. When a terminal is consumed, the method consumeToken(int) is 
+called in order to remember (when needed) the consumed token */
+// (int)asr[asi(act)]
+// name[symbol_index[currentKind]]
+protected void parse() {
+	if (DEBUG) System.out.println("-- ENTER INSIDE PARSE METHOD --");  //$NON-NLS-1$
+	boolean isDietParse = this.diet;
+	int oldFirstToken = getFirstToken();
+	this.hasError = false;
+	
+	this.hasReportedError = false;
+	int act = START_STATE;
+	this.stateStackTop = -1;
+	this.currentToken = getFirstToken();
+	ProcessTerminals : for (;;) {
+		int stackLength = this.stack.length;
+		if (++this.stateStackTop >= stackLength) {
+			System.arraycopy(
+				this.stack, 0,
+				this.stack = new int[stackLength + StackIncrement], 0,
+				stackLength);
+		}
+		this.stack[this.stateStackTop] = act;
+
+		act = tAction(act, this.currentToken);
+		if (act == ERROR_ACTION || this.restartRecovery) {
+			int errorPos = this.scanner.currentPosition;
+			if (!this.hasReportedError) {
+				this.hasError = true;
+			}
+			if (resumeOnSyntaxError()) {
+				if (act == ERROR_ACTION) this.lastErrorEndPosition = errorPos;
+				act = START_STATE;
+				this.stateStackTop = -1;
+				this.currentToken = getFirstToken();
+				continue ProcessTerminals;
+			}
+			act = ERROR_ACTION;
+			break ProcessTerminals;
+		}
+		if (act <= NUM_RULES) {
+			this.stateStackTop--;
+
+		} else if (act > ERROR_ACTION) { /* shift-reduce */
+			consumeToken(this.currentToken);
+			if (this.currentElement != null) this.recoveryTokenCheck();
+			try {
+				this.currentToken = this.scanner.getNextToken();
+			} catch(InvalidInputException e){
+				if (!this.hasReportedError){
+					this.problemReporter().scannerError(this, e.getMessage());
+					this.hasReportedError = true;
+				}
+				this.lastCheckPoint = this.scanner.currentPosition;
+				this.restartRecovery = true;
+			}					
+			act -= ERROR_ACTION;
+			
+		} else {
+		    if (act < ACCEPT_ACTION) { /* shift */
+				consumeToken(this.currentToken);
+				if (this.currentElement != null) this.recoveryTokenCheck();
+				try{
+					this.currentToken = this.scanner.getNextToken();
+				} catch(InvalidInputException e){
+					if (!this.hasReportedError){
+						this.problemReporter().scannerError(this, e.getMessage());
+						this.hasReportedError = true;
+					}
+					this.lastCheckPoint = this.scanner.currentPosition;
+					this.restartRecovery = true;
+				}					
+				continue ProcessTerminals;
+			}
+			break ProcessTerminals;
+		}
+			
+		ProcessNonTerminals : do { /* reduce */
+			consumeRule(act);
+			this.stateStackTop -= (rhs[act] - 1);
+			act = ntAction(this.stack[this.stateStackTop], lhs[act]);
+		} while (act <= NUM_RULES);
+	}
+	endParse(act);
+	
+	if (this.reportSyntaxErrorIsRequired && this.hasError) {
+		reportSyntaxErrors(isDietParse, oldFirstToken);
+	}
+	if (DEBUG) System.out.println("-- EXIT FROM PARSE METHOD --");  //$NON-NLS-1$
+}
+

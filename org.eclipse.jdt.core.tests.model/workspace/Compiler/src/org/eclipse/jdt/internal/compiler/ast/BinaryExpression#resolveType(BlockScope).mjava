@@ -1,0 +1,97 @@
+	public TypeBinding resolveType(BlockScope scope) {
+
+		boolean leftIsCast, rightIsCast;
+		if ((leftIsCast = left instanceof CastExpression) == true) left.bits |= IgnoreNeedForCastCheckMASK; // will check later on
+		TypeBinding leftType = left.resolveType(scope);
+
+		if ((rightIsCast = right instanceof CastExpression) == true) right.bits |= IgnoreNeedForCastCheckMASK; // will check later on
+		TypeBinding rightType = right.resolveType(scope);
+
+		// use the id of the type to navigate into the table
+		if (leftType == null || rightType == null) {
+			constant = Constant.NotAConstant;
+			return null;
+		}
+		int leftTypeId = leftType.id;
+		int rightTypeId = rightType.id;
+		if (leftTypeId > 15
+			|| rightTypeId > 15) { // must convert String + Object || Object + String
+			if (leftTypeId == T_String) {
+				rightTypeId = T_Object;
+			} else if (rightTypeId == T_String) {
+				leftTypeId = T_Object;
+			} else {
+				constant = Constant.NotAConstant;
+				scope.problemReporter().invalidOperator(this, leftType, rightType);
+				return null;
+			}
+		}
+		if (((bits & OperatorMASK) >> OperatorSHIFT) == PLUS) {
+			if (leftTypeId == T_String) {
+				this.left.computeConversion(scope, leftType, leftType);
+				if (rightType.isArrayType() && ((ArrayBinding) rightType).elementsType() == CharBinding) {
+					scope.problemReporter().signalNoImplicitStringConversionForCharArrayExpression(right);
+				}
+			}
+			if (rightTypeId == T_String) {
+				this.right.computeConversion(scope, rightType, rightType);
+				if (leftType.isArrayType() && ((ArrayBinding) leftType).elementsType() == CharBinding) {
+					scope.problemReporter().signalNoImplicitStringConversionForCharArrayExpression(left);
+				}
+			}
+		}
+
+		// the code is an int
+		// (cast)  left   Op (cast)  right --> result
+		//  0000   0000       0000   0000      0000
+		//  <<16   <<12       <<8    <<4       <<0
+
+		// Don't test for result = 0. If it is zero, some more work is done.
+		// On the one hand when it is not zero (correct code) we avoid doing the test	
+		int operator = (bits & OperatorMASK) >> OperatorSHIFT;
+		int operatorSignature = OperatorSignatures[operator][(leftTypeId << 4) + rightTypeId];
+		left.implicitConversion = operatorSignature >>> 12;
+		right.implicitConversion = (operatorSignature >>> 4) & 0x000FF;
+
+		bits |= operatorSignature & 0xF;
+		switch (operatorSignature & 0xF) { // record the current ReturnTypeID
+			// only switch on possible result type.....
+			case T_boolean :
+				this.resolvedType = BooleanBinding;
+				break;
+			case T_byte :
+				this.resolvedType = ByteBinding;
+				break;
+			case T_char :
+				this.resolvedType = CharBinding;
+				break;
+			case T_double :
+				this.resolvedType = DoubleBinding;
+				break;
+			case T_float :
+				this.resolvedType = FloatBinding;
+				break;
+			case T_int :
+				this.resolvedType = IntBinding;
+				break;
+			case T_long :
+				this.resolvedType = LongBinding;
+				break;
+			case T_String :
+				this.resolvedType = scope.getJavaLangString();
+				break;
+			default : //error........
+				constant = Constant.NotAConstant;
+				scope.problemReporter().invalidOperator(this, leftType, rightType);
+				return null;
+		}
+
+		// check need for operand cast
+		if (leftIsCast || rightIsCast) {
+			CastExpression.checkNeedForArgumentCasts(scope, operator, operatorSignature, left, leftTypeId, leftIsCast, right, rightTypeId, rightIsCast);
+		}
+		// compute the constant when valid
+		computeConstant(scope, leftTypeId, rightTypeId);
+		return this.resolvedType;
+	}
+

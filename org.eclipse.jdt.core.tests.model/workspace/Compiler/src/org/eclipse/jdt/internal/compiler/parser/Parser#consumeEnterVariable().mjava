@@ -1,0 +1,119 @@
+protected void consumeEnterVariable() {
+	// EnterVariable ::= $empty
+	// do nothing by default
+
+	char[] identifierName = this.identifierStack[this.identifierPtr];
+	long namePosition = this.identifierPositionStack[this.identifierPtr];
+	int extendedDimension = this.intStack[this.intPtr--];
+	AbstractVariableDeclaration declaration;
+	// create the ast node
+	boolean isLocalDeclaration = this.nestedMethod[this.nestedType] != 0; 
+	if (isLocalDeclaration) {
+		// create the local variable declarations
+		declaration = 
+			this.createLocalDeclaration(identifierName, (int) (namePosition >>> 32), (int) namePosition);
+	} else {
+		// create the field declaration
+		declaration = 
+			this.createFieldDeclaration(identifierName, (int) (namePosition >>> 32), (int) namePosition); 
+	}
+	
+	this.identifierPtr--;
+	this.identifierLengthPtr--;
+	TypeReference type;
+	int variableIndex = this.variablesCounter[this.nestedType];
+	int typeDim = 0;
+	if (variableIndex == 0) {
+		// first variable of the declaration (FieldDeclaration or LocalDeclaration)
+		if (isLocalDeclaration) {
+			declaration.declarationSourceStart = this.intStack[this.intPtr--];
+			declaration.modifiers = this.intStack[this.intPtr--];
+			// consume annotations
+			int length;
+			if ((length = this.expressionLengthStack[this.expressionLengthPtr--]) != 0) {
+				System.arraycopy(
+					this.expressionStack, 
+					(this.expressionPtr -= length) + 1, 
+					declaration.annotations = new Annotation[length], 
+					0, 
+					length); 
+			}	
+			type = getTypeReference(typeDim = this.intStack[this.intPtr--]); // type dimension
+			if (declaration.declarationSourceStart == -1) {
+				// this is true if there is no modifiers for the local variable declaration
+				declaration.declarationSourceStart = type.sourceStart;
+			}
+			pushOnAstStack(type);
+		} else {
+			type = getTypeReference(typeDim = this.intStack[this.intPtr--]); // type dimension
+			pushOnAstStack(type);
+			declaration.declarationSourceStart = this.intStack[this.intPtr--];
+			declaration.modifiers = this.intStack[this.intPtr--];
+			// consume annotations
+			int length;
+			if ((length = this.expressionLengthStack[this.expressionLengthPtr--]) != 0) {
+				System.arraycopy(
+					this.expressionStack, 
+					(this.expressionPtr -= length) + 1, 
+					declaration.annotations = new Annotation[length], 
+					0, 
+					length); 
+			}			
+			// Store javadoc only on first declaration as it is the same for all ones
+			FieldDeclaration fieldDeclaration = (FieldDeclaration) declaration;
+			fieldDeclaration.javadoc = this.javadoc;
+			this.javadoc = null;
+		}
+	} else {
+		type = (TypeReference) this.astStack[this.astPtr - variableIndex];
+		typeDim = type.dimensions();
+		AbstractVariableDeclaration previousVariable = 
+			(AbstractVariableDeclaration) this.astStack[this.astPtr]; 
+		declaration.declarationSourceStart = previousVariable.declarationSourceStart;
+		declaration.modifiers = previousVariable.modifiers;
+	}
+
+	if (extendedDimension == 0) {
+		declaration.type = type;
+	} else {
+		int dimension = typeDim + extendedDimension;
+		//on the this.identifierLengthStack there is the information about the type....
+		int baseType;
+		if ((baseType = this.identifierLengthStack[this.identifierLengthPtr + 1]) < 0) {
+			//it was a baseType
+			int typeSourceStart = type.sourceStart;
+			int typeSourceEnd = type.sourceEnd;
+			type = TypeReference.baseTypeReference(-baseType, dimension);
+			type.sourceStart = typeSourceStart;
+			type.sourceEnd = typeSourceEnd;
+			declaration.type = type;
+		} else {
+			declaration.type = this.copyDims(type, dimension);
+		}
+	}
+	this.variablesCounter[this.nestedType]++;
+	pushOnAstStack(declaration);
+	// recovery
+	if (this.currentElement != null) {
+		if (!(this.currentElement instanceof RecoveredType)
+			&& (this.currentToken == TokenNameDOT
+				//|| declaration.modifiers != 0
+				|| (this.scanner.getLineNumber(declaration.type.sourceStart)
+						!= this.scanner.getLineNumber((int) (namePosition >>> 32))))){
+			this.lastCheckPoint = (int) (namePosition >>> 32);
+			this.restartRecovery = true;
+			return;
+		}
+		if (isLocalDeclaration){
+			LocalDeclaration localDecl = (LocalDeclaration) this.astStack[this.astPtr];
+			this.lastCheckPoint = localDecl.sourceEnd + 1;
+			this.currentElement = this.currentElement.add(localDecl, 0);
+		} else {
+			FieldDeclaration fieldDecl = (FieldDeclaration) this.astStack[this.astPtr];
+			this.lastCheckPoint = fieldDecl.sourceEnd + 1;
+			this.currentElement = this.currentElement.add(fieldDecl, 0);
+		}
+		this.lastIgnoredToken = -1;
+	}
+}
+

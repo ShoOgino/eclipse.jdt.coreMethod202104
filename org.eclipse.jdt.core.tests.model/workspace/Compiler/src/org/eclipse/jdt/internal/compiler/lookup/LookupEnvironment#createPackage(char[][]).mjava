@@ -1,0 +1,32 @@
+PackageBinding createPackage(char[][] compoundName) {
+	PackageBinding packageBinding = getPackage0(compoundName[0]);
+	if (packageBinding == null || packageBinding == TheNotFoundPackage) {
+		packageBinding = new PackageBinding(compoundName[0], this);
+		knownPackages.put(compoundName[0], packageBinding);
+	}
+
+	for (int i = 1, length = compoundName.length; i < length; i++) {
+		// check to see if it collides with a known type...
+		// this case can only happen if the package does not exist as a directory in the file system
+		// otherwise when the source type was defined, the correct error would have been reported
+		// unless its an unresolved type which is referenced from an inconsistent class file
+		ReferenceBinding type = packageBinding.getType0(compoundName[i]);
+		if (type != null && type != TheNotFoundType && !(type instanceof UnresolvedReferenceBinding))
+			return null;
+
+		PackageBinding parent = packageBinding;
+		if ((packageBinding = parent.getPackage0(compoundName[i])) == null || packageBinding == TheNotFoundPackage) {
+			// if the package is unknown, check to see if a type exists which would collide with the new package
+			// catches the case of a package statement of: package java.lang.Object;
+			// since the package can be added after a set of source files have already been compiled, we need
+			// whenever a package statement is encountered
+			if (nameEnvironment.findType(compoundName[i], parent.compoundName) != null)
+				return null;
+
+			packageBinding = new PackageBinding(CharOperation.subarray(compoundName, 0, i + 1), parent, this);
+			parent.addPackage(packageBinding);
+		}
+	}
+	return packageBinding;
+}
+

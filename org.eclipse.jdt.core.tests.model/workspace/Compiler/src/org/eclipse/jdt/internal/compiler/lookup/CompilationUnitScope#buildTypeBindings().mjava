@@ -1,0 +1,71 @@
+void buildTypeBindings() {
+	topLevelTypes = new SourceTypeBinding[0]; // want it initialized if the package cannot be resolved
+	if (referenceContext.compilationResult.compilationUnit != null) {
+		char[][] expectedPackageName = referenceContext.compilationResult.compilationUnit.getPackageName();
+		if (expectedPackageName != null 
+				&& !CharOperation.equals(currentPackageName, expectedPackageName)) {
+
+			// only report if the unit isn't structurally empty
+			if (referenceContext.currentPackage != null 
+					|| referenceContext.types != null 
+					|| referenceContext.imports != null) {
+				problemReporter().packageIsNotExpectedPackage(referenceContext);
+			}
+			currentPackageName = expectedPackageName.length == 0 ? CharOperation.NO_CHAR_CHAR : expectedPackageName;
+		}
+	}
+	if (currentPackageName == CharOperation.NO_CHAR_CHAR) {
+		if ((fPackage = environment.defaultPackage) == null) {
+			problemReporter().mustSpecifyPackage(referenceContext);
+			return;
+		}
+	} else {
+		if ((fPackage = environment.createPackage(currentPackageName)) == null) {
+			problemReporter().packageCollidesWithType(referenceContext);
+			return;
+		}
+		recordQualifiedReference(currentPackageName); // always dependent on your own package
+	}
+
+	// Skip typeDeclarations which know of previously reported errors
+	TypeDeclaration[] types = referenceContext.types;
+	int typeLength = (types == null) ? 0 : types.length;
+	topLevelTypes = new SourceTypeBinding[typeLength];
+	int count = 0;
+	nextType: for (int i = 0; i < typeLength; i++) {
+		TypeDeclaration typeDecl = types[i];
+		ReferenceBinding typeBinding = fPackage.getType0(typeDecl.name);
+		recordSimpleReference(typeDecl.name); // needed to detect collision cases
+		if (typeBinding != null && !(typeBinding instanceof UnresolvedReferenceBinding)) {
+			// if a type exists, it must be a valid type - cannot be a NotFound problem type
+			// unless its an unresolved type which is now being defined
+			problemReporter().duplicateTypes(referenceContext, typeDecl);
+			continue nextType;
+		}
+		if (fPackage != environment.defaultPackage && fPackage.getPackage(typeDecl.name) != null) {
+			// if a package exists, it must be a valid package - cannot be a NotFound problem package
+			problemReporter().typeCollidesWithPackage(referenceContext, typeDecl);
+			continue nextType;
+		}
+
+		if ((typeDecl.modifiers & AccPublic) != 0) {
+			char[] mainTypeName;
+			if ((mainTypeName = referenceContext.getMainTypeName()) != null // mainTypeName == null means that implementor of ICompilationUnit decided to return null
+					&& !CharOperation.equals(mainTypeName, typeDecl.name)) {
+				problemReporter().publicClassMustMatchFileName(referenceContext, typeDecl);
+				continue nextType;
+			}
+		}
+
+		ClassScope child = new ClassScope(this, typeDecl);
+		SourceTypeBinding type = child.buildType(null, fPackage);
+		if(type != null) {
+			topLevelTypes[count++] = type;
+		}
+	}
+
+	// shrink topLevelTypes... only happens if an error was reported
+	if (count != topLevelTypes.length)
+		System.arraycopy(topLevelTypes, 0, topLevelTypes = new SourceTypeBinding[count], 0, count);
+}
+

@@ -1,0 +1,213 @@
+	// Internal use only
+	public MethodBinding findMethod(
+		ReferenceBinding receiverType,
+		char[] selector,
+		TypeBinding[] argumentTypes,
+		InvocationSite invocationSite) {
+
+		ReferenceBinding currentType = receiverType;
+		MethodBinding matchingMethod = null;
+		ObjectVector found = new ObjectVector(); //TODO (kent) should rewrite to remove #matchingMethod since found is allocated anyway
+
+		compilationUnitScope().recordTypeReferences(argumentTypes);
+
+		if (currentType.isInterface()) {
+			compilationUnitScope().recordTypeReference(currentType);
+			MethodBinding[] currentMethods = currentType.getMethods(selector);
+			int currentLength = currentMethods.length;
+			if (currentLength == 1) {
+				matchingMethod = currentMethods[0];
+			} else if (currentLength > 1) {
+				found.addAll(currentMethods);
+			}
+			matchingMethod = findMethodInSuperInterfaces(currentType, selector, found, matchingMethod);
+			currentType = getJavaLangObject();
+		}
+
+		boolean isCompliant14 = compilationUnitScope().environment.options.complianceLevel >= ClassFileConstants.JDK1_4;
+		// superclass lookup
+		ReferenceBinding classHierarchyStart = currentType;
+		while (currentType != null) {
+			compilationUnitScope().recordTypeReference(currentType);
+			MethodBinding[] currentMethods = currentType.getMethods(selector);
+			int currentLength = currentMethods.length;
+
+			/*
+			 * if 1.4 compliant, must filter out redundant protected methods from superclasses
+			 */
+			if (isCompliant14){			 
+				nextMethod: for (int i = 0; i < currentLength; i++){
+					MethodBinding currentMethod = currentMethods[i];
+					// protected method need to be checked only - default access is already dealt with in #canBeSeen implementation
+					// when checking that p.C -> q.B -> p.A cannot see default access members from A through B.
+					if ((currentMethod.modifiers & AccProtected) == 0) continue nextMethod;
+					if (matchingMethod != null){
+						if (currentMethod.areParametersEqual(matchingMethod)){
+							currentLength--;
+							currentMethods[i] = null; // discard this match
+							continue nextMethod;
+						}
+					} else {
+						for (int j = 0, max = found.size; j < max; j++) {
+							if (((MethodBinding)found.elementAt(j)).areParametersEqual(currentMethod)){
+								currentLength--;
+								currentMethods[i] = null;
+								continue nextMethod;
+							}
+						}
+					}
+				}
+			}
+			
+			if (currentLength == 1 && matchingMethod == null && found.size == 0) {
+				matchingMethod = currentMethods[0];
+			} else if (currentLength > 0) {
+				if (matchingMethod != null) {
+					found.add(matchingMethod);
+					matchingMethod = null;
+				}
+				// append currentMethods, filtering out null entries
+				int maxMethod = currentMethods.length;
+				if (maxMethod == currentLength) { // no method was eliminated for 1.4 compliance (see above)
+					found.addAll(currentMethods);
+				} else {
+					for (int i = 0, max = currentMethods.length; i < max; i++) {
+						MethodBinding currentMethod = currentMethods[i];
+						if (currentMethod != null) found.add(currentMethod);
+					}
+				}
+			}
+			currentType = currentType.superclass();
+		}
+
+		// if found several candidates, then eliminate those not matching argument types
+		int foundSize = found.size;
+		MethodBinding[] candidates = null;
+		int candidatesCount = 0;
+		boolean checkedMatchingMethod = false; // is matchingMethod meeting argument expectation ?
+		MethodBinding problemMethod = null;
+		if (foundSize > 0) {
+			// argument type compatibility check
+			for (int i = 0; i < foundSize; i++) {
+				MethodBinding methodBinding = (MethodBinding) found.elementAt(i);
+				MethodBinding compatibleMethod = computeCompatibleMethod(methodBinding, argumentTypes, invocationSite);
+				if (compatibleMethod != null) {
+					if (compatibleMethod.isValidBinding()) {
+						switch (candidatesCount) {
+							case 0: 
+								matchingMethod = compatibleMethod; // if only one match, reuse matchingMethod
+								checkedMatchingMethod = true; // matchingMethod is known to exist and match params here
+								break;
+							case 1:
+								candidates = new MethodBinding[foundSize]; // only lazily created if more than one match
+								candidates[0] = matchingMethod; // copy back
+								matchingMethod = null;
+								// fall through
+							default:
+								candidates[candidatesCount] = compatibleMethod;
+						}
+						candidatesCount++;
+					} else if (problemMethod == null) {
+						problemMethod = compatibleMethod;
+					}
+				}
+			}
+		}
+		if (candidatesCount > 0)
+			problemMethod = null; // forget the problem method if candidates were found
+
+		// if only one matching method left (either from start or due to elimination of rivals), then match is in matchingMethod
+		if (matchingMethod != null) {
+			if (!checkedMatchingMethod) {
+				MethodBinding compatibleMethod = computeCompatibleMethod(matchingMethod, argumentTypes, invocationSite);
+				if (compatibleMethod != null) {
+					if (compatibleMethod.isValidBinding()) {
+						matchingMethod = compatibleMethod;
+						checkedMatchingMethod = true;
+					} else {
+						problemMethod = compatibleMethod;
+					}
+				}
+			}
+			if (checkedMatchingMethod) {
+				// (if no default abstract) must explicitly look for one instead, which could be a better match
+				if (!matchingMethod.canBeSeenBy(receiverType, invocationSite, this)) {
+					// ignore matching method (to be consistent with multiple matches, none visible (matching method is then null)
+					MethodBinding interfaceMethod =
+						findDefaultAbstractMethod(receiverType, selector, argumentTypes, invocationSite, classHierarchyStart, null, found);						
+					if (interfaceMethod != null) return interfaceMethod;
+					compilationUnitScope().recordTypeReferences(matchingMethod.thrownExceptions);
+					return matchingMethod;
+				}
+			} 
+			matchingMethod =
+				findDefaultAbstractMethod(receiverType, selector, argumentTypes, invocationSite, classHierarchyStart, matchingMethod, found);
+			if (matchingMethod != null) return matchingMethod;
+			return problemMethod;
+		}
+
+		// no match was found, try to find a close match when the parameter order is wrong or missing some parameters
+		if (candidatesCount == 0) {
+			MethodBinding interfaceMethod =
+				findDefaultAbstractMethod(receiverType, selector, argumentTypes, invocationSite, classHierarchyStart, matchingMethod, found);
+			if (interfaceMethod != null) return interfaceMethod;
+			if (problemMethod != null) return problemMethod;
+
+			int argLength = argumentTypes.length;
+			foundSize = found.size;
+			nextMethod : for (int i = 0; i < foundSize; i++) {
+				MethodBinding methodBinding = (MethodBinding) found.elementAt(i);
+				TypeBinding[] params = methodBinding.parameters;
+				int paramLength = params.length;
+				nextArg: for (int a = 0; a < argLength; a++) {
+					TypeBinding arg = argumentTypes[a];
+					for (int p = 0; p < paramLength; p++)
+						if (params[p] == arg)
+							continue nextArg;
+					continue nextMethod;
+				}
+				return methodBinding;
+			}
+			return (MethodBinding) found.elementAt(0); // no good match so just use the first one found
+		}
+
+		// check for duplicate parameterized methods
+		if (compilationUnitScope().environment.options.sourceLevel >= ClassFileConstants.JDK1_5) {
+			for (int i = 0; i < candidatesCount; i++) {
+				MethodBinding current = candidates[i];
+				if (current instanceof ParameterizedMethodBinding)
+					for (int j = i + 1; j < candidatesCount; j++)
+						if (current.declaringClass == candidates[j].declaringClass && current.areParametersEqual(candidates[j]))
+							return new ProblemMethodBinding(candidates[i].selector, candidates[i].parameters, Ambiguous);
+			}
+		}
+
+		// tiebreak using visibility check
+		int visiblesCount = 0;
+		for (int i = 0; i < candidatesCount; i++) {
+			MethodBinding methodBinding = candidates[i];
+			if (methodBinding.canBeSeenBy(receiverType, invocationSite, this)) {
+				if (visiblesCount != i) {
+					candidates[i] = null;
+					candidates[visiblesCount] = methodBinding;
+				}
+				visiblesCount++;
+			}
+		}
+		if (visiblesCount == 1) {
+			compilationUnitScope().recordTypeReferences(candidates[0].thrownExceptions);
+			return candidates[0];
+		}
+		if (visiblesCount == 0) {
+			MethodBinding interfaceMethod =
+				findDefaultAbstractMethod(receiverType, selector, argumentTypes, invocationSite, classHierarchyStart, matchingMethod, found);
+			if (interfaceMethod != null) return interfaceMethod;
+			return new ProblemMethodBinding(candidates[0], candidates[0].selector, candidates[0].parameters, NotVisible);
+		}
+		if (isCompliant14)
+			return mostSpecificMethodBinding(candidates, visiblesCount, invocationSite);
+		return candidates[0].declaringClass.isClass()
+			? mostSpecificClassMethodBinding(candidates, visiblesCount, invocationSite)
+			: mostSpecificInterfaceMethodBinding(candidates, visiblesCount, invocationSite);
+	}
+

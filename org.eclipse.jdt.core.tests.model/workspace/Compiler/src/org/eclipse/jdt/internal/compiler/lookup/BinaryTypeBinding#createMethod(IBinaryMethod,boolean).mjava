@@ -1,0 +1,118 @@
+private MethodBinding createMethod(IBinaryMethod method, boolean checkGenericSignatures) {
+	int methodModifiers = method.getModifiers() | AccUnresolved;
+	ReferenceBinding[] exceptions = NoExceptions;
+	TypeBinding[] parameters = NoParameters;
+	TypeVariableBinding[] typeVars = NoTypeVariables;
+	TypeBinding returnType = null;
+
+	char[] methodSignature = checkGenericSignatures ? method.getGenericSignature() : null;
+	if (methodSignature == null) { // no generics
+		char[] methodDescriptor = method.getMethodDescriptor();   // of the form (I[Ljava/jang/String;)V
+		int numOfParams = 0;
+		char nextChar;
+		int index = 0;   // first character is always '(' so skip it
+		while ((nextChar = methodDescriptor[++index]) != ')') {
+			if (nextChar != '[') {
+				numOfParams++;
+				if (nextChar == 'L')
+					while ((nextChar = methodDescriptor[++index]) != ';'){/*empty*/}
+			}
+		}
+
+		// Ignore synthetic argument for member types.
+		int startIndex = (method.isConstructor() && isMemberType() && !isStatic()) ? 1 : 0;
+		int size = numOfParams - startIndex;
+		if (size > 0) {
+			parameters = new TypeBinding[size];
+			index = 1;
+			int end = 0;   // first character is always '(' so skip it
+			for (int i = 0; i < numOfParams; i++) {
+				while ((nextChar = methodDescriptor[++end]) == '['){/*empty*/}
+				if (nextChar == 'L')
+					while ((nextChar = methodDescriptor[++end]) != ';'){/*empty*/}
+	
+				if (i >= startIndex)   // skip the synthetic arg if necessary
+					parameters[i - startIndex] = environment.getTypeFromSignature(methodDescriptor, index, end, false, this);
+				index = end + 1;
+			}
+		}
+
+		char[][] exceptionTypes = method.getExceptionTypeNames();
+		if (exceptionTypes != null) {
+			size = exceptionTypes.length;
+			if (size > 0) {
+				exceptions = new ReferenceBinding[size];
+				for (int i = 0; i < size; i++)
+					exceptions[i] = environment.getTypeFromConstantPoolName(exceptionTypes[i], 0, -1, false);
+			}
+		}
+
+		if (!method.isConstructor())
+			returnType = environment.getTypeFromSignature(methodDescriptor, index + 1, -1, false, this);   // index is currently pointing at the ')'
+	} else {
+		// MethodTypeSignature = ParameterPart(optional) '(' TypeSignatures ')' return_typeSignature ['^' TypeSignature (optional)]
+		SignatureWrapper wrapper = new SignatureWrapper(methodSignature);
+		if (wrapper.signature[wrapper.start] == '<') {
+			// <A::Ljava/lang/annotation/Annotation;>(Ljava/lang/Class<TA;>;)TA;
+			// ParameterPart = '<' ParameterSignature(s) '>'
+			wrapper.start++; // skip '<'
+			int rank = 0;
+			do {
+				TypeVariableBinding variable = createTypeVariable(wrapper, rank);
+				System.arraycopy(typeVars, 0, typeVars = new TypeVariableBinding[rank + 1], 0, rank);
+				typeVars[rank++] = variable;
+				initializeTypeVariable(variable,typeVars, wrapper);
+			} while (wrapper.signature[wrapper.start] != '>');
+			wrapper.start++; // skip '>'
+		}
+
+		if (wrapper.signature[wrapper.start] == '(') {
+			wrapper.start++; // skip '('
+			if (wrapper.signature[wrapper.start] == ')') {
+				wrapper.start++; // skip ')'
+			} else {
+				java.util.ArrayList types = new java.util.ArrayList(2);
+				int startIndex = (method.isConstructor() && isMemberType() && !isStatic()) ? 1 : 0;
+				if (startIndex == 1)
+					environment.getTypeFromTypeSignature(wrapper, typeVars, this); // skip synthetic argument
+				while (wrapper.signature[wrapper.start] != ')') {
+					types.add(environment.getTypeFromTypeSignature(wrapper, typeVars, this));
+				}
+				wrapper.start++; // skip ')'
+				parameters = new TypeBinding[types.size()];
+				types.toArray(parameters);
+			}
+		}
+
+		if (!method.isConstructor())
+			returnType = environment.getTypeFromTypeSignature(wrapper, typeVars, this);
+
+		if (!wrapper.atEnd() && wrapper.signature[wrapper.start] == '^') {
+			// attempt to find each superinterface if it exists in the cache (otherwise - resolve it when requested)
+			java.util.ArrayList types = new java.util.ArrayList(2);
+			do {
+				wrapper.start++; // skip '^'
+				types.add(environment.getTypeFromTypeSignature(wrapper, typeVars, this));
+			} while (!wrapper.atEnd() && wrapper.signature[wrapper.start] == '^');
+			exceptions = new ReferenceBinding[types.size()];
+			types.toArray(exceptions);
+		} else { // get the exceptions the old way
+			char[][] exceptionTypes = method.getExceptionTypeNames();
+			if (exceptionTypes != null) {
+				int size = exceptionTypes.length;
+				if (size > 0) {
+					exceptions = new ReferenceBinding[size];
+					for (int i = 0; i < size; i++)
+						exceptions[i] = environment.getTypeFromConstantPoolName(exceptionTypes[i], 0, -1, false);
+				}
+			}
+		}
+	}
+
+	MethodBinding result = method.isConstructor()
+		? new MethodBinding(methodModifiers, parameters, exceptions, this)
+		: new MethodBinding(methodModifiers, method.getSelector(), returnType, parameters, exceptions, this);
+	result.typeVariables = typeVars;
+	return result;
+}
+

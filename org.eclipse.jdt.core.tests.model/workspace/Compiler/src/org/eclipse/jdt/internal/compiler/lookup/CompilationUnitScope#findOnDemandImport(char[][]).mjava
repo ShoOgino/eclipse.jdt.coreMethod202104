@@ -1,0 +1,56 @@
+private Binding findOnDemandImport(char[][] compoundName) {
+	recordQualifiedReference(compoundName);
+
+	Binding binding = environment.getTopLevelPackage(compoundName[0]);
+	int i = 1;
+	int length = compoundName.length;
+	foundNothingOrType: if (binding != null) {
+		PackageBinding packageBinding = (PackageBinding) binding;
+		while (i < length) {
+			binding = packageBinding.getTypeOrPackage(compoundName[i++]);
+			if (binding == null || !binding.isValidBinding()) {
+				binding = null;
+				break foundNothingOrType;
+			}
+			if (!(binding instanceof PackageBinding))
+				break foundNothingOrType;
+
+			packageBinding = (PackageBinding) binding;
+		}
+		return packageBinding;
+	}
+
+	ReferenceBinding type;
+	if (binding == null) {
+		if (environment.defaultPackage == null
+				|| environment.options.complianceLevel >= ClassFileConstants.JDK1_4){
+			return new ProblemReferenceBinding(
+				CharOperation.subarray(compoundName, 0, i),
+				NotFound);
+		}
+		type = findType(compoundName[0], environment.defaultPackage, environment.defaultPackage);
+		if (type == null || !type.isValidBinding())
+			return new ProblemReferenceBinding(
+				CharOperation.subarray(compoundName, 0, i),
+				NotFound);
+		i = 1; // reset to look for member types inside the default package type
+	} else {
+		type = (ReferenceBinding) binding;
+	}
+
+	for (; i < length; i++) {
+		if (!type.canBeSeenBy(fPackage)) {
+			return new ProblemReferenceBinding(CharOperation.subarray(compoundName, 0, i), type, NotVisible);		
+		}
+		// does not look for inherited member types on purpose
+		if ((type = type.getMemberType(compoundName[i])) == null) {
+			return new ProblemReferenceBinding(
+				CharOperation.subarray(compoundName, 0, i + 1),
+				NotFound);
+		}
+	}
+	if (!type.canBeSeenBy(fPackage))
+		return new ProblemReferenceBinding(compoundName, type, NotVisible);
+	return type;
+}
+

@@ -1,0 +1,58 @@
+protected void consumeMethodDeclaration(boolean isNotAbstract) {
+	// MethodDeclaration ::= MethodHeader MethodBody
+	// AbstractMethodDeclaration ::= MethodHeader ';'
+
+	/*
+	this.astStack : modifiers arguments throws statements
+	this.identifierStack : type name
+	this.intStack : dim dim dim
+	 ==>
+	this.astStack : MethodDeclaration
+	this.identifierStack :
+	this.intStack : 
+	*/
+
+	int length;
+	if (isNotAbstract) {
+		// pop the position of the {  (body of the method) pushed in block decl
+		this.intPtr--;
+		this.intPtr--;
+	}
+
+	int explicitDeclarations = 0;
+	Statement[] statements = null;
+	if (isNotAbstract) {
+		//statements
+		explicitDeclarations = this.realBlockStack[this.realBlockPtr--];
+		if ((length = this.astLengthStack[this.astLengthPtr--]) != 0) {
+			System.arraycopy(
+				this.astStack, 
+				(this.astPtr -= length) + 1, 
+				statements = new Statement[length], 
+				0, 
+				length); 
+		}
+	}
+
+	// now we know that we have a method declaration at the top of the ast stack
+	MethodDeclaration md = (MethodDeclaration) this.astStack[this.astPtr];
+	md.statements = statements;
+	md.explicitDeclarations = explicitDeclarations;
+
+	// cannot be done in consumeMethodHeader because we have no idea whether or not there
+	// is a body when we reduce the method header
+	if (!isNotAbstract) { //remember the fact that the method has a semicolon body
+		md.modifiers |= AccSemicolonBody;
+	} else {
+		if (!this.diet && statements == null) {
+			if (!containsComment(md.bodyStart, this.endPosition)) {
+				md.bits |= ASTNode.UndocumentedEmptyBlockMASK;
+			}
+		}
+	}
+	// store the this.endPosition (position just before the '}') in case there is
+	// a trailing comment behind the end of the method
+	md.bodyEnd = this.endPosition;
+	md.declarationSourceEnd = flushCommentsDefinedPriorTo(this.endStatementPosition);
+}
+
