@@ -1,0 +1,46 @@
+/**
+ * Returns whether this package reference pattern matches the given qualified name reference.
+ * Look at resolved information only if specified.
+ */
+private boolean matches(QualifiedNameReference qNameRef, boolean resolve) {
+	Binding binding = qNameRef.binding;
+	if (!resolve || binding == null || !binding.isValidBinding()) {
+		if (this.pkgName != null) {
+			switch (this.matchMode) {
+				case EXACT_MATCH:
+				case PREFIX_MATCH:
+					return CharOperation.prefixEquals(this.pkgName, CharOperation.concatWith(qNameRef.tokens, '.'), this.isCaseSensitive);
+				case PATTERN_MATCH:
+					char[] pattern = this.pkgName[this.pkgName.length-1] == '*' ? this.pkgName : CharOperation.concat(this.pkgName, ".*"/*nonNLS*/.toCharArray());
+					return CharOperation.match(pattern, CharOperation.concatWith(qNameRef.tokens, '.'), this.isCaseSensitive);
+			}
+		}
+	} else {
+		TypeBinding typeBinding = null;
+		char[][] tokens = qNameRef.tokens;
+		int lastIndex = tokens.length-1;
+		switch (qNameRef.bits & Statement.RestrictiveFlagMASK) {
+			case BindingIds.FIELD : // reading a field
+				typeBinding = ((FieldBinding)binding).declaringClass;
+				// no valid match amongst fields
+				int otherBindingsCount = qNameRef.otherBindings == null ? 0 : qNameRef.otherBindings.length;			
+				lastIndex -= otherBindingsCount + 1;
+				if (lastIndex < 0) return false;
+				break;
+			case BindingIds.LOCAL : // reading a local variable
+				return false; // no package match in it
+			case BindingIds.TYPE : //=============only type ==============
+				typeBinding = (TypeBinding)binding;
+		}
+		if (typeBinding instanceof ArrayBinding) {
+			typeBinding = ((ArrayBinding)typeBinding).leafComponentType;
+		}
+		if (typeBinding instanceof ReferenceBinding) {
+			PackageBinding pkgBinding = ((ReferenceBinding)typeBinding).fPackage;
+			return this.matches(pkgBinding.compoundName);
+		}
+		return false;
+	}
+	return true;
+}
+
