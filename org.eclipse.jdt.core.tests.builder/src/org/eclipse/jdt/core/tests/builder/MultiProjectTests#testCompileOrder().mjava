@@ -1,4 +1,4 @@
-	public void testCycle2() throws JavaModelException {
+	public void testCompileOrder() throws JavaModelException {
 		Hashtable options = JavaCore.getOptions();
 		Hashtable newOptions = JavaCore.getOptions();
 		newOptions.put(JavaCore.CORE_CIRCULAR_CLASSPATH, JavaCore.WARNING); //$NON-NLS-1$
@@ -15,13 +15,10 @@
 		IPath root1 = env.addPackageFragmentRoot(p1, "src"); //$NON-NLS-1$
 		env.setOutputFolder(p1, "bin"); //$NON-NLS-1$
 		
-		env.addClass(root1, "p1", "X", //$NON-NLS-1$ //$NON-NLS-2$
+		IPath c1 = env.addClass(root1, "p1", "X", //$NON-NLS-1$ //$NON-NLS-2$
 			"package p1;\n"+ //$NON-NLS-1$
-			"import p2.Y;\n"+ //$NON-NLS-1$
 			"public class X {\n"+ //$NON-NLS-1$
-			"  public void bar(Y y, int i){\n"+ //$NON-NLS-1$
-			"    y.zork();\n"+ //$NON-NLS-1$
-			"  }\n"+ //$NON-NLS-1$
+			"  W w;\n" + //$NON-NLS-1$
 			"}\n" //$NON-NLS-1$
 			);
 		
@@ -37,14 +34,8 @@
 		
 		IPath c2 = env.addClass(root2, "p2", "Y", //$NON-NLS-1$ //$NON-NLS-2$
 			"package p2;\n"+ //$NON-NLS-1$
-			"import p1.X;\n"+ //$NON-NLS-1$
-			"import p3.Z;\n"+ //$NON-NLS-1$
-			"public class Y extends Z{\n"+ //$NON-NLS-1$
-			"  public X zork(){\n"+ //$NON-NLS-1$
-			"    X x = foo();\n"+ //$NON-NLS-1$
-			"    x.bar(this);\n"+ //$NON-NLS-1$
-			"    return x;\n"+ //$NON-NLS-1$
-			"  }\n"+ //$NON-NLS-1$
+			"public class Y {\n"+ //$NON-NLS-1$
+			"  W w;\n" + //$NON-NLS-1$
 			"}\n" //$NON-NLS-1$
 			);
 
@@ -58,36 +49,23 @@
 		IPath root3 = env.addPackageFragmentRoot(p3, "src"); //$NON-NLS-1$
 		env.setOutputFolder(p3, "bin"); //$NON-NLS-1$
 		
-		env.addClass(root3, "p3", "Z", //$NON-NLS-1$ //$NON-NLS-2$
+		IPath c3 = env.addClass(root3, "p3", "Z", //$NON-NLS-1$ //$NON-NLS-2$
 			"package p3;\n"+ //$NON-NLS-1$
-			"import p1.X;\n"+ //$NON-NLS-1$
 			"public class Z {\n"+ //$NON-NLS-1$
-			"  public X foo(){\n"+ //$NON-NLS-1$
-			"    return null;\n"+ //$NON-NLS-1$
-			"  }\n"+ //$NON-NLS-1$
+			"  W w;\n" + //$NON-NLS-1$
 			"}\n" //$NON-NLS-1$
 			);
 		
-		// for Project1
-		env.addRequiredProject(p1, p2);
-		env.addRequiredProject(p1, p3);
-		// for Project2
-		env.addRequiredProject(p2, p1);
-		env.addRequiredProject(p2, p3);
-		// for Project3
-		env.addRequiredProject(p3, p1);
-
-		env.setBuildOrder(new String[]{"P1", "P2", "P3"});
+		env.setBuildOrder(new String[]{"P1", "P3", "P2"});
 		fullBuild();
 		
-		expectingCompilingOrder(new String[]{"p1.X", "p2.Y", "p3.Z", "p1.X", "p2.Y", "p3.Z", "p1.X"});
-		expectingOnlySpecificProblemFor(p1,new Problem("p1", "A cycle was detected in the project's classpath.", p1));
-		expectingOnlySpecificProblemsFor(p2,new Problem[]{
-				new Problem("p2", "The method bar(Y, int) in the type X is not applicable for the arguments (Y)", c2),
-				new Problem("p2", "A cycle was detected in the project's classpath.", p2)
-		});
-		expectingOnlySpecificProblemFor(p3,new Problem("p3", "A cycle was detected in the project's classpath.", p3));
-		
+		expectingCompilingOrder(new String[]{"p1.X", "p3.Z", "p2.Y"});
+		IPath workspaceRootPath = env.getWorkspaceRootPath();
+		expectingOnlySpecificProblemsFor(workspaceRootPath,new Problem[]{
+				new Problem("p3", "W cannot be resolved (or is not a valid type) for the field Z.w", c3),
+				new Problem("p2", "W cannot be resolved (or is not a valid type) for the field Y.w", c2),
+				new Problem("p1", "W cannot be resolved (or is not a valid type) for the field X.w", c1)
+		});	
 		JavaCore.setOptions(options);
 	}
 
