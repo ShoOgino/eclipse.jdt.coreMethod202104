@@ -5,25 +5,26 @@
 		Parser parser,
 		WorkingCopyOwner workingCopyOwner,
 		IProblemRequestor problemRequestor,
-		IProblemFactory problemFactory,
 		boolean cleanupCU,
 		IProgressMonitor monitor)
 		throws JavaModelException {
 
 		JavaProject project = (JavaProject) unitElement.getJavaProject();
-		CompilationUnitProblemFinder problemFinder =
-			new CompilationUnitProblemFinder(
-				project.newSearchableNameEnvironment(workingCopyOwner),
+		CancelableNameEnvironment environment = null;
+		CancelableProblemFactory problemFactory = null;
+		CompilationUnitProblemFinder problemFinder = null;
+		try {
+			environment = new CancelableNameEnvironment(project, workingCopyOwner, monitor);
+			problemFactory = new CancelableProblemFactory(monitor);
+			problemFinder = new CompilationUnitProblemFinder(
+				environment,
 				getHandlingPolicy(),
 				project.getOptions(true),
 				getRequestor(),
 				problemFactory);
-		if (parser != null) {
-			problemFinder.parser = parser;
-		}
-
-		try {
-			
+			if (parser != null) {
+				problemFinder.parser = parser;
+			}
 			PackageFragment packageFragment = (PackageFragment)unitElement.getAncestor(IJavaElement.PACKAGE_FRAGMENT);
 			char[][] expectedPackageName = null;
 			if (packageFragment != null){
@@ -49,15 +50,21 @@
 			}
 			reportProblems(unit, problemRequestor, monitor);
 			return unit;
+		} catch (OperationCanceledException e) {
+			throw e;
 		} catch(RuntimeException e) { 
 			// avoid breaking other tools due to internal compiler failure (40334)
 			Util.log(e, "Exception occurred during problem detection: "); //$NON-NLS-1$ 
 			throw new JavaModelException(e, IJavaModelStatusConstants.COMPILER_FAILURE);
 		} finally {
-			if (cleanupCU && unit != null) {
+			if (environment != null)
+				environment.monitor = null; // don't hold a reference to this external object
+			if (problemFactory != null)
+				problemFactory.monitor = null; // don't hold a reference to this external object
+			if (cleanupCU && unit != null)
 				unit.cleanUp();
-			}
-			problemFinder.lookupEnvironment.reset();			
+			if (problemFinder != null)
+				problemFinder.lookupEnvironment.reset();			
 		}
 	}
 
