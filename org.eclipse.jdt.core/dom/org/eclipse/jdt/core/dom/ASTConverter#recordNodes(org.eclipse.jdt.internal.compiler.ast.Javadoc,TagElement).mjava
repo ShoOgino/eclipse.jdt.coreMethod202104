@@ -14,14 +14,17 @@
 				}
 				// Replace qualifier to have all nodes recorded
 				if (memberRef.getQualifier() != null) {
-					memberRef.setQualifier(convert((org.eclipse.jdt.internal.compiler.ast.TypeReference) fieldRef.receiver));
+					recordName(memberRef.getQualifier(), fieldRef.receiver);
 				}
 			} else if (node.getNodeType() == ASTNode.METHOD_REF) {
 				MethodRef methodRef = (MethodRef) node;
+				Name name = methodRef.getName();
 				// get compiler node and record nodes
-				org.eclipse.jdt.internal.compiler.ast.ASTNode compilerNode = javadoc.getNodeStartingAt(node.getStartPosition());
+				int start = name.getStartPosition();
+				// get compiler node and record nodes
+				org.eclipse.jdt.internal.compiler.ast.ASTNode compilerNode = javadoc.getNodeStartingAt(start);
 				if (compilerNode != null) {
-					recordNodes(methodRef.getName(), compilerNode);
+					recordNodes(name, compilerNode);
 					recordNodes(methodRef, compilerNode);
 				}
 				// Replace qualifier to have all nodes recorded
@@ -37,31 +40,31 @@
 						}
 					}
 					if (typeRef != null) {
-						methodRef.setQualifier(convert(typeRef));
+						recordName(methodRef.getQualifier(), typeRef);
+					}
+				}
+				// Resolve parameters
+				Iterator parameters = methodRef.parameters().listIterator();
+				while (parameters.hasNext()) {
+					MethodRefParameter param = (MethodRefParameter) parameters.next();
+					org.eclipse.jdt.internal.compiler.ast.Expression expression = (org.eclipse.jdt.internal.compiler.ast.Expression) javadoc.getNodeStartingAt(param.getStartPosition());
+					if (expression != null) {
+						recordNodes(param, expression);
+						if (expression instanceof JavadocArgumentExpression) {
+							JavadocArgumentExpression argExpr = (JavadocArgumentExpression) expression;
+							org.eclipse.jdt.internal.compiler.ast.TypeReference typeRef = argExpr.argument.type;
+							recordNodes(param.getType(), typeRef);
+							if (param.getType().isSimpleType()) {
+								SimpleType type = (SimpleType)param.getType();
+								recordName(type.getName(), typeRef);
+							}
+						}
 					}
 				}
 			} else if (node.getNodeType() == ASTNode.SIMPLE_NAME ||
 					node.getNodeType() == ASTNode.QUALIFIED_NAME) {
 				org.eclipse.jdt.internal.compiler.ast.ASTNode compilerNode = javadoc.getNodeStartingAt(node.getStartPosition());
-				if (compilerNode != null) {
-					if (compilerNode instanceof org.eclipse.jdt.internal.compiler.ast.TypeReference) {
-//						convert((org.eclipse.jdt.internal.compiler.ast.TypeReference) compilerNode);
-						org.eclipse.jdt.internal.compiler.ast.TypeReference typeRef = (org.eclipse.jdt.internal.compiler.ast.TypeReference) compilerNode;
-						Name name = (Name) node;
-						if (name.isQualifiedName()) {
-							SimpleName simpleName = null;
-							while (name.isQualifiedName()) {
-								simpleName = ((QualifiedName) name).getName();
-								recordNodes(simpleName, typeRef);
-								name = ((QualifiedName) name).getQualifier();
-								recordNodes(name, typeRef);
-							}
-//							simpleName = ((QualifiedName) name).getName();
-//							recordNodes(simpleName, typeRef);
-						}
-					}
-					recordNodes(node, compilerNode);
-				}
+				recordName((Name) node, compilerNode);
 			} else if (node.getNodeType() == ASTNode.TAG_ELEMENT) {
 				// resolve member and method references binding
 				recordNodes(javadoc, (TagElement) node);
