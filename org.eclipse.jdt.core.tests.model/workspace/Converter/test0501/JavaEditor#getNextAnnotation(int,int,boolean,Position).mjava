@@ -1,0 +1,84 @@
+	/**
+	 * Returns the annotation closest to the given range respecting the given
+	 * direction. If an annotation is found, the annotations current position
+	 * is copied into the provided annotation position.
+	 * 
+	 * @param offset the region offset
+	 * @param length the region length
+	 * @param forward <code>true</code> for forwards, <code>false</code> for backward
+	 * @param annotationPosition the position of the found annotation
+	 * @return the found annotation
+	 */
+	private Annotation getNextAnnotation(int offset, int length, boolean forward, Position annotationPosition) {
+		
+		Annotation nextAnnotation= null;
+		Position nextAnnotationPosition= null;
+		Annotation containingAnnotation= null;
+		Position containingAnnotationPosition= null;
+		boolean currentAnnotation= false;
+		
+		IDocument document= getDocumentProvider().getDocument(getEditorInput());
+		int endOfDocument= document.getLength(); 
+		int distance= 0;
+		
+		IAnnotationAccess access= getAnnotationAccess();
+		
+		IAnnotationModel model= getDocumentProvider().getAnnotationModel(getEditorInput());
+		Iterator e= new JavaAnnotationIterator(model, true, true);
+		while (e.hasNext()) {
+			Annotation a= (Annotation) e.next();
+			Object type;
+			if (a instanceof IJavaAnnotation)
+				type= ((IJavaAnnotation) a).getAnnotationType();
+			else
+				type= access.getType(a);
+			boolean isNavigationTarget= isNavigationTargetType(type);
+			
+			if ((a instanceof IJavaAnnotation) && ((IJavaAnnotation)a).hasOverlay() || !isNavigationTarget)
+				continue;
+				
+			Position p= model.getPosition(a);
+			if (p == null)
+				continue;
+			
+			if (!(p.includes(offset) || (p.getLength() == 0 && offset == p.offset))) {
+				
+				int currentDistance= 0;
+				
+				if (forward) {
+					currentDistance= p.getOffset() - offset;
+					if (currentDistance < 0)
+						currentDistance= endOfDocument - offset + p.getOffset();
+				} else {
+					currentDistance= offset - p.getOffset();
+					if (currentDistance < 0)
+						currentDistance= offset + endOfDocument - p.getOffset();
+				}						
+										
+				if (nextAnnotation == null || currentDistance < distance) {
+					distance= currentDistance;
+					nextAnnotation= a;
+					nextAnnotationPosition= p;
+				}
+			} else {
+				if (containingAnnotationPosition == null || containingAnnotationPosition.length > p.length) {
+					containingAnnotation= a;
+					containingAnnotationPosition= p;
+					if (length == p.length)
+						currentAnnotation= true;
+				}
+			}
+		}
+		if (containingAnnotationPosition != null && (!currentAnnotation || nextAnnotation == null)) {
+			annotationPosition.setOffset(containingAnnotationPosition.getOffset());
+			annotationPosition.setLength(containingAnnotationPosition.getLength());
+			return containingAnnotation;
+		}
+		if (nextAnnotationPosition != null) {
+			annotationPosition.setOffset(nextAnnotationPosition.getOffset());
+			annotationPosition.setLength(nextAnnotationPosition.getLength());
+		}
+		
+		return nextAnnotation;
+	}
+

@@ -1,0 +1,85 @@
+		/*
+		 * @see java.lang.Runnable#run()
+		 */
+		public void run() {
+			
+			try {
+				
+				if (isCancelled())
+					return;
+				
+				// Find occurrences
+				FindOccurrencesEngine engine= FindOccurrencesEngine.create(getInputJavaElement());
+				List matches= new ArrayList();
+				try {
+					matches= engine.findOccurrences(fSelection.getOffset(), fSelection.getLength());
+				} catch (JavaModelException e) {
+					JavaPlugin.log(e);
+					return;
+				}
+
+				if (matches == null || matches.isEmpty())
+					return;
+				
+				if (isCancelled())
+					return;
+				
+				removeOccurrenceAnnotations();
+				
+				if (isCancelled())
+					return;
+				
+				ITextViewer textViewer= getViewer(); 
+				if (textViewer == null)
+					return;
+				
+				IDocument document= textViewer.getDocument();
+				if (document == null)
+					return;
+				
+				IDocumentProvider documentProvider= getDocumentProvider();
+				if (documentProvider == null)
+					return;
+				
+				IAnnotationModel annotationModel= documentProvider.getAnnotationModel(getEditorInput());
+				if (annotationModel == null)
+					return;
+				
+				// Add occurrence annotations
+				ArrayList annotations= new ArrayList();
+				ArrayList positions= new ArrayList();
+				for (Iterator each= matches.iterator(); each.hasNext();) {
+					
+					if (isCancelled())
+						return; 
+					
+					ASTNode node= (ASTNode) each.next();
+					if (node == null)
+						continue;
+					
+					String message;
+					// Create & add annotation
+					try {
+						message= document.get(node.getStartPosition(), node.getLength());
+					} catch (BadLocationException ex) {
+						// Skip this match
+						continue;
+					}
+					annotations.add(new DefaultAnnotation(SearchUI.SEARCH_MARKER, IMarker.SEVERITY_INFO, true, message));
+					positions.add(new Position(node.getStartPosition(), node.getLength()));
+				}
+				
+				if (isCancelled())
+					return;
+				
+				synchronized (annotationModel) {
+					fOccurrenceAnnotations= annotations;
+					for (int i= 0, size= annotations.size(); i < size; i++)
+						annotationModel.addAnnotation((Annotation) annotations.get(i), (Position) positions.get(i));
+				}
+				
+			} finally {
+				fDocument.removeDocumentListener(this);
+			}
+		}
+
