@@ -1,0 +1,54 @@
+	/*
+	 * Computes the paths of projects and jars that the hierarchy on the given type could contain.
+	 * This is a super set of the project and jar paths once the hierarchy is computed.	 */
+	private IPath[] computeProjectsAndJars(IType type) throws JavaModelException {
+		HashSet set = new HashSet();
+		IPackageFragmentRoot root = (IPackageFragmentRoot)type.getPackageFragment().getParent();
+		if (root.isArchive()) {
+			// add the root
+			set.add(root.getPath());
+			// add all projects that reference this archive and their dependents
+			IPath rootPath = root.getPath();
+			IJavaModel model = JavaModelManager.getJavaModelManager().getJavaModel();
+			IJavaProject[] projects = model.getJavaProjects();
+			HashSet visited = new HashSet();
+			for (int i = 0; i < projects.length; i++) {
+				IJavaProject project = projects[i];
+				IClasspathEntry[] classpath = project.getResolvedClasspath(true);
+				for (int j = 0; j < classpath.length; j++) {
+					if (rootPath.equals(classpath[j].getPath())) {
+						// add the project and its jar pkg fragment roots
+						IPackageFragmentRoot[] roots = project.getPackageFragmentRoots();
+						set.add(project.getPath());
+						for (int k = 0; k < roots.length; k++) {
+							IPackageFragmentRoot pkgFragmentRoot = roots[k];
+							if (pkgFragmentRoot.isArchive()) {
+								set.add(pkgFragmentRoot.getPath());
+							}
+						}
+						// add the dependent projects
+						this.computeDependents(project, set, visited);
+						break;
+					}
+				}
+			}
+		} else {
+			// add all the project's pkg fragment roots
+			IJavaProject project = (IJavaProject)root.getParent();
+			IPackageFragmentRoot[] roots = project.getAllPackageFragmentRoots();
+			for (int i = 0; i < roots.length; i++) {
+				IPackageFragmentRoot pkgFragmentRoot = roots[i];
+				if (pkgFragmentRoot.isArchive()) {
+					set.add(pkgFragmentRoot.getPath());
+				} else {
+					set.add(pkgFragmentRoot.getParent().getPath());
+				}
+			}
+			// add the dependent projects
+			this.computeDependents(project, set, new HashSet());
+		}
+		IPath[] result = new IPath[set.size()];
+		set.toArray(result);
+		return result;
+	}
+
