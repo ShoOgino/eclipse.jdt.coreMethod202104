@@ -7,12 +7,28 @@
 		
 		CompilationResult compilationResult = new CompilationResult(topLevelType.getParent().getElementName().toCharArray(), 1, 1, this.compilerOptions.maxProblemsPerUnit);
 	
-		CompilationUnitDeclaration compilationUnit = new CompilationUnitDeclaration(this.problemReporter, compilationResult, 0);
+		CompilationUnitDeclaration compilationUnit = null;
 	
 		try {
 			// TypeConverter is used instead of SourceTypeConverter because the type
 			// to convert can be a binary type or a source type
-			TypeDeclaration typeDeclaration = TypeConverter.buildTypeDeclaration(type, compilationUnit, compilationResult);
+			TypeDeclaration typeDeclaration = null;
+			if (type instanceof SourceType) {
+				SourceType sourceType = (SourceType) type;
+				ISourceType info = (ISourceType) sourceType.getElementInfo();
+				compilationUnit = SourceTypeConverter.buildCompilationUnit(
+					new ISourceType[] {info},//sourceTypes[0] is always toplevel here
+					SourceTypeConverter.FIELD_AND_METHOD // need field and methods
+					| SourceTypeConverter.MEMBER_TYPE, // need member types
+					// no need for field initialization
+					this.problemReporter,
+					compilationResult);
+				if (compilationUnit.types != null)
+					typeDeclaration = compilationUnit.types[0];
+			} else {
+				compilationUnit = new CompilationUnitDeclaration(this.problemReporter, compilationResult, 0);
+				typeDeclaration = BinaryTypeConverter.buildTypeDeclaration(type, compilationUnit, compilationResult);
+			}
 		
 			if(typeDeclaration != null) {	
 				// build AST from snippet
@@ -20,9 +36,14 @@
 				
 				// merge AST
 				FieldDeclaration[] oldFields = typeDeclaration.fields;
-				FieldDeclaration[] newFields = new FieldDeclaration[oldFields.length + 1];
-				System.arraycopy(oldFields, 0, newFields, 0, oldFields.length);
-				newFields[oldFields.length] = fakeInitializer;
+				FieldDeclaration[] newFields = null;
+				if (oldFields != null) {
+					newFields = new FieldDeclaration[oldFields.length + 1];
+					System.arraycopy(oldFields, 0, newFields, 0, oldFields.length);
+					newFields[oldFields.length] = fakeInitializer;
+				} else {
+					newFields = new FieldDeclaration[] {fakeInitializer};
+				}
 				typeDeclaration.fields = newFields;
 		
 				if(DEBUG) {
