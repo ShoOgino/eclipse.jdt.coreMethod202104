@@ -1,0 +1,37 @@
+/**
+ * Add additional source types
+ * @param sourceTypes
+ * @param packageBinding
+ */
+public void accept(ISourceType[] sourceTypes, PackageBinding packageBinding, AccessRestriction accessRestriction) {
+	// find most enclosing type first (needed when explicit askForType(...) is done 
+	// with a member type (e.g. p.A$B))
+	ISourceType sourceType = sourceTypes[0];
+	while (sourceType.getEnclosingType() != null)
+		sourceType = sourceType.getEnclosingType();
+	
+	// build corresponding compilation unit
+	CompilationResult result = new CompilationResult(sourceType.getFileName(), 1, 1, this.options.maxProblemsPerUnit);
+	CompilationUnitDeclaration unit =
+		SourceTypeConverter.buildCompilationUnit(
+			new ISourceType[] {sourceType}, // ignore secondary types, to improve laziness
+			SourceTypeConverter.MEMBER_TYPE, // need member types
+			// no need for field initialization
+			this.lookupEnvironment.problemReporter, 
+			result);
+		
+	// build bindings
+	if (unit != null) {
+		try {
+			this.lookupEnvironment.buildTypeBindings(unit, accessRestriction);
+			
+			org.eclipse.jdt.core.ICompilationUnit cu = ((SourceTypeElementInfo)sourceType).getHandle().getCompilationUnit();
+			rememberAllTypes(unit, cu, false);
+
+			this.lookupEnvironment.completeTypeBindings(unit, true/*build constructor only*/);
+		} catch (AbortCompilation e) {
+			// missing 'java.lang' package: ignore
+		}
+	}
+}
+

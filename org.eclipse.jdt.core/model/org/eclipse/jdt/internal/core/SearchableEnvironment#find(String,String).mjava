@@ -12,10 +12,43 @@
 				false,
 				NameLookup.ACCEPT_CLASSES | NameLookup.ACCEPT_INTERFACES);
 		if (type != null) {
-			if (type instanceof BinaryType) {
+			boolean isBinary = type instanceof BinaryType;
+			
+			// determine associated access restriction
+			AccessRestriction accessRestriction;
+			if (isBinary) {
+				accessRestriction = (AccessRestriction)this.accessRestrictions.get(this.project);
+				if (accessRestriction == null) {
+					accessRestriction = this.project.getProjectImportRestriction();
+					if (accessRestriction != null) {
+						this.accessRestrictions.put(this.project, accessRestriction);
+					}
+				}
+			} else {
+				JavaProject definingProject = (JavaProject) type.getJavaProject();
+				if (!definingProject.equals(this.project)) {
+					accessRestriction = (AccessRestriction)this.accessRestrictions.get(definingProject);
+					if (accessRestriction == null) {
+						accessRestriction = this.project.getProjectDependencyRestriction(definingProject);
+						if (accessRestriction != null) {
+							this.accessRestrictions.put(definingProject, accessRestriction);
+						}
+					}
+				} else {
+					accessRestriction = null;
+				}
+			}
+			if (accessRestriction != null) {
+				// TODO (philippe) improve char[] <-> String conversions to avoid performing them on the fly
+				char[][] packageChars = CharOperation.splitOn('.', packageName.toCharArray());
+				char[] typeChars = typeName.toCharArray();
+				accessRestriction = accessRestriction.getViolatedRestriction(CharOperation.concatWith(packageChars, typeChars, '/'), null);
+			}
+			
+			// construct name env answer
+			if (isBinary) { // BinaryType
 				try {
-					return new NameEnvironmentAnswer(
-						(IBinaryType) ((BinaryType) type).getElementInfo());
+					return new NameEnvironmentAnswer((IBinaryType) ((BinaryType) type).getElementInfo(), accessRestriction);
 				} catch (JavaModelException npe) {
 					return null;
 				}
@@ -40,7 +73,7 @@
 						if (!otherType.equals(topLevelType) && index < length) // check that the index is in bounds (see https://bugs.eclipse.org/bugs/show_bug.cgi?id=62861)
 							sourceTypes[index++] = otherType;
 					}
-					return new NameEnvironmentAnswer(sourceTypes);
+					return new NameEnvironmentAnswer(sourceTypes, accessRestriction);
 				} catch (JavaModelException npe) {
 					return null;
 				}
