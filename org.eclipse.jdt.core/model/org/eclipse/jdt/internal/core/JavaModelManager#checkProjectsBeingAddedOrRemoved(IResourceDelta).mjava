@@ -2,7 +2,6 @@
 	 * Process the given delta and look for projects being added, opened, closed or
 	 * with a java nature being added or removed.
 	 * Note that projects being deleted are checked in deleting(IProject).
-	 * In this case of a project being added, removes it from the list of projects being deleted.
 	 * In all cases, add the project's dependents to the list of projects to update
 	 * so that the classpath related markers can be updated.
 	 */
@@ -10,6 +9,14 @@
 		IResource resource = delta.getResource();
 		switch (resource.getType()) {
 			case IResource.ROOT :
+				// workaround for bug 15168 circular errors not reported 
+				if (this.javaProjectsCache == null) {
+					try {
+						this.javaProjectsCache = this.getJavaModel().getJavaProjects();
+					} catch (JavaModelException e) {
+					}
+				}
+				
 				IResourceDelta[] children = delta.getAffectedChildren();
 				for (int i = 0, length = children.length; i < length; i++) {
 					this.checkProjectsBeingAddedOrRemoved(children[i]);
@@ -21,29 +28,60 @@
 				//     - if the project is closed, it has already lost its java nature
 				int deltaKind = delta.getKind();
 				if (deltaKind == IResourceDelta.ADDED) {
-					// in case the project was removed then added
-					this.projectsBeingDeleted.remove(resource);
-					
 					// remember project and its dependents
-					this.deltaProcessor.addToProjectsToUpdateWithDependents((IProject)resource);
+					IProject project = (IProject)resource;
+					this.deltaProcessor.addToProjectsToUpdateWithDependents(project);
+					
+					// workaround for bug 15168 circular errors not reported 
+					if (this.deltaProcessor.hasJavaNature(project)) {
+						this.deltaProcessor.addToParentInfo((JavaProject)JavaCore.create(project));
+					}
 
 				} else if (deltaKind == IResourceDelta.CHANGED) {
-					// in case the project was removed then added then changed
-					this.projectsBeingDeleted.remove(resource);
-					
+					IProject project = (IProject)resource;
 					if ((delta.getFlags() & IResourceDelta.OPEN) != 0) {
 						// project opened or closed: remember  project and its dependents
-						this.deltaProcessor.addToProjectsToUpdateWithDependents((IProject)resource);
-					}
-					if ((delta.getFlags() & IResourceDelta.DESCRIPTION) != 0) {
-						IProject project = (IProject)resource;
+						this.deltaProcessor.addToProjectsToUpdateWithDependents(project);
+						
+						// workaround for bug 15168 circular errors not reported 
+						if (project.isOpen()) {
+							if (this.deltaProcessor.hasJavaNature(project)) {
+								this.deltaProcessor.addToParentInfo((JavaProject)JavaCore.create(project));
+							}
+						} else {
+							JavaProject javaProject = (JavaProject)this.getJavaModel().findJavaProject(project);
+							if (javaProject != null) {
+								try {
+									javaProject.close();
+								} catch (JavaModelException e) {
+								}
+								this.deltaProcessor.removeFromParentInfo(javaProject);
+							}
+						}
+					} else if ((delta.getFlags() & IResourceDelta.DESCRIPTION) != 0) {
 						boolean wasJavaProject = this.getJavaModel().findJavaProject(project) != null;
 						boolean isJavaProject = this.deltaProcessor.hasJavaNature(project);
 						if (wasJavaProject != isJavaProject) {
 							// java nature added or removed: remember  project and its dependents
-							this.deltaProcessor.addToProjectsToUpdateWithDependents((IProject)resource);
+							this.deltaProcessor.addToProjectsToUpdateWithDependents(project);
+
+							// workaround for bug 15168 circular errors not reported 
+							if (isJavaProject) {
+								this.deltaProcessor.addToParentInfo((JavaProject)JavaCore.create(project));
+							} else {
+								JavaProject javaProject = (JavaProject)JavaCore.create(project);
+								try {
+									javaProject.close();
+								} catch (JavaModelException e) {
+								}
+								this.deltaProcessor.removeFromParentInfo(javaProject);
+							}
 						}
-					}
+					} else {
+						// workaround for bug 15168 circular errors not reported 
+						// in case the project was removed then added then changed
+						this.deltaProcessor.addToParentInfo((JavaProject)JavaCore.create(project));
+					}					
 				}
 				break;
 		}
