@@ -1,19 +1,22 @@
 	private void rewriteModifiers(ASTNode parent, StructuralPropertyDescriptor property, int offset) {
-		
 		RewriteEvent event= getEvent(parent, property);
 		if (event == null || event.getChangeKind() != RewriteEvent.REPLACED) {
 			return;
 		}
-		
-		int oldModifiers= ((Integer) event.getOriginalValue()).intValue();
-		int newModifiers= ((Integer) event.getNewValue()).intValue();
-		TextEditGroup editGroup= getEditGroup(event);
-		
 		try {
-			int tok= getScanner().readNext(offset, true);
-			int startPos= getScanner().getCurrentStartOffset();
-			int endPos= startPos;
+			int oldModifiers= ((Integer) event.getOriginalValue()).intValue();
+			int newModifiers= ((Integer) event.getNewValue()).intValue();
+			TextEditGroup editGroup= getEditGroup(event);
+		
+			TokenScanner scanner= getScanner();
+
+			int tok= scanner.readNext(offset, false);
+			int startPos= scanner.getCurrentStartOffset();
+			int nextStart= startPos;
 			loop: while (true) {
+				if (TokenScanner.isComment(tok)) {
+					tok= scanner.readNext(true); // next non-comment token
+				}
 				boolean keep= true;
 				switch (tok) {
 					case ITerminalSymbols.TokenNamepublic: keep= Modifier.isPublic(newModifiers); break;
@@ -30,16 +33,16 @@
 					default:
 						break loop;
 				}
-				tok= getScanner().readNext(true);
-				int currPos= endPos;
-				endPos= getScanner().getCurrentStartOffset();
+				tok= getScanner().readNext(false); // include comments
+				int currPos= nextStart;
+				nextStart= getScanner().getCurrentStartOffset();
 				if (!keep) {
-					doTextRemove(currPos, endPos - currPos, editGroup);
+					doTextRemove(currPos, nextStart - currPos, editGroup);
 				}
 			} 
 			int addedModifiers= newModifiers & ~oldModifiers;
 			if (addedModifiers != 0) {
-				if (startPos != endPos) {
+				if (startPos != nextStart) {
 					int visibilityModifiers= addedModifiers & (Modifier.PUBLIC | Modifier.PRIVATE | Modifier.PROTECTED);
 					if (visibilityModifiers != 0) {
 						StringBuffer buf= new StringBuffer();
@@ -50,10 +53,10 @@
 				}
 				StringBuffer buf= new StringBuffer();
 				ASTRewriteFlattener.printModifiers(addedModifiers, buf);
-				doTextInsert(endPos, buf.toString(), editGroup);
+				doTextInsert(nextStart, buf.toString(), editGroup);
 			}
 		} catch (CoreException e) {
-			// ignore
-		}		
+			handleException(e);
+		}
 	}
 
