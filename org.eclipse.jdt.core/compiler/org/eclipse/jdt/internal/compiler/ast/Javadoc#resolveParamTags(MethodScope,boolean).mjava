@@ -3,15 +3,24 @@
 	 */
 	private void resolveParamTags(MethodScope methScope, boolean reportMissing) {
 		AbstractMethodDeclaration md = methScope.referenceMethod();
-		int paramTagsSize = parameters == null ? 0 : parameters.length;
-		int argumentsSize = md.arguments == null ? 0 : md.arguments.length;
+		int paramTagsSize = this.parameters == null ? 0 : this.parameters.length;
 
+		// If no referenced method (field initializer for example) then report a problem for each param tag
+		if (md == null) {
+			for (int i = 0; i < paramTagsSize; i++) {
+				JavadocSingleNameReference param = this.parameters[i];
+				methScope.problemReporter().javadocUnexpectedTag(param.tagSourceStart, param.tagSourceEnd);
+			}
+			return;
+		}
+		
 		// If no param tags then report a problem for each method argument
+		int argumentsSize = md.arguments == null ? 0 : md.arguments.length;
 		if (paramTagsSize == 0) {
 			if (reportMissing) {
 				for (int i = 0; i < argumentsSize; i++) {
 					Argument arg = md.arguments[i];
-					methScope.problemReporter().javadocMissingParamTag(arg);
+					methScope.problemReporter().javadocMissingParamTag(arg, md.binding.modifiers);
 				}
 			}
 		} else {
@@ -20,14 +29,14 @@
 
 			// Scan all @param tags
 			for (int i = 0; i < paramTagsSize; i++) {
-				JavadocSingleNameReference param = parameters[i];
+				JavadocSingleNameReference param = this.parameters[i];
 				param.resolve(methScope);
 				if (param.binding != null && param.binding.isValidBinding()) {
 					// Verify duplicated tags
 					boolean found = false;
 					for (int j = 0; j < maxBindings && !found; j++) {
 						if (bindings[j] == param.binding) {
-							methScope.problemReporter().javadocInvalidParamName(param, true);
+							methScope.problemReporter().javadocDuplicatedParamTag(param, md.binding.modifiers);
 							found = true;
 						}
 					}
@@ -49,7 +58,7 @@
 						}
 					}
 					if (!found) {
-						methScope.problemReporter().javadocMissingParamTag(arg);
+						methScope.problemReporter().javadocMissingParamTag(arg, md.binding.modifiers);
 					}
 				}
 			}
