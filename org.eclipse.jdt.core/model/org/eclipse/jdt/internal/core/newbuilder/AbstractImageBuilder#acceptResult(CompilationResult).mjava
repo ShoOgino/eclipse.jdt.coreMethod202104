@@ -1,0 +1,50 @@
+public void acceptResult(CompilationResult result) {
+	// In Batch mode, we write out the class files, hold onto the dependency info
+	// & additional types and report problems.
+
+	// In Incremental mode, when writing out a class file we need to compare it
+	// against the previous file, remembering if structural changes occured.
+	// Before reporting the new problems, we need to update the problem count &
+	// remove the old problems. Plus delete additional class files that no longer exist.
+
+// should CompilationResult keep this as a String? Or convert WorkQueue to hold onto char[]?
+	char[] fileId = result.getFileName();
+//	CharOperation.replace(fileId, '\\', '/');
+	String filename = new String(fileId);
+	// this is the full filesystem source path 'd:/xyz/eclipse/Test/p1/p2/A.java'
+	if (!workQueue.isCompiled(filename)) {
+		try {
+			workQueue.finished(filename);
+	
+			ICompilationUnit compilationUnit = result.getCompilationUnit();
+			ClassFile[] classFiles = result.getClassFiles();
+			int length = classFiles.length;
+			ArrayList otherTypeNames = new ArrayList(length);
+			char[] mainTypeName = compilationUnit.getMainTypeName(); // may not match any produced class file
+			for (int i = 0; i < length; i++) {
+				ClassFile classFile = classFiles[i];
+				char[][] compoundName = classFile.getCompoundName();
+				char[] typeName = compoundName[compoundName.length - 1];
+				if (CharOperation.equals(mainTypeName, typeName)) {
+					writeClassFile(classFile, false);
+				} else {
+					boolean isSecondaryType = !CharOperation.contains('$', typeName);
+					otherTypeNames.add(writeClassFile(classFile, isSecondaryType));
+				}
+			}
+			newState.recordDependencies(fileId, result.qualifiedReferences, result.simpleNameReferences);
+			updateProblemsFor(result);
+			if (otherTypeNames.isEmpty()) {
+				finishedWith(fileId, new char[0][]);
+			} else {
+				char[][] additionalTypeNames = new char[otherTypeNames.size()][];
+				otherTypeNames.toArray(additionalTypeNames);
+				finishedWith(fileId, additionalTypeNames);
+			}
+			notifier.compiled(compilationUnit);
+		} catch (CoreException e) {
+			throw internalException(e);
+		}
+	}
+}
+

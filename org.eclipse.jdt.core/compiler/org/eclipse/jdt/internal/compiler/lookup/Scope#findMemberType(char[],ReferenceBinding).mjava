@@ -1,15 +1,17 @@
 	// Internal use only
-	public ReferenceBinding findMemberType(
-		char[] typeName,
-		ReferenceBinding enclosingType) {
+	public ReferenceBinding findMemberType(char[] typeName, ReferenceBinding enclosingType) {
 		if ((enclosingType.tagBits & HasNoMemberTypes) != 0)
 			return null; // know it has no member types (nor inherited member types)
 
 		SourceTypeBinding enclosingSourceType = enclosingSourceType();
 		PackageBinding currentPackage = getCurrentPackage();
+// replaces call to addTypeReference
+		compilationUnitScope().recordReference(enclosingType.compoundName, typeName);
 		compilationUnitScope().addTypeReference(enclosingType);
 		ReferenceBinding memberType = enclosingType.getMemberType(typeName);
 		if (memberType != null) {
+// was the enclosing type not recorded 3 lines above?
+			compilationUnitScope().recordTypeReference(memberType); // to record supertypes
 			compilationUnitScope().addTypeReference(memberType);
 			if (enclosingSourceType == null
 				? memberType.canBeSeenBy(currentPackage)
@@ -18,6 +20,7 @@
 			else
 				return new ProblemReferenceBinding(typeName, NotVisible);
 		}
+
 		// collect all superinterfaces of receiverType until the memberType is found in a supertype
 		ReferenceBinding currentType = enclosingType;
 		ReferenceBinding[][] interfacesToVisit = null;
@@ -43,17 +46,21 @@
 			if ((currentType = currentType.superclass()) == null)
 				break;
 
+// replaces call to addTypeReference
+			compilationUnitScope().recordReference(currentType.compoundName, typeName);
 			compilationUnitScope().addTypeReference(currentType);
 			if ((memberType = currentType.getMemberType(typeName)) != null) {
+// was the superclass not recorded 3 lines above?
+				compilationUnitScope().recordTypeReference(memberType); // to record supertypes
 				compilationUnitScope().addTypeReference(memberType);
 				keepLooking = false;
 				if (enclosingSourceType == null
 					? memberType.canBeSeenBy(currentPackage)
 					: memberType.canBeSeenBy(enclosingType, enclosingSourceType)) {
-					if (visibleMemberType == null)
-						visibleMemberType = memberType;
-					else
-						return new ProblemReferenceBinding(typeName, Ambiguous);
+						if (visibleMemberType == null)
+							visibleMemberType = memberType;
+						else
+							return new ProblemReferenceBinding(typeName, Ambiguous);
 				} else {
 					notVisible = true;
 				}
@@ -69,8 +76,12 @@
 					if ((anInterface.tagBits & InterfaceVisited) == 0) {
 						// if interface as not already been visited
 						anInterface.tagBits |= InterfaceVisited;
+// replaces call to addTypeReference
+						compilationUnitScope().recordReference(anInterface.compoundName, typeName);
 						compilationUnitScope().addTypeReference(anInterface);
 						if ((memberType = anInterface.getMemberType(typeName)) != null) {
+// was the interface not recorded 3 lines above?
+							compilationUnitScope().recordTypeReference(memberType); // to record supertypes
 							compilationUnitScope().addTypeReference(memberType);
 							if (visibleMemberType == null) {
 								visibleMemberType = memberType;
@@ -94,6 +105,7 @@
 					}
 				}
 			}
+
 			// bit reinitialization
 			for (int i = 0; i <= lastPosition; i++) {
 				ReferenceBinding[] interfaces = interfacesToVisit[i];

@@ -1,0 +1,45 @@
+NameEnvironmentAnswer findClass(char[] className, char[][] packageName) {
+	String filename = new String(className);
+	String sourceFilename = filename + ".java"; //$NON-NLS-1$
+	String binaryFilename = filename + ".class"; //$NON-NLS-1$
+
+	if (!exists(binaryPath, binaryFilename, packageName)) {
+		if (!exists(sourcePath, sourceFilename, packageName)) return null;
+		String fullName = sourcePath + NameEnvironment.assembleName(sourceFilename, packageName, '/');
+		return new NameEnvironmentAnswer(new CompilationUnit(null, fullName));
+	}
+
+	if (!exists(sourcePath, sourceFilename, packageName)) {
+		// ask builder for the matching source filename for this type
+		sourceFilename = findSourceFilenameFor(className, packageName);
+		if (sourceFilename == null) {
+			// return class file if a matching source filename doesn't exist... EXTRA class file case
+			try {
+				return new NameEnvironmentAnswer(
+					ClassFileReader.read(binaryPath + NameEnvironment.assembleName(binaryFilename, packageName, '/')));
+			} catch (Exception e) {
+				return null;
+			}
+		}
+		if (exists(sourcePath, sourceFilename, packageName)) {
+			// return the source file which contains this secondary type
+			String fullName = sourcePath + NameEnvironment.assembleName(sourceFilename, packageName, '/');
+			return new NameEnvironmentAnswer(new CompilationUnit(null, fullName));
+		}
+		return null; // return null if a source filename is known but its not in this classpath entry
+	}
+
+	String fullSourceName = sourcePath + NameEnvironment.assembleName(sourceFilename, packageName, '/');
+	String fullBinaryName = binaryPath + NameEnvironment.assembleName(binaryFilename, packageName, '/');
+	long sourceModified = new File(fullSourceName).lastModified();
+	long binaryModified = new File(fullBinaryName).lastModified();
+	if (binaryModified > sourceModified) {
+		try {
+			return new NameEnvironmentAnswer(
+				ClassFileReader.read(fullBinaryName));
+		} catch (Exception e) {
+		}
+	}
+	return new NameEnvironmentAnswer(new CompilationUnit(null, fullSourceName));
+}
+

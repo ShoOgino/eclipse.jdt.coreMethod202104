@@ -1,0 +1,41 @@
+/* Compile the given elements, adding more elements to the work queue 
+* if they are affected by the changes.
+*/
+protected void compile(String[] filenames, String[] initialTypeNames) {
+	nameEnvironment.initialTypeNames(initialTypeNames);
+
+	int i = 0;
+	int toDo = filenames.length;
+	boolean inFirstPass = true;
+	while (i < toDo) {
+		ArrayList doNow = new ArrayList(Math.min(toDo, MAX_AT_ONCE));
+		while (i < toDo && doNow.size() < MAX_AT_ONCE) {
+			String filename = filenames[i++];
+			// Although it needed compiling when this method was called, it may have
+			// already been compiled when it was referenced by another unit.
+			if (inFirstPass || workQueue.isWaiting(filename)) {
+				CompilationUnit compUnit = new CompilationUnit(null, filename);
+				doNow.add(compUnit);
+// WHY is there no notification about which files are about to compiled?
+// Would the names go by too fast?
+			}
+		}
+		inFirstPass = false;
+		notifier.checkCancel();
+		if (doNow.size() > 0) {
+			CompilationUnit[] toCompile = new CompilationUnit[doNow.size()];
+			doNow.toArray(toCompile);
+			try {
+				inCompiler = true;
+				compiler.compile(toCompile);
+			} finally {
+				inCompiler = false;
+			}
+
+			// Check for cancel immediately after a compile, because the compiler may
+			// have been cancelled but without propagating the correct exception
+			notifier.checkCancel();
+		}
+	}
+}
+
