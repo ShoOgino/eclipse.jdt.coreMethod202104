@@ -1,0 +1,74 @@
+	/*
+	 * Resolve @throws/@exception tags while method scope
+	 */
+	private void resolveThrowsTags(MethodScope methScope) {
+		AbstractMethodDeclaration md = methScope.referenceMethod();
+		int throwsTagsNbre = thrownExceptions == null ? 0 : thrownExceptions.length;
+		int thrownExceptionSize = md.thrownExceptions == null ? 0 : md.thrownExceptions.length;
+
+		// If no throws tags then report a problem for each method thrown exception
+		if (throwsTagsNbre == 0) {
+			for (int i = 0; i < thrownExceptionSize; i++) {
+				TypeReference typeRef = md.thrownExceptions[i];
+				if (typeRef.resolvedType != null) { // flag only valid class name
+					methScope.problemReporter().annotationMissingThrowsTag(typeRef);
+				}
+			}
+		} else {
+			int maxRef = 0;
+			TypeReference[] typeReferences = new TypeReference[throwsTagsNbre];
+
+			// Scan all @throws tags
+			for (int i = 0; i < throwsTagsNbre; i++) {
+				TypeReference typeRef = thrownExceptions[i];
+				typeRef.resolve(methScope);
+				TypeBinding typeBinding = typeRef.resolvedType;
+
+				if (typeBinding.isValidBinding() && typeBinding.isClass()) {
+					// Verify duplicated tags
+					boolean found = false;
+					for (int j = 0; j < maxRef && !found; j++) {
+						if (typeReferences[j].resolvedType == typeBinding) {
+							methScope.problemReporter().annotationInvalidThrowsClassName(typeRef, true);
+							found = true;
+						}
+					}
+					if (!found) {
+						typeReferences[maxRef++] = typeRef;
+					}
+				}
+			}
+
+			// Look for undocumented thrown exception
+			for (int i = 0; i < thrownExceptionSize; i++) {
+				TypeReference exception = md.thrownExceptions[i];
+				boolean found = false;
+				for (int j = 0; j < maxRef && !found; j++) {
+					if (typeReferences[j] != null) {
+						TypeBinding typeBinding = typeReferences[j].resolvedType;
+						if (exception.resolvedType == typeBinding) {
+							found = true;
+							typeReferences[j] = null;
+						}
+					}
+				}
+				if (!found) {
+					if (exception.resolvedType != null) { // flag only valid class name
+						methScope.problemReporter().annotationMissingThrowsTag(exception);
+					}
+				}
+			}
+
+			// Verify that additional @throws tags are unchecked exception
+			for (int i = 0; i < maxRef; i++) {
+				TypeReference typeRef = typeReferences[i];
+				if (typeRef != null) {
+					if (!typeRef.resolvedType.isCompatibleWith(methScope.getJavaLangRuntimeException())
+							&& !typeRef.resolvedType.isCompatibleWith(methScope.getJavaLangError())) {
+						methScope.problemReporter().annotationInvalidThrowsClassName(typeRef, false);
+					}
+				}
+			}
+		}
+	}
+

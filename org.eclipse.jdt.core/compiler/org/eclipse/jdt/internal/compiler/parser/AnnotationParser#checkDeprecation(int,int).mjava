@@ -9,9 +9,17 @@
 		boolean foundDeprecated = false;
 		try {
 			this.source = this.sourceParser.scanner.source;
-			if (this.sourceParser.options.checkAnnotation) {
+			//this.problemReporter = sourceParser.problemReporter();
+			if (this.checkAnnotation) {
 				this.annotation = new Annotation(annotationStart, annotationEnd);
-				this.identifierPtr = -1;
+				this.astLengthPtr = -1;
+				this.astPtr = -1;
+				//if (this.scanner.source == null) {
+				//	this.scanner.setSource(this.source);
+				//}
+				//this.scanner.setSource(CharOperation.subarray(this.source, annotationStart, annotationEnd+1));
+				//this.source = this.scanner.source;
+				this.currentTokenType = -1;
 			} else {
 				this.annotation = null;
 			} 
@@ -24,11 +32,13 @@
 				int lineStart = line == firstLineNumber 
 						? annotationStart + 3 		// skip leading /**
 						:  this.sourceParser.scanner.getLineStart(line);
-				this.index[0] = lineStart;
-				int lineEnd = line == lastLineNumber
+				//lineStart -= annotationStart;
+				this.index = lineStart;
+				this.lineEnd = line == lastLineNumber
 						? annotationEnd - 2 		// remove trailing */
 						:  this.sourceParser.scanner.getLineEnd(line);
-				while (this.index[0] < lineEnd) {
+				//this.lineEnd -= annotationStart;
+				while (this.index < this.lineEnd) {
 					char nextCharacter = readChar(); // consider unicodes
 					switch(nextCharacter) {
 						case '@' :
@@ -52,16 +62,20 @@
 								}
 								continue nextLine;
 							} 
-							this.scanner.resetTo(this.index[0], lineEnd);
+							this.scanner.resetTo(this.index, this.lineEnd);
+							this.currentTokenType = -1; // flush token cache at line begin
 							try {
-								switch (this.scanner.getNextToken()) {
+								int tk = readConsumeToken();
+								this.tagSourceStart = this.scanner.getCurrentTokenStartPosition();
+								this.tagSourceEnd = this.scanner.getCurrentTokenEndPosition();
+								switch (tk) {
 									case  TerminalTokens.TokenNameIdentifier :
 										char[] tag = this.scanner.getCurrentIdentifierSource();
 										if (CharOperation.equals(tag, TAG_DEPRECATED)) {
 											foundDeprecated = true;
 										} else if (CharOperation.equals(tag, TAG_PARAM)) {
 											parseParam();
-										} else if (CharOperation.equals(tag, TAG_THROWS) || CharOperation.equals(tag, TAG_EXCEPTION)) {
+										} else if (CharOperation.equals(tag, TAG_EXCEPTION)) {
 											parseThrows();
 										} else if (CharOperation.equals(tag, TAG_SEE)) {
 											parseSee();
@@ -69,9 +83,13 @@
 										break;
 									case TerminalTokens.TokenNamereturn :
 										parseReturn();
+										break;
+									case TerminalTokens.TokenNamethrows :
+										parseThrows();
+										break;
 								}
 							} catch (InvalidInputException e) {
-	 							// ignore
+	 							consumeToken();
 							}
 							continue nextLine;
 						case '*' :
@@ -82,6 +100,7 @@
 				}
 			}
 		} finally {
+			updateAnnotation();
 			this.source = null; // release source as soon as finished
 		}		
 		return foundDeprecated;
