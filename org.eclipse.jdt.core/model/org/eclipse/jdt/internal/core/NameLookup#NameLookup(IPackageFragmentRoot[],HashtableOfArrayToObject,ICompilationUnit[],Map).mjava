@@ -5,11 +5,36 @@
 			this.unitsToLookInside = new HashMap();
 			HashSet visited = new HashSet();
 			for (int i = 0, length = workingCopies.length; i < length; i++) {
-				ICompilationUnit unitToLookInside = workingCopies[i];
-				ICompilationUnit original = unitToLookInside.getPrimary();
-				this.unitsToLookInside.put(original, unitToLookInside);
+				ICompilationUnit workingCopy = workingCopies[i];
+				PackageFragment pkg = (PackageFragment) workingCopy.getParent();
+				HashMap typeMap = (HashMap) this.unitsToLookInside.get(pkg);
+				if (typeMap == null) {
+					typeMap = new HashMap();
+					this.unitsToLookInside.put(pkg, typeMap);
+				}
+				try {
+					IType[] types = workingCopy.getTypes();
+					for (int j = 0, typeLength = types.length; j < typeLength; j++) {
+						IType type = types[j];
+						String typeName = type.getElementName();
+						Object existing = typeMap.get(typeName);
+						if (existing == null) {
+							typeMap.put(typeName, type);
+						} else if (existing instanceof IType) {
+							typeMap.put(typeName, new IType[] {(IType) existing, type});
+						} else {
+							IType[] existingTypes = (IType[]) existing;
+							int existingTypeLength = existingTypes.length;
+							System.arraycopy(existingTypes, 0, existingTypes = new IType[existingTypeLength+1], 0, existingTypeLength);
+							existingTypes[length] = type;
+							typeMap.put(typeName, existingTypes);
+						}
+					}
+				} catch (JavaModelException e) {
+					// working copy doesn't exist -> ignore
+				}
 				
-				PackageFragment pkg = (PackageFragment) unitToLookInside.getParent();
+				// add root of package fragment to cache
 				IPackageFragmentRoot root = (IPackageFragmentRoot) pkg.getParent();
 				if (visited.contains(root)) continue;
 				String[] pkgName = pkg.names;
