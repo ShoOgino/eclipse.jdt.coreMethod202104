@@ -12,13 +12,13 @@
 	public Object[] getEmulationPath(
 			ReferenceBinding targetEnclosingType, 
 			boolean onlyExactMatch,
-			boolean ignoreEnclosingArgInConstructorCall) {
+			boolean denyEnclosingArgInConstructorCall) {
 				
 		MethodScope currentMethodScope = this.methodScope();
 		SourceTypeBinding sourceType = currentMethodScope.enclosingSourceType();
 
 		// use 'this' if possible
-		if (!currentMethodScope.isConstructorCall && !currentMethodScope.isStatic) {
+		if (!currentMethodScope.isStatic && !currentMethodScope.isConstructorCall) {
 			if (sourceType == targetEnclosingType || (!onlyExactMatch && sourceType.findSuperTypeErasingTo(targetEnclosingType) != null)) {
 				return EmulationPathToImplicitThis; // implicit this is good enough
 			}
@@ -37,7 +37,7 @@
 			SyntheticArgumentBinding syntheticArg;
 			if ((syntheticArg = ((NestedTypeBinding) sourceType).getSyntheticArgument(targetEnclosingType, onlyExactMatch)) != null) {
 				// reject allocation and super constructor call
-				if (ignoreEnclosingArgInConstructorCall 
+				if (denyEnclosingArgInConstructorCall
 						&& currentMethodScope.isConstructorCall 
 						&& (sourceType == targetEnclosingType || (!onlyExactMatch && sourceType.findSuperTypeErasingTo(targetEnclosingType) != null))) {
 					return NoEnclosingInstanceInConstructorCall;
@@ -50,6 +50,20 @@
 		if (currentMethodScope.isStatic) {
 			return NoEnclosingInstanceInStaticContext;
 		}
+		if (sourceType.isAnonymousType()) {
+			ReferenceBinding enclosingType = sourceType.enclosingType();
+			if (enclosingType.isNestedType()) {
+				NestedTypeBinding nestedEnclosingType = (NestedTypeBinding) enclosingType;
+				SyntheticArgumentBinding enclosingArgument = nestedEnclosingType.getSyntheticArgument(nestedEnclosingType.enclosingType(), onlyExactMatch);
+				if (enclosingArgument != null) {
+					FieldBinding syntheticField = sourceType.getSyntheticField(enclosingArgument);
+					if (syntheticField != null) {
+						if (syntheticField.type == targetEnclosingType || (!onlyExactMatch && ((ReferenceBinding)syntheticField.type).findSuperTypeErasingTo(targetEnclosingType) != null))
+							return new Object[] { syntheticField };
+					}
+				}
+			}
+		}
 		FieldBinding syntheticField = sourceType.getSyntheticField(targetEnclosingType, onlyExactMatch);
 		if (syntheticField != null) {
 			if (currentMethodScope.isConstructorCall){
@@ -57,6 +71,7 @@
 			}
 			return new Object[] { syntheticField };
 		}
+
 		// could be reached through a sequence of enclosing instance link (nested members)
 		Object[] path = new Object[2]; // probably at least 2 of them
 		ReferenceBinding currentType = sourceType.enclosingType();
