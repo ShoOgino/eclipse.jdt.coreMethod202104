@@ -1,0 +1,122 @@
+	/*
+	 * Scan full source workspace files which are larger than a given limit of characters.
+	 * Two kind of scan is currently possible:
+	 * 	- 0: only scan all tokens
+	 * 	- 1: scan all tokens and get each identifier
+	 */
+	private void scanFiles(final long limit, int kind) throws InvalidInputException, IOException {
+		IWorkspace workspace = ResourcesPlugin.getWorkspace();
+		String wkspPath = workspace.getRoot()
+			.getLocation()
+			.toFile()
+			.getCanonicalPath();
+
+		// Get files
+		File wkspFile = new File(wkspPath);
+		File[] wkspFiles = getAllFiles(wkspFile, new FileFilter() {
+			public boolean accept(File pathname) {
+				String name = pathname.getName();
+				String path = pathname.getAbsolutePath().toLowerCase();
+				long length = pathname.length();
+				return !name.startsWith(".") && !name.equalsIgnoreCase("cvs") && ((pathname.isDirectory() || length >= limit && path.endsWith(".java")));
+			}
+		});
+		if (DEBUG) {
+			System.out.println("Number of files over "+limit+" chars in "+wkspPath+": " + wkspFiles.length);
+		}
+
+		// loop for time measuring
+		Scanner scanner = new Scanner(true, true, true, ClassFileConstants.JDK1_4, null, null, false);
+		int tokenCount = 0;
+		long timeMax = 0;
+		long timeMin = Integer.MAX_VALUE;
+		String fileMin = null;
+		String fileMax = null;
+		int fileCount = 0;
+		long size = 0;
+		for (int i = 0, max = wkspFiles.length; i < max; i++) {
+
+			// Get source out of time measuring
+			char[] source = Util.getFileCharContent(wkspFiles[i], null);
+			int sourceLength = source.length;
+			fileCount++;
+			scanner.setSource(source);
+			long start = 0;
+			if (DEBUG) {
+				start = System.currentTimeMillis();
+				System.out.println("	- file "+wkspFiles[i].getName()+":");
+			}
+			
+			// Repeat scan to have a meaningful times to measure
+			int repeat = (int) limit/200;
+			if (DEBUG)
+				System.out.println("	  repeat="+repeat);
+			startMeasuring();
+			for (int l = 0; l < repeat; l++) {
+				scanner.resetTo(0, sourceLength);
+				tokenize: while (true) {
+					int token = scanner.getNextToken();
+					switch (kind) {
+						case 0: // first case: only read tokens
+							switch (token) {
+								case TerminalTokens.TokenNameEOF:
+									break tokenize;
+							}
+							break;
+						case 1: // second case: read tokens + create ids
+							switch (token) {
+								case TerminalTokens.TokenNameEOF:
+									break tokenize;
+								case TerminalTokens.TokenNameIdentifier:
+									char[] c = scanner.getCurrentIdentifierSource();
+									size += c.length;
+									break;
+							}
+							break;
+					}
+					tokenCount++;
+				}
+			}
+			stopMeasuring();
+			
+			// Warn if measure time is not enough while debugging
+			if (DEBUG) {
+				long time = System.currentTimeMillis() - start;
+				if (time < TIME_THRESHOLD) {
+					System.err.println("	  length="+sourceLength+", time="+time);
+				} else {
+					System.out.println("	  length="+sourceLength+", time="+time);
+				}
+				if (time<timeMin) {
+					timeMin = time;
+					fileMin = wkspFiles[i].toString();
+				}
+				if (time>timeMax) {
+					timeMax = time;
+					fileMax = wkspFiles[i].toString();
+				}
+			}
+		}
+		if (DEBUG) {
+			System.out.println("There was "+fileCount+" over "+limit+" characters:");
+			System.out.println("	Time min="+timeMin+" for "+fileMin);
+			System.out.println("	Time max="+timeMax+" for "+fileMax);
+		}
+
+		// dump measure
+		commitMeasurements();
+		assertPerformance();
+
+		// Debug
+		if (DEBUG) {
+			switch (kind) {
+				case 0:
+					System.out.println(tokenCount + " tokens read.");
+					break;
+				case 1:
+					System.out.print(tokenCount + " tokens were read ("+size+" characters)");
+					break;
+			}
+		}
+	}
+
