@@ -1,0 +1,112 @@
+	/*
+	 * Returns an element handle corresponding to the given AstNode in the given parsed unit.
+	 * Returns null if the given AstNode could not be found.
+	 */
+	public IJavaElement createElement(final AstNode toBeFound, CompilationUnitDeclaration parsedUnit, final Openable openable) {
+		class EndVisit extends RuntimeException {
+			// marker to stop traversing ast
+		}
+		class Visitor extends AbstractSyntaxTreeVisitorAdapter {
+			IJavaElement currentElement = openable;
+			HashSet knownElements = new HashSet();
+			
+			public boolean visit(AnonymousLocalTypeDeclaration node, BlockScope scope) {
+				currentElement = updateOccurenceCount(((IMember)currentElement).getType("", 1)); //$NON-NLS-1$
+				if (node == toBeFound) throw new EndVisit();
+				return true;
+			}
+			public void endVisit(AnonymousLocalTypeDeclaration node, BlockScope scope) {
+				currentElement = currentElement.getParent();
+			}
+			public boolean visit(ConstructorDeclaration node, ClassScope scope) {
+				currentElement = ((IType)currentElement).getMethod(currentElement.getElementName(), getParameterTypeSignatures(node));
+				if (node == toBeFound) throw new EndVisit();
+				return true;
+			}
+			public void endVisit(ConstructorDeclaration node, ClassScope scope) {
+				currentElement = currentElement.getParent();
+			}
+
+			public boolean visit(FieldDeclaration node, MethodScope scope) {
+				currentElement = ((IType)currentElement).getField(currentElement.getElementName());
+				if (node == toBeFound) throw new EndVisit();
+				return true;
+			}
+			public void endVisit(FieldDeclaration node, MethodScope scope) {
+				currentElement = currentElement.getParent();
+			}
+
+			public boolean visit(Initializer node, MethodScope scope) {
+				currentElement = updateOccurenceCount(((IType)currentElement).getInitializer(1));
+				if (node == toBeFound) throw new EndVisit();
+				return true;
+			}
+			public void endVisit(Initializer node, MethodScope scope) {
+				currentElement = currentElement.getParent();
+			}
+
+			public boolean visit(LocalTypeDeclaration node, BlockScope scope) {
+				currentElement = updateOccurenceCount(((IMember)currentElement).getType(new String(node.name), 1));
+				if (node == toBeFound) throw new EndVisit();
+				return true;
+			}
+			public void endVisit(LocalTypeDeclaration node, BlockScope scope) {
+				currentElement = currentElement.getParent();
+			}
+
+			public boolean visit(MemberTypeDeclaration node, ClassScope scope) {
+				currentElement = ((IType)currentElement).getType(new String(node.name));
+				if (node == toBeFound) throw new EndVisit();
+				return true;
+			}
+			public void endVisit(MemberTypeDeclaration node, ClassScope scope) {
+				currentElement = currentElement.getParent();
+			}
+
+			public boolean visit(MethodDeclaration node, ClassScope scope) {
+				currentElement = ((IType)currentElement).getMethod(new String(node.selector), getParameterTypeSignatures(node));
+				if (node == toBeFound) throw new EndVisit();
+				return true;
+			}
+			public void endVisit(MethodDeclaration node, ClassScope scope) {
+				currentElement = currentElement.getParent();
+			}
+
+			public boolean visit(TypeDeclaration node, CompilationUnitScope scope) {
+				currentElement = ((ICompilationUnit)currentElement).getType(new String(node.name));
+				if (node == toBeFound) throw new EndVisit();
+				return true;
+			}
+			public void endVisit(TypeDeclaration node, CompilationUnitScope scope) {
+				currentElement = currentElement.getParent();
+			}
+
+			private String[] getParameterTypeSignatures(AbstractMethodDeclaration method) {
+				Argument[] args = method.arguments;
+				if (args != null) {
+					int length = args.length;
+					String[] signatures = new String[length];
+					for (int i = 0; i < args.length; i++) {
+						Argument arg = args[i];
+						signatures[i] = org.eclipse.jdt.internal.core.Util.typeSignature(arg.type);
+					}
+					return signatures;
+				}
+				return new String[0];
+			}
+			private IJavaElement updateOccurenceCount(IJavaElement element) {
+				while (knownElements.contains(element)) {
+					((JavaElement)element).occurrenceCount++;
+				}
+				return element;
+			}
+		}
+		Visitor visitor = new Visitor();
+		try {
+			parsedUnit.traverse(visitor, parsedUnit.scope);
+		} catch (EndVisit e) {
+			return visitor.currentElement;
+		}
+		return null;
+	}
+
