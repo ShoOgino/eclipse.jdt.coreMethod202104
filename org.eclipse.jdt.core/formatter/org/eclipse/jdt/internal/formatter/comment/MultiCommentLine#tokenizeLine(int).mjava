@@ -1,0 +1,90 @@
+	/*
+	 * @see org.eclipse.jdt.internal.corext.text.comment.CommentLine#tokenizeLine(int)
+	 */
+	protected void tokenizeLine(int line) {
+
+		int offset= 0;
+		int index= offset;
+
+		final CommentRegion parent= getParent();
+		final CommentRange range= getFirst();
+		final int begin= range.getOffset();
+
+		final String content= parent.getText(begin, range.getLength());
+		final int length= content.length();
+
+		while (offset < length && Character.isWhitespace(content.charAt(offset)))
+			offset++;
+
+		CommentRange result= null;
+		if (offset >= length && !parent.isClearLines() && (line > 0 && line < parent.getSize() - 1)) {
+
+			result= new CommentRange(begin, 0);
+			result.setAttribute(COMMENT_BLANKLINE);
+			result.setAttribute(COMMENT_FIRST_TOKEN);
+
+			parent.append(result);
+		}
+
+		int attribute= COMMENT_FIRST_TOKEN | COMMENT_STARTS_WITH_RANGE_DELIMITER;
+		while (offset < length) {
+
+			while (offset < length && Character.isWhitespace(content.charAt(offset))) {
+				offset++;
+				attribute |= COMMENT_STARTS_WITH_RANGE_DELIMITER;
+			}
+
+			index= offset;
+
+			if (index < length) {
+
+				if (content.charAt(index) == HTML_TAG_PREFIX) {
+
+					// in order to avoid recognizing any < in a comment, even those which are part of e.g.
+					// java source code, we validate the tag content to be one of the recognized
+					// tags (structural, breaks, pre, code).
+					int tag= ++index;
+					while (index < length && content.charAt(index) != HTML_TAG_POSTFIX && content.charAt(index) != HTML_TAG_PREFIX)
+						index++;
+
+					if (index < length && content.charAt(index) == HTML_TAG_POSTFIX && isValidTag(content.substring(tag, index))) {
+						index++;
+						attribute |= COMMENT_HTML; // only set html attribute if postfix found
+					} else {
+						// no tag - do the usual thing from the original offset
+						index= tag;
+						while (index < length && !Character.isWhitespace(content.charAt(index)) && content.charAt(index) != HTML_TAG_PREFIX && !content.startsWith(LINK_TAG_PREFIX, index))
+							index++;
+					}
+
+
+				} else if (content.startsWith(LINK_TAG_PREFIX, index)) {
+
+					while (index < length && content.charAt(index) != LINK_TAG_POSTFIX)
+						index++;
+
+					if (index < length && content.charAt(index) == LINK_TAG_POSTFIX)
+						index++;
+
+					attribute |= COMMENT_OPEN | COMMENT_CLOSE;
+
+				} else {
+
+					while (index < length && !Character.isWhitespace(content.charAt(index)) && content.charAt(index) != HTML_TAG_PREFIX && !content.startsWith(LINK_TAG_PREFIX, index))
+						index++;
+				}
+			}
+
+			if (index - offset > 0) {
+
+				result= new CommentRange(begin + offset, index - offset);
+				result.setAttribute(attribute);
+
+				parent.append(result);
+				offset= index;
+			}
+			
+			attribute= 0;
+		}
+	}
+
