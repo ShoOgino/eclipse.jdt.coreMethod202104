@@ -1,0 +1,295 @@
+/* Tokenize a method body, assuming that curly brackets are properly balanced.
+ */
+public final void jumpOverMethodBody() {
+
+	this.wasAcr = false;
+	int found = 1;
+	try {
+		while (true) { //loop for jumping over comments
+			// ---------Consume white space and handles startPosition---------
+			boolean isWhiteSpace;
+			do {
+				startPosition = currentPosition;
+				if (((currentCharacter = source[currentPosition++]) == '\\')
+					&& (source[currentPosition] == 'u')) {
+					isWhiteSpace = jumpOverUnicodeWhiteSpace();
+				} else {
+					if (recordLineSeparator
+						&& ((currentCharacter == '\r') || (currentCharacter == '\n')))
+						pushLineSeparator();
+					isWhiteSpace = CharOperation.isWhitespace(currentCharacter);
+				}
+			} while (isWhiteSpace);
+
+			// -------consume token until } is found---------
+			switch (currentCharacter) {
+				case '{' :
+					found++;
+					break;
+				case '}' :
+					found--;
+					if (found == 0)
+						return;
+					break;
+				case '\'' :
+					{
+						boolean test;
+						test = getNextChar('\\');
+						if (test) {
+							try {
+								scanEscapeCharacter();
+							} catch (InvalidInputException ex) {
+							};
+						} else {
+							try { // consume next character
+								unicodeAsBackSlash = false;
+								if (((currentCharacter = source[currentPosition++]) == '\\')
+									&& (source[currentPosition] == 'u')) {
+									getNextUnicodeChar();
+								} else {
+									if (withoutUnicodePtr != 0) {
+										withoutUnicodeBuffer[++withoutUnicodePtr] = currentCharacter;
+									}
+								}
+							} catch (InvalidInputException ex) {
+							};
+						}
+						getNextChar('\'');
+						break;
+					}
+				case '"' :
+					try {
+						try { // consume next character
+							unicodeAsBackSlash = false;
+							if (((currentCharacter = source[currentPosition++]) == '\\')
+								&& (source[currentPosition] == 'u')) {
+								getNextUnicodeChar();
+							} else {
+								if (withoutUnicodePtr != 0) {
+									withoutUnicodeBuffer[++withoutUnicodePtr] = currentCharacter;
+								}
+							}
+						} catch (InvalidInputException ex) {
+						};
+						while (currentCharacter != '"') {
+							if (currentCharacter == '\r'){
+								if (source[currentPosition] == '\n') currentPosition++;
+								break; // the string cannot go further that the line
+							}
+							if (currentCharacter == '\n'){
+								break; // the string cannot go further that the line
+							}
+							if (currentCharacter == '\\') {
+								try {
+									scanEscapeCharacter();
+								} catch (InvalidInputException ex) {
+								};
+							}
+							try { // consume next character
+								unicodeAsBackSlash = false;
+								if (((currentCharacter = source[currentPosition++]) == '\\')
+									&& (source[currentPosition] == 'u')) {
+									getNextUnicodeChar();
+								} else {
+									if (withoutUnicodePtr != 0) {
+										withoutUnicodeBuffer[++withoutUnicodePtr] = currentCharacter;
+									}
+								}
+							} catch (InvalidInputException ex) {
+							};
+						}
+					} catch (IndexOutOfBoundsException e) {
+						return;
+					}
+					break;
+				case '/' :
+					{
+						int test;
+						boolean isUnicode;
+						if ((test = getNextChar('/', '*')) == 0) { //line comment 
+							try {
+								//get the next char 
+								if (((currentCharacter = source[currentPosition++]) == '\\')
+									&& (source[currentPosition] == 'u')) {
+									//-------------unicode traitement ------------
+									isUnicode = true;
+									int c1 = 0, c2 = 0, c3 = 0, c4 = 0;
+									currentPosition++;
+									while (source[currentPosition] == 'u') {
+										currentPosition++;
+									}
+									if ((c1 = Character.getNumericValue(source[currentPosition++])) > 15
+										|| c1 < 0
+										|| (c2 = Character.getNumericValue(source[currentPosition++])) > 15
+										|| c2 < 0
+										|| (c3 = Character.getNumericValue(source[currentPosition++])) > 15
+										|| c3 < 0
+										|| (c4 = Character.getNumericValue(source[currentPosition++])) > 15
+										|| c4 < 0) { //error don't care of the value
+										currentCharacter = 'A';
+									} //something different from \n and \r
+									else {
+										currentCharacter = (char) (((c1 * 16 + c2) * 16 + c3) * 16 + c4);
+									}
+								} else {
+									isUnicode = false;
+								}
+
+								while (currentCharacter != '\r' && currentCharacter != '\n') {
+									//get the next char 
+									if (((currentCharacter = source[currentPosition++]) == '\\')
+										&& (source[currentPosition] == 'u')) {
+										//-------------unicode traitement ------------
+										int c1 = 0, c2 = 0, c3 = 0, c4 = 0;
+										currentPosition++;
+										isUnicode = true;
+										while (source[currentPosition] == 'u') {
+											currentPosition++;
+										}
+										if ((c1 = Character.getNumericValue(source[currentPosition++])) > 15
+											|| c1 < 0
+											|| (c2 = Character.getNumericValue(source[currentPosition++])) > 15
+											|| c2 < 0
+											|| (c3 = Character.getNumericValue(source[currentPosition++])) > 15
+											|| c3 < 0
+											|| (c4 = Character.getNumericValue(source[currentPosition++])) > 15
+											|| c4 < 0) { //error don't care of the value
+											currentCharacter = 'A';
+										} //something different from \n and \r
+										else {
+											currentCharacter = (char) (((c1 * 16 + c2) * 16 + c3) * 16 + c4);
+										}
+									} else {
+										isUnicode = false;
+									}
+								}
+								if (recordLineSeparator
+									&& ((currentCharacter == '\r') || (currentCharacter == '\n'))) {
+										if (!isUnicode) {
+											pushLineSeparator();
+										}
+									}
+							} catch (IndexOutOfBoundsException e) {
+							} //an eof will them be generated
+							break;
+						}
+						if (test > 0) { //traditional and annotation comment
+							isUnicode = false;
+							boolean star = false;
+							try { // consume next character
+								unicodeAsBackSlash = false;
+								if (((currentCharacter = source[currentPosition++]) == '\\')
+									&& (source[currentPosition] == 'u')) {
+									getNextUnicodeChar();
+									isUnicode = true;
+								} else {
+									isUnicode = false;
+									if (withoutUnicodePtr != 0) {
+										withoutUnicodeBuffer[++withoutUnicodePtr] = currentCharacter;
+									}
+								};
+							} catch (InvalidInputException ex) {
+							};
+							if (currentCharacter == '*') {
+								star = true;
+							}
+							if (recordLineSeparator
+								&& ((currentCharacter == '\r') || (currentCharacter == '\n'))) {
+									if (!isUnicode) {
+										pushLineSeparator();
+									}
+							}
+							try { //get the next char 
+								if (((currentCharacter = source[currentPosition++]) == '\\')
+									&& (source[currentPosition] == 'u')) {
+									//-------------unicode traitement ------------
+									isUnicode = true;
+									int c1 = 0, c2 = 0, c3 = 0, c4 = 0;
+									currentPosition++;
+									while (source[currentPosition] == 'u') {
+										currentPosition++;
+									}
+									if ((c1 = Character.getNumericValue(source[currentPosition++])) > 15
+										|| c1 < 0
+										|| (c2 = Character.getNumericValue(source[currentPosition++])) > 15
+										|| c2 < 0
+										|| (c3 = Character.getNumericValue(source[currentPosition++])) > 15
+										|| c3 < 0
+										|| (c4 = Character.getNumericValue(source[currentPosition++])) > 15
+										|| c4 < 0) { //error don't care of the value
+										currentCharacter = 'A';
+									} //something different from * and /
+									else {
+										currentCharacter = (char) (((c1 * 16 + c2) * 16 + c3) * 16 + c4);
+									}
+								} else {
+									isUnicode = false;
+								}
+								//loop until end of comment */ 
+								while ((currentCharacter != '/') || (!star)) {
+									if (recordLineSeparator
+										&& ((currentCharacter == '\r') || (currentCharacter == '\n'))) {
+											if (!isUnicode) {
+												pushLineSeparator();
+											}
+									}
+									star = currentCharacter == '*';
+									//get next char
+									if (((currentCharacter = source[currentPosition++]) == '\\')
+										&& (source[currentPosition] == 'u')) {
+										//-------------unicode traitement ------------
+										isUnicode = true;
+										int c1 = 0, c2 = 0, c3 = 0, c4 = 0;
+										currentPosition++;
+										while (source[currentPosition] == 'u') {
+											currentPosition++;
+										}
+										if ((c1 = Character.getNumericValue(source[currentPosition++])) > 15
+											|| c1 < 0
+											|| (c2 = Character.getNumericValue(source[currentPosition++])) > 15
+											|| c2 < 0
+											|| (c3 = Character.getNumericValue(source[currentPosition++])) > 15
+											|| c3 < 0
+											|| (c4 = Character.getNumericValue(source[currentPosition++])) > 15
+											|| c4 < 0) { //error don't care of the value
+											currentCharacter = 'A';
+										} //something different from * and /
+										else {
+											currentCharacter = (char) (((c1 * 16 + c2) * 16 + c3) * 16 + c4);
+										}
+									} else {
+										isUnicode = false;
+									}
+								}
+							} catch (IndexOutOfBoundsException e) {
+								return;
+							}
+							break;
+						}
+						break;
+					}
+
+				default :
+					if (Character.isJavaIdentifierStart(currentCharacter)) {
+						try {
+							scanIdentifierOrKeyword();
+						} catch (InvalidInputException ex) {
+						};
+						break;
+					}
+					if (Character.isDigit(currentCharacter)) {
+						try {
+							scanNumber(false);
+						} catch (InvalidInputException ex) {
+						};
+						break;
+					}
+			}
+		}
+		//-----------------end switch while try--------------------
+	} catch (IndexOutOfBoundsException e) {
+	} catch (InvalidInputException e) {
+	}
+	return;
+}
+

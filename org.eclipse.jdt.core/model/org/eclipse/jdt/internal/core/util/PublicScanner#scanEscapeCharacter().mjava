@@ -1,0 +1,82 @@
+public final void scanEscapeCharacter() throws InvalidInputException {
+	// the string with "\\u" is a legal string of two chars \ and u
+	//thus we use a direct access to the source (for regular cases).
+
+	if (unicodeAsBackSlash) {
+		// consume next character
+		unicodeAsBackSlash = false;
+		if (((currentCharacter = source[currentPosition++]) == '\\') && (source[currentPosition] == 'u')) {
+			getNextUnicodeChar();
+		} else {
+			if (withoutUnicodePtr != 0) {
+				withoutUnicodeBuffer[++withoutUnicodePtr] = currentCharacter;
+			}
+		}
+	} else
+		currentCharacter = source[currentPosition++];
+	switch (currentCharacter) {
+		case 'b' :
+			currentCharacter = '\b';
+			break;
+		case 't' :
+			currentCharacter = '\t';
+			break;
+		case 'n' :
+			currentCharacter = '\n';
+			break;
+		case 'f' :
+			currentCharacter = '\f';
+			break;
+		case 'r' :
+			currentCharacter = '\r';
+			break;
+		case '\"' :
+			currentCharacter = '\"';
+			break;
+		case '\'' :
+			currentCharacter = '\'';
+			break;
+		case '\\' :
+			currentCharacter = '\\';
+			break;
+		default :
+			// -----------octal escape--------------
+			// OctalDigit
+			// OctalDigit OctalDigit
+			// ZeroToThree OctalDigit OctalDigit
+
+			int number = Character.getNumericValue(currentCharacter);
+			if (number >= 0 && number <= 7) {
+				boolean zeroToThreeNot = number > 3;
+				if (Character.isDigit(currentCharacter = source[currentPosition++])) {
+					int digit = Character.getNumericValue(currentCharacter);
+					if (digit >= 0 && digit <= 7) {
+						number = (number * 8) + digit;
+						if (Character.isDigit(currentCharacter = source[currentPosition++])) {
+							if (zeroToThreeNot) {// has read \NotZeroToThree OctalDigit Digit --> ignore last character
+								currentPosition--;
+							} else {
+								digit = Character.getNumericValue(currentCharacter);
+								if (digit >= 0 && digit <= 7){ // has read \ZeroToThree OctalDigit OctalDigit
+									number = (number * 8) + digit;
+								} else {// has read \ZeroToThree OctalDigit NonOctalDigit --> ignore last character
+									currentPosition--;
+								}
+							}
+						} else { // has read \OctalDigit NonDigit--> ignore last character
+							currentPosition--;
+						}
+					} else { // has read \OctalDigit NonOctalDigit--> ignore last character						
+						currentPosition--;
+					}
+				} else { // has read \OctalDigit --> ignore last character
+					currentPosition--;
+				}
+				if (number > 255)
+					throw new InvalidInputException(INVALID_ESCAPE);
+				currentCharacter = (char) number;
+			} else
+				throw new InvalidInputException(INVALID_ESCAPE);
+	}
+}
+
