@@ -1,0 +1,50 @@
+	public void complete(IType type, char[] snippet, int position, char[][] localVariableTypeNames, char[][] localVariableNames, int[] localVariableModifiers, boolean isStatic){	
+		TypeConverter converter = new TypeConverter();
+		
+		IType topLevelType = type;
+		while(topLevelType.getDeclaringType() != null) {
+			topLevelType = topLevelType.getDeclaringType();
+		}
+		
+		CompilationResult compilationResult = new CompilationResult((topLevelType.getElementName() + ".java").toCharArray(), 1, 1);
+	
+		CompilationUnitDeclaration compilationUnit = new CompilationUnitDeclaration(problemReporter, compilationResult, 0);
+		
+		TypeDeclaration typeDeclaration = converter.buildCompilationUnit(type, compilationUnit, compilationResult, problemReporter);
+		
+		if(compilationUnit != null) {	
+			// build AST from snippet
+			AbstractMethodDeclaration fakeMethod = parseSnippetMethod(snippet, position, localVariableTypeNames, localVariableNames, localVariableModifiers, isStatic);
+			
+			// merge AST
+			AbstractMethodDeclaration[] oldMethods = typeDeclaration.methods;
+			AbstractMethodDeclaration[] newMethods = new AbstractMethodDeclaration[oldMethods.length + 1];
+			System.arraycopy(oldMethods, 0, newMethods, 0, oldMethods.length);
+			newMethods[oldMethods.length] = fakeMethod;
+			typeDeclaration.methods = newMethods;
+	
+			if(DEBUG) {
+				System.out.println("SNIPPET COMPLETION AST :");
+				System.out.println(compilationUnit.toString());
+			}
+			
+			if (compilationUnit.types != null) {
+				try {
+					lookupEnvironment.buildTypeBindings(compilationUnit);
+			
+					if ((unitScope = compilationUnit.scope) != null) {
+						lookupEnvironment.completeTypeBindings(compilationUnit, true);
+						compilationUnit.scope.faultInTypes();
+						compilationUnit.resolve();
+					}
+				} catch (CompletionNodeFound e) {
+					//					completionNodeFound = true;
+					if (e.astNode != null) {
+						// if null then we found a problem in the completion node
+						complete(e.astNode, e.qualifiedBinding, e.scope);
+					}
+				}
+			}
+		}
+	}
+
