@@ -7,30 +7,37 @@
 			&& currentType != targetEnclosingType){
 			/*&& !targetEnclosingType.isSuperclassOf(currentType)*/
 
-			NestedTypeBinding currentNestedType = (NestedTypeBinding) currentType;
 			if (useDirectReference) {
 				// the target enclosing type is not in scope, we directly refer it
 				// must also add a synthetic field if we're not inside a constructor
+				NestedTypeBinding currentNestedType = (NestedTypeBinding) currentType;
 				if (methodScope().isInsideInitializerOrConstructor())
 					currentNestedType.addSyntheticArgument(targetEnclosingType);
 				else
 					currentNestedType.addSyntheticArgumentAndField(targetEnclosingType);
-			} else if (currentNestedType.isLocalType()) {
-				// direct enclosing instance link
-				// must also add a synthetic field if we're not inside a constructor
-				currentType = currentNestedType.enclosingType;
-				if (methodScope().isInsideInitializerOrConstructor())
-					currentNestedType.addSyntheticArgument(currentType);
-				else
-					currentNestedType.addSyntheticArgumentAndField(currentType);
-				// further indirect cases
-				while (currentType.isNestedType()
-					&& currentType != targetEnclosingType
-					&& !targetEnclosingType.isSuperclassOf(currentType)) {
-
-					currentNestedType = (NestedTypeBinding) currentType;
+					
+			} else { // indirect reference sequence
+				int depth = 0;
+				
+				// saturate all the way up until reaching compatible enclosing type
+				while (currentType.isLocalType()){
+					NestedTypeBinding currentNestedType = (NestedTypeBinding) currentType;
 					currentType = currentNestedType.enclosingType;
-					currentNestedType.addSyntheticArgumentAndField(currentType);
+					
+					if (depth == 0){
+						if (methodScope().isInsideInitializerOrConstructor()) {
+							// must also add a synthetic field if we're not inside a constructor
+							currentNestedType.addSyntheticArgument(currentType);
+						} else {
+							currentNestedType.addSyntheticArgumentAndField(currentType);
+						}					
+					} else if (currentNestedType == targetEnclosingType 
+										|| targetEnclosingType.isSuperclassOf(currentNestedType)) {
+							break;
+					} else {
+						currentNestedType.addSyntheticArgumentAndField(currentType);
+					} 
+					depth++;
 				}
 			}
 		}
