@@ -7,46 +7,47 @@ public void acceptResult(CompilationResult result) {
 	// Before reporting the new problems, we need to update the problem count &
 	// remove the old problems. Plus delete additional class files that no longer exist.
 
-	String location = new String(result.getFileName()); // the full filesystem path 'd:/xyz/eclipse/Test/p1/p2/A.java'
-	if (!workQueue.isCompiled(location)) {
+	// only need to find resource for the sourceLocation when problems need to be reported against it
+	String sourceLocation = new String(result.getFileName()); // the full filesystem path "d:/xyz/eclipse/src1/Test/p1/p2/A.java"
+	if (!workQueue.isCompiled(sourceLocation)) {
 		try {
-			workQueue.finished(location);
-	
+			workQueue.finished(sourceLocation);
+			updateProblemsFor(sourceLocation, result); // record compilation problems before potentially adding duplicate errors
+
 			ICompilationUnit compilationUnit = result.getCompilationUnit();
 			ClassFile[] classFiles = result.getClassFiles();
 			int length = classFiles.length;
-			ArrayList otherTypeNames = new ArrayList(length);
-			char[] mainTypeName = compilationUnit.getMainTypeName(); // may not match any produced class file
+			ArrayList duplicateTypeNames = null;
+			ArrayList definedTypeNames = new ArrayList(length);
 			for (int i = 0; i < length; i++) {
 				ClassFile classFile = classFiles[i];
 				char[][] compoundName = classFile.getCompoundName();
 				char[] typeName = compoundName[compoundName.length - 1];
-				if (CharOperation.equals(mainTypeName, typeName)) {
-					writeClassFile(classFile, false);
+				boolean isNestedType = CharOperation.contains('$', typeName);
+
+				// Look for a possible collision, if one exists, report an error but do not write the class file
+				if (isNestedType) {
+					String qualifiedTypeName = new String(classFile.outerMostEnclosingClassFile().fileName());
+					if (newState.isDuplicateLocation(qualifiedTypeName, sourceLocation))
+						continue;
 				} else {
-					boolean isSecondaryType = !CharOperation.contains('$', typeName);
-					otherTypeNames.add(writeClassFile(classFile, isSecondaryType));
+					String qualifiedTypeName = new String(classFile.fileName()); // the qualified type name "p1/p2/A"
+					if (newState.isDuplicateLocation(qualifiedTypeName, sourceLocation)) {
+						if (duplicateTypeNames == null)
+							duplicateTypeNames = new ArrayList();
+						duplicateTypeNames.add(compoundName);
+						createErrorFor(resourceForLocation(sourceLocation), Util.bind("build.duplicateClassFile", new String(typeName)));
+						continue;
+					}
+					newState.locationForType(qualifiedTypeName, sourceLocation);
 				}
+				definedTypeNames.add(writeClassFile(classFile, !isNestedType));
 			}
-			updateProblemsFor(result);
-			if (otherTypeNames.isEmpty()) {
-				finishedWith(location, result, new char[0][]);
-			} else {
-				char[][] additionalTypeNames = new char[otherTypeNames.size()][];
-				otherTypeNames.toArray(additionalTypeNames);
-				finishedWith(location, result, additionalTypeNames);
-			}
+
+			finishedWith(sourceLocation, result, compilationUnit.getMainTypeName(), definedTypeNames, duplicateTypeNames);
 			notifier.compiled(compilationUnit);
 		} catch (CoreException e) {
-			try {
-				// add another problem to the compilation unit that its class file is inconsistent
-				IResource resource = javaBuilder.workspaceRoot.getFileForLocation(new Path(location));
-				IMarker marker = resource.createMarker(ProblemMarkerTag);
-				marker.setAttribute(IMarker.MESSAGE, Util.bind("build.inconsistentClassFile"));
-				marker.setAttribute(IMarker.SEVERITY, IMarker.SEVERITY_ERROR);
-			} catch (CoreException ignore) {
-				throw internalException(e);
-			}
+			createErrorFor(resourceForLocation(sourceLocation), Util.bind("build.inconsistentClassFile"));
 		}
 	}
 }

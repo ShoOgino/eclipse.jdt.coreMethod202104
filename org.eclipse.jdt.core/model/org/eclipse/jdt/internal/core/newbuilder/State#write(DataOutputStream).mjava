@@ -1,12 +1,27 @@
 void write(DataOutputStream out) throws IOException {
+	int length;
+	Object[] keyTable;
+	Object[] valueTable;
+
+/*
+ * byte			VERSION
+ * String		project name
+ * int				build number
+ * int				last structural build number
+ * String		output location
+*/
 	out.writeByte(VERSION);
 	out.writeUTF(javaProjectName);
 	out.writeInt(buildNumber);
 	out.writeInt(lastStructuralBuildNumber);
 	out.writeUTF(outputLocationString);
 
-	int length = classpathLocations.length;
-	out.writeInt(length);
+/*
+ * Class path locations[]
+ * int				id
+ * String		path(s)
+*/
+	out.writeInt(length = classpathLocations.length);
 	for (int i = 0; i < length; ++i) {
 		ClasspathLocation c = classpathLocations[i];
 		if (c instanceof ClasspathMultiDirectory) {
@@ -23,11 +38,15 @@ void write(DataOutputStream out) throws IOException {
 		}
 	}
 
-	length = structuralBuildNumbers.size();
-	out.writeInt(length);
+/*
+ * Structural build numbers table
+ * String		prereq project name
+ * int				last structural build number
+*/
+	out.writeInt(length = structuralBuildNumbers.elementSize);
 	if (length > 0) {
-		Object[] keyTable = structuralBuildNumbers.keyTable;
-		Object[] valueTable = structuralBuildNumbers.valueTable;
+		keyTable = structuralBuildNumbers.keyTable;
+		valueTable = structuralBuildNumbers.valueTable;
 		for (int i = 0, l = keyTable.length; i < l; i++) {
 			if (keyTable[i] != null) {
 				out.writeUTF((String) keyTable[i]);
@@ -36,9 +55,44 @@ void write(DataOutputStream out) throws IOException {
 		}
 	}
 
+/*
+ * String[]		Interned locations
+ */
+	out.writeInt(length = references.elementSize);
+	ArrayList internedLocations = new ArrayList(length);
+	keyTable = references.keyTable;
+	for (int i = 0, l = keyTable.length; i < l; i++) {
+		if (keyTable[i] != null) {
+			String key = (String) keyTable[i];
+			out.writeUTF(key);
+			internedLocations.add(key);
+		}
+	}
+
+/*
+ * Type locations table
+ * String		type name
+ * int				interned location id
+ */
+	out.writeInt(length = typeLocations.elementSize);
+	if (length > 0) {
+		keyTable = typeLocations.keyTable;
+		valueTable = typeLocations.valueTable;
+		for (int i = 0, l = keyTable.length; i < l; i++) {
+			if (keyTable[i] != null) {
+				out.writeUTF((String) keyTable[i]);
+				out.writeInt(internedLocations.indexOf((String) valueTable[i]));
+			}
+		}
+	}
+
+/*
+ * char[][][]	Interned qualified names
+ * char[][]		Interned simple names
+ */
 	ArrayList internedQualifiedNames = new ArrayList(31);
 	ArrayList internedSimpleNames = new ArrayList(31);
-	Object[] valueTable = references.valueTable;
+	valueTable = references.valueTable;
 	for (int i = 0, l = valueTable.length; i < l; i++) {
 		if (valueTable[i] != null) {
 			ReferenceCollection collection = (ReferenceCollection) valueTable[i];
@@ -66,8 +120,7 @@ void write(DataOutputStream out) throws IOException {
 	internedSimpleNames.toArray(internedArray);
 	writeNames(internedArray, out);
 	// now write the interned qualified names as arrays of interned simple names
-	length = internedQualifiedNames.size();
-	out.writeInt(length);
+	out.writeInt(length = internedQualifiedNames.size());
 	for (int i = 0; i < length; i++) {
 		char[][] qName = (char[][]) internedQualifiedNames.get(i);
 		int qLength = qName.length;
@@ -76,17 +129,21 @@ void write(DataOutputStream out) throws IOException {
 			out.writeInt(internedSimpleNames.indexOf(qName[j]));
 	}
 
-	length = references.size();
-	out.writeInt(length);
-	Object[] keyTable = references.keyTable;
+/*
+ * References table
+ * int			interned location id
+ * ReferenceCollection
+*/
+	out.writeInt(length = references.elementSize);
+	keyTable = references.keyTable;
 	for (int i = 0, l = keyTable.length; i < l; i++) {
 		if (keyTable[i] != null) {
-			out.writeUTF((String) keyTable[i]);
+			out.writeInt(internedLocations.indexOf((String) keyTable[i]));
 			ReferenceCollection collection = (ReferenceCollection) valueTable[i];
 			if (collection instanceof AdditionalTypeCollection) {
 				out.writeByte(1);
 				AdditionalTypeCollection atc = (AdditionalTypeCollection) collection;
-				writeNames(atc.additionalTypeNames, out);
+				writeNames(atc.definedTypeNames, out);
 			} else {
 				out.writeByte(2);
 			}
