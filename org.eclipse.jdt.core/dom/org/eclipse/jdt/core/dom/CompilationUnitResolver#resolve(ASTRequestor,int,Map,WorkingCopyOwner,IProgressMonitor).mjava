@@ -1,0 +1,74 @@
+	private void resolve(ASTRequestor astRequestor, int apiLevel, Map compilerOptions, WorkingCopyOwner owner, IProgressMonitor monitor) {
+
+		DefaultBindingResolver.BindingTables bindingTables = new DefaultBindingResolver.BindingTables();
+		CompilationUnitDeclaration unit = null;
+		int i = 0;
+		try {
+			ICompilationUnit[] workingCopies = astRequestor.getSources();
+			if (workingCopies == null) return;
+			int length = workingCopies.length;
+			org.eclipse.jdt.internal.compiler.env.ICompilationUnit[] sourceUnits = new org.eclipse.jdt.internal.compiler.env.ICompilationUnit[length];
+			System.arraycopy(workingCopies, 0, sourceUnits, 0, length);
+			beginToCompile(sourceUnits);
+			// process all units (some more could be injected in the loop by the lookup environment)
+			for (; i < this.totalUnits; i++) {
+				unit = this.unitsToProcess[i];
+				try {
+					process(unit, i);
+					
+					// convert AST
+					CompilationResult compilationResult = unit.compilationResult;
+					org.eclipse.jdt.internal.compiler.env.ICompilationUnit sourceUnit = compilationResult.compilationUnit;
+					char[] contents = sourceUnit.getContents();
+					AST ast = AST.newAST(apiLevel);
+					ast.setDefaultNodeFlag(ASTNode.ORIGINAL);
+					ASTConverter converter = new ASTConverter(compilerOptions, true/*need to resolve bindings*/, monitor);
+					BindingResolver resolver = new DefaultBindingResolver(unit.scope, owner, bindingTables);
+					ast.setBindingResolver(resolver);
+					converter.setAST(ast);
+					CompilationUnit compilationUnit = converter.convert(unit, contents);
+					compilationUnit.setLineEndTable(compilationResult.lineSeparatorPositions);
+					ast.setDefaultNodeFlag(0);
+					ast.setOriginalModificationCount(ast.modificationCount());
+					
+					// pass it to requestor
+					astRequestor.acceptAST(compilationUnit);
+				} finally {
+					// cleanup compilation unit result
+					unit.cleanUp();
+				}
+				this.unitsToProcess[i] = null; // release reference to processed unit declaration
+				this.requestor.acceptResult(unit.compilationResult.tagAsAccepted());
+				
+				if (i == this.totalUnits-1) {
+					// end of batch: look for new one
+					do {
+						workingCopies = astRequestor.getSources();
+					} while (workingCopies != null && workingCopies.length == 0);
+					if (workingCopies != null) {
+						for (int j = 0, workingCopyLength = workingCopies.length; j < workingCopyLength; j++) {
+							ICompilationUnit workingCopy = workingCopies[j];
+							accept((org.eclipse.jdt.internal.compiler.env.ICompilationUnit) workingCopy);
+						}
+					}
+				}
+			}
+		} catch (AbortCompilation e) {
+			this.handleInternalException(e, unit);
+		} catch (Error e) {
+			this.handleInternalException(e, unit, null);
+			throw e; // rethrow
+		} catch (RuntimeException e) {
+			this.handleInternalException(e, unit, null);
+			throw e; // rethrow
+		} finally {
+			// No reset is performed there anymore since,
+			// within the CodeAssist (or related tools),
+			// the compiler may be called *after* a call
+			// to this resolve(...) method. And such a call
+			// needs to have a compiler with a non-empty
+			// environment.
+			// this.reset();
+		}
+	}
+

@@ -14,57 +14,30 @@
 			case K_COMPILATION_UNIT :
 				CompilationUnitDeclaration compilationUnitDeclaration = null;
 				try {
-					char[] source = null;
 					NodeSearcher searcher = null;
-					char[][] packageName = null;
-					String fileName = null;
+					org.eclipse.jdt.internal.compiler.env.ICompilationUnit sourceUnit = null;
 					if (this.compilationUnitSource != null) {
-						try {
-							source = this.compilationUnitSource.getSource().toCharArray();
-						} catch(JavaModelException e) {
-							// no source, then we cannot build anything
-							throw new IllegalStateException();
-						}
-						PackageFragment packageFragment = (PackageFragment)this.compilationUnitSource.getAncestor(IJavaElement.PACKAGE_FRAGMENT);
-						if (packageFragment != null){
-							packageName = Util.toCharArrays(packageFragment.names);
-						}
-						fileName = this.compilationUnitSource.getElementName();
+						sourceUnit = (org.eclipse.jdt.internal.compiler.env.ICompilationUnit) this.compilationUnitSource;
 					} else if (this.classFileSource != null) {
-						String sourceString = null;
 						try {
-							sourceString = this.classFileSource.getSource();
-						} catch (JavaModelException e) {
-							// nothing to do
-						}
-					
-						if (sourceString == null) {
-							throw new IllegalStateException();
-						}
-						source = sourceString.toCharArray();
-						try {
+							String sourceString = this.classFileSource.getSource();
+							if (sourceString == null) {
+								throw new IllegalStateException();
+							}
 							PackageFragment packageFragment = (PackageFragment) this.classFileSource.getParent();
-							packageName = Util.toCharArrays(packageFragment.names);
 							BinaryType type = (BinaryType) this.classFileSource.getType();
 							IBinaryType binaryType = (IBinaryType) type.getElementInfo();
-							fileName = type.sourceFileName(binaryType);
+							String fileName = type.sourceFileName(binaryType);
+							sourceUnit = new BasicCompilationUnit(sourceString.toCharArray(), Util.toCharArrays(packageFragment.names), fileName, this.project);
 						} catch(JavaModelException e) {
+							// class file doesn't exist
 							needToResolveBindings = false;
 						}
 					} else if (this.rawSource != null) {
-						source = this.rawSource;
-						if (this.unitName == null || this.project == null || this.compilerOptions == null) {
-							needToResolveBindings = false;
-						} else {
-							fileName = this.unitName;
-							needToResolveBindings = true;
-						}
-					}
-					if (source == null) {
+						needToResolveBindings = this.unitName != null && this.project != null && this.compilerOptions != null;
+						sourceUnit = new BasicCompilationUnit(this.rawSource, null, this.unitName == null ? "" : this.unitName, this.project); //$NON-NLS-1$
+					} else {
 						throw new IllegalStateException();
-					}
-					if (this.sourceLength == -1) {
-						this.sourceLength = source.length;
 					}
 					if (this.partial) {
 						searcher = new NodeSearcher(this.focalPointPosition);
@@ -74,30 +47,35 @@
 							// parse and resolve
 							compilationUnitDeclaration = 
 								CompilationUnitResolver.resolve(
-									source,
-									packageName,
-									fileName,
+									sourceUnit,
 									this.project,
 									searcher,
 									this.compilerOptions,
-									false,
 									this.workingCopyOwner,
 									monitor);
 						} catch (JavaModelException e) {
 							compilationUnitDeclaration = CompilationUnitResolver.parse(
-									source,
+									sourceUnit,
 									searcher,
 									this.compilerOptions);
 							needToResolveBindings = false;
 						}
 					} else {
 						compilationUnitDeclaration = CompilationUnitResolver.parse(
-								source,
+								sourceUnit,
 								searcher,
 								this.compilerOptions);
 						needToResolveBindings = false;
 					}
-					return convert(monitor, compilationUnitDeclaration, source, needToResolveBindings);
+					return CompilationUnitResolver.convert(
+						compilationUnitDeclaration, 
+						sourceUnit.getContents(), 
+						this.apiLevel, 
+						this.compilerOptions,
+						needToResolveBindings,
+						this.compilationUnitSource == null ? this.workingCopyOwner : this.compilationUnitSource.getOwner(),
+						needToResolveBindings ? new DefaultBindingResolver.BindingTables() : null, 
+						monitor);
 				} finally {
 					if (compilationUnitDeclaration != null && this.resolveBindings) {
 						compilationUnitDeclaration.cleanUp();
