@@ -19,6 +19,8 @@ public void generateCode(ClassScope classScope, ClassFile classFile) {
 		int codeAttributeOffset = classFile.contentsOffset;
 		classFile.generateCodeAttributeHeader();
 		CodeStream codeStream = classFile.codeStream;
+		this.resolve(classScope);
+		
 		codeStream.reset(this, classFile);
 		TypeDeclaration declaringType = classScope.referenceContext;
 
@@ -26,6 +28,23 @@ public void generateCode(ClassScope classScope, ClassFile classFile) {
 		scope.computeLocalVariablePositions(0, codeStream); // should not be necessary
 		MethodScope staticInitializerScope = declaringType.staticInitializerScope;
 		staticInitializerScope.computeLocalVariablePositions(0, codeStream); // offset by the argument size
+
+		// 1.4 feature
+		// This has to be done before any other initialization
+		if (this.assertionSyntheticFieldBinding != null) {
+			// generate code related to the activation of assertion for this class
+			codeStream.generateClassLiteralAccessForType(classScope.enclosingSourceType(), classLiteralSyntheticField);
+			codeStream.invokeJavaLangClassDesiredAssertionStatus();
+			Label falseLabel = new Label(codeStream);
+			codeStream.ifne(falseLabel);
+			codeStream.iconst_1();
+			Label jumpLabel = new Label(codeStream);
+			codeStream.goto_(jumpLabel);
+			falseLabel.place();
+			codeStream.iconst_0();
+			jumpLabel.place();
+			codeStream.putstatic(this.assertionSyntheticFieldBinding);
+		}
 
 		// generate initializers
 		if (declaringType.fields != null) {
