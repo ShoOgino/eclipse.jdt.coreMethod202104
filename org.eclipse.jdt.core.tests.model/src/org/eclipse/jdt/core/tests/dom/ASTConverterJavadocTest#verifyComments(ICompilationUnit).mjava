@@ -1,59 +1,56 @@
 	/* (non-Javadoc)
 	 * @see junit.framework.TestCase#setUp()
 	 */
-	private void verifyComments(ICompilationUnit sourceUnit) throws JavaModelException {
+	protected void verifyComments(ICompilationUnit unit) throws JavaModelException {
 		// Get test file
-//		ICompilationUnit sourceUnit = getCompilationUnit("Converter" , "src", "javadoc.test"+testNbre, "Test.java"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
-//		assertNotNull("Test file Converter/src/javadoc/test"+testNbre+"/Test.java was not found!", sourceUnit);
+		this.sourceUnit = unit;
 
 		// Create DOM AST nodes hierarchy
-		String fileName = sourceUnit.getElementName();
-		String sourceStr = sourceUnit.getSource();
-		IJavaProject project = sourceUnit.getJavaProject();
+		String sourceStr = this.sourceUnit.getSource();
+		IJavaProject project = this.sourceUnit.getJavaProject();
 		Map originalOptions = project.getOptions(true);
 		Comment[] unitComments = null;
-		if (debug) {
+		if (problems) {
 			try {
 				project.setOption(JavaCore.COMPILER_PB_INVALID_JAVADOC, JavaCore.ERROR);
 				project.setOption(JavaCore.COMPILER_PB_MISSING_JAVADOC_TAGS, JavaCore.ERROR);
 				project.setOption(JavaCore.COMPILER_PB_MISSING_JAVADOC_COMMENTS, JavaCore.ERROR);
-				CompilationUnit compilUnit = (CompilationUnit) runConversion(sourceUnit, true); // resolve bindings
-				assertEquals(fileName+": Unexpected problems", 0, compilUnit.getProblems().length); //$NON-NLS-1$
+				CompilationUnit compilUnit = (CompilationUnit) runConversion(this.sourceUnit, true); // resolve bindings
+				assertEquals(this.prefix+"Unexpected problems", 0, compilUnit.getProblems().length); //$NON-NLS-1$
 				unitComments = compilUnit.getCommentTable();
 			} finally {
 				project.setOptions(originalOptions);
 			}
 		} else {
-				CompilationUnit compilUnit = (CompilationUnit) runConversion(sourceUnit, true); // resolve bindings
+				CompilationUnit compilUnit = (CompilationUnit) runConversion(this.sourceUnit, true); // resolve bindings
 				unitComments = compilUnit.getCommentTable();
 		}
-		assertNotNull(fileName+": Unexpected problems", unitComments);
+		assertNotNull(this.prefix+"Unexpected problems", unitComments);
 
 		// Get comments infos from test file
 		char[] source = sourceStr.toCharArray();
 		setSourceComment(source);
 		
 		// Basic comments verification
-		assertEquals(fileName+": Wrong number of comments", this.comments.size(), unitComments.length);
+		assertEquals(this.prefix+"Wrong number of comments in source:\n"+sourceStr+"\n", this.comments.size(), unitComments.length);
 		
 		// Verify comments positions and bindings
 		for (int i=0; i<unitComments.length; i++) {
 			Comment comment = unitComments[i];
 			List tags = (List) allTags.get(i);
+			// Verify flattened content
+			String stringComment = (String) this.comments.get(i);
+			ASTConverterJavadocFlattener printer = new ASTConverterJavadocFlattener(stringComment);
+			comment.accept(printer);
+			String text = new String(source, comment.getStartPosition(), comment.getLength());
+			assertEquals(this.prefix+"Flattened comment does NOT match source!", stringComment, text);
 			// Verify javdoc tags positions and bindings
 			if (comment.isDocComment()) {
 				Javadoc docComment = (Javadoc)comment;
-				assertEquals(fileName+": Invalid tags number! ", tags.size(), allTags(docComment));
+				assertEquals(this.prefix+"Invalid tags number in javadoc:\n"+docComment+"\n", tags.size(), allTags(docComment));
 				verifyPositions(docComment, source);
 				verifyBindings(docComment);
-			} else {
-				String stringComment = (String) this.comments.get(i);
-//				ASTConverterJavadocFlattener printer = new ASTConverterJavadocFlattener(stringComment);
-//				comment.accept(printer);
-				String text = new String(source, comment.getStartPosition(), comment.getLength());
-				assertEquals(fileName+": Flattened comment does NOT match source!", stringComment, text);
 			}
-			if (debug) System.out.println(comment+"\nsuccessfully verified in "+fileName);
 		}
 		
 		/* Verify each javadoc: not implemented yet
