@@ -8,18 +8,18 @@
 		Argument[] arguments = method.arguments;
 		int length = arguments == null ? 0 : arguments.length;
 		if (type.isBinary()) {
-			String selector = new String(method.selector);
-			IMethod[] methods;
-			try {
-				methods = type.getMethods();
-			} catch (JavaModelException e) {
-				return null;
-			}
-			for (int i = 0; i < methods.length; i++) {
-				IMethod methodHandle = methods[i];
-				if (methodHandle.getElementName().equals(selector) && length == methodHandle.getNumberOfParameters()) {
+			// don't cache the methods of the binary type
+			ClassFileReader reader = this.classFileReader(type);
+			if (reader == null) return null;
+			IBinaryMethod[] methods = reader.getMethods();
+
+			for (int i = 0, methodsLength = methods.length; i < methodsLength; i++) {
+				IBinaryMethod binaryMethod = methods[i];
+				char[] selector = binaryMethod.getSelector();
+				if (CharOperation.equals(selector, method.selector)) {
+					String[] parameterTypes = Signature.getParameterTypes(new String(binaryMethod.getMethodDescriptor()));
+					if (length != parameterTypes.length) continue;
 					boolean sameParameters = true;
-					String[] parameterTypes = methodHandle.getParameterTypes();
 					for (int j = 0; j < length; j++) {
 						TypeReference parameterType = arguments[j].type;
 						char[] typeName = CharOperation.concatWith(parameterType.getTypeName(), '.');
@@ -30,19 +30,12 @@
 						if (!Signature.toString(parameterTypeName).endsWith(new String(typeName))) {
 							sameParameters = false;
 							break;
+						} else {
+							parameterTypes[j] = parameterTypeName.replace('/', '.');
 						}
 					}
 					if (sameParameters) {
-						IJavaProject project = type.getJavaProject();
-						// check if the method's project is the same as the type's project
-						// they could be different in the case of a jar shared by several projects
-						// (the handles are equals and thus the java model cache contains only one of them)
-						// see bug 7945 Search results not selected in external jar  
-						if (!project.equals(methodHandle.getJavaProject())) {
-							return type.getMethod(selector, parameterTypes);
-						} else {
-							return methodHandle;
-						}
+						return type.getMethod(new String(selector), parameterTypes);
 					}
 				}
 			}
