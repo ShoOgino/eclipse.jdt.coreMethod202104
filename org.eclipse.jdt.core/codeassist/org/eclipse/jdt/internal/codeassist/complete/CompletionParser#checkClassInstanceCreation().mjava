@@ -4,22 +4,27 @@
  */
 private boolean checkClassInstanceCreation() {
 	if (topKnownElementKind(COMPLETION_OR_ASSIST_PARSER) == K_BETWEEN_NEW_AND_LEFT_BRACKET) {
+		int length = identifierLengthStack[identifierLengthPtr];
+		int numberOfIdentifiers = this.genericsIdentifiersLengthStack[this.genericsIdentifiersLengthPtr];
+		if (length != numberOfIdentifiers || this.genericsLengthStack[this.genericsLengthPtr] != 0) {
+			// no class instance creation with a parameterized type
+			return true;
+		}
+		
 		// completion on type inside an allocation expression
 		
 		TypeReference type;
-		if (topKnownElementKind(COMPLETION_OR_ASSIST_PARSER, 1) == K_INSIDE_THROW_STATEMENT
-			&& topKnownElementInfo(COMPLETION_OR_ASSIST_PARSER, 1) == this.bracketDepth) {
-			pushOnElementStack(K_NEXT_TYPEREF_IS_EXCEPTION);
-			type = getTypeReference(0);
-			popElement(K_NEXT_TYPEREF_IS_EXCEPTION);
-		} else {
-			type = getTypeReference(0);
-		}
-		this.assistNode = type;
-		this.lastCheckPoint = type.sourceEnd + 1;
 		if (this.invocationType == ALLOCATION) {
 			// non qualified allocation expression
 			AllocationExpression allocExpr = new AllocationExpression();
+			if (topKnownElementKind(COMPLETION_OR_ASSIST_PARSER, 1) == K_INSIDE_THROW_STATEMENT
+				&& topKnownElementInfo(COMPLETION_OR_ASSIST_PARSER, 1) == this.bracketDepth) {
+				pushOnElementStack(K_NEXT_TYPEREF_IS_EXCEPTION);
+				type = getTypeReference(0);
+				popElement(K_NEXT_TYPEREF_IS_EXCEPTION);
+			} else {
+				type = getTypeReference(0);
+			}
 			allocExpr.type = type;
 			allocExpr.sourceStart = type.sourceStart;
 			allocExpr.sourceEnd = type.sourceEnd;
@@ -28,6 +33,16 @@ private boolean checkClassInstanceCreation() {
 		} else {
 			// qualified allocation expression
 			QualifiedAllocationExpression allocExpr = new QualifiedAllocationExpression();
+			pushOnGenericsIdentifiersLengthStack(identifierLengthStack[identifierLengthPtr]);
+			pushOnGenericsLengthStack(0);
+			if (topKnownElementKind(COMPLETION_OR_ASSIST_PARSER, 1) == K_INSIDE_THROW_STATEMENT
+				&& topKnownElementInfo(COMPLETION_OR_ASSIST_PARSER, 1) == this.bracketDepth) {
+				pushOnElementStack(K_NEXT_TYPEREF_IS_EXCEPTION);
+				type = getTypeReference(0);
+				popElement(K_NEXT_TYPEREF_IS_EXCEPTION);
+			} else {
+				type = getTypeReference(0);
+			}
 			allocExpr.type = type;
 			allocExpr.enclosingInstance = this.expressionStack[this.qualifier];
 			allocExpr.sourceStart = this.intStack[this.intPtr--];
@@ -35,6 +50,9 @@ private boolean checkClassInstanceCreation() {
 			this.expressionStack[this.qualifier] = allocExpr; // attach it now (it replaces the qualifier expression)
 			this.isOrphanCompletionNode = false;
 		}
+		this.assistNode = type;
+		this.lastCheckPoint = type.sourceEnd + 1;
+		
 		popElement(K_BETWEEN_NEW_AND_LEFT_BRACKET);
 		return true;
 	}

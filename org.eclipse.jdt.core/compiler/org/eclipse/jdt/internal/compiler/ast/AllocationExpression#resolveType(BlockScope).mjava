@@ -5,6 +5,21 @@
 		this.resolvedType = type.resolveType(scope);
 		// will check for null after args are resolved
 
+		// resolve type arguments (for generic constructor call)
+		if (this.typeArguments != null) {
+			int length = this.typeArguments.length;
+			boolean argHasError = false; // typeChecks all arguments
+			this.genericTypeArguments = new TypeBinding[length];
+			for (int i = 0; i < length; i++) {
+				if ((this.genericTypeArguments[i] = this.typeArguments[i].resolveType(scope)) == null) {
+					argHasError = true;
+				}
+			}
+			if (argHasError) {
+				return null;
+			}
+		}
+		
 		// buffering the arguments' types
 		boolean argsContainCast = false;
 		TypeBinding[] argumentTypes = NoParameters;
@@ -33,9 +48,12 @@
 			scope.problemReporter().cannotInstantiate(type, this.resolvedType);
 			return this.resolvedType;
 		}
+		if ((this.resolvedType.tagBits & TagBits.HasWildcard) != 0) {
+		    scope.problemReporter().cannotInstantiateWithWildcards(type, (ParameterizedTypeBinding)this.resolvedType);
+		    return this.resolvedType;
+		}
 		ReferenceBinding allocationType = (ReferenceBinding) this.resolvedType;
-		if (!(binding = scope.getConstructor(allocationType, argumentTypes, this))
-			.isValidBinding()) {
+		if (!(binding = scope.getConstructor(allocationType, argumentTypes, this)).isValidBinding()) {
 			if (binding.declaringClass == null)
 				binding.declaringClass = allocationType;
 			scope.problemReporter().invalidConstructor(this, binding);
@@ -43,15 +61,8 @@
 		}
 		if (isMethodUseDeprecated(binding, scope))
 			scope.problemReporter().deprecatedMethod(binding, this);
-
-		if (arguments != null) {
-			for (int i = 0; i < arguments.length; i++) {
-				arguments[i].implicitWidening(binding.parameters[i], argumentTypes[i]);
-			}
-			if (argsContainCast) {
-				CastExpression.checkNeedForArgumentCasts(scope, null, allocationType, binding, this.arguments, argumentTypes, this);
-			}
-		}
+		if (this.arguments != null)
+			checkInvocationArguments(scope, null, allocationType, this.binding, this.arguments, argumentTypes, argsContainCast, this);
 		return allocationType;
 	}
 

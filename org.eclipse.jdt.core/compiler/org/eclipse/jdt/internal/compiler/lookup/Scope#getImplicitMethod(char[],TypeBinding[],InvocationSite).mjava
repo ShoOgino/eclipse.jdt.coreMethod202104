@@ -11,17 +11,14 @@
 	 * 
 	 *	If no visible method is discovered, an error binding is answered.
 	 */
-	public MethodBinding getImplicitMethod(
-		char[] selector,
-		TypeBinding[] argumentTypes,
-		InvocationSite invocationSite) {
+	public MethodBinding getImplicitMethod(char[] selector, TypeBinding[] argumentTypes, InvocationSite invocationSite) {
 
 		boolean insideStaticContext = false;
 		boolean insideConstructorCall = false;
 		MethodBinding foundMethod = null;
-		ProblemMethodBinding foundFuzzyProblem = null;
+		MethodBinding foundFuzzyProblem = null;
 		// the weird method lookup case (matches method name in scope, then arg types, then visibility)
-		ProblemMethodBinding foundInsideProblem = null;
+		MethodBinding foundInsideProblem = null;
 		// inside Constructor call or inside static context
 		Scope scope = this;
 		int depth = 0;
@@ -39,24 +36,15 @@
 					// retrieve an exact visible match (if possible)
 					MethodBinding methodBinding =
 						(foundMethod == null)
-							? classScope.findExactMethod(
-								receiverType,
-								selector,
-								argumentTypes,
-								invocationSite)
-							: classScope.findExactMethod(
-								receiverType,
-								foundMethod.selector,
-								foundMethod.parameters,
-								invocationSite);
-					//						? findExactMethod(receiverType, selector, argumentTypes, invocationSite)
-					//						: findExactMethod(receiverType, foundMethod.selector, foundMethod.parameters, invocationSite);
+							? classScope.findExactMethod(receiverType, selector, argumentTypes, invocationSite)
+							: classScope.findExactMethod( receiverType, foundMethod.selector, foundMethod.parameters, invocationSite);
+					//		? findExactMethod(receiverType, selector, argumentTypes, invocationSite)
+					//		: findExactMethod(receiverType, foundMethod.selector, foundMethod.parameters, invocationSite);
 					if (methodBinding == null) {
 						// answers closest approximation, may not check argumentTypes or visibility
 						isExactMatch = false;
-						methodBinding =
-							classScope.findMethod(receiverType, selector, argumentTypes, invocationSite);
-						//					methodBinding = findMethod(receiverType, selector, argumentTypes, invocationSite);
+						methodBinding = classScope.findMethod(receiverType, selector, argumentTypes, invocationSite);
+						// methodBinding = findMethod(receiverType, selector, argumentTypes, invocationSite);
 					}
 					if (methodBinding != null) { // skip it if we did not find anything
 						if (methodBinding.problemId() == Ambiguous) {
@@ -71,26 +59,25 @@
 								argumentTypes,
 								InheritedNameHidesEnclosingName);
 						}
-						ProblemMethodBinding fuzzyProblem = null;
-						ProblemMethodBinding insideProblem = null;
+						MethodBinding fuzzyProblem = null;
+						MethodBinding insideProblem = null;
 						if (methodBinding.isValidBinding()) {
 							if (!isExactMatch) {
-								if (!areParametersAssignable(methodBinding.parameters, argumentTypes)) {
-									if (foundMethod == null || foundMethod.problemId() == NotVisible){
+								MethodBinding compatibleMethod = computeCompatibleMethod(methodBinding, argumentTypes, invocationSite);
+								if (compatibleMethod == null) {
+									if (foundMethod == null || foundMethod.problemId() == NotVisible)
 										// inherited mismatch is reported directly, not looking at enclosing matches
 										return new ProblemMethodBinding(methodBinding, selector, argumentTypes, NotFound);
-									}
 									// make the user qualify the method, likely wants the first inherited method (javac generates an ambiguous error instead)
-									fuzzyProblem = new ProblemMethodBinding(selector, methodBinding.parameters, InheritedNameHidesEnclosingName);
-
-								} else if (!methodBinding.canBeSeenBy(receiverType, invocationSite, classScope)) {
-									// using <classScope> instead of <this> for visibility check does grant all access to innerclass
-									fuzzyProblem =
-										new ProblemMethodBinding(
-											methodBinding,
-											selector,
-											methodBinding.parameters,
-											NotVisible);
+									fuzzyProblem = new ProblemMethodBinding(methodBinding, selector, methodBinding.parameters, InheritedNameHidesEnclosingName);
+								} else if (!compatibleMethod.isValidBinding()) {
+									fuzzyProblem = compatibleMethod;
+								} else {
+									methodBinding = compatibleMethod;
+									if (!methodBinding.canBeSeenBy(receiverType, invocationSite, classScope)) {
+										// using <classScope> instead of <this> for visibility check does grant all access to innerclass
+										fuzzyProblem = new ProblemMethodBinding(methodBinding, selector, methodBinding.parameters, NotVisible);
+									}
 								}
 							}
 							if (fuzzyProblem == null && !methodBinding.isStatic()) {

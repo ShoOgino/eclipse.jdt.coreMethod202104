@@ -1,0 +1,70 @@
+	/**
+	 * index is <0 to denote write access emulation
+	 */
+	public void manageSyntheticAccessIfNecessary(
+			BlockScope currentScope,
+			FieldBinding fieldBinding,
+			TypeBinding lastReceiverType,
+			int index,
+			FlowInfo flowInfo) {
+	    
+		if (!flowInfo.isReachable()) return;
+		// index == 0 denotes the first fieldBinding, index > 0 denotes one of the 'otherBindings', index < 0 denotes a write access (to last binding)
+		if (fieldBinding.constant != NotAConstant)
+			return;
+
+		// if field from parameterized type got found, use the original field at codegen time
+		if (fieldBinding instanceof ParameterizedFieldBinding) {
+		    ParameterizedFieldBinding parameterizedField = (ParameterizedFieldBinding) fieldBinding;
+		    FieldBinding originalField = parameterizedField.originalField;
+		    TypeBinding requiredGenericCast = null;
+		    // extra cast needed if field type was type variable
+		    if ((originalField.type.tagBits & TagBits.HasTypeVariable) != 0) {
+		        requiredGenericCast = originalField.type.genericCast(parameterizedField.type);
+		    }		    
+		    setCodegenBinding(fieldBinding, index, originalField, requiredGenericCast);
+		}
+		
+		if (fieldBinding.isPrivate()) { // private access
+			if (fieldBinding.declaringClass != currentScope.enclosingSourceType()) {
+			    FieldBinding someCodegenBinding = getCodegenBinding(fieldBinding, index);
+			    setSyntheticAccessor(fieldBinding, index, 
+			            ((SourceTypeBinding) fieldBinding.declaringClass).addSyntheticMethod(someCodegenBinding, index >= 0 /*read-access?*/));
+				currentScope.problemReporter().needToEmulateFieldAccess(someCodegenBinding, this, index >= 0 /*read-access?*/);
+				return;
+			}
+		} else if (fieldBinding.isProtected()){
+		    int depth = fieldBinding == binding 
+		    		? (bits & DepthMASK) >> DepthSHIFT 
+		    		 : otherDepths[index < 0 ? otherDepths.length-1 : index-1];
+			
+			// implicit protected access 
+			if (depth > 0 && (fieldBinding.declaringClass.getPackage() != currentScope.enclosingSourceType().getPackage())) {
+			    FieldBinding someCodegenBinding = getCodegenBinding(fieldBinding, index);
+			    setSyntheticAccessor(fieldBinding, index, 
+			            ((SourceTypeBinding) currentScope.enclosingSourceType().enclosingTypeAt(depth)).addSyntheticMethod(someCodegenBinding, index >= 0 /*read-access?*/));
+				currentScope.problemReporter().needToEmulateFieldAccess(someCodegenBinding, this, index >= 0 /*read-access?*/);
+				return;
+			}
+		}
+		// if the binding declaring class is not visible, need special action
+		// for runtime compatibility on 1.2 VMs : change the declaring class of the binding
+		// NOTE: from target 1.2 on, field's declaring class is touched if any different from receiver type
+		if (fieldBinding.declaringClass != lastReceiverType
+			&& !lastReceiverType.isArrayType()			
+			&& fieldBinding.declaringClass != null
+			&& fieldBinding.constant == NotAConstant
+			&& ((currentScope.environment().options.targetJDK >= ClassFileConstants.JDK1_2
+					&& (fieldBinding != binding || indexOfFirstFieldBinding > 1 || !fieldBinding.isStatic())
+					&& fieldBinding.declaringClass.id != T_Object)
+				|| !fieldBinding.declaringClass.canBeSeenBy(currentScope))){
+		    setCodegenBinding(
+		            fieldBinding, 
+		            index, 
+		            currentScope.enclosingSourceType().getUpdatedFieldBinding(
+		                    getCodegenBinding(fieldBinding, index), 
+		                    (ReferenceBinding)lastReceiverType.erasure()), 
+		         	null/*reuse existing*/);
+		}
+	}
+

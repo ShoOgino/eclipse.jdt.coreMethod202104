@@ -1,6 +1,18 @@
 public void manageSyntheticAccessIfNecessary(BlockScope currentScope, FlowInfo flowInfo) {
 
 	if (!flowInfo.isReachable()) return;
+
+	// if method from parameterized type got found, use the original method at codegen time
+	this.codegenBinding = this.binding.original();
+	if (this.codegenBinding != this.binding) {
+	    // extra cast needed if method return type was type variable
+	    if (this.codegenBinding.returnType.isTypeVariable()) {
+	        TypeVariableBinding variableReturnType = (TypeVariableBinding) this.codegenBinding.returnType;
+	        if (variableReturnType.firstBound != this.binding.returnType) { // no need for extra cast if same as first bound anyway
+			    this.genericCast = this.binding.returnType;
+	        }
+	    }
+	} 
 	
 	// if the binding declaring class is not visible, need special action
 	// for runtime compatibility on 1.2 VMs : change the declaring class of the binding
@@ -9,10 +21,10 @@ public void manageSyntheticAccessIfNecessary(BlockScope currentScope, FlowInfo f
 	if (this.binding.declaringClass != this.qualifyingType
 		&& !this.qualifyingType.isArrayType()
 		&& ((currentScope.environment().options.targetJDK >= ClassFileConstants.JDK1_2
-				&& (!this.receiver.isImplicitThis() || !this.binding.isStatic())
+				&& (!this.receiver.isImplicitThis() || !this.codegenBinding.isStatic())
 				&& this.binding.declaringClass.id != T_Object) // no change for Object methods
 			|| !this.binding.declaringClass.canBeSeenBy(currentScope))) {
-		this.codegenBinding = currentScope.enclosingSourceType().getUpdatedMethodBinding(this.binding, (ReferenceBinding) this.qualifyingType);
+		this.codegenBinding = currentScope.enclosingSourceType().getUpdatedMethodBinding(this.codegenBinding, (ReferenceBinding) this.qualifyingType.erasure());
 	}	
 }
 

@@ -1,0 +1,35 @@
+	private int rewriteOptionalTypeParameters(ASTNode parent, StructuralPropertyDescriptor property, int offset, String keyword) {
+		int pos= offset;
+		RewriteEvent event= getEvent(parent, property);
+		if (event != null && event.getChangeKind() != RewriteEvent.UNCHANGED) {
+			RewriteEvent[] children= event.getChildren();
+			try {
+				boolean isAllRemoved= isAllOfKind(children, RewriteEvent.REMOVED);
+				if (isAllRemoved) { // all removed: set start to left bracket
+					pos= getScanner().getTokenStartOffset(ITerminalSymbols.TokenNameLESS, pos);
+				}
+				pos= new ListRewriter().rewriteList(parent, property, pos, keyword + String.valueOf('<'), ", "); //$NON-NLS-1$ //$NON-NLS-2$
+				if (isAllRemoved) { // all removed: remove right bracked
+					int endPos= getScanner().getTokenEndOffset(ITerminalSymbols.TokenNameGREATER, pos); // set pos to '>'
+					doTextRemove(pos, endPos - pos, getEditGroup(children[children.length - 1]));
+					return endPos;
+				} else if (isAllOfKind(children, RewriteEvent.INSERTED)) {
+					doTextInsert(pos, String.valueOf('>'), getEditGroup(children[children.length - 1]));
+					return pos;
+				}
+			} catch (CoreException e) {
+				handleException(e);
+			}
+		} else {
+			pos= doVisit(parent, property, pos);
+		}
+		if (pos != offset) { // list contained some type -> parse after closing bracket
+			try {
+				return getScanner().getTokenEndOffset(ITerminalSymbols.TokenNameGREATER, pos);
+			} catch (CoreException e) {
+				handleException(e);
+			}
+		}
+		return pos;
+	}
+

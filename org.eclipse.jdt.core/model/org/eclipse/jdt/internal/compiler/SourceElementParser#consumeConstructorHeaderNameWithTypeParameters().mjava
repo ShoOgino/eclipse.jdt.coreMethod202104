@@ -1,0 +1,59 @@
+protected void consumeConstructorHeaderNameWithTypeParameters() {
+
+	/* recovering - might be an empty message send */
+	if (this.currentElement != null){
+		if (this.lastIgnoredToken == TokenNamenew){ // was an allocation expression
+			this.lastCheckPoint = this.scanner.startPosition; // force to restart at this exact position				
+			this.restartRecovery = true;
+			return;
+		}
+	}
+	
+	// ConstructorHeaderName ::=  Modifiersopt TypeParameters 'Identifier' '('
+	SourceConstructorDeclaration cd = new SourceConstructorDeclaration(this.compilationUnit.compilationResult);
+
+	//name -- this is not really revelant but we do .....
+	cd.selector = this.identifierStack[this.identifierPtr];
+	long selectorSourcePositions = this.identifierPositionStack[this.identifierPtr--];
+	this.identifierLengthPtr--;
+
+	// consume type parameters
+	int length = this.genericsLengthStack[this.genericsLengthPtr--];
+	this.genericsPtr -= length;
+	System.arraycopy(this.genericsStack, this.genericsPtr + 1, cd.typeParameters = new TypeParameter[length], 0, length);
+	
+	//modifiers
+	cd.declarationSourceStart = this.intStack[this.intPtr--];
+	cd.modifiers = this.intStack[this.intPtr--];
+	// consume annotations
+	if ((length = this.expressionLengthStack[this.expressionLengthPtr--]) != 0) {
+		System.arraycopy(
+			this.expressionStack, 
+			(this.expressionPtr -= length) + 1, 
+			cd.annotations = new Annotation[length], 
+			0, 
+			length); 
+	}
+	// javadoc
+	cd.javadoc = this.javadoc;
+	this.javadoc = null;
+
+	//highlight starts at the selector starts
+	cd.sourceStart = (int) (selectorSourcePositions >>> 32);
+	cd.selectorSourceEnd = (int) selectorSourcePositions;
+	pushOnAstStack(cd);
+	cd.sourceEnd = this.lParenPos;
+	cd.bodyStart = this.lParenPos+1;
+	this.listLength = 0; // initialize listLength before reading parameters/throws
+
+	// recovery
+	if (this.currentElement != null){
+		this.lastCheckPoint = cd.bodyStart;
+		if ((this.currentElement instanceof RecoveredType && this.lastIgnoredToken != TokenNameDOT)
+			|| cd.modifiers != 0){
+			this.currentElement = this.currentElement.add(cd, 0);
+			this.lastIgnoredToken = -1;
+		}
+	}	
+}
+

@@ -1,7 +1,12 @@
-	public MethodDeclaration convert(org.eclipse.jdt.internal.compiler.ast.AbstractMethodDeclaration methodDeclaration) {
+	public ASTNode convert(org.eclipse.jdt.internal.compiler.ast.AbstractMethodDeclaration methodDeclaration) {
 		checkCanceled();
+		if (methodDeclaration instanceof org.eclipse.jdt.internal.compiler.ast.AnnotationTypeMemberDeclaration) {
+			return convert((org.eclipse.jdt.internal.compiler.ast.AnnotationTypeMemberDeclaration) methodDeclaration);
+		}
 		MethodDeclaration methodDecl = this.ast.newMethodDeclaration();
-		methodDecl.setModifiers(methodDeclaration.modifiers & org.eclipse.jdt.internal.compiler.lookup.CompilerModifiers.AccJustFlag);
+		if ((methodDeclaration.modifiers & CompilerModifiers.AccJustFlag) != 0) {
+			setModifiers(methodDecl, methodDeclaration);
+		}
 		boolean isConstructor = methodDeclaration.isConstructor();
 		methodDecl.setConstructor(isConstructor);
 		SimpleName methodName = this.ast.newSimpleName(new String(methodDeclaration.selector));
@@ -25,13 +30,19 @@
 		}
 		org.eclipse.jdt.internal.compiler.ast.ExplicitConstructorCall explicitConstructorCall = null;
 		if (isConstructor) {
-			// set the return type to VOID
-			PrimitiveType returnType = this.ast.newPrimitiveType(PrimitiveType.VOID);
-			returnType.setSourceRange(methodDeclaration.sourceStart, 0);
-			methodDecl.setReturnType(returnType);
 			org.eclipse.jdt.internal.compiler.ast.ConstructorDeclaration constructorDeclaration = (org.eclipse.jdt.internal.compiler.ast.ConstructorDeclaration) methodDeclaration;
 			explicitConstructorCall = constructorDeclaration.constructorCall;
-		} else {
+			switch(this.ast.apiLevel) {
+				case AST.JLS2 :
+					// set the return type to VOID
+					PrimitiveType returnType = this.ast.newPrimitiveType(PrimitiveType.VOID);
+					returnType.setSourceRange(methodDeclaration.sourceStart, 0);
+					methodDecl.setReturnType(returnType);
+					break;
+				case AST.JLS3 :
+					methodDecl.setReturnType2(null);
+			}
+		} else if (methodDeclaration instanceof org.eclipse.jdt.internal.compiler.ast.MethodDeclaration) {
 			org.eclipse.jdt.internal.compiler.ast.MethodDeclaration method = (org.eclipse.jdt.internal.compiler.ast.MethodDeclaration) methodDeclaration;
 			org.eclipse.jdt.internal.compiler.ast.TypeReference typeReference = method.returnType;
 			if (typeReference != null) {
@@ -46,10 +57,10 @@
 		int declarationSourceStart = methodDeclaration.declarationSourceStart;
 		int declarationSourceEnd = methodDeclaration.bodyEnd;
 		methodDecl.setSourceRange(declarationSourceStart, declarationSourceEnd - declarationSourceStart + 1);
-		int closingPosition = retrieveRightBraceOrSemiColonPosition(methodDecl, methodDeclaration);
+		int closingPosition = retrieveRightBraceOrSemiColonPosition(methodDeclaration.bodyEnd, methodDeclaration.declarationSourceEnd);
 		if (closingPosition != -1) {
 			int startPosition = methodDecl.getStartPosition();
-			methodDecl.setSourceRange(startPosition, closingPosition - startPosition);
+			methodDecl.setSourceRange(startPosition, closingPosition - startPosition + 1);
 
 			org.eclipse.jdt.internal.compiler.ast.Statement[] statements = methodDeclaration.statements;
 			
@@ -108,10 +119,21 @@
 				}
 			}			
 		}
+
+		org.eclipse.jdt.internal.compiler.ast.TypeParameter[] typeParameters = methodDeclaration.typeParameters();
+		if (typeParameters != null) {
+			switch(this.ast.apiLevel) {
+				case AST.JLS2 :
+					methodDecl.setFlags(methodDecl.getFlags() | ASTNode.MALFORMED);
+					break;
+				case AST.JLS3 :
+					for (int i = 0, max = typeParameters.length; i < max; i++) {
+						methodDecl.typeParameters().add(convert(typeParameters[i]));
+					}
+			}
+		}
 		
 		// The javadoc comment is now got from list store in compilation unit declaration
-//		setJavaDocComment(methodDecl);
-//		methodDecl.setJavadoc(convert(methodDeclaration.javadoc));
 		convert(methodDeclaration.javadoc, methodDecl);
 		if (this.resolveBindings) {
 			recordNodes(methodDecl, methodDeclaration);

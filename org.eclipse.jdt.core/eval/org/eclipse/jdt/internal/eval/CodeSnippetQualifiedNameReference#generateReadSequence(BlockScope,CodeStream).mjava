@@ -2,36 +2,35 @@
  * Generate code for all bindings (local and fields) excluding the last one, which may then be generated code
  * for a read or write access.
  */
-public void generateReadSequence(BlockScope currentScope, CodeStream codeStream) {
+public FieldBinding generateReadSequence(BlockScope currentScope, CodeStream codeStream) {
+    
 	// determine the rank until which we now we do not need any actual value for the field access
 	int otherBindingsCount = this.otherCodegenBindings == null ? 0 : this.otherCodegenBindings.length;
-
 	boolean needValue = otherBindingsCount == 0 || !this.otherBindings[0].isStatic();
+	FieldBinding lastFieldBinding = null;
+	TypeBinding lastGenericCast = null;
+	
 	switch (this.bits & RestrictiveFlagMASK) {
 		case FIELD :
-			this.lastFieldBinding = (FieldBinding) this.codegenBinding;
+			lastFieldBinding = (FieldBinding) this.codegenBinding;
+			lastGenericCast = this.genericCast;
 			// if first field is actually constant, we can inline it
-			if (this.lastFieldBinding.constant != NotAConstant) {
+			if (lastFieldBinding.constant != NotAConstant) {
 				break;
 			}
 			if (needValue) {
-				if (this.lastFieldBinding.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
-					if (!this.lastFieldBinding.isStatic()) {
+				if (lastFieldBinding.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
+					if (!lastFieldBinding.isStatic()) {
 						if ((this.bits & DepthMASK) != 0) {
 							ReferenceBinding targetType = currentScope.enclosingSourceType().enclosingTypeAt((this.bits & DepthMASK) >> DepthSHIFT);
 							Object[] emulationPath = currentScope.getEmulationPath(targetType, true /*only exact match*/, false/*consider enclosing arg*/);
-							if (emulationPath == null) {
-								// internal error, per construction we should have found it
-								currentScope.problemReporter().needImplementation();
-							} else {
-								codeStream.generateOuterAccess(emulationPath, this, targetType, currentScope);
-							}
+							codeStream.generateOuterAccess(emulationPath, this, targetType, currentScope);
 						} else {
 							generateReceiver(codeStream);
 						}
 					}
 				} else {
-					if (!this.lastFieldBinding.isStatic()) {
+					if (!lastFieldBinding.isStatic()) {
 						if ((this.bits & DepthMASK) != 0) {
 							// internal error, per construction we should have found it
 							// not yet supported
@@ -47,7 +46,6 @@ public void generateReadSequence(BlockScope currentScope, CodeStream codeStream)
 			break;
 		case LOCAL : // reading the first local variable
 			if (!needValue) break; // no value needed
-			this.lastFieldBinding = null;
 			LocalVariableBinding localBinding = (LocalVariableBinding) this.codegenBinding;
 			// regular local variable read
 			if (localBinding.constant != NotAConstant) {
@@ -55,15 +53,10 @@ public void generateReadSequence(BlockScope currentScope, CodeStream codeStream)
 				// no implicit conversion
 			} else {
 				// outer local?
-				if ((this.bits & DepthMASK) != 0) {
+				if ((bits & DepthMASK) != 0) {
 					// outer local can be reached either through a synthetic arg or a synthetic field
 					VariableBinding[] path = currentScope.getEmulationPath(localBinding);
-					if (path == null) {
-						// emulation was not possible (should not happen per construction)
-						currentScope.problemReporter().needImplementation();
-					} else {
-						codeStream.generateOuterAccess(path, this, localBinding, currentScope);
-					}
+					codeStream.generateOuterAccess(path, this, localBinding, currentScope);
 				} else {
 					codeStream.load(localBinding);
 				}
@@ -75,38 +68,42 @@ public void generateReadSequence(BlockScope currentScope, CodeStream codeStream)
 	if (this.otherCodegenBindings != null) {
 		for (int i = 0; i < otherBindingsCount; i++) {
 			FieldBinding nextField = this.otherCodegenBindings[i];
-			if (this.lastFieldBinding != null) {
+			TypeBinding nextGenericCast = this.otherGenericCasts == null ? null : this.otherGenericCasts[i];
+			if (lastFieldBinding != null) {
 				needValue = !nextField.isStatic();
 				if (needValue) {
-					if (this.lastFieldBinding.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
-						if (this.lastFieldBinding.constant != NotAConstant) {
-							if (this.lastFieldBinding != this.codegenBinding && !this.lastFieldBinding.isStatic()) {
+					if (lastFieldBinding.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
+						if (lastFieldBinding.constant != NotAConstant) {
+							if (lastFieldBinding != this.codegenBinding && !lastFieldBinding.isStatic()) {
 								codeStream.invokeObjectGetClass(); // perform null check
 								codeStream.pop();
 							}
-							codeStream.generateConstant(this.lastFieldBinding.constant, 0);
-						} else if (this.lastFieldBinding.isStatic()) {
-							codeStream.getstatic(this.lastFieldBinding);
+							codeStream.generateConstant(lastFieldBinding.constant, 0);
+						} else if (lastFieldBinding.isStatic()) {
+							codeStream.getstatic(lastFieldBinding);
 						} else {
-							codeStream.getfield(this.lastFieldBinding);
+							codeStream.getfield(lastFieldBinding);
 						}
 					} else {
-						((CodeSnippetCodeStream) codeStream).generateEmulatedReadAccessForField(this.lastFieldBinding);
+						((CodeSnippetCodeStream) codeStream).generateEmulatedReadAccessForField(lastFieldBinding);
 					}
+					if (lastGenericCast != null) codeStream.checkcast(lastGenericCast);
 				} else {
-					if (this.codegenBinding != this.lastFieldBinding && !this.lastFieldBinding.isStatic()){
+					if (this.codegenBinding != lastFieldBinding && !lastFieldBinding.isStatic()){
 						codeStream.invokeObjectGetClass(); // perform null check
 						codeStream.pop();
 					}						
 				}
 			}
-			this.lastFieldBinding = nextField;
-			if (this.lastFieldBinding != null && !this.lastFieldBinding.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
-				if (this.lastFieldBinding.isStatic()) {
+			lastFieldBinding = nextField;
+			lastGenericCast = nextGenericCast;
+			if (lastFieldBinding != null && !lastFieldBinding.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
+				if (lastFieldBinding.isStatic()) {
 					codeStream.aconst_null();
 				}
 			}
 		}			
 	}
+	return lastFieldBinding;
 }
 

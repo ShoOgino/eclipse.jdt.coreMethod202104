@@ -1,0 +1,196 @@
+	public Type convertType(TypeReference typeReference) {
+		if (typeReference instanceof Wildcard) {
+			Wildcard wildcard = (Wildcard) typeReference;
+			WildcardType wildcardType = this.ast.newWildcardType();
+			if (wildcard.bound != null) {
+				wildcardType.setBound(convertType(wildcard.bound), wildcard.kind == Wildcard.EXTENDS);
+			}
+			int start = wildcard.sourceStart;
+			int end = wildcard.sourceEnd;
+			wildcardType.setSourceRange(start, end - start + 1);
+			return wildcardType;
+		}
+		Type type = null;				
+		int sourceStart = -1;
+		int length = 0;
+		int dimensions = typeReference.dimensions();
+		if (typeReference instanceof org.eclipse.jdt.internal.compiler.ast.SingleTypeReference) {
+			// this is either an ArrayTypeReference or a SingleTypeReference
+			char[] name = ((org.eclipse.jdt.internal.compiler.ast.SingleTypeReference) typeReference).getTypeName()[0];
+			sourceStart = typeReference.sourceStart;
+			length = typeReference.sourceEnd - typeReference.sourceStart + 1;
+			// need to find out if this is an array type of primitive types or not
+			if (isPrimitiveType(name)) {
+				int end = retrieveEndOfElementTypeNamePosition(sourceStart, sourceStart + length);
+				if (end == -1) {
+					end = sourceStart + length - 1;
+				}					
+				type = this.ast.newPrimitiveType(getPrimitiveTypeCode(name));
+				type.setSourceRange(sourceStart, end - sourceStart + 1);
+			} else if (typeReference instanceof ParameterizedSingleTypeReference) {
+				ParameterizedSingleTypeReference parameterizedSingleTypeReference = (ParameterizedSingleTypeReference) typeReference;
+				SimpleName simpleName = this.ast.newSimpleName(new String(name));
+				int end = retrieveEndOfElementTypeNamePosition(sourceStart, sourceStart + length);
+				if (end == -1) {
+					end = sourceStart + length - 1;
+				}
+				simpleName.setSourceRange(sourceStart, end - sourceStart + 1);
+				switch(this.ast.apiLevel) {
+					case AST.JLS2 :
+						type = this.ast.newSimpleType(simpleName);
+						type.setFlags(type.getFlags() | ASTNode.MALFORMED);
+						type.setSourceRange(sourceStart, end - sourceStart + 1);
+						if (this.resolveBindings) {
+							this.recordNodes(simpleName, typeReference);
+						}
+						break;
+					case AST.JLS3 :
+						SimpleType simpleType = this.ast.newSimpleType(simpleName);
+						simpleType.setSourceRange(simpleName.getStartPosition(), simpleName.getLength());
+						type = this.ast.newParameterizedType(simpleType);
+						TypeReference[] typeArguments = parameterizedSingleTypeReference.typeArguments;
+						if (typeArguments != null) {
+							Type type2 = null;
+							for (int i = 0, max = typeArguments.length; i < max; i++) {
+								type2 = convertType(typeArguments[i]);
+								((ParameterizedType) type).typeArguments().add(type2);
+								end = type2.getStartPosition() + type2.getLength() - 1;
+							}
+							end = retrieveClosingAngleBracketPosition(end + 1);
+							type.setSourceRange(sourceStart, end - sourceStart + 1);
+						} else {
+							type.setSourceRange(sourceStart, end - sourceStart + 1);
+						}
+						if (this.resolveBindings) {
+							this.recordNodes(simpleName, typeReference);
+						}
+				}
+			} else {
+				SimpleName simpleName = this.ast.newSimpleName(new String(name));
+				// we need to search for the starting position of the first brace in order to set the proper length
+				// PR http://dev.eclipse.org/bugs/show_bug.cgi?id=10759
+				int end = retrieveEndOfElementTypeNamePosition(sourceStart, sourceStart + length);
+				if (end == -1) {
+					end = sourceStart + length - 1;
+				}
+				simpleName.setSourceRange(sourceStart, end - sourceStart + 1);
+				type = this.ast.newSimpleType(simpleName);
+				type.setSourceRange(sourceStart, end - sourceStart + 1);
+				if (this.resolveBindings) {
+					this.recordNodes(simpleName, typeReference);
+				}
+			}
+			if (dimensions != 0) {
+				type = this.ast.newArrayType(type, dimensions);
+				type.setSourceRange(sourceStart, length);
+				if (this.resolveBindings) {
+					// store keys for inner types
+					completeRecord((ArrayType) type, typeReference);
+				}
+			}
+		} else {
+			if (typeReference instanceof ParameterizedQualifiedTypeReference) {
+				ParameterizedQualifiedTypeReference parameterizedQualifiedTypeReference = (ParameterizedQualifiedTypeReference) typeReference;
+				char[][] tokens = parameterizedQualifiedTypeReference.tokens;
+				TypeReference[][] typeArguments = parameterizedQualifiedTypeReference.typeArguments;
+				long[] positions = parameterizedQualifiedTypeReference.sourcePositions;
+				switch(this.ast.apiLevel) {
+					case AST.JLS2 : {
+							char[][] name = ((org.eclipse.jdt.internal.compiler.ast.QualifiedTypeReference) typeReference).getTypeName();
+							int nameLength = name.length;
+							sourceStart = (int)(positions[0]>>>32);
+							length = (int)(positions[nameLength - 1] & 0xFFFFFFFF) - sourceStart + 1;
+							Name qualifiedName = this.setQualifiedNameNameAndSourceRanges(name, positions, typeReference);
+							type = this.ast.newSimpleType(qualifiedName);
+							type.setSourceRange(sourceStart, length);
+						}
+						break;
+					case AST.JLS3 :
+						if (typeArguments != null) {
+							int startingIndex = 0;
+							int endingIndex = 0;
+							while (typeArguments[endingIndex] == null) {
+								endingIndex++;
+							}
+							Name name = null;
+							if (endingIndex - startingIndex == 0) {
+								name = this.ast.newSimpleName(new String(tokens[startingIndex]));
+								int start = (int)(positions[startingIndex]>>>32);
+								int end = (int) positions[startingIndex];
+								name.setSourceRange(start, end - start + 1);
+							} else {
+								name = this.setQualifiedNameNameAndSourceRanges(tokens, positions, startingIndex, endingIndex, typeReference);
+							}
+							SimpleType simpleType = this.ast.newSimpleType(name);
+							int start = (int)(positions[startingIndex]>>>32);
+							int end = (int) positions[endingIndex];
+							simpleType.setSourceRange(start, end - start + 1);
+							ParameterizedType parameterizedType = this.ast.newParameterizedType(simpleType);
+							start = simpleType.getStartPosition();
+							end = start + simpleType.getLength() - 1;
+							for (int i = 0, max = typeArguments[endingIndex].length; i < max; i++) {
+								final Type type2 = convertType(typeArguments[endingIndex][i]);
+								parameterizedType.typeArguments().add(type2);
+								end = type2.getStartPosition() + type2.getLength() - 1;
+							}
+							end = retrieveClosingAngleBracketPosition(end + 1);
+							parameterizedType.setSourceRange(start, end - start + 1);
+							startingIndex = endingIndex + 1;
+							Type currentType = parameterizedType;
+							while(startingIndex < typeArguments.length) {
+								SimpleName simpleName = this.ast.newSimpleName(new String(tokens[startingIndex]));
+								start = (int)(positions[startingIndex]>>>32);
+								end = (int) positions[startingIndex];
+								simpleName.setSourceRange(start, end - start + 1);
+								QualifiedType qualifiedType = this.ast.newQualifiedType(currentType, simpleName);							
+								start = currentType.getStartPosition();
+								end = simpleName.getStartPosition() + simpleName.getLength() - 1;
+								qualifiedType.setSourceRange(start, end - start + 1);
+								if (typeArguments[startingIndex] != null) {
+									ParameterizedType parameterizedType2 = this.ast.newParameterizedType(qualifiedType);
+									for (int i = 0, max = typeArguments[startingIndex].length; i < max; i++) {
+										final Type type2 = convertType(typeArguments[startingIndex][i]);
+										parameterizedType2.typeArguments().add(type2);
+										end = type2.getStartPosition() + type2.getLength() - 1;
+									}
+									end = retrieveClosingAngleBracketPosition(end + 1);
+									parameterizedType2.setSourceRange(start, end - start + 1);							
+									currentType = parameterizedType2;
+								} else {
+									currentType = qualifiedType;
+								}
+								startingIndex++;
+							}
+							return currentType;
+						}
+				}
+			} else {
+				char[][] name = ((org.eclipse.jdt.internal.compiler.ast.QualifiedTypeReference) typeReference).getTypeName();
+				int nameLength = name.length;
+				long[] positions = ((org.eclipse.jdt.internal.compiler.ast.QualifiedTypeReference) typeReference).sourcePositions;
+				sourceStart = (int)(positions[0]>>>32);
+				length = (int)(positions[nameLength - 1] & 0xFFFFFFFF) - sourceStart + 1;
+				Name qualifiedName = this.setQualifiedNameNameAndSourceRanges(name, positions, typeReference);
+				type = this.ast.newSimpleType(qualifiedName);
+				type.setSourceRange(sourceStart, length);
+			}
+
+			if (dimensions != 0) {
+				type = this.ast.newArrayType(type, dimensions);
+				if (this.resolveBindings) {
+					completeRecord((ArrayType) type, typeReference);
+				}
+				int end = retrieveEndOfDimensionsPosition(sourceStart+length, this.compilationUnitSource.length);
+				if (end != -1) {
+					type.setSourceRange(sourceStart, end - sourceStart + 1);
+				} else {
+					type.setSourceRange(sourceStart, length);
+				}
+			}
+		}
+		if (this.resolveBindings) {
+			this.recordNodes(type, typeReference);
+		}
+		return type;
+	}
+

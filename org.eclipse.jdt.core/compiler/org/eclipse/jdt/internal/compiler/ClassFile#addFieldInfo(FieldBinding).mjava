@@ -10,10 +10,13 @@
 		if (contentsOffset + 30 >= contents.length) {
 			resizeContents(30);
 		}
-		// Generate two attribute: constantValueAttribute and SyntheticAttribute
 		// Now we can generate all entries into the byte array
 		// First the accessFlags
 		int accessFlags = fieldBinding.getAccessFlags();
+		if (targetJDK < ClassFileConstants.JDK1_5) {
+		    // pre 1.5, synthetic was an attribute, not a modifier
+		    accessFlags &= ~AccSynthetic;
+		}		
 		contents[contentsOffset++] = (byte) (accessFlags >> 8);
 		contents[contentsOffset++] = (byte) accessFlags;
 		// Then the nameIndex
@@ -28,7 +31,11 @@
 		int fieldAttributeOffset = contentsOffset;
 		contentsOffset += 2;
 		// 4.7.2 only static constant fields get a ConstantAttribute
+		// Generate the constantValueAttribute
 		if (fieldBinding.constant != Constant.NotAConstant){
+			if (contentsOffset + 8 >= contents.length) {
+				resizeContents(8);
+			}
 			// Now we generate the constant attribute corresponding to the fieldBinding
 			int constantValueNameIndex =
 				constantPool.literalIndex(AttributeNamesConstants.ConstantValueName);
@@ -103,7 +110,10 @@
 					}
 			}
 		}
-		if (fieldBinding.isSynthetic()) {
+		if (this.targetJDK < ClassFileConstants.JDK1_5 && fieldBinding.isSynthetic()) {
+			if (contentsOffset + 6 >= contents.length) {
+				resizeContents(6);
+			}
 			int syntheticAttributeNameIndex =
 				constantPool.literalIndex(AttributeNamesConstants.SyntheticName);
 			contents[contentsOffset++] = (byte) (syntheticAttributeNameIndex >> 8);
@@ -116,6 +126,9 @@
 			attributeNumber++;
 		}
 		if (fieldBinding.isDeprecated()) {
+			if (contentsOffset + 6 >= contents.length) {
+				resizeContents(6);
+			}
 			int deprecatedAttributeNameIndex =
 				constantPool.literalIndex(AttributeNamesConstants.DeprecatedName);
 			contents[contentsOffset++] = (byte) (deprecatedAttributeNameIndex >> 8);
@@ -127,6 +140,29 @@
 			contents[contentsOffset++] = 0;
 			attributeNumber++;
 		}
+		// add signature attribute
+		char[] genericSignature = fieldBinding.genericSignature();
+		if (genericSignature != null) {
+			// check that there is enough space to write all the bytes for the field info corresponding
+			// to the @fieldBinding
+			if (contentsOffset + 8 >= contents.length) {
+				resizeContents(8);
+			}
+			int signatureAttributeNameIndex =
+				constantPool.literalIndex(AttributeNamesConstants.SignatureName);
+			contents[contentsOffset++] = (byte) (signatureAttributeNameIndex >> 8);
+			contents[contentsOffset++] = (byte) signatureAttributeNameIndex;
+			// the length of a signature attribute is equals to 2
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 2;
+			int signatureIndex =
+				constantPool.literalIndex(genericSignature);
+			contents[contentsOffset++] = (byte) (signatureIndex >> 8);
+			contents[contentsOffset++] = (byte) signatureIndex;
+			attributeNumber++;
+		}				
 		contents[fieldAttributeOffset++] = (byte) (attributeNumber >> 8);
 		contents[fieldAttributeOffset] = (byte) attributeNumber;
 	}

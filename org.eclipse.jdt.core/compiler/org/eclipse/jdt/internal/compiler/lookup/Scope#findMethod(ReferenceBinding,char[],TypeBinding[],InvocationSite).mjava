@@ -7,7 +7,7 @@
 
 		ReferenceBinding currentType = receiverType;
 		MethodBinding matchingMethod = null;
-		ObjectVector found = new ObjectVector(); //TODO should rewrite to remove #matchingMethod since found is allocated anyway
+		ObjectVector found = new ObjectVector(); //TODO (kent) should rewrite to remove #matchingMethod since found is allocated anyway
 
 		faultInReceiverType(receiverType);
 		compilationUnitScope().recordTypeReference(receiverType);
@@ -85,41 +85,65 @@
 		MethodBinding[] candidates = null;
 		int candidatesCount = 0;
 		boolean checkedMatchingMethod = false; // is matchingMethod meeting argument expectation ?
+		MethodBinding problemMethod = null;
 		if (foundSize > 0) {
 			// argument type compatibility check
 			for (int i = 0; i < foundSize; i++) {
 				MethodBinding methodBinding = (MethodBinding) found.elementAt(i);
-				if (areParametersAssignable(methodBinding.parameters, argumentTypes)) {
-					switch (candidatesCount) {
-						case 0: 
-							matchingMethod = methodBinding; // if only one match, reuse matchingMethod
-							checkedMatchingMethod = true; // matchingMethod is known to exist and match params here
-							break;
-						case 1:
-							candidates = new MethodBinding[foundSize]; // only lazily created if more than one match
-							candidates[0] = matchingMethod; // copy back
-							matchingMethod = null;
-							// fall through
-						default:
-							candidates[candidatesCount] = methodBinding;
+				MethodBinding compatibleMethod = computeCompatibleMethod(methodBinding, argumentTypes, invocationSite);
+				if (compatibleMethod != null) {
+					if (compatibleMethod.isValidBinding()) {
+						switch (candidatesCount) {
+							case 0: 
+								matchingMethod = compatibleMethod; // if only one match, reuse matchingMethod
+								checkedMatchingMethod = true; // matchingMethod is known to exist and match params here
+								break;
+							case 1:
+								candidates = new MethodBinding[foundSize]; // only lazily created if more than one match
+								candidates[0] = matchingMethod; // copy back
+								matchingMethod = null;
+								// fall through
+							default:
+								candidates[candidatesCount] = compatibleMethod;
+						}
+						candidatesCount++;
+					} else if (problemMethod == null) {
+						problemMethod = compatibleMethod;
 					}
-					candidatesCount++;
 				}
 			}
 		}
+		if (candidatesCount > 0)
+			problemMethod = null; // forget the problem method if candidates were found
+
 		// if only one matching method left (either from start or due to elimination of rivals), then match is in matchingMethod
 		if (matchingMethod != null) {
-			if (checkedMatchingMethod || areParametersAssignable(matchingMethod.parameters, argumentTypes)) {
+			if (!checkedMatchingMethod) {
+				MethodBinding compatibleMethod = computeCompatibleMethod(matchingMethod, argumentTypes, invocationSite);
+				if (compatibleMethod != null) {
+					if (compatibleMethod.isValidBinding()) {
+						matchingMethod = compatibleMethod;
+						checkedMatchingMethod = true;
+					} else {
+						problemMethod = compatibleMethod;
+					}
+				}
+			}
+			if (checkedMatchingMethod) {
 				// (if no default abstract) must explicitly look for one instead, which could be a better match
 				if (!matchingMethod.canBeSeenBy(receiverType, invocationSite, this)) {
 					// ignore matching method (to be consistent with multiple matches, none visible (matching method is then null)
-					MethodBinding interfaceMethod = findDefaultAbstractMethod(receiverType, selector, argumentTypes, invocationSite, classHierarchyStart, null, found);						
+					MethodBinding interfaceMethod =
+						findDefaultAbstractMethod(receiverType, selector, argumentTypes, invocationSite, classHierarchyStart, null, found);						
 					if (interfaceMethod != null) return interfaceMethod;
 					compilationUnitScope().recordTypeReferences(matchingMethod.thrownExceptions);
 					return matchingMethod;
 				}
 			} 
-			return findDefaultAbstractMethod(receiverType, selector, argumentTypes, invocationSite, classHierarchyStart, matchingMethod, found);
+			matchingMethod =
+				findDefaultAbstractMethod(receiverType, selector, argumentTypes, invocationSite, classHierarchyStart, matchingMethod, found);
+			if (matchingMethod != null) return matchingMethod;
+			return problemMethod;
 		}
 
 		// no match was found, try to find a close match when the parameter order is wrong or missing some parameters
@@ -127,6 +151,7 @@
 			MethodBinding interfaceMethod =
 				findDefaultAbstractMethod(receiverType, selector, argumentTypes, invocationSite, classHierarchyStart, matchingMethod, found);
 			if (interfaceMethod != null) return interfaceMethod;
+			if (problemMethod != null) return problemMethod;
 
 			int argLength = argumentTypes.length;
 			foundSize = found.size;
@@ -144,6 +169,17 @@
 				return methodBinding;
 			}
 			return (MethodBinding) found.elementAt(0); // no good match so just use the first one found
+		}
+
+		// check for duplicate parameterized methods
+		if (compilationUnitScope().environment.options.sourceLevel >= ClassFileConstants.JDK1_5) {
+			for (int i = 0; i < candidatesCount; i++) {
+				MethodBinding current = candidates[i];
+				if (current instanceof ParameterizedMethodBinding)
+					for (int j = i + 1; j < candidatesCount; j++)
+						if (current.declaringClass == candidates[j].declaringClass && current.areParametersEqual(candidates[j]))
+							return new ProblemMethodBinding(candidates[i].selector, candidates[i].parameters, Ambiguous);
+			}
 		}
 
 		// tiebreak using visibility check
@@ -169,9 +205,9 @@
 			return new ProblemMethodBinding(candidates[0], candidates[0].selector, candidates[0].parameters, NotVisible);
 		}
 		if (isCompliant14)
-			return mostSpecificMethodBinding(candidates, visiblesCount);
+			return mostSpecificMethodBinding(candidates, visiblesCount, invocationSite);
 		return candidates[0].declaringClass.isClass()
-			? mostSpecificClassMethodBinding(candidates, visiblesCount)
-			: mostSpecificInterfaceMethodBinding(candidates, visiblesCount);
+			? mostSpecificClassMethodBinding(candidates, visiblesCount, invocationSite)
+			: mostSpecificInterfaceMethodBinding(candidates, visiblesCount, invocationSite);
 	}
 

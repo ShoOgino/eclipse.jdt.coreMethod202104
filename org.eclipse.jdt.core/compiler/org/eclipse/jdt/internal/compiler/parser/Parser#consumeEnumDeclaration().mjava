@@ -1,0 +1,44 @@
+protected void consumeEnumDeclaration() {
+	// EnumDeclaration ::= EnumHeader ClassHeaderImplementsopt EnumBody
+	int length;
+	if ((length = this.astLengthStack[this.astLengthPtr--]) != 0) {
+		//there are length declarations
+		//dispatch according to the type of the declarations
+		dispatchDeclarationIntoEnumDeclaration(length);
+	}
+
+	EnumDeclaration enumDeclaration = (EnumDeclaration) this.astStack[this.astPtr];
+
+	// mark initializers with local type mark if needed
+	markInitializersWithLocalType(enumDeclaration);
+
+	//convert constructor that do not have the type's name into methods
+	boolean hasConstructor = enumDeclaration.checkConstructors(this);
+	
+	//add the default constructor when needed (interface don't have it)
+	if (!hasConstructor && !enumDeclaration.isInterface()) {
+		boolean insideFieldInitializer = false;
+		if (this.diet) {
+			for (int i = this.nestedType; i > 0; i--){
+				if (this.variablesCounter[i] > 0) {
+					insideFieldInitializer = true;
+					break;
+				}
+			}
+		}
+		enumDeclaration.createsInternalConstructor(!this.diet || insideFieldInitializer, true);
+	}
+
+	//always add <clinit> (will be remove at code gen time if empty)
+	if (this.scanner.containsAssertKeyword) {
+		enumDeclaration.bits |= ASTNode.AddAssertionMASK;
+	}
+	enumDeclaration.addClinit();
+	enumDeclaration.bodyEnd = this.endStatementPosition;
+	if (length == 0 && !containsComment(enumDeclaration.bodyStart, enumDeclaration.bodyEnd)) {
+		enumDeclaration.bits |= ASTNode.UndocumentedEmptyBlockMASK;
+	}
+
+	enumDeclaration.declarationSourceEnd = flushCommentsDefinedPriorTo(this.endStatementPosition); 
+}
+

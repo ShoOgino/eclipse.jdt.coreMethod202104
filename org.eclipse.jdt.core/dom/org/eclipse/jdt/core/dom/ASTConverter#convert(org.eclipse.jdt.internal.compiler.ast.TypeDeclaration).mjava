@@ -1,10 +1,33 @@
-	public TypeDeclaration convert(org.eclipse.jdt.internal.compiler.ast.TypeDeclaration typeDeclaration) {
+	public ASTNode convert(org.eclipse.jdt.internal.compiler.ast.TypeDeclaration typeDeclaration) {
+		if (typeDeclaration instanceof org.eclipse.jdt.internal.compiler.ast.AnnotationTypeDeclaration) {
+			if (this.ast.apiLevel == AST.JLS2) {
+				return null;
+			} else {
+				return convert((org.eclipse.jdt.internal.compiler.ast.AnnotationTypeDeclaration) typeDeclaration);
+			}
+		}
+		if (typeDeclaration instanceof EnumConstant) {
+			if (this.ast.apiLevel == AST.JLS2) {
+				return null;
+			} else {
+				return convert((EnumConstant) typeDeclaration);
+			}
+		}
+		if (typeDeclaration instanceof org.eclipse.jdt.internal.compiler.ast.EnumDeclaration) {
+			if (this.ast.apiLevel == AST.JLS2) {
+				return null;
+			} else {
+				return convert((org.eclipse.jdt.internal.compiler.ast.EnumDeclaration) typeDeclaration);
+			}
+		}
 		checkCanceled();
 		TypeDeclaration typeDecl = this.ast.newTypeDeclaration();
 		int modifiers = typeDeclaration.modifiers;
 		modifiers &= ~IConstants.AccInterface; // remove AccInterface flags
 		modifiers &= CompilerModifiers.AccJustFlag;
-		typeDecl.setModifiers(modifiers);
+		if (modifiers != 0) {
+			setModifiers(typeDecl, typeDeclaration);
+		}
 		typeDecl.setInterface(typeDeclaration.isInterface());
 		SimpleName typeName = this.ast.newSimpleName(new String(typeDeclaration.name));
 		typeName.setSourceRange(typeDeclaration.sourceStart, typeDeclaration.sourceEnd - typeDeclaration.sourceStart + 1);
@@ -14,19 +37,43 @@
 		// need to set the superclass and super interfaces here since we cannot distinguish them at
 		// the type references level.
 		if (typeDeclaration.superclass != null) {
-			typeDecl.setSuperclass(convert(typeDeclaration.superclass));
+			switch(this.ast.apiLevel) {
+				case AST.JLS2 :
+					typeDecl.setSuperclass(convert(typeDeclaration.superclass));
+					break;
+				case AST.JLS3 :
+					typeDecl.setSuperclassType(convertType(typeDeclaration.superclass));
+					break;
+			}
 		}
 		
 		org.eclipse.jdt.internal.compiler.ast.TypeReference[] superInterfaces = typeDeclaration.superInterfaces;
 		if (superInterfaces != null) {
-			for (int index = 0, length = superInterfaces.length; index < length; index++) {
-				typeDecl.superInterfaces().add(convert(superInterfaces[index]));
+			switch(this.ast.apiLevel) {
+				case AST.JLS2 :
+					for (int index = 0, length = superInterfaces.length; index < length; index++) {
+						typeDecl.superInterfaces().add(convert(superInterfaces[index]));
+					}
+					break;
+				case AST.JLS3 :
+					for (int index = 0, length = superInterfaces.length; index < length; index++) {
+						typeDecl.superInterfaceTypes().add(convertType(superInterfaces[index]));
+					}
+			}					
+		}
+		org.eclipse.jdt.internal.compiler.ast.TypeParameter[] typeParameters = typeDeclaration.typeParameters;
+		if (typeParameters != null) {
+			switch(this.ast.apiLevel) {
+				case AST.JLS2 :
+					typeDecl.setFlags(typeDecl.getFlags() | ASTNode.MALFORMED);
+					break;
+				case AST.JLS3 :
+					for (int index = 0, length = typeParameters.length; index < length; index++) {
+						typeDecl.typeParameters().add(convert(typeParameters[index]));
+					}
 			}
 		}
-		
 		buildBodyDeclarations(typeDeclaration, typeDecl);
-		// The javadoc comment is now got from list store in compilation unit declaration
-//		setJavaDocComment(typeDecl);
 		if (this.resolveBindings) {
 			recordNodes(typeDecl, typeDeclaration);
 			recordNodes(typeName, typeDeclaration);

@@ -1,0 +1,114 @@
+	/*
+	 * Run Sun compilation using javac.
+	 * Use JRE directory to retrieve javac bin directory and current classpath for
+	 * compilation.
+	 * Launch compilation in a thread and verify that it does not take more than 5s
+	 * to perform it. Otherwise abort the process and log in console.
+	 */
+	protected void runJavac(String[] testFiles, final String expectedProblemLog) {
+		try {
+			// Write files in dir
+			IPath dirFilePath = writeFiles(testFiles);
+			
+			String testName = shortTestName();
+			Process process = null;
+			try {
+				// Compute classpath
+				String[] classpath = getDefaultClassPaths();
+				StringBuffer cp = new StringBuffer();
+				int length = classpath.length;
+				for (int i = 0; i < length; i++) {
+					if (classpath[i].indexOf(" ") != -1) {
+						cp.append("\"" + classpath[i] + "\"");
+					} else {
+						cp.append(classpath[i]);
+					}
+					if (i<(length-1)) cp.append(";");
+				}
+				// Compute command line
+				IPath jdkDir = (new Path(Util.getJREDirectory())).removeLastSegments(1);
+				IPath javacPath = jdkDir.append("bin").append("javac.exe");
+				StringBuffer cmdLine = new StringBuffer(javacPath.toString());
+				cmdLine.append(" -classpath ");
+				cmdLine.append(cp);
+				cmdLine.append(" -source 1.5 -deprecation -Xlint:unchecked "); // enable recommended warnings
+				if (this.dirPath.equals(dirFilePath)) {
+					cmdLine.append("*.java");
+				} else {
+					IPath subDirPath = dirFilePath.append("*.java").removeFirstSegments(GenericTypeTest.this.dirPath.segmentCount());
+					String subDirName = subDirPath.toString().substring(subDirPath.getDevice().length());
+					cmdLine.append(subDirName);
+				}
+//				System.out.println(testName+": "+cmdLine.toString());
+//				System.out.println(GenericTypeTest.this.dirPath.toFile().getAbsolutePath());
+				// Launch process
+				process = Runtime.getRuntime().exec(cmdLine.toString(), null, GenericTypeTest.this.dirPath.toFile());
+	            // Log errors
+	            Logger errorLogger = new Logger(process.getErrorStream(), "ERROR");            
+	            
+	            // Log output
+	            Logger outputLogger = new Logger(process.getInputStream(), "OUTPUT");
+	                
+	            // start the threads to run outputs (standard/error)
+	            errorLogger.start();
+	            outputLogger.start();
+
+	            // Wait for end of process
+				int exitValue = process.waitFor();
+
+				// Compare compilation results
+				if (expectedProblemLog == null) {
+					if (exitValue != 0) {
+						System.out.println("========================================");
+						System.out.println(testName+": javac has found error(s) although we're expecting conform result:\n");
+						System.out.println(errorLogger.buffer.toString());
+						printFiles(testFiles);
+					}
+					else if (errorLogger.buffer.length() > 0) {
+						System.out.println("========================================");
+						System.out.println(testName+": javac displays warning(s) although we're expecting conform result:\n");
+						System.out.println(errorLogger.buffer.toString());
+						printFiles(testFiles);
+					}
+				} else if (exitValue == 0) {
+					if (errorLogger.buffer.length() == 0) {
+						System.out.println("========================================");
+						System.out.println(testName+": javac has found no error/warning although we're expecting negative result:");
+						System.out.println(expectedProblemLog);
+						printFiles(testFiles);
+					} else if (expectedProblemLog.indexOf("ERROR") >0 ){
+						System.out.println("========================================");
+						System.out.println(testName+": javac has found warning(s) although we're expecting error(s):");
+						System.out.println("javac:");
+						System.out.println(errorLogger.buffer.toString());
+						System.out.println("eclipse:");
+						System.out.println(expectedProblemLog);
+						printFiles(testFiles);
+					} else {
+						// TODO (frederic) compare warnings in each result and verify they are similar...
+//						System.out.println(testName+": javac has found warnings :");
+//						System.out.print(errorLogger.buffer.toString());
+//						System.out.println(testName+": we're expecting warning results:");
+//						System.out.println(expectedProblemLog);
+					}
+				} else if (errorLogger.buffer.length() == 0) {
+					System.out.println("========================================");
+					System.out.println(testName+": javac displays no output although we're expecting negative result:\n");
+					System.out.println(expectedProblemLog);
+					printFiles(testFiles);
+				}
+			} catch (IOException ioe) {
+				System.out.println(testName+": Not possible to launch Sun javac compilation!");
+			} catch (InterruptedException e1) {
+				if (process != null) process.destroy();
+				System.out.println(testName+": Sun javac compilation was aborted!");
+			}
+
+			// Clean up written file(s)
+			IPath testDir =  new Path(Util.getOutputDirectory()).append(shortTestName());
+			cleanupDirectory(testDir.toFile());
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+

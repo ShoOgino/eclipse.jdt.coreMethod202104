@@ -21,21 +21,14 @@
 		ReferenceBinding[] interfaceBindings = new ReferenceBinding[length];
 		int count = 0;
 		nextInterface : for (int i = 0; i < length; i++) {
-			ReferenceBinding superInterface = findSupertype(referenceContext.superInterfaces[i]);
+		    TypeReference superInterfaceRef = referenceContext.superInterfaces[i];
+			ReferenceBinding superInterface = findSupertype(superInterfaceRef);
 			if (superInterface == null) { // detected cycle
-				noProblems = false;
-				continue nextInterface;
-			}
-			referenceContext.superInterfaces[i].resolvedType = superInterface; // hold onto the problem type
-			if (!superInterface.isValidBinding()) {
-				problemReporter().invalidSuperinterface(
-					sourceType,
-					referenceContext.superInterfaces[i],
-					superInterface);
 				sourceType.tagBits |= HierarchyHasProblems;
 				noProblems = false;
 				continue nextInterface;
 			}
+			superInterfaceRef.resolvedType = superInterface; // hold onto the problem type
 			// Check for a duplicate interface once the name is resolved, otherwise we may be confused (ie : a.b.I and c.d.I)
 			for (int k = 0; k < count; k++) {
 				if (interfaceBindings[k] == superInterface) {
@@ -46,6 +39,18 @@
 			}
 			if (superInterface.isClass()) {
 				problemReporter().superinterfaceMustBeAnInterface(sourceType, referenceContext, superInterface);
+				sourceType.tagBits |= HierarchyHasProblems;
+				noProblems = false;
+				continue nextInterface;
+			}
+			ReferenceBinding invalid = findAmbiguousInterface(superInterface, sourceType);
+			if (invalid != null) {
+				ReferenceBinding generic = null;
+				if (superInterface.isParameterizedType())
+					generic = ((ParameterizedTypeBinding) superInterface).type;
+				else if (invalid.isParameterizedType())
+					generic = ((ParameterizedTypeBinding) invalid).type;
+				problemReporter().superinterfacesCollide(generic, referenceContext, superInterface, invalid);
 				sourceType.tagBits |= HierarchyHasProblems;
 				noProblems = false;
 				continue nextInterface;

@@ -1,0 +1,36 @@
+	// Internal use only
+	/* All methods in visible are acceptable matches for the method in question...
+	* The methods defined by the receiver type appear before those defined by its
+	* superclass and so on. We want to find the one which matches best.
+	*
+	* Since the receiver type is a class, we know each method's declaring class is
+	* either the receiver type or one of its superclasses. It is an error if the best match
+	* is defined by a superclass, when a lesser match is defined by the receiver type
+	* or a closer superclass.
+	*/
+	protected final MethodBinding mostSpecificClassMethodBinding(MethodBinding[] visible, int visibleSize, InvocationSite invocationSite) {
+		MethodBinding problemMethod = null;
+		MethodBinding previous = null;
+		nextVisible : for (int i = 0; i < visibleSize; i++) {
+			MethodBinding method = visible[i];
+			if (previous != null && method.declaringClass != previous.declaringClass)
+				break; // cannot answer a method farther up the hierarchy than the first method found
+
+			previous = method;
+			for (int j = 0; j < visibleSize; j++) {
+				if (i == j) continue;
+				MethodBinding compatibleMethod = computeCompatibleMethod(visible[j], method.parameters, invocationSite);
+				if (compatibleMethod == null || !compatibleMethod.isValidBinding()) {
+					if (problemMethod == null)
+						problemMethod = compatibleMethod;
+					continue nextVisible;
+				}
+			}
+			compilationUnitScope().recordTypeReferences(method.thrownExceptions);
+			return method;
+		}
+		if (problemMethod == null)
+			return new ProblemMethodBinding(visible[0].selector, visible[0].parameters, Ambiguous);
+		return problemMethod;
+	}
+

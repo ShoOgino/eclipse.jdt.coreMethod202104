@@ -1,4 +1,7 @@
 	public Statement convert(org.eclipse.jdt.internal.compiler.ast.Statement statement) {
+		if (statement instanceof ForeachStatement) {
+			return convert((ForeachStatement) statement);
+		}
 		if (statement instanceof org.eclipse.jdt.internal.compiler.ast.LocalDeclaration) {
 			return convertToVariableDeclarationStatement((org.eclipse.jdt.internal.compiler.ast.LocalDeclaration)statement);
 		}
@@ -50,18 +53,48 @@
 		if (statement instanceof org.eclipse.jdt.internal.compiler.ast.TryStatement) {
 			return convert((org.eclipse.jdt.internal.compiler.ast.TryStatement) statement);
 		}
-		if (statement instanceof org.eclipse.jdt.internal.compiler.ast.TypeDeclaration 
+		if (statement instanceof org.eclipse.jdt.internal.compiler.ast.AnnotationTypeDeclaration
 				&& (statement.bits & org.eclipse.jdt.internal.compiler.ast.ASTNode.IsLocalTypeMASK) != 0) {
-			TypeDeclarationStatement typeDeclarationStatement = this.ast.newTypeDeclarationStatement(convert((org.eclipse.jdt.internal.compiler.ast.TypeDeclaration) statement));
-			TypeDeclaration typeDecl = typeDeclarationStatement.getTypeDeclaration();
-			typeDeclarationStatement.setSourceRange(typeDecl.getStartPosition(), typeDecl.getLength());
-			return typeDeclarationStatement;
+			switch(this.ast.apiLevel) {
+				case AST.JLS2 :
+					return createFakeEmptyStatement(statement);
+				case AST.JLS3 :
+					TypeDeclarationStatement typeDeclarationStatement = this.ast.newTypeDeclarationStatement(convert((org.eclipse.jdt.internal.compiler.ast.AnnotationTypeDeclaration) statement));
+					TypeDeclaration typeDecl = typeDeclarationStatement.getTypeDeclaration();
+					typeDeclarationStatement.setSourceRange(typeDecl.getStartPosition(), typeDecl.getLength());
+					return typeDeclarationStatement;
+			}
 		}
+		if (statement instanceof org.eclipse.jdt.internal.compiler.ast.EnumDeclaration
+				&& (statement.bits & org.eclipse.jdt.internal.compiler.ast.ASTNode.IsLocalTypeMASK) != 0) {
+			switch(this.ast.apiLevel) {
+				case AST.JLS2 :
+					return createFakeEmptyStatement(statement);
+				case AST.JLS3 :
+					TypeDeclarationStatement typeDeclarationStatement = this.ast.newTypeDeclarationStatement(convert((org.eclipse.jdt.internal.compiler.ast.EnumDeclaration) statement));
+					TypeDeclaration typeDecl = typeDeclarationStatement.getTypeDeclaration();
+					typeDeclarationStatement.setSourceRange(typeDecl.getStartPosition(), typeDecl.getLength());
+					return typeDeclarationStatement;
+			}
+		}		
 		if (statement instanceof org.eclipse.jdt.internal.compiler.ast.TypeDeclaration) {
-			TypeDeclarationStatement typeDeclarationStatement = this.ast.newTypeDeclarationStatement(convert((org.eclipse.jdt.internal.compiler.ast.TypeDeclaration) statement));
-			TypeDeclaration typeDecl = typeDeclarationStatement.getTypeDeclaration();
-			typeDeclarationStatement.setSourceRange(typeDecl.getStartPosition(), typeDecl.getLength());
-			return typeDeclarationStatement;
+			TypeDeclaration typeDeclaration = (TypeDeclaration) convert((org.eclipse.jdt.internal.compiler.ast.TypeDeclaration) statement);
+			if (typeDeclaration == null) {
+				return createFakeEmptyStatement(statement);
+			} else {
+				TypeDeclarationStatement typeDeclarationStatement = this.ast.newTypeDeclarationStatement(typeDeclaration);
+				switch(this.ast.apiLevel) {
+					case AST.JLS2 :
+						TypeDeclaration typeDecl = typeDeclarationStatement.getTypeDeclaration();
+						typeDeclarationStatement.setSourceRange(typeDecl.getStartPosition(), typeDecl.getLength());					
+						break;
+					case AST.JLS3 :
+						AbstractTypeDeclaration typeDeclAST3 = typeDeclarationStatement.getDeclaration();
+						typeDeclarationStatement.setSourceRange(typeDeclAST3.getStartPosition(), typeDeclAST3.getLength());					
+						break;
+				}
+				return typeDeclarationStatement;
+			}
 		}
 		if (statement instanceof org.eclipse.jdt.internal.compiler.ast.WhileStatement) {
 			return convert((org.eclipse.jdt.internal.compiler.ast.WhileStatement) statement);
@@ -73,6 +106,6 @@
 			retrieveSemiColonPosition(stmt);
 			return stmt;
 		}
-		throw new IllegalArgumentException("Not yet implemented: convert(" + statement.getClass() + ")");//$NON-NLS-1$//$NON-NLS-2$
+		return createFakeEmptyStatement(statement);
 	}
 

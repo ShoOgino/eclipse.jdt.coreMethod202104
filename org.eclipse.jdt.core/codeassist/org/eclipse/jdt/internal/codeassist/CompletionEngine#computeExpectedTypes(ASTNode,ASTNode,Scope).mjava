@@ -1,0 +1,187 @@
+	private void computeExpectedTypes(ASTNode parent, ASTNode node, Scope scope){
+		
+		// default filter
+		expectedTypesFilter = SUBTYPE;
+		
+		// find types from parent
+		if(parent instanceof AbstractVariableDeclaration) {
+			AbstractVariableDeclaration variable = (AbstractVariableDeclaration)parent;
+			TypeBinding binding = variable.type.resolvedType;
+			if(binding != null) {
+				if(!(variable.initialization instanceof ArrayInitializer)) {
+					addExpectedType(binding);
+				}
+			}
+		} else if(parent instanceof Assignment) {
+			TypeBinding binding = ((Assignment)parent).resolvedType;
+			if(binding != null) {
+				addExpectedType(binding);
+			}
+		} else if(parent instanceof ReturnStatement) {
+			if(scope.methodScope().referenceContext instanceof AbstractMethodDeclaration) {
+				MethodBinding methodBinding = ((AbstractMethodDeclaration) scope.methodScope().referenceContext).binding;
+				TypeBinding binding = methodBinding  == null ? null : methodBinding.returnType;
+				if(binding != null) {
+					addExpectedType(binding);
+				}
+			}
+		} else if(parent instanceof CastExpression) {
+			Expression e = ((CastExpression)parent).type;
+			TypeBinding binding = e.resolvedType;
+			if(binding != null){
+				addExpectedType(binding);
+				expectedTypesFilter = SUBTYPE | SUPERTYPE;
+			}
+		} else if(parent instanceof MessageSend) {
+			MessageSend messageSend = (MessageSend) parent;
+
+			if(messageSend.receiverType instanceof ReferenceBinding) {
+				ReferenceBinding binding = (ReferenceBinding)messageSend.receiverType;
+				boolean isStatic = messageSend.receiver.isTypeReference();
+				
+				while(binding != null) {	
+					computeExpectedTypesForMessageSend(
+						binding,
+						messageSend.selector,
+						messageSend.arguments,
+						(ReferenceBinding)messageSend.receiverType,
+						scope,
+						messageSend,
+						isStatic);
+					computeExpectedTypesForMessageSendForInterface(
+						binding,
+						messageSend.selector,
+						messageSend.arguments,
+						(ReferenceBinding)messageSend.receiverType,
+						scope,
+						messageSend,
+						isStatic);
+					binding = binding.superclass();
+				}
+			}
+		} else if(parent instanceof AllocationExpression) {
+			AllocationExpression allocationExpression = (AllocationExpression) parent;
+			
+			ReferenceBinding binding = (ReferenceBinding)allocationExpression.type.resolvedType;
+
+			if(binding != null) {	
+				computeExpectedTypesForAllocationExpression(
+					binding,
+					allocationExpression.arguments,
+					scope,
+					allocationExpression);
+			}
+		} else if(parent instanceof OperatorExpression) {
+			int operator = (parent.bits & ASTNode.OperatorMASK) >> ASTNode.OperatorSHIFT;
+			if(parent instanceof ConditionalExpression) {
+				// for future use
+			} else if(parent instanceof InstanceOfExpression) {
+				InstanceOfExpression e = (InstanceOfExpression) parent;
+				TypeBinding binding = e.expression.resolvedType;
+				if(binding != null){
+					addExpectedType(binding);
+					expectedTypesFilter = SUBTYPE | SUPERTYPE;
+				}
+			} else if(parent instanceof BinaryExpression) {
+				switch(operator) {
+					case OperatorIds.PLUS :
+						addExpectedType(BaseTypes.ShortBinding);
+						addExpectedType(BaseTypes.IntBinding);
+						addExpectedType(BaseTypes.LongBinding);
+						addExpectedType(BaseTypes.FloatBinding);
+						addExpectedType(BaseTypes.DoubleBinding);
+						addExpectedType(BaseTypes.CharBinding);
+						addExpectedType(BaseTypes.ByteBinding);
+						addExpectedType(scope.getJavaLangString());
+						break;
+					case OperatorIds.AND_AND :
+					case OperatorIds.OR_OR :
+					case OperatorIds.XOR :
+						addExpectedType(BaseTypes.BooleanBinding);
+						break;
+					default :
+						addExpectedType(BaseTypes.ShortBinding);
+						addExpectedType(BaseTypes.IntBinding);
+						addExpectedType(BaseTypes.LongBinding);
+						addExpectedType(BaseTypes.FloatBinding);
+						addExpectedType(BaseTypes.DoubleBinding);
+						addExpectedType(BaseTypes.CharBinding);
+						addExpectedType(BaseTypes.ByteBinding);
+						break;
+				}
+				BinaryExpression binaryExpression = (BinaryExpression) parent;
+				if(operator == OperatorIds.LESS) {
+					if(binaryExpression.left instanceof SingleNameReference){
+						SingleNameReference name = (SingleNameReference) binaryExpression.left;
+						Binding b = scope.getBinding(name.token, BindingIds.VARIABLE | BindingIds.TYPE, name, false);
+						if(b instanceof ReferenceBinding) {
+							TypeVariableBinding[] typeVariableBindings =((ReferenceBinding)b).typeVariables();
+							if(typeVariableBindings != null && typeVariableBindings.length > 0) {
+								addExpectedType(typeVariableBindings[0].firstBound);
+							}
+							
+						}
+					}
+				}
+			} else if(parent instanceof UnaryExpression) {
+				switch(operator) {
+					case OperatorIds.NOT :
+						addExpectedType(BaseTypes.BooleanBinding);
+						break;
+					case OperatorIds.TWIDDLE :
+						addExpectedType(BaseTypes.ShortBinding);
+						addExpectedType(BaseTypes.IntBinding);
+						addExpectedType(BaseTypes.LongBinding);
+						addExpectedType(BaseTypes.CharBinding);
+						addExpectedType(BaseTypes.ByteBinding);
+						break;
+					case OperatorIds.PLUS :
+					case OperatorIds.MINUS :
+					case OperatorIds.PLUS_PLUS :
+					case OperatorIds.MINUS_MINUS :
+						addExpectedType(BaseTypes.ShortBinding);
+						addExpectedType(BaseTypes.IntBinding);
+						addExpectedType(BaseTypes.LongBinding);
+						addExpectedType(BaseTypes.FloatBinding);
+						addExpectedType(BaseTypes.DoubleBinding);
+						addExpectedType(BaseTypes.CharBinding);
+						addExpectedType(BaseTypes.ByteBinding);
+						break;
+				}
+			}
+		} else if(parent instanceof ArrayReference) {
+			addExpectedType(BaseTypes.ShortBinding);
+			addExpectedType(BaseTypes.IntBinding);
+			addExpectedType(BaseTypes.LongBinding);
+		} else if(parent instanceof ParameterizedSingleTypeReference) {
+			ParameterizedSingleTypeReference ref = (ParameterizedSingleTypeReference) parent;
+			TypeVariableBinding[] typeVariables = ((ReferenceBinding)ref.resolvedType).typeVariables();
+			int length = ref.typeArguments == null ? 0 : ref.typeArguments.length;
+			if(typeVariables != null && typeVariables.length >= length) {
+				int index = length - 1;
+				while(index > -1 && ref.typeArguments[index] != node) index--;
+				addExpectedType(typeVariables[index].firstBound);
+			}
+		} else if(parent instanceof ParameterizedQualifiedTypeReference) {
+			ParameterizedQualifiedTypeReference ref = (ParameterizedQualifiedTypeReference) parent;
+			TypeVariableBinding[] typeVariables = ((ReferenceBinding)ref.resolvedType).typeVariables();
+			TypeReference[][] arguments = ref.typeArguments;
+			if(typeVariables != null) {
+				int iLength = arguments == null ? 0 : arguments.length;
+				done: for (int i = 0; i < iLength; i++) {
+					int jLength = arguments[i] == null ? 0 : arguments[i].length;
+					for (int j = 0; j < jLength; j++) {
+						if(arguments[i][j] == node && typeVariables.length >= j) {
+							addExpectedType(typeVariables[j].firstBound);
+							break done;
+						}
+					}
+				}
+			}
+		}
+		
+		if(expectedTypesPtr + 1 != expectedTypes.length) {
+			System.arraycopy(expectedTypes, 0, expectedTypes = new TypeBinding[expectedTypesPtr + 1], 0, expectedTypesPtr + 1);
+		}
+	}
+

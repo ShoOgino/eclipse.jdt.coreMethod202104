@@ -4,20 +4,74 @@ void cachePartsFrom(IBinaryType binaryType, boolean needFieldsAndMethods) {
 	// and still want to use binaries passed that point (e.g. type hierarchy resolver, see bug 63748).
 	this.superInterfaces = NoSuperInterfaces;
 	
-	char[] superclassName = binaryType.getSuperclassName();
-	if (superclassName != null)
-		// attempt to find the superclass if it exists in the cache (otherwise - resolve it when requested)
-		this.superclass = environment.getTypeFromConstantPoolName(superclassName, 0, -1);
-
+	// need enclosing type to access type variables
 	char[] enclosingTypeName = binaryType.getEnclosingTypeName();
 	if (enclosingTypeName != null) {
 		// attempt to find the enclosing type if it exists in the cache (otherwise - resolve it when requested)
-		this.enclosingType = environment.getTypeFromConstantPoolName(enclosingTypeName, 0, -1);
+		this.enclosingType = environment.getTypeFromConstantPoolName(enclosingTypeName, 0, -1, true); // pretend parameterized to avoid raw
 		this.tagBits |= MemberTypeMask;   // must be a member type not a top-level or local type
+		this.tagBits |= 	HasUnresolvedEnclosingType;
 		if (this.enclosingType().isStrictfp())
 			this.modifiers |= AccStrictfp;
 		if (this.enclosingType().isDeprecated())
 			this.modifiers |= AccDeprecatedImplicitly;
+	}
+
+	boolean checkGenericSignatures = environment.options.sourceLevel >= ClassFileConstants.JDK1_5;
+	char[] typeSignature = checkGenericSignatures ? binaryType.getGenericSignature() : null;
+	if (typeSignature == null) {
+		char[] superclassName = binaryType.getSuperclassName();
+		if (superclassName != null) {
+			// attempt to find the superclass if it exists in the cache (otherwise - resolve it when requested)
+			this.superclass = environment.getTypeFromConstantPoolName(superclassName, 0, -1, false);
+			this.tagBits |= 	HasUnresolvedSuperclass;
+		}
+
+		this.superInterfaces = NoSuperInterfaces;
+		char[][] interfaceNames = binaryType.getInterfaceNames();
+		if (interfaceNames != null) {
+			int size = interfaceNames.length;
+			if (size > 0) {
+				this.superInterfaces = new ReferenceBinding[size];
+				for (int i = 0; i < size; i++)
+					// attempt to find each superinterface if it exists in the cache (otherwise - resolve it when requested)
+					this.superInterfaces[i] = environment.getTypeFromConstantPoolName(interfaceNames[i], 0, -1, false);
+				this.tagBits |= 	HasUnresolvedSuperinterfaces;
+			}
+		}
+	} else {
+		// ClassSignature = ParameterPart(optional) super_TypeSignature interface_signature
+		SignatureWrapper wrapper = new SignatureWrapper(typeSignature);
+		if (wrapper.signature[wrapper.start] == '<') {
+			// ParameterPart = '<' ParameterSignature(s) '>'
+			wrapper.start++; // skip '<'
+			int rank = 0;
+			do {
+				TypeVariableBinding variable = createTypeVariable(wrapper, rank);
+				variable.fPackage = this.fPackage;
+				System.arraycopy(this.typeVariables, 0, this.typeVariables = new TypeVariableBinding[rank + 1], 0, rank);
+				this.typeVariables[rank++] = variable;
+			} while (wrapper.signature[wrapper.start] != '>');
+			wrapper.start++; // skip '>'
+			this.tagBits |=  HasUnresolvedTypeVariables;
+			this.modifiers |= AccGenericSignature;
+		}
+
+		// attempt to find the superclass if it exists in the cache (otherwise - resolve it when requested)
+		this.superclass = (ReferenceBinding) environment.getTypeFromTypeSignature(wrapper, NoTypeVariables, this);
+		this.tagBits |= 	HasUnresolvedSuperclass;
+
+		this.superInterfaces = NoSuperInterfaces;
+		if (!wrapper.atEnd()) {
+			// attempt to find each superinterface if it exists in the cache (otherwise - resolve it when requested)
+			java.util.ArrayList types = new java.util.ArrayList(2);
+			do {
+				types.add(environment.getTypeFromTypeSignature(wrapper, NoTypeVariables, this));
+			} while (!wrapper.atEnd());
+			this.superInterfaces = new ReferenceBinding[types.size()];
+			types.toArray(this.superInterfaces);
+			this.tagBits |= 	HasUnresolvedSuperinterfaces;
+		}
 	}
 
 	this.memberTypes = NoMemberTypes;
@@ -28,23 +82,14 @@ void cachePartsFrom(IBinaryType binaryType, boolean needFieldsAndMethods) {
 			this.memberTypes = new ReferenceBinding[size];
 			for (int i = 0; i < size; i++)
 				// attempt to find each member type if it exists in the cache (otherwise - resolve it when requested)
-				this.memberTypes[i] = environment.getTypeFromConstantPoolName(memberTypeStructures[i].getName(), 0, -1);
+				this.memberTypes[i] = environment.getTypeFromConstantPoolName(memberTypeStructures[i].getName(), 0, -1, false);
+			this.tagBits |= 	HasUnresolvedMemberTypes;
 		}
 	}
 
-	char[][] interfaceNames = binaryType.getInterfaceNames();
-	if (interfaceNames != null) {
-		int size = interfaceNames.length;
-		if (size > 0) {
-			this.superInterfaces = new ReferenceBinding[size];
-			for (int i = 0; i < size; i++)
-				// attempt to find each superinterface if it exists in the cache (otherwise - resolve it when requested)
-				this.superInterfaces[i] = environment.getTypeFromConstantPoolName(interfaceNames[i], 0, -1);
-		}
-	}
 	if (needFieldsAndMethods) {
-		createFields(binaryType.getFields());
-		createMethods(binaryType.getMethods());
+		createFields(binaryType.getFields(), checkGenericSignatures);
+		createMethods(binaryType.getMethods(), checkGenericSignatures);
 	} else { // protect against incorrect use of the needFieldsAndMethods flag, see 48459
 		this.fields = NoFields;
 		this.methods = NoMethods;

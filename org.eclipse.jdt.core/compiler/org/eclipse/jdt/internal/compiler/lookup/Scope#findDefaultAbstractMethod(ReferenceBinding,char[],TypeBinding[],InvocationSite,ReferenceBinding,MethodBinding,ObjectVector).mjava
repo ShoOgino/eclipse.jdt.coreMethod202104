@@ -21,17 +21,25 @@
 		}
 		MethodBinding[] candidates = new MethodBinding[foundSize - startFoundSize];
 		int candidatesCount = 0;
+		MethodBinding problemMethod = null;
 		// argument type compatibility check
 		for (int i = startFoundSize; i < foundSize; i++) {
 			MethodBinding methodBinding = (MethodBinding) found.elementAt(i);
-			if (areParametersAssignable(methodBinding.parameters, argumentTypes))
-				candidates[candidatesCount++] = methodBinding;
+			MethodBinding compatibleMethod = computeCompatibleMethod(methodBinding, argumentTypes, invocationSite);
+			if (compatibleMethod != null) {
+				if (compatibleMethod.isValidBinding())
+					candidates[candidatesCount++] = compatibleMethod;
+				else if (problemMethod == null)
+					problemMethod = compatibleMethod;
+			}
 		}
+
 		if (candidatesCount == 1) {
 			compilationUnitScope().recordTypeReferences(candidates[0].thrownExceptions);
 			return candidates[0]; 
 		}
 		if (candidatesCount == 0) { // try to find a close match when the parameter order is wrong or missing some parameters
+			if (problemMethod != null) return problemMethod;
 			int argLength = argumentTypes.length;
 			nextMethod : for (int i = 0; i < foundSize; i++) {
 				MethodBinding methodBinding = (MethodBinding) found.elementAt(i);
@@ -49,6 +57,6 @@
 			return (MethodBinding) found.elementAt(0); // no good match so just use the first one found
 		}
 		// no need to check for visibility - interface methods are public
-		return mostSpecificInterfaceMethodBinding(candidates, candidatesCount);
+		return mostSpecificInterfaceMethodBinding(candidates, candidatesCount, invocationSite);
 	}
 

@@ -1,4 +1,5 @@
 	public void resolve(BlockScope scope) {
+		
 		MethodScope methodScope = scope.methodScope();
 		MethodBinding methodBinding;
 		TypeBinding methodType =
@@ -7,6 +8,7 @@
 					? null 
 					: methodBinding.returnType)
 				: VoidBinding;
+		TypeBinding expressionType;
 		if (methodType == VoidBinding) {
 			// the expression should be null
 			if (expression == null)
@@ -19,12 +21,17 @@
 			if (methodType != null) scope.problemReporter().shouldReturn(methodType, this);
 			return;
 		}
+		expression.setExpectedType(methodType); // needed in case of generic method invocation
 		if ((expressionType = expression.resolveType(scope)) == null)
 			return;
 	
+		if (expressionType.isRawType() && (methodType.isParameterizedType() || methodType.isGenericType())) {
+		    scope.problemReporter().unsafeRawReturnValue(this.expression, expressionType, methodType);
+		}
+		
 		if (methodType != null && expression.isConstantValueOfTypeAssignableToType(expressionType, methodType)) {
 			// dealing with constant
-			expression.implicitWidening(methodType, expressionType);
+			expression.computeConversion(scope, methodType, expressionType);
 			return;
 		}
 		if (expressionType == VoidBinding) {
@@ -32,11 +39,11 @@
 			return;
 		}
 		if (methodType != null && expressionType.isCompatibleWith(methodType)) {
-			expression.implicitWidening(methodType, expressionType);
+			expression.computeConversion(scope, methodType, expressionType);
 			return;
 		}
 		if (methodType != null){
-			scope.problemReporter().typeMismatchErrorActualTypeExpectedType(expression, expressionType, methodType);
+			scope.problemReporter().typeMismatchError(expressionType, methodType, expression);
 		}
 	}
 

@@ -63,10 +63,81 @@ protected void attachOrphanCompletionNode(){
 			return;
 		} 
 	}
+	if(this.currentElement instanceof RecoveredType || this.currentElement instanceof RecoveredMethod) {
+		if(this.currentElement instanceof RecoveredType) {
+			RecoveredType recoveredType = (RecoveredType)this.currentElement;
+			if(recoveredType.foundOpeningBrace && this.genericsPtr > -1) {
+				if(this.genericsStack[this.genericsPtr] instanceof TypeParameter) {
+					TypeParameter typeParameter = (TypeParameter) this.genericsStack[this.genericsPtr];
+					this.currentElement.add(new CompletionOnMethodTypeParameter(new TypeParameter[]{typeParameter},this.compilationUnit.compilationResult()), 0);
+					return;
+				}
+			}
+		}
+		
+		if ((!isInsideMethod() && !isInsideFieldInitialization())) { 
+			if(this.genericsPtr > -1 && this.genericsLengthPtr > -1 && this.genericsIdentifiersLengthPtr > -1) {
+				int kind = topKnownElementKind(COMPLETION_OR_ASSIST_PARSER);
+				int info = topKnownElementInfo(COMPLETION_OR_ASSIST_PARSER);
+				if(kind == K_BINARY_OPERATOR && info == LESS) {
+					this.consumeTypeArguments();
+				}
+				int numberOfIdentifiers = this.genericsIdentifiersLengthStack[this.genericsIdentifiersLengthPtr];
+				int genPtr = this.genericsPtr;
+				done : for(int i = 0; i < numberOfIdentifiers; i++){
+					int length = this.genericsLengthStack[this.genericsLengthPtr - i];
+					for(int j = 0; j < length; j++) {
+						ASTNode node = this.genericsStack[genPtr - j];
+						CompletionNodeDetector detector = new CompletionNodeDetector(this.assistNode, node);
+						if(detector.containsCompletionNode()) {
+							if(node == this.assistNode){
+								if(this.identifierLengthPtr > -1 &&	this.identifierLengthStack[this.identifierLengthPtr]!= 0) {
+									TypeReference ref = this.getTypeReference(0);
+									this.assistNodeParent = ref;
+								}
+							} else {
+								this.assistNodeParent = detector.getCompletionNodeParent();
+							}
+							break done;
+						}
+					}
+					genPtr -= length;
+				}
+				if(this.assistNodeParent != null && this.assistNodeParent instanceof TypeReference) {
+					if(this.currentElement instanceof RecoveredType) {
+						this.currentElement = this.currentElement.add(new CompletionOnFieldType((TypeReference)this.assistNodeParent, false), 0);
+					} else {
+						this.currentElement = this.currentElement.add((TypeReference)this.assistNodeParent, 0);
+					}
+				}
+			}
+		}
+	}
 	
 	// the following code applies only in methods, constructors or initializers
 	if ((!isInsideMethod() && !isInsideFieldInitialization())) { 
 		return;
+	}
+	
+	if(this.genericsPtr > -1) {
+		ASTNode node = this.genericsStack[this.genericsPtr];
+		CompletionNodeDetector detector = new CompletionNodeDetector(this.assistNode, node);
+		if(detector.containsCompletionNode()) {
+			/* check for completion at the beginning of method body
+				behind an invalid signature
+			 */
+			RecoveredMethod method = this.currentElement.enclosingMethod();
+			if (method != null){
+				AbstractMethodDeclaration methodDecl = method.methodDeclaration;
+				if ((methodDecl.bodyStart == methodDecl.sourceEnd+1) // was missing opening brace
+					&& (this.scanner.getLineNumber(node.sourceStart) == this.scanner.getLineNumber(methodDecl.sourceEnd))){
+					return;
+				}
+			}
+			if(node == this.assistNode){
+				buildMoreGenericsCompletionContext(node);
+			}
+		}
 	}
 	
 	// push top expression on ast stack if it contains the completion node
