@@ -32,6 +32,7 @@
 	
 		IProject project = javaProject.getProject();
 		IPath projectPath= project.getFullPath();
+		String projectName = javaProject.getElementName();
 	
 		/* validate output location */
 		if (projectOutputLocation == null) {
@@ -78,13 +79,13 @@
 
 					if (resolvedEntry.getExclusionPatterns() != null && resolvedEntry.getExclusionPatterns().length > 0
 							&& JavaCore.DISABLED.equals(javaProject.getOption(JavaCore.CORE_ENABLE_CLASSPATH_EXCLUSION_PATTERNS, true))) {
-						return new JavaModelStatus(IJavaModelStatusConstants.DISABLED_CP_EXCLUSION_PATTERNS, resolvedEntry.getPath());
+						return new JavaModelStatus(IJavaModelStatusConstants.DISABLED_CP_EXCLUSION_PATTERNS, javaProject, resolvedEntry.getPath());
 					}
 					IPath customOutput; 
 					if ((customOutput = resolvedEntry.getOutputLocation()) != null) {
 
 						if (JavaCore.DISABLED.equals(javaProject.getOption(JavaCore.CORE_ENABLE_CLASSPATH_MULTIPLE_OUTPUT_LOCATIONS, true))) {
-							return new JavaModelStatus(IJavaModelStatusConstants.DISABLED_CP_MULTIPLE_OUTPUT_LOCATIONS, resolvedEntry.getPath());
+							return new JavaModelStatus(IJavaModelStatusConstants.DISABLED_CP_MULTIPLE_OUTPUT_LOCATIONS, javaProject, resolvedEntry.getPath());
 						}
 						// ensure custom output is in project
 						if (customOutput.isAbsolute()) {
@@ -151,10 +152,14 @@
 			if (entry == null) continue;
 			IPath entryPath = entry.getPath();
 			int kind = entry.getEntryKind();
+			
+			// Build some common strings for status message
+			boolean epStartsWithProject = entryPath.segment(0).toString().equals(projectName);
+			String entryPathMsg = epStartsWithProject ? entryPath.removeFirstSegments(1).toString() : entryPath.makeRelative().toString();
 	
 			// complain if duplicate path
 			if (!pathes.add(entryPath)){
-				return new JavaModelStatus(IJavaModelStatusConstants.NAME_COLLISION, Util.bind("classpath.duplicateEntryPath", entryPath.makeRelative().toString())); //$NON-NLS-1$
+				return new JavaModelStatus(IJavaModelStatusConstants.NAME_COLLISION, Util.bind("classpath.duplicateEntryPath", entryPathMsg, projectName)); //$NON-NLS-1$
 			}
 			// no further check if entry coincidates with project or output location
 			if (entryPath.equals(projectPath)){
@@ -191,7 +196,7 @@
 									exclusionPattern += '/';
 									return new JavaModelStatus(IJavaModelStatusConstants.INVALID_CLASSPATH, Util.bind("classpath.cannotNestEntryInEntry", new String[] {entryPath.makeRelative().toString(), otherEntry.getPath().makeRelative().toString(), exclusionPattern})); //$NON-NLS-1$
 								} else {
-									return new JavaModelStatus(IJavaModelStatusConstants.INVALID_CLASSPATH, Util.bind("classpath.cannotNestEntryInLibrary", new String[] {entryPath.makeRelative().toString(), otherEntry.getPath().makeRelative().toString()})); //$NON-NLS-1$
+									return new JavaModelStatus(IJavaModelStatusConstants.INVALID_CLASSPATH, Util.bind("classpath.cannotNestEntryInLibrary", entryPath.makeRelative().toString(), otherEntry.getPath().makeRelative().toString())); //$NON-NLS-1$
 								}
 							}
 						}
@@ -226,6 +231,10 @@
 			IPath entryPath = entry.getPath();
 			int kind = entry.getEntryKind();
 
+			// Build some common strings for status message
+			boolean epStartsWithProject = entryPath.segment(0).toString().equals(projectName);
+			String entryPathMsg = epStartsWithProject ? entryPath.removeFirstSegments(1).toString() : entryPath.makeRelative().toString();
+	
 			if (kind == IClasspathEntry.CPE_SOURCE) {
 				IPath output = entry.getOutputLocation();
 				if (output == null) continue; // 36465 - for 2.0 backward compatibility, only check specific output locations (the default can still coincidate)
@@ -233,15 +242,20 @@
 				for (int j = 0; j < length; j++) {
 					IClasspathEntry otherEntry = classpath[j];
 					if (otherEntry == entry) continue;
+
+					// Build some common strings for status message
+					boolean opStartsWithProject = otherEntry.getPath().segment(0).toString().equals(projectName);
+					String otherPathMsg = opStartsWithProject ? otherEntry.getPath().removeFirstSegments(1).toString() : otherEntry.getPath().makeRelative().toString();
+	
 					switch (otherEntry.getEntryKind()) {
 						case IClasspathEntry.CPE_SOURCE :
 							if (otherEntry.getPath().equals(output)) {
-								return new JavaModelStatus(IJavaModelStatusConstants.INVALID_CLASSPATH, Util.bind("classpath.cannotUseDistinctSourceFolderAsOutput", entryPath.makeRelative().toString(), otherEntry.getPath().makeRelative().toString())); //$NON-NLS-1$
+								return new JavaModelStatus(IJavaModelStatusConstants.INVALID_CLASSPATH, Util.bind("classpath.cannotUseDistinctSourceFolderAsOutput", new String[] {entryPathMsg, otherPathMsg, projectName})); //$NON-NLS-1$
 							}
 							break;
 						case IClasspathEntry.CPE_LIBRARY :
 							if (otherEntry.getPath().equals(output)) {
-								return new JavaModelStatus(IJavaModelStatusConstants.INVALID_CLASSPATH, Util.bind("classpath.cannotUseLibraryAsOutput", entryPath.makeRelative().toString(), otherEntry.getPath().makeRelative().toString())); //$NON-NLS-1$
+								return new JavaModelStatus(IJavaModelStatusConstants.INVALID_CLASSPATH, Util.bind("classpath.cannotUseLibraryAsOutput", new String[] {entryPathMsg, otherPathMsg, projectName})); //$NON-NLS-1$
 							}
 					}
 				}
