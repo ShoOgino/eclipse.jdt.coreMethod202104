@@ -1,0 +1,57 @@
+	// 15.12.2
+	private TypeBinding lowerUpperBound(TypeBinding[] types, List lubStack) {
+		
+		int typeLength = types.length;
+		if (typeLength == 1) {
+			TypeBinding type = types[0];
+			return type == null ? VoidBinding : type;
+		}
+		// cycle detection
+		int stackLength = lubStack.size();
+		nextLubCheck: for (int i = 0; i < stackLength; i++) {
+			TypeBinding[] lubTypes = (TypeBinding[])lubStack.get(i);
+			int lubTypeLength = lubTypes.length;
+			if (lubTypeLength < typeLength) continue nextLubCheck;
+			nextTypeCheck:	for (int j = 0; j < typeLength; j++) {
+				TypeBinding type = types[j];
+				for (int k = 0; k < lubTypeLength; k++) {
+					if (lubTypes[k] == type) continue nextTypeCheck; // type found, jump to next one
+				}
+				continue nextLubCheck; // type not found in current lubTypes
+			}
+			// all types are included in some lub, cycle detected - stop recursion by answering special value (int)
+			return IntBinding;
+		}
+
+		lubStack.add(types);
+		Map invocations = new HashMap(1);
+		TypeBinding[] mecs = minimalErasedCandidates(types, invocations);
+		if (mecs == null) return null;
+		int length = mecs.length;
+		if (length == 0) return VoidBinding;
+		int count = 0, last = -1;
+		TypeBinding firstBound = null;
+		for (int i = 0; i < length; i++) {
+			TypeBinding mec = mecs[i];
+			if (mec == null) continue;
+			last = i;
+			count++;
+			mecs[i] = leastContainingInvocation(mec, (Set)invocations.get(mec), lubStack);
+			if (mec.isClass()) firstBound = mecs[i];
+		}
+		switch (count) {
+			case 0 : return VoidBinding;
+			case 1 : return mecs[last];
+		}
+		TypeBinding[] otherBounds = new TypeBinding[count - 1];
+		int rank = 0;
+		for (int i = 0; i < length; i++) {
+			TypeBinding mec = mecs[i];
+			if (mec == null) continue;
+			if (mec.isInterface()) {
+				otherBounds[rank++] = (ReferenceBinding)mec;
+			}
+		}
+		return environment().createWildcard(null, 0, firstBound, otherBounds, Wildcard.EXTENDS);
+	}
+
