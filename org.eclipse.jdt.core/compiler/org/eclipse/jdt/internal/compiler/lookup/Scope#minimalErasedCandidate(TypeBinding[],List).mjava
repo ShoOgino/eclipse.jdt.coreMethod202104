@@ -3,9 +3,9 @@
 	 * (i.e. most specific common super type)
 	 * If no types is given, will return VoidBinding. If not compatible 
 	 * reference type is found, returns null.
-	 * @deprecated - use lowerUpperBound(TypeBinding[]) instead
 	 */
-	public TypeBinding mostSpecificCommonType(TypeBinding[] types) {
+	private TypeBinding minimalErasedCandidate(TypeBinding[] types, List invocations) {
+		Map allInvocations = new HashMap(2);
 		int length = types.length;
 		int indexOfFirst = -1, actualLength = 0;
 		for (int i = 0; i < length; i++) {
@@ -29,29 +29,55 @@
 			return null; 
 		} else if (firstType.isArrayType()) {
 			superLength = 4;
+			if (firstType.erasure() != firstType) {
+				ArrayList someInvocations = new ArrayList(1);
+				someInvocations.add(firstType);
+				allInvocations.put(firstType.erasure(), someInvocations);
+			}
 			superTypes = new TypeBinding[] {
-					firstType, 
+					firstType.erasure(), 
 					getJavaIoSerializable(),
 					getJavaLangCloneable(),
 					getJavaLangObject(),
 			};
 		} else {
 			ArrayList typesToVisit = new ArrayList(5);
-			typesToVisit.add(firstType);
+			if (firstType.erasure() != firstType) {
+				ArrayList someInvocations = new ArrayList(1);
+				someInvocations.add(firstType);
+				allInvocations.put(firstType.erasure(), someInvocations);
+			}			
+			typesToVisit.add(firstType.erasure());
 			ReferenceBinding currentType = (ReferenceBinding)firstType;
 			for (int i = 0, max = 1; i < max; i++) {
 				currentType = (ReferenceBinding) typesToVisit.get(i);
-				ReferenceBinding itsSuperclass = currentType.superclass();
-				if (itsSuperclass != null && !typesToVisit.contains(itsSuperclass)) {
-					typesToVisit.add(itsSuperclass);
-					max++;
-				}
-				ReferenceBinding[] itsInterfaces = currentType.superInterfaces();
-				for (int j = 0, count = itsInterfaces.length; j < count; j++)
-					if (!typesToVisit.contains(itsInterfaces[j])) {
-						typesToVisit.add(itsInterfaces[j]);
+				TypeBinding itsSuperclass = currentType.superclass();
+				if (itsSuperclass != null) {
+					TypeBinding itsSuperclassErasure = itsSuperclass.erasure();
+					if (!typesToVisit.contains(itsSuperclassErasure)) {
+						if (itsSuperclassErasure != itsSuperclass) {
+							ArrayList someInvocations = new ArrayList(1);
+							someInvocations.add(itsSuperclass);
+							allInvocations.put(itsSuperclassErasure, someInvocations);
+						}
+						typesToVisit.add(itsSuperclass);
 						max++;
 					}
+				}
+				ReferenceBinding[] itsInterfaces = currentType.superInterfaces();
+				for (int j = 0, count = itsInterfaces.length; j < count; j++) {
+					TypeBinding itsInterface = itsInterfaces[j];
+					TypeBinding itsInterfaceErasure = itsInterface.erasure();
+					if (!typesToVisit.contains(itsInterfaceErasure)) {
+						if (itsInterfaceErasure != itsInterface) {
+							ArrayList someInvocations = new ArrayList(1);
+							someInvocations.add(itsInterface);
+							allInvocations.put(itsInterfaceErasure, someInvocations);
+						}						
+						typesToVisit.add(itsInterfaceErasure);
+						max++;
+					}
+				}
 			}
 			superLength = typesToVisit.size();
 			superTypes = new TypeBinding[superLength];
@@ -82,7 +108,14 @@
 			nextSuperType: for (int j = 0; j < superLength; j++) {
 				TypeBinding superType = superTypes[j];
 				if (superType == null) continue nextSuperType;
-				if (otherRefType.isCompatibleWith(superType)) {
+				if (otherRefType.erasure().isCompatibleWith(superType)) {
+					TypeBinding match = otherRefType.findSuperTypeErasingTo((ReferenceBinding)superType);
+						if (match.erasure() != match) {
+							ArrayList someInvocations = (ArrayList) allInvocations.get(superType);
+							if (someInvocations == null) someInvocations = new ArrayList(1);
+							someInvocations.add(match);
+							allInvocations.put(superType, someInvocations);
+						}						
 					break nextSuperType;
 				} else {
 					superTypes[j] = null;
@@ -93,7 +126,11 @@
 		// per construction, first non-null supertype is most specific common supertype
 		for (int i = 0; i < superLength; i++) {
 			TypeBinding superType = superTypes[i];
-			if (superType != null) return superType;
+			if (superType != null) {
+				List matchingInvocations = (List)allInvocations.get(superType);
+				if (matchingInvocations != null) invocations.addAll(matchingInvocations);
+				return superType;
+			}
 		}
 		return null;
 	}
