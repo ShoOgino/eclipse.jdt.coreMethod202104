@@ -1,79 +1,93 @@
-public TypeBinding getOtherFieldBindings(BlockScope scope) {
-	// At this point restrictiveFlag may ONLY have two potential value : FIELD LOCAL (i.e cast <<(VariableBinding) binding>> is valid)
+	public TypeBinding getOtherFieldBindings(BlockScope scope) {
 
-	if ((bits & FIELD) != 0) {
-		if (!((FieldBinding) binding).isStatic()) { //must check for the static status....
-			if (indexOfFirstFieldBinding == 1) {
-				//the field is the first token of the qualified reference....
-				if (scope.methodScope().isStatic) {
-					scope.problemReporter().staticFieldAccessToNonStaticVariable(this, (FieldBinding) binding);
+		// At this point restrictiveFlag may ONLY have two potential value : FIELD LOCAL (i.e cast <<(VariableBinding) binding>> is valid)
+		if ((bits & FIELD) != 0) {
+			if (!((FieldBinding) binding).isStatic()) {
+				//must check for the static status....
+				if (indexOfFirstFieldBinding == 1) {
+					//the field is the first token of the qualified reference....
+					if (scope.methodScope().isStatic) {
+						scope.problemReporter().staticFieldAccessToNonStaticVariable(
+							this,
+							(FieldBinding) binding);
+						return null;
+					}
+				} else { //accessing to a field using a type as "receiver" is allowed only with static field	
+					scope.problemReporter().staticFieldAccessToNonStaticVariable(
+						this,
+						(FieldBinding) binding);
 					return null;
 				}
-			} else { //accessing to a field using a type as "receiver" is allowed only with static field	
-				scope.problemReporter().staticFieldAccessToNonStaticVariable(this, (FieldBinding) binding);
+			}
+			if (isFieldUseDeprecated((FieldBinding) binding, scope))
+				scope.problemReporter().deprecatedField((FieldBinding) binding, this);
+
+			// if the binding declaring class is not visible, need special action
+			// for runtime compatibility on 1.2 VMs : change the declaring class of the binding
+			FieldBinding fieldBinding = (FieldBinding) binding;
+			if (fieldBinding.declaringClass != null
+				&& fieldBinding.constant == NotAConstant
+				&& !fieldBinding.declaringClass.canBeSeenBy(scope))
+				binding = new FieldBinding(fieldBinding, scope.enclosingSourceType());
+		}
+
+		TypeBinding type = ((VariableBinding) binding).type;
+		int index = indexOfFirstFieldBinding;
+		int length = tokens.length;
+		if (index == length) { //	restrictiveFlag == FIELD
+			constant =
+				FieldReference.getConstantFor((FieldBinding) binding, false, this, index - 1);
+			return type;
+		}
+
+		// allocation of the fieldBindings array	and its respective constants
+		int otherBindingsLength = length - index;
+		otherBindings = new FieldBinding[otherBindingsLength];
+		otherDepths = new int[otherBindingsLength];
+		
+		// fill the first constant (the one of the binding)
+		constant =
+			((bits & FIELD) != 0)
+				? FieldReference.getConstantFor((FieldBinding) binding, false, this, index - 1)
+				: ((VariableBinding) binding).constant;
+		// save first depth, since will be updated by visibility checks of other bindings
+		int firstDepth = (bits & DepthMASK) >> DepthSHIFT;
+
+		// iteration on each field	
+		while (index < length) {
+			char[] token = tokens[index];
+			if (type == null)
+				return null; // could not resolve type prior to this point
+			FieldBinding field = scope.getField(type, token, this);
+			int place = index - indexOfFirstFieldBinding;
+			otherBindings[place] = field;
+			otherDepths[place] = (bits & DepthMASK) >> DepthSHIFT;
+			if (field.isValidBinding()) {
+				if (isFieldUseDeprecated(field, scope))
+					scope.problemReporter().deprecatedField(field, this);
+				Constant someConstant =
+					FieldReference.getConstantFor(field, false, this, place);
+				// constant propagation can only be performed as long as the previous one is a constant too.
+				if (constant != NotAConstant) {
+					constant = someConstant;
+				}
+				// if the binding declaring class is not visible, need special action
+				// for runtime compatibility on 1.2 VMs : change the declaring class of the binding
+				if (field.declaringClass != type
+					&& field.declaringClass != null // array.length
+					&& field.constant == NotAConstant
+					&& !field.declaringClass.canBeSeenBy(scope))
+					otherBindings[place] = new FieldBinding(field, (ReferenceBinding) type);
+				type = field.type;
+				index++;
+			} else {
+				constant = NotAConstant; //don't fill other constants slots...
+				scope.problemReporter().invalidField(this, field, index, type);
+				setDepth(firstDepth);
 				return null;
 			}
 		}
-		if (isFieldUseDeprecated((FieldBinding) binding, scope))
-			scope.problemReporter().deprecatedField((FieldBinding) binding, this);
-
-		// if the binding declaring class is not visible, need special action
-		// for runtime compatibility on 1.2 VMs : change the declaring class of the binding
-		FieldBinding fieldBinding = (FieldBinding)binding;
-		if (fieldBinding.declaringClass != null
-			&& fieldBinding.constant == NotAConstant
-			&& !fieldBinding.declaringClass.canBeSeenBy(scope))
-				binding = new FieldBinding(fieldBinding, scope.enclosingSourceType());
+		setDepth(firstDepth);
+		return (otherBindings[otherBindingsLength - 1]).type;
 	}
-
-	TypeBinding type = ((VariableBinding) binding).type;
-	int index = indexOfFirstFieldBinding;
-	int length = tokens.length;
-	if (index == length) { //	restrictiveFlag == FIELD
-		constant = FieldReference.getConstantFor((FieldBinding) binding, false, this, index - 1);
-		return type;
-	}
-
-	// allocation of the fieldBindings array	and its respective constants
-	int otherBindingsLength = length - index;
-	otherBindings = new FieldBinding[otherBindingsLength];
-	
-	// fill the first constant (the one of the binding)
-	constant =
-		((bits & FIELD) != 0)
-			? FieldReference.getConstantFor((FieldBinding) binding, false, this, index - 1)
-			: ((VariableBinding) binding).constant;
-
-	// iteration on each field	
-	while (index < length) {
-		char[] token = tokens[index];
-		if (type == null) return null; // could not resolve type prior to this point
-		FieldBinding field = scope.getField(type, token, this);
-		int place = index - indexOfFirstFieldBinding;
-		otherBindings[place] = field;
-		if (field.isValidBinding()) {
-			if (isFieldUseDeprecated(field, scope))
-				scope.problemReporter().deprecatedField(field, this);
-			Constant someConstant = FieldReference.getConstantFor(field, false, this, place);
-			// constant propagation can only be performed as long as the previous one is a constant too.
-			if (constant != NotAConstant){
-				constant = someConstant;
-			}
-			// if the binding declaring class is not visible, need special action
-			// for runtime compatibility on 1.2 VMs : change the declaring class of the binding
-			if (field.declaringClass != type
-				&& field.declaringClass != null // array.length
-				&& field.constant == NotAConstant
-				&& !field.declaringClass.canBeSeenBy(scope))
-					otherBindings[place] = new FieldBinding(field, (ReferenceBinding)type);
-			type = field.type;
-			index++;
-		} else {
-			constant = NotAConstant; //don't fill other constants slots...
-			scope.problemReporter().invalidField(this, field, index, type);
-			return null;
-		}
-	}
-	return (otherBindings[otherBindingsLength - 1]).type;
-}
 
