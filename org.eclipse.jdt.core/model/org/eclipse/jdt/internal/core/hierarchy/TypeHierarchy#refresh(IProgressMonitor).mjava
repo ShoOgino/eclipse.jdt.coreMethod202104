@@ -1,13 +1,10 @@
 /**
  * @see ITypeHierarchy
+ * TODO: (jerome) should use a PerThreadObject to build the hierarchy instead of synchronizing
+ * (see also isAffected(IJavaElementDelta))
  */
-public void refresh(IProgressMonitor monitor) throws JavaModelException {
+public synchronized void refresh(IProgressMonitor monitor) throws JavaModelException {
 	try {
-		boolean reactivate = isActivated();
-		ArrayList listeners = this.changeListeners;
-		if (reactivate) {
-			deactivate();
-		}
 		this.progressMonitor = monitor;
 		if (monitor != null) {
 			if (this.focusType != null) {
@@ -28,11 +25,11 @@ public void refresh(IProgressMonitor monitor) throws JavaModelException {
 				System.out.println("  on type " + ((JavaElement)this.focusType).toStringWithAncestors()); //$NON-NLS-1$
 			}
 		}
+
 		compute();
-		if (reactivate) {
-			activate();
-			this.changeListeners = listeners;
-		}
+		initializeRegions();
+		this.needsRefresh = false;
+
 		if (DEBUG) {
 			if (this.computeSubtypes) {
 				System.out.println("CREATED TYPE HIERARCHY in " + (System.currentTimeMillis() - start) + "ms"); //$NON-NLS-1$ //$NON-NLS-2$
@@ -42,13 +39,9 @@ public void refresh(IProgressMonitor monitor) throws JavaModelException {
 			System.out.println(this.toString());
 		}
 	} catch (JavaModelException e) {
-		this.progressMonitor = null;
 		throw e;
 	} catch (CoreException e) {
-		this.progressMonitor = null;
 		throw new JavaModelException(e);
-	} catch (OperationCanceledException oce) {
-		refreshCancelled(oce);
 	} finally {
 		if (monitor != null) {
 			monitor.done();
