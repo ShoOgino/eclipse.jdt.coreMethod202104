@@ -1,34 +1,48 @@
 public void add(IJavaElement element) throws JavaModelException {
 	IPackageFragmentRoot root = null;
-	if (element instanceof IJavaProject) {
-		this.add((IJavaProject)element, true, new HashSet(2));
-	} else if (element instanceof IPackageFragmentRoot) {
-		root = (IPackageFragmentRoot)element;
-		this.add(root.getPath(), true);
-	} else if (element instanceof IPackageFragment) {
-		root = (IPackageFragmentRoot)element.getParent();
-		if (root.isArchive()) {
-			this.add(root.getPath().append(new Path(element.getElementName().replace('.', '/'))), false);
-		} else {
+	switch (element.getElementType()) {
+		case IJavaElement.JAVA_MODEL:
+			// a workspace sope should be used
+			break; 
+		case IJavaElement.JAVA_PROJECT:
+			this.add((IJavaProject)element, true, new HashSet(2));
+			break;
+		case IJavaElement.PACKAGE_FRAGMENT_ROOT:
+			root = (IPackageFragmentRoot)element;
+			this.add(root.getPath(), true);
+			break;
+		case IJavaElement.PACKAGE_FRAGMENT:
+			root = (IPackageFragmentRoot)element.getParent();
+			if (root.isArchive()) {
+				this.add(root.getPath().append(new Path(element.getElementName().replace('.', '/'))), false);
+			} else {
+				IResource resource = element.getUnderlyingResource();
+				if (resource != null && resource.isAccessible()) {
+					this.add(resource.getFullPath(), false);
+				}
+			}
+			break;
+		default:
 			IResource resource = element.getUnderlyingResource();
 			if (resource != null && resource.isAccessible()) {
-				this.add(resource.getFullPath(), false);
-			}
-		}
-	} else {
-		IResource resource = element.getUnderlyingResource();
-		if (resource != null && resource.isAccessible()) {
-			this.add(resource.getFullPath(), true);
-			
-			// find package fragment root including this java element
-			IJavaElement parent = element.getParent();
-			while (parent != null && !(parent instanceof IPackageFragmentRoot)) {
-				parent = parent.getParent();
-			}
-			if (parent instanceof IPackageFragmentRoot) {
-				root = (IPackageFragmentRoot)parent;
-			}
-		}	
+				// remember sub-cu (or sub-class file) java elements
+				if (element instanceof IMember) {
+					if (this.elements == null) {
+						this.elements = new ArrayList();
+					}
+					this.elements.add(element);
+				}
+				this.add(resource.getFullPath(), true);
+				
+				// find package fragment root including this java element
+				IJavaElement parent = element.getParent();
+				while (parent != null && !(parent instanceof IPackageFragmentRoot)) {
+					parent = parent.getParent();
+				}
+				if (parent instanceof IPackageFragmentRoot) {
+					root = (IPackageFragmentRoot)parent;
+				}
+			}	
 	}
 	
 	if (root != null) {
