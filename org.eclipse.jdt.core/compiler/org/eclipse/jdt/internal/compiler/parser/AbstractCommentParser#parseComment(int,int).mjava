@@ -4,7 +4,7 @@
 	 * If javadoc checking is enabled, will also construct an Javadoc node, which will be stored into Parser.javadoc
 	 * slot for being consumed later on.
 	 */
-	public boolean checkDeprecation(int javadocStart, int javadocEnd) {
+	protected boolean parseComment(int javadocStart, int javadocEnd) {
 
 		boolean validComment = true;
 		try {
@@ -17,12 +17,15 @@
 			this.scanner.resetTo(this.index, this.endComment);
 			this.inlineTagStarted = false;
 			this.lineStarted = false;
-			char nextCharacter= 0, previousChar;
-			int charPosition = -1, inlineStartPosition = 0;
 			this.returnStatement = null;
 			this.inherited = false;
 			this.deprecated = false;
-			initLineEnd();
+			this.linePtr = getLineNumber(javadocStart);
+			this.lastLinePtr = getLineNumber(javadocEnd);
+			this.lineEnd = (this.linePtr == this.lastLinePtr) ? this.endComment : javadocStart + 3;
+			this.textStart = -1;
+			char nextCharacter= 0, previousChar;
+			int charPosition = -1, inlineStartPosition = 0;
 			
 			// Loop on each comment character
 			while (this.index < this.endComment) {
@@ -30,7 +33,7 @@
 				previousChar = nextCharacter;
 				
 				// Calculate line end (cannot use this.scanner.linePtr as scanner does not parse line ends again)
-				if (this.index > this.lineEnd) {
+				if (this.index > (this.lineEnd+1)) {
 					updateLineEnd();
 					this.lineStarted = false;
 				}
@@ -39,6 +42,7 @@
 				if (this.currentTokenType < 0) {
 					nextCharacter = readChar(); // consider unicodes
 				} else {
+					previousPosition = this.scanner.getCurrentTokenStartPosition();
 					switch (this.currentTokenType) {
 						case TerminalTokens.TokenNameRBRACE:
 							nextCharacter = '}';
@@ -64,13 +68,14 @@
 								validComment = false;
 							} else {
 								if (previousChar == '{') {
+									pushText(this.textStart, charPosition);
 									this.inlineTagStarted = true;
 								}
 								this.scanner.resetTo(this.index, this.endComment);
 								this.currentTokenType = -1; // flush token cache at line begin
 								try {
 									int tk = readTokenAndConsume();
-									this.tagSourceStart = this.scanner.getCurrentTokenStartPosition();
+									this.tagSourceStart = this.kind == COMPIL_PARSER ? this.scanner.getCurrentTokenStartPosition() : previousPosition;
 									this.tagSourceEnd = this.scanner.getCurrentTokenEndPosition();
 									switch (tk) {
 										case TerminalTokens.TokenNameIdentifier :
@@ -84,11 +89,12 @@
 											} else if (CharOperation.equals(tag, TAG_PARAM)) {
 												valid = parseParam();
 											} else if (CharOperation.equals(tag, TAG_EXCEPTION)) {
-												valid = parseThrows();
+												valid = parseThrows(false);
 											} else if (CharOperation.equals(tag, TAG_SEE) ||
-													CharOperation.equals(tag, TAG_LINK) ||
-													CharOperation.equals(tag, TAG_LINKPLAIN)) {
-												valid = parseSee();
+													CharOperation.equals(tag, TAG_LINK)) {
+												valid = parseSee(false);
+											} else if (CharOperation.equals(tag, TAG_LINKPLAIN)) {
+												valid = parseSee(true);
 											} else {
 												valid = parseTag();
 											}
@@ -97,13 +103,14 @@
 											valid = parseReturn();
 											break;
 										case TerminalTokens.TokenNamethrows :
-											valid = parseThrows();
+											valid = parseThrows(true);
 											break;
 									}
 									if (!valid) {
 										this.inlineTagStarted = false;
 										validComment = false;
 									}
+									this.textStart = this.index;
 								} catch (InvalidInputException e) {
 									consumeToken();
 								}
@@ -112,12 +119,23 @@
 						break;
 					case '\r':
 					case '\n':
+						if (this.lineStarted && this.textStart <= charPosition) {
+							pushText(this.textStart, charPosition);
+						}
 						this.lineStarted = false;
 						break;
 					case '}' :
-						if (this.inlineTagStarted) this.inlineTagStarted = false;
-						this.lineStarted = true;
-						charPosition = previousPosition;
+						if (this.inlineTagStarted) {
+							if (this.lineStarted && this.textStart <= charPosition) {
+								pushText(this.textStart, charPosition);
+							}
+							this.textStart = this.index;
+							this.inlineTagStarted = false;
+						}
+						if (this.index < this.lineEnd) {
+							this.lineStarted = true;
+							charPosition = previousPosition;
+						}
 						break;
 					case '{' :
 						if (this.inlineTagStarted) {
@@ -132,13 +150,20 @@
 						break;
 					default :
 						charPosition = previousPosition;
-						if (!this.lineStarted && !CharOperation.isWhitespace(nextCharacter)) {
+						if (!CharOperation.isWhitespace(nextCharacter)) {
+							if (!this.lineStarted) {
+								this.textStart = previousPosition;
+							}
 							this.lineStarted = true;
 						}
 				}
 			}
-		} finally {
-			updateJavadoc();
+			if (this.lineStarted && this.textStart <= this.endComment) {
+				pushText(this.textStart, this.endComment);
+			}
+			updateDocComment();
+		} catch (Exception ex) {
+			validComment = false;
 		}
 		return validComment;
 	}

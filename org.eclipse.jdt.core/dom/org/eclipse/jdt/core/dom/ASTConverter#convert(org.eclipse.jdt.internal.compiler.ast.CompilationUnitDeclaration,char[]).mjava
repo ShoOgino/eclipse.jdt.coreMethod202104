@@ -1,10 +1,11 @@
 	public CompilationUnit convert(org.eclipse.jdt.internal.compiler.ast.CompilationUnitDeclaration unit, char[] source) {
 		this.compilationUnitSource = source;
-		scanner.setSource(source);
+		this.scanner.setSource(source);
+		this.scanner.lineEnds = unit.compilationResult().lineSeparatorPositions;
 		CompilationUnit compilationUnit = this.ast.newCompilationUnit();
 		// handle the package declaration immediately
 		// There is no node corresponding to the package declaration
-		if (resolveBindings) {
+		if (this.resolveBindings) {
 			recordNodes(compilationUnit, unit);
 		}
 		if (unit.currentPackage != null) {
@@ -18,6 +19,28 @@
 				compilationUnit.imports().add(convertImport(imports[i]));
 			}
 		}
+		// Parse comments
+		int[][] comments = unit.comments;
+		if (comments != null && this.insideComments) {
+			// Build comment table
+			this.commentsTable = new Comment[comments.length];
+			int nbr = 0;
+			for (int i = 0; i < comments.length; i++) {
+				Comment comment = createComment(comments[i]);
+				if (comment != null) {
+					comment.setAlternateRoot(compilationUnit);
+					this.commentsTable[nbr++] = comment;
+				}
+			}
+			// Resize table if  necessary
+			if (nbr<comments.length) {
+				Comment[] newCommentsTable = new Comment[nbr];
+				System.arraycopy(this.commentsTable, 0, newCommentsTable, 0, nbr);
+				this.commentsTable = newCommentsTable;
+			}
+			compilationUnit.setCommentTable(this.commentsTable);
+		}
+
 		org.eclipse.jdt.internal.compiler.ast.TypeDeclaration[] types = unit.types;
 		if (types != null) {
 			int typesLength = types.length;
@@ -39,7 +62,7 @@
 			propagateErrors(compilationUnit, resizedProblems);
 			compilationUnit.setProblems(resizedProblems);
 		}
-		if (resolveBindings) {
+		if (this.resolveBindings) {
 			lookupForScopes();
 		}
 		return compilationUnit;
