@@ -1,34 +1,29 @@
 	public TypeBinding resolveType(BlockScope scope) {
 
 		constant = NotAConstant;
-		TypeBinding qualificationTb = qualification.resolveType(scope);
-		if (qualificationTb == null)
-			return null;
+		this.resolvedType = qualification.resolveType(scope);
+		if (this.resolvedType == null) return null;
 
 		// the qualification MUST exactly match some enclosing type name
 		// Its possible to qualify 'this' by the name of the current class
 		int depth = 0;
-		currentCompatibleType = scope.referenceType().binding;
-		while (currentCompatibleType != null
-			&& currentCompatibleType != qualificationTb) {
+		this.currentCompatibleType = scope.referenceType().binding;
+		while (this.currentCompatibleType != null
+			&& this.currentCompatibleType != this.resolvedType) {
 			depth++;
-			currentCompatibleType =
-				currentCompatibleType.isStatic() ? null : currentCompatibleType.enclosingType();
+			this.currentCompatibleType = this.currentCompatibleType.isStatic() ? null : this.currentCompatibleType.enclosingType();
 		}
 		bits &= ~DepthMASK; // flush previous depth if any			
 		bits |= (depth & 0xFF) << DepthSHIFT; // encoded depth into 8 bits
 
-		if (currentCompatibleType == null) {
-			scope.problemReporter().incorrectEnclosingInstanceReference(
-				this,
-				qualificationTb);
-			return null;
+		if (this.currentCompatibleType == null) {
+			scope.problemReporter().noSuchEnclosingInstance(this.resolvedType, this, false);
+			return this.resolvedType;
 		}
 
 		// Ensure one cannot write code like: B() { super(B.this); }
 		if (depth == 0) {
-			if (!checkAccess(scope.methodScope(), qualificationTb))
-				return null;
+			checkAccess(scope.methodScope(), this.resolvedType);
 		} else {
 			// Could also be targeting an enclosing instance inside a super constructor invocation
 			//	class X {
@@ -39,14 +34,11 @@
 
 			MethodScope methodScope = scope.methodScope();
 			while (methodScope != null) {
-				if (methodScope.enclosingSourceType() == currentCompatibleType) {
-					if (!this.checkAccess(methodScope, qualificationTb))
-						return null;
-					break;
-				}
+				if (!this.checkAccess(methodScope, this.resolvedType)) break;
+				if (methodScope.enclosingSourceType() == this.currentCompatibleType) break;
 				methodScope = methodScope.parent.methodScope();
 			}
 		}
-		return this.resolvedType = qualificationTb;
+		return this.resolvedType;
 	}
 
