@@ -1,0 +1,47 @@
+private void mergeCategory(char[] categoryName, DiskIndex onDisk, int[] positions, DataOutputStream stream) throws IOException {
+	HashtableOfObject wordsToDocs = (HashtableOfObject) this.categoryTables.get(categoryName);
+	if (wordsToDocs == null)
+		wordsToDocs = new HashtableOfObject(3);
+
+	HashtableOfObject oldWordsToDocs = onDisk.readCategoryTable(categoryName, true);
+	if (oldWordsToDocs != null) {
+		char[][] oldWords = oldWordsToDocs.keyTable;
+		Object[] oldArrayOffsets = oldWordsToDocs.valueTable;
+		nextWord: for (int i = 0, l = oldWords.length; i < l; i++) {
+			char[] oldWord = oldWords[i];
+			if (oldWord != null) {
+				int[] oldDocNumbers = (int[]) oldArrayOffsets[i];
+				int length = oldDocNumbers.length;
+				int[] mappedNumbers = new int[length];
+				int count = 0;
+				for (int j = 0; j < length; j++) {
+					int pos = positions[oldDocNumbers[j]];
+					if (pos > RE_INDEXED) // forget any reference to a document which was deleted or re_indexed
+						mappedNumbers[count++] = pos;
+				}
+				if (count < length) {
+					if (count == 0) continue nextWord; // skip words which no longer have any references
+					System.arraycopy(mappedNumbers, 0, mappedNumbers = new int[count], 0, count);
+				}
+
+				Object o = wordsToDocs.get(oldWord);
+				if (o == null) {
+					wordsToDocs.put(oldWord, mappedNumbers);
+				} else {
+					IntList list = null;
+					if (o instanceof IntList) {
+						list = (IntList) o;
+					} else {
+						list = new IntList((int[]) o);
+						wordsToDocs.put(oldWord, list);
+					}
+					for (int j = 0; j < count; j++)
+						list.add(mappedNumbers[j]);
+				}
+			}
+		}
+		onDisk.categoryTables.put(categoryName, null); // flush cached table
+	}
+	writeCategoryTable(categoryName, wordsToDocs, stream);
+}
+

@@ -1,0 +1,56 @@
+private void writeAllDocumentNames(String[] sortedDocNames, DataOutputStream stream) throws IOException {
+	if (sortedDocNames.length == 0)
+		throw new IllegalArgumentException();
+
+	// assume the file was just created by initializeFrom()
+	// in order, write: SIGNATURE & headerInfoOffset place holder, then each compressed chunk of document names
+	stream.writeUTF(SIGNATURE);
+	this.headerInfoOffset = stream.size();
+	stream.writeInt(-1); // will overwrite with correct value later
+
+	int size = sortedDocNames.length;
+	this.numberOfChunks = (size / CHUNK_SIZE) + 1;
+	this.sizeOfLastChunk = size % CHUNK_SIZE;
+	if (this.sizeOfLastChunk == 0) {
+		this.numberOfChunks--;
+		this.sizeOfLastChunk = CHUNK_SIZE;
+	}
+	this.documentReferenceSize = size <= 0x7F ? 1 : (size <= 0x7FFF ? 2 : 4); // number of bytes used to encode a reference
+
+	this.chunkOffsets = new int[this.numberOfChunks];
+	int lastIndex = this.numberOfChunks - 1;
+	for (int i = 0; i < this.numberOfChunks; i++) {
+		this.chunkOffsets[i] = stream.size();
+
+		int chunkSize = i == lastIndex ? this.sizeOfLastChunk : CHUNK_SIZE;
+		int chunkIndex = i * CHUNK_SIZE;
+		String current = sortedDocNames[chunkIndex];
+		stream.writeUTF(current);
+		for (int j = 1; j < chunkSize; j++) {
+			String next = sortedDocNames[chunkIndex + j];
+			int len1 = current.length();
+			int len2 = next.length();
+			int max = len1 < len2 ? len1 : len2;
+			int start = 0; // number of identical characters at the beginning (also the index of first character that is different)
+			while (current.charAt(start) == next.charAt(start)) {
+				start++;
+				if (max == start) break; // current is 'abba', next is 'abbab'
+			}
+			if (start > 255) start = 255;
+
+			int end = 0; // number of identical characters at the end
+			while (current.charAt(--len1) == next.charAt(--len2)) {
+				end++;
+				if (len2 == start) break; // current is 'abbba', next is 'abba'
+			}
+			if (end > 255) end = 255;
+			stream.writeByte(start);
+			stream.writeByte(end);
+
+			int last = next.length() - end;
+			stream.writeUTF(start < last ? next.substring(start, last) : ""); //$NON-NLS-1$
+			current = next;
+		}
+	}
+}
+

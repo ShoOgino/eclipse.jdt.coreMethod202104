@@ -1,43 +1,21 @@
-	public boolean search(Index index, IProgressMonitor progressMonitor) {
+public boolean search(Index index, IProgressMonitor progressMonitor) {
+	if (index == null) return COMPLETE;
+	if (progressMonitor != null && progressMonitor.isCanceled()) throw new OperationCanceledException();
 
-		if (progressMonitor != null && progressMonitor.isCanceled())
-			throw new OperationCanceledException();
-
-//			System.out.println("SANITY CHECK: search job using obsolete index: ["+index+ "] instead of: ["+inMemIndex+"]");
-		if (index == null)
-			return COMPLETE;
-		IndexManager indexManager = JavaModelManager.getJavaModelManager().getIndexManager();
-		ReadWriteMonitor monitor = indexManager.getMonitorFor(index);
-		if (monitor == null)
-			return COMPLETE; // index got deleted since acquired
-		try {
-			monitor.enterRead(); // ask permission to read
-
-			/* if index has changed, commit these before querying */
-			if (index.hasChanged()) {
-				try {
-					monitor.exitRead(); // free read lock
-					monitor.enterWrite(); // ask permission to write
-					indexManager.saveIndex(index);
-				} catch (IOException e) {
-					return FAILED;
-				} finally {
-					monitor.exitWriteEnterRead(); // finished writing and reacquire read permission
-				}
-			}
-			long start = System.currentTimeMillis();
-			pattern.findIndexMatches(
-				index,
-				requestor,
-				this.participant,
-				this.scope,
-				progressMonitor);
-			executionTime += System.currentTimeMillis() - start;
-			return COMPLETE;
-		} catch (IOException e) {
-			return FAILED;
-		} finally {
-			monitor.exitRead(); // finished reading
-		}
+	ReadWriteMonitor monitor = index.monitor;
+	if (monitor == null) return COMPLETE; // index got deleted since acquired
+	try {
+		monitor.enterRead(); // ask permission to read
+		long start = System.currentTimeMillis();
+		pattern.findIndexMatches(index, requestor, this.participant, this.scope, progressMonitor);
+		executionTime += System.currentTimeMillis() - start;
+		return COMPLETE;
+	} catch (IOException e) {
+		if (e instanceof java.io.EOFException)
+			e.printStackTrace();
+		return FAILED;
+	} finally {
+		monitor.exitRead(); // finished reading
 	}
+}
 

@@ -1,0 +1,75 @@
+DiskIndex mergeWith(MemoryIndex memoryIndex) throws IOException {
+ 	// assume write lock is held
+	// compute & write out new docNames
+	String[] docNames = readAllDocumentNames();
+	int previousLength = docNames.length;
+	int[] positions = new int[previousLength]; // keeps track of the position of each document in the new sorted docNames
+	SimpleLookupTable indexedDocuments = new SimpleLookupTable(3); // for each new/changed document in the memoryIndex
+	docNames = computeDocumentNames(docNames, positions, indexedDocuments, memoryIndex);
+	if (docNames.length == 0) {
+		if (previousLength == 0) return this; // nothing to do... memory index contained deleted documents that had never been saved
+
+		// index is now empty since all the saved documents were removed
+		DiskIndex newDiskIndex = new DiskIndex(this.fileName);
+		newDiskIndex.initialize(false);
+		return newDiskIndex;
+	}
+
+	DiskIndex newDiskIndex = new DiskIndex(this.fileName + ".tmp"); //$NON-NLS-1$
+	File newIndexFile = newDiskIndex.getIndexFile();
+	try {
+		newDiskIndex.initializeFrom(this, newIndexFile);
+		DataOutputStream stream = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(newIndexFile, false)));
+		int offsetToHeader = -1;
+		try {
+			newDiskIndex.writeAllDocumentNames(docNames, stream);
+			docNames = null; // free up the space
+
+			// add each new/changed doc to empty category tables using its new position #
+			if (indexedDocuments.elementSize > 0) {
+				Object[] names = indexedDocuments.keyTable;
+				Object[] integerPositions = indexedDocuments.valueTable;
+				for (int i = 0, l = names.length; i < l; i++)
+					if (names[i] != null)
+						newDiskIndex.copyQueryResults(
+							(HashtableOfObject) memoryIndex.docsToReferences.get(names[i]),
+							((Integer) integerPositions[i]).intValue());
+			}
+			indexedDocuments = null; // free up the space
+
+			// merge each category table with the new ones & write them out
+			if (previousLength == 0)
+				newDiskIndex.writeCategories(stream);
+			else
+				newDiskIndex.mergeCategories(this, positions, stream);
+			offsetToHeader = stream.size();
+			newDiskIndex.writeHeaderInfo(stream);
+			positions = null; // free up the space
+		} finally {
+			stream.close();
+		}
+		newDiskIndex.writeOffsetToHeader(offsetToHeader);
+
+		// rename file by deleting previous index file & renaming temp one
+		File old = getIndexFile();
+		if (!old.delete()) {
+			if (DEBUG)
+				System.out.println("mergeWith - Failed to delete " + this.fileName); //$NON-NLS-1$
+			throw new IOException("Failed to delete index file " + this.fileName); //$NON-NLS-1$
+		}
+		if (!newIndexFile.renameTo(old)) {
+			if (DEBUG)
+				System.out.println("mergeWith - Failed to rename " + this.fileName); //$NON-NLS-1$
+			throw new IOException("Failed to rename index file " + this.fileName); //$NON-NLS-1$
+		}
+	} catch (IOException e) {
+		if (newIndexFile.exists() && !newIndexFile.delete())
+			if (DEBUG)
+				System.out.println("mergeWith - Failed to delete temp index " + newDiskIndex.fileName); //$NON-NLS-1$
+		throw e;
+	}
+
+	newDiskIndex.fileName = this.fileName;
+	return newDiskIndex;
+}
+

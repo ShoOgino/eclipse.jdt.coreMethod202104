@@ -1,7 +1,34 @@
-	/**
-	 * Returns the entries containing the given key in a group of categories.
-	 * The matchRule dictates whether its an exact, prefix or pattern match, as well as
-	 * case sensitive or insensitive.
-	 */
-	public abstract EntryResult[] query(char[][] categories, char[] key, int matchRule);
+/**
+ * Returns the entries containing the given key in a group of categories, or null if no matches are found.
+ * The matchRule dictates whether its an exact, prefix or pattern match, as well as case sensitive or insensitive.
+ * If the key is null then all entries in specified categories are returned.
+ */
+public EntryResult[] query(char[][] categories, char[] key, int matchRule) throws IOException {
+	if (this.memoryIndex.shouldMerge() && monitor.exitReadEnterWrite()) {
+		try {
+			save();
+		} finally {
+			monitor.exitWriteEnterRead();
+		}
+	}
+
+	HashtableOfObject results;
+	if (this.memoryIndex.hasChanged()) {
+		results = this.diskIndex.addQueryResults(categories, key, matchRule, this.memoryIndex);
+		this.memoryIndex.addQueryResults(categories, key, matchRule, results);
+	} else {
+		results = this.diskIndex.addQueryResults(categories, key, matchRule, null);
+	}
+	if (results.elementSize == 0) return null;
+
+	EntryResult[] entryResults = new EntryResult[results.elementSize];
+	int count = 0;
+	Object[] values = results.valueTable;
+	for (int i = 0, l = values.length; i < l; i++) {
+		EntryResult result = (EntryResult) values[i];
+		if (result != null)
+			entryResults[count++] = result;
+	}
+	return entryResults;
+}
 

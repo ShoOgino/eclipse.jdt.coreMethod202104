@@ -1,0 +1,91 @@
+private String[] computeDocumentNames(String[] onDiskNames, int[] positions, SimpleLookupTable indexedDocuments, MemoryIndex memoryIndex) {
+	int onDiskLength = onDiskNames.length;
+	Object[] docNames = memoryIndex.docsToReferences.keyTable;
+	Object[] referenceTables = memoryIndex.docsToReferences.valueTable;
+	if (onDiskLength == 0) {
+		// disk index was empty, so add every indexed document
+		for (int i = 0, l = referenceTables.length; i < l; i++)
+			if (referenceTables[i] != null)
+				indexedDocuments.put(docNames[i], null); // remember each new document
+
+		String[] newDocNames = new String[indexedDocuments.elementSize];
+		int count = 0;
+		Object[] added = indexedDocuments.keyTable;
+		for (int i = 0, l = added.length; i < l; i++)
+			if (added[i] != null)
+				newDocNames[count++] = (String) added[i];
+		Util.sort(newDocNames);
+		for (int i = 0, l = newDocNames.length; i < l; i++)
+			indexedDocuments.put(newDocNames[i], new Integer(i));
+		return newDocNames;
+	}
+
+	// initialize positions as if each document will remain in the same position
+	for (int i = 0; i < onDiskLength; i++)
+		positions[i] = i;
+
+	// find out if the memory index has any new or deleted documents, if not then the names & positions are the same
+	int numDeletedDocNames = 0;
+	int numReindexedDocNames = 0;
+	nextPath : for (int i = 0, l = docNames.length; i < l; i++) {
+		String docName = (String) docNames[i];
+		if (docName != null) {
+			for (int j = 0; j < onDiskLength; j++) {
+				if (docName.equals(onDiskNames[j])) {
+					if (referenceTables[i] == null) {
+						positions[j] = DELETED;
+						numDeletedDocNames++;
+					} else {
+						positions[j] = RE_INDEXED;
+						numReindexedDocNames++;
+					}
+					continue nextPath;
+				}
+			}
+			if (referenceTables[i] != null)
+				indexedDocuments.put(docName, null); // remember each new document, skip deleted documents which were never saved
+		}
+	}
+
+	String[] newDocNames = onDiskNames;
+	if (numDeletedDocNames > 0 || indexedDocuments.elementSize > 0) {
+		// some new documents have been added or some old ones deleted
+		newDocNames = new String[onDiskLength + indexedDocuments.elementSize - numDeletedDocNames];
+		int count = 0;
+		for (int i = 0; i < onDiskLength; i++)
+			if (positions[i] >= RE_INDEXED)
+				newDocNames[count++] = onDiskNames[i]; // keep each unchanged document
+		Object[] added = indexedDocuments.keyTable;
+		for (int i = 0, l = added.length; i < l; i++)
+			if (added[i] != null)
+				newDocNames[count++] = (String) added[i]; // add each new document
+		Util.sort(newDocNames);
+		for (int i = 0, l = newDocNames.length; i < l; i++)
+			if (indexedDocuments.containsKey(newDocNames[i]))
+				indexedDocuments.put(newDocNames[i], new Integer(i)); // remember the position for each new document
+	}
+
+	// need to be able to look up an old position (ref# from a ref[]) and map it to its new position
+	// if its old position == DELETED then its forgotton
+	// if its old position == ReINDEXED then its also forgotten but its new position is needed to map references
+	int count = -1;
+	for (int i = 0; i < onDiskLength;) {
+		switch(positions[i]) {
+			case DELETED :
+				i++; // skip over deleted... references are forgotten
+				break;
+			case RE_INDEXED :
+				String newName = newDocNames[++count];
+				if (newName.equals(onDiskNames[i])) {
+					indexedDocuments.put(newName, new Integer(count)); // the reindexed docName that was at position i is now at position count
+					i++;
+				}
+				break;
+			default :
+				if (newDocNames[++count].equals(onDiskNames[i]))
+					positions[i++] = count; // the unchanged docName that was at position i is now at position count
+		}
+	}
+	return newDocNames;
+}
+
