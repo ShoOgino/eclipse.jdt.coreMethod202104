@@ -25,103 +25,25 @@
 		} catch (InvalidInputException e) {
 			return null;
 		}
-		boolean storeType = true, storeParam = true;
-		int parameterized = 0;
-		int paramPtr = -1;
-		char[] paramName = null;
-		char[][] paramNames = null;
-		int[] wildcards = null;
+		int paramCount = 0;
 		while (token != TerminalTokens.TokenNameEOF) {
-			if (token != TerminalTokens.TokenNameWHITESPACE) {
-				if (storeParam) {
+			switch (token) {
+				case TerminalTokens.TokenNameWHITESPACE:
+					if (paramCount == 0) break;
+					// fall through default case if we're inside a type argument...
+				default: // all other tokens are considered identifiers (see bug 21763 Problem in Java search [search])
 					switch (token) {
-						case TerminalTokens.TokenNameMULTIPLY:
-							if (parameterized > 0) {
-								// TODO (frederic) Should warn user that syntax is not valid
-							}
-							break;
-						case TerminalTokens.TokenNameQUESTION:
-							if (parameterized > 0) {
-								if (wildcards[paramPtr] == -1) {
-									wildcards[paramPtr] = Wildcard.UNBOUND;
-								} else {
-									// TODO (frederic) Should warn user that syntax is not valid
-								}
-							}
-							break;
-						case TerminalTokens.TokenNameextends:
-							if (parameterized > 0) {
-								if (wildcards[paramPtr] == Wildcard.UNBOUND) {
-									wildcards[paramPtr] = Wildcard.EXTENDS;
-								} else {
-									// TODO (frederic) Should warn user that syntax is not valid
-								}
-							}
-							break;
-						case TerminalTokens.TokenNamesuper:
-							if (parameterized > 0) {
-								if (wildcards[paramPtr] == Wildcard.UNBOUND) {
-									wildcards[paramPtr] = Wildcard.SUPER;
-								} else {
-									// TODO (frederic) Should warn user that syntax is not valid
-								}
-							}
-							break;
-						case TerminalTokens.TokenNameCOMMA:
-							if (parameterized == 1 && storeParam) {
-								if (paramPtr < paramNames.length) {
-									paramNames[paramPtr++] = paramName;
-									paramName = null;
-								}
-								wildcards[paramPtr] = -1;
-							}
-							break;
 						case TerminalTokens.TokenNameGREATER:
-							if (parameterized == 1) {
-								if (storeParam) {
-									storeParam = false;
-									if (paramPtr < paramNames.length) {
-										paramNames[paramPtr] = paramName;
-										paramName = null;
-									}
-								}
-							}
-							parameterized--;
+							paramCount++;
 							break;
 						case TerminalTokens.TokenNameLESS:
-							if (parameterized == 0) {
-								paramNames = new char[10][]; // 10 parameters max
-								paramPtr++;
-								wildcards = new int[10]; // 10 parameters max
-								wildcards[paramPtr] = -1;
-								storeType = false;
-							}
-							parameterized++;
-							break;
-						case TerminalTokens.TokenNameIdentifier:
-							if (parameterized == 1 && storeParam) {
-								if (paramName == null) {
-									// never store id at this index
-									paramName = scanner.getCurrentIdentifierSource();
-								} else {
-									paramName = CharOperation.concat(paramName, scanner.getCurrentIdentifierSource());
-								}
-							}
-							break;
-						case TerminalTokens.TokenNameDOT:
-							if (parameterized == 1 && storeParam && paramName != null) {
-								paramName = CharOperation.append(paramName, '.');
-							}
+							paramCount--;
 							break;
 					}
-				}
-				if (storeType) { // store type if not in type arguments declaration
 					if (type == null)
 						type = new String(scanner.getCurrentTokenSource());
 					else
 						type += new String(scanner.getCurrentTokenSource());
-				}
-				storeType = parameterized == 0;
 			}
 			try {
 				token = scanner.getNextToken();
@@ -130,17 +52,27 @@
 			}
 		}
 		if (type == null) return null;
-		// Resize param names array if necessary
-		if (paramPtr >= 0) {
-			System.arraycopy(paramNames, 0, paramNames = new char[paramPtr+1][], 0, paramPtr+1);
-			System.arraycopy(wildcards, 0, wildcards = new int[paramPtr+1], 0, paramPtr+1);
-		}
-	
+		char[] typeSignature = null;
 		char[] qualificationChars = null, typeChars = null;
 	
 		// extract declaring type infos
 		if (type != null) {
-			char[] typePart = type.toCharArray();
+			// get type part and signature
+			char[] typePart = null;
+			try {
+				String signature = Signature.createTypeSignature(type, false);
+				if (signature.indexOf(Signature.C_GENERIC_START) < 0) {
+					typePart = type.toCharArray();
+				} else {
+					typeSignature = signature.toCharArray();
+					typePart = Signature.toCharArray(Signature.getTypeErasure(typeSignature));
+				}
+			}
+			catch (IllegalArgumentException iae) {
+				// string is not a valid type syntax
+				return null;
+			}
+			// get qualification name
 			int lastDotPosition = CharOperation.lastIndexOf('.', typePart);
 			if (lastDotPosition >= 0) {
 				qualificationChars = CharOperation.subarray(typePart, 0, lastDotPosition);
@@ -158,7 +90,7 @@
 			case IJavaSearchConstants.DECLARATIONS : // cannot search for explicit member types
 				return new QualifiedTypeDeclarationPattern(qualificationChars, typeChars, IIndexConstants.TYPE_SUFFIX, matchRule);
 			case IJavaSearchConstants.REFERENCES :
-				return new TypeReferencePattern(qualificationChars, typeChars, paramNames, false /* not generic */, wildcards, matchRule);
+				return new TypeReferencePattern(qualificationChars, typeChars, typeSignature, false /* not generic */, matchRule);
 			case IJavaSearchConstants.IMPLEMENTORS : 
 				return new SuperTypeReferencePattern(qualificationChars, typeChars, true, matchRule);
 			case IJavaSearchConstants.ALL_OCCURRENCES :
