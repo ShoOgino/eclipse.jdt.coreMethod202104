@@ -7,16 +7,34 @@
 //		assertNotNull("Test file Converter/src/javadoc/test"+testNbre+"/Test.java was not found!", sourceUnit);
 
 		// Create DOM AST nodes hierarchy
+		String fileName = sourceUnit.getElementName();
 		String sourceStr = sourceUnit.getSource();
-		CompilationUnit compilUnit = (CompilationUnit) runConversion(sourceUnit, true); // resolve bindings
-		Comment[] unitComments = compilUnit.getCommentTable();
+		IJavaProject project = sourceUnit.getJavaProject();
+		Map originalOptions = project.getOptions(true);
+		Comment[] unitComments = null;
+		if (debug) {
+			try {
+				project.setOption(JavaCore.COMPILER_PB_INVALID_JAVADOC, JavaCore.ERROR);
+				project.setOption(JavaCore.COMPILER_PB_MISSING_JAVADOC_TAGS, JavaCore.ERROR);
+				project.setOption(JavaCore.COMPILER_PB_MISSING_JAVADOC_COMMENTS, JavaCore.ERROR);
+				CompilationUnit compilUnit = (CompilationUnit) runConversion(sourceUnit, true); // resolve bindings
+				assertEquals(fileName+": Unexpected problems", 0, compilUnit.getProblems().length); //$NON-NLS-1$
+				unitComments = compilUnit.getCommentTable();
+			} finally {
+				project.setOptions(originalOptions);
+			}
+		} else {
+				CompilationUnit compilUnit = (CompilationUnit) runConversion(sourceUnit, true); // resolve bindings
+				unitComments = compilUnit.getCommentTable();
+		}
+		assertNotNull(fileName+": Unexpected problems", unitComments);
 
 		// Get comments infos from test file
 		char[] source = sourceStr.toCharArray();
 		setSourceComment(source);
 		
 		// Basic comments verification
-		assertEquals("Wrong number of comments", this.comments.size(), unitComments.length);
+		assertEquals(fileName+": Wrong number of comments", this.comments.size(), unitComments.length);
 		
 		// Verify comments positions and bindings
 		for (int i=0; i<unitComments.length; i++) {
@@ -27,14 +45,15 @@
 			ASTConverterJavadocFlattener printer = new ASTConverterJavadocFlattener(stringComment);
 			comment.accept(printer);
 			String text = new String(source, comment.getStartPosition(), comment.getLength());
-			assertEquals("Flattened javadoc does NOT match source!", text, printer.getResult());
+			assertEquals(fileName+": Flattened javadoc does NOT match source!", text, printer.getResult());
 			// Verify javdoc tags positions and bindings
 			if (comment.isDocComment()) {
 				Javadoc docComment = (Javadoc)comment;
-				assertEquals("Invalid tags number! ", tags.size(), allTags(docComment));
+				assertEquals(fileName+": Invalid tags number! ", tags.size(), allTags(docComment));
 				verifyPositions(docComment, source);
 				verifyBindings(docComment);
 			}
+			if (debug) System.out.println(comment+"\nsuccessfully verified in "+fileName);
 		}
 		
 		/* Verify each javadoc: not implemented yet
