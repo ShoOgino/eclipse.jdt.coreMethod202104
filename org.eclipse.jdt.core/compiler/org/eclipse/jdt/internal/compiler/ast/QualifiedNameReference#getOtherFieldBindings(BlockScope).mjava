@@ -1,25 +1,28 @@
 	public TypeBinding getOtherFieldBindings(BlockScope scope) {
 		// At this point restrictiveFlag may ONLY have two potential value : FIELD LOCAL (i.e cast <<(VariableBinding) binding>> is valid)
 		int length = tokens.length;
+		FieldBinding field;
 		if ((bits & FIELD) != 0) {
-			FieldBinding fieldBinding = (FieldBinding) binding;
-			if (!fieldBinding.isStatic()) {
+			field = (FieldBinding) this.binding;
+			if (!field.isStatic()) {
 				//must check for the static status....
 				if (indexOfFirstFieldBinding > 1  //accessing to a field using a type as "receiver" is allowed only with static field
 						 || scope.methodScope().isStatic) { 	// the field is the first token of the qualified reference....
-					scope.problemReporter().staticFieldAccessToNonStaticVariable(this, fieldBinding);
+					scope.problemReporter().staticFieldAccessToNonStaticVariable(this, field);
 					return null;
 				 }
 			} else {
 				// indirect static reference ?
 				if (indexOfFirstFieldBinding > 1 
-						&& fieldBinding.declaringClass != actualReceiverType) {
-					scope.problemReporter().indirectAccessToStaticField(this, fieldBinding);
+						&& field.declaringClass != actualReceiverType) {
+					scope.problemReporter().indirectAccessToStaticField(this, field);
 				}
 			}
 			// only last field is actually a write access if any
-			if (isFieldUseDeprecated(fieldBinding, scope, (this.bits & IsStrictlyAssignedMASK) !=0 && indexOfFirstFieldBinding == length))
-				scope.problemReporter().deprecatedField(fieldBinding, this);
+			if (isFieldUseDeprecated(field, scope, (this.bits & IsStrictlyAssignedMASK) !=0 && indexOfFirstFieldBinding == length))
+				scope.problemReporter().deprecatedField(field, this);
+		} else {
+			field = null;
 		}
 		TypeBinding type = ((VariableBinding) binding).type;
 		int index = indexOfFirstFieldBinding;
@@ -33,8 +36,7 @@
 		otherDepths = new int[otherBindingsLength];
 		
 		// fill the first constant (the one of the binding)
-		this.constant =
-			((bits & FIELD) != 0)
+		this.constant = field != null
 				? FieldReference.getConstantFor((FieldBinding) binding, this, false, scope)
 				: ((VariableBinding) binding).constant();
 		// save first depth, since will be updated by visibility checks of other bindings
@@ -45,8 +47,18 @@
 			if (type == null)
 				return null; // could not resolve type prior to this point
 
+			// set generic cast of for previous field (if any)
+			if (field != null) {
+				FieldBinding originalBinding = field.original();
+				if (originalBinding != field) {
+				    // extra cast needed if method return type has type variable
+				    if ((originalBinding.type.tagBits & TagBits.HasTypeVariable) != 0 && type.id != T_Object) {
+				    	setGenericCast(index-1,originalBinding.type.genericCast(type));
+				    }
+				} 	
+			}
 			bits &= ~DepthMASK; // flush previous depth if any			
-			FieldBinding field = scope.getField(type, token, this);
+			field = scope.getField(type, token, this);
 			int place = index - indexOfFirstFieldBinding;
 			otherBindings[place] = field;
 			otherDepths[place] = (bits & DepthMASK) >> DepthSHIFT;
