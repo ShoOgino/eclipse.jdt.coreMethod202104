@@ -1,112 +1,101 @@
-	// Internal use only
-	public ReferenceBinding findMemberType(
-		char[] typeName,
-		ReferenceBinding enclosingType) {
-		if ((enclosingType.tagBits & HasNoMemberTypes) != 0)
-			return null; // know it has no member types (nor inherited member types)
+public  ReferenceBinding findMemberType(char[] typeName, ReferenceBinding enclosingType) {
+	if ((enclosingType.tagBits & HasNoMemberTypes) != 0)
+		return null; // know it has no member types (nor inherited member types)
 
-		SourceTypeBinding enclosingSourceType = enclosingSourceType();
-		PackageBinding currentPackage = getCurrentPackage();
-		compilationUnitScope().addTypeReference(enclosingType);
-		ReferenceBinding memberType = enclosingType.getMemberType(typeName);
-		if (memberType != null) {
+	SourceTypeBinding enclosingSourceType = enclosingSourceType();
+	PackageBinding currentPackage = getCurrentPackage();
+	compilationUnitScope().addTypeReference(enclosingType);
+	ReferenceBinding memberType = enclosingType.getMemberType(typeName);
+	if (memberType != null) {
+		compilationUnitScope().addTypeReference(memberType);
+		if (enclosingSourceType == null
+			? memberType.canBeSeenBy(currentPackage)
+			: memberType.canBeSeenBy(enclosingType, enclosingSourceType))
+				return memberType;
+		else
+				return new ProblemReferenceBinding(typeName, NotVisible);
+	}
+
+	// collect all superinterfaces of receiverType until the memberType is found in a supertype
+	ReferenceBinding currentType = enclosingType;
+	ReferenceBinding[][] interfacesToVisit = null;
+	int lastPosition = -1;
+	ReferenceBinding visibleMemberType = null;
+	boolean keepLooking = true;
+	boolean notVisible = false; // we could hold onto the not visible field for extra error reporting
+	while (keepLooking) {
+		ReferenceBinding[] itsInterfaces = currentType.superInterfaces();
+		if (itsInterfaces != NoSuperInterfaces) {
+			if (interfacesToVisit == null)
+				interfacesToVisit = new ReferenceBinding[5][];
+			if (++lastPosition == interfacesToVisit.length)
+				System.arraycopy(interfacesToVisit, 0, interfacesToVisit = new ReferenceBinding[lastPosition * 2][], 0, lastPosition);
+			interfacesToVisit[lastPosition] = itsInterfaces;
+		}
+		if ((currentType = currentType.superclass()) == null)
+			break;
+
+		compilationUnitScope().addTypeReference(currentType);
+		if ((memberType = currentType.getMemberType(typeName)) != null) {
 			compilationUnitScope().addTypeReference(memberType);
+			keepLooking = false;
 			if (enclosingSourceType == null
 				? memberType.canBeSeenBy(currentPackage)
-				: memberType.canBeSeenBy(enclosingType, enclosingSourceType))
-				return memberType;
-			else
-				return new ProblemReferenceBinding(typeName, NotVisible);
-		}
-		// collect all superinterfaces of receiverType until the memberType is found in a supertype
-		ReferenceBinding currentType = enclosingType;
-		ReferenceBinding[][] interfacesToVisit = null;
-		int lastPosition = -1;
-		ReferenceBinding visibleMemberType = null;
-		boolean keepLooking = true;
-		boolean notVisible = false;
-		// we could hold onto the not visible field for extra error reporting
-		while (keepLooking) {
-			ReferenceBinding[] itsInterfaces = currentType.superInterfaces();
-			if (itsInterfaces != NoSuperInterfaces) {
-				if (interfacesToVisit == null)
-					interfacesToVisit = new ReferenceBinding[5][];
-				if (++lastPosition == interfacesToVisit.length)
-					System.arraycopy(
-						interfacesToVisit,
-						0,
-						interfacesToVisit = new ReferenceBinding[lastPosition * 2][],
-						0,
-						lastPosition);
-				interfacesToVisit[lastPosition] = itsInterfaces;
-			}
-			if ((currentType = currentType.superclass()) == null)
-				break;
-
-			compilationUnitScope().addTypeReference(currentType);
-			if ((memberType = currentType.getMemberType(typeName)) != null) {
-				compilationUnitScope().addTypeReference(memberType);
-				keepLooking = false;
-				if (enclosingSourceType == null
-					? memberType.canBeSeenBy(currentPackage)
-					: memberType.canBeSeenBy(enclosingType, enclosingSourceType)) {
+				: memberType.canBeSeenBy(enclosingType, enclosingSourceType)) {
 					if (visibleMemberType == null)
 						visibleMemberType = memberType;
 					else
 						return new ProblemReferenceBinding(typeName, Ambiguous);
-				} else {
-					notVisible = true;
-				}
+			} else {
+				notVisible = true;
 			}
 		}
-		// walk all visible interfaces to find ambiguous references
-		if (interfacesToVisit != null) {
-			ProblemReferenceBinding ambiguous = null;
-			done : for (int i = 0; i <= lastPosition; i++) {
-				ReferenceBinding[] interfaces = interfacesToVisit[i];
-				for (int j = 0, length = interfaces.length; j < length; j++) {
-					ReferenceBinding anInterface = interfaces[j];
-					if ((anInterface.tagBits & InterfaceVisited) == 0) {
-						// if interface as not already been visited
-						anInterface.tagBits |= InterfaceVisited;
-						compilationUnitScope().addTypeReference(anInterface);
-						if ((memberType = anInterface.getMemberType(typeName)) != null) {
-							compilationUnitScope().addTypeReference(memberType);
-							if (visibleMemberType == null) {
-								visibleMemberType = memberType;
-							} else {
-								ambiguous = new ProblemReferenceBinding(typeName, Ambiguous);
-								break done;
-							}
+	}
+
+	// walk all visible interfaces to find ambiguous references
+	if (interfacesToVisit != null) {
+		ProblemReferenceBinding ambiguous = null;
+		done : for (int i = 0; i <= lastPosition; i++) {
+			ReferenceBinding[] interfaces = interfacesToVisit[i];
+			for (int j = 0, length = interfaces.length; j < length; j++) {
+				ReferenceBinding anInterface = interfaces[j];
+				if ((anInterface.tagBits & InterfaceVisited) == 0) { // if interface as not already been visited
+					anInterface.tagBits |= InterfaceVisited;
+					compilationUnitScope().addTypeReference(anInterface);
+					if ((memberType = anInterface.getMemberType(typeName)) != null) {
+						compilationUnitScope().addTypeReference(memberType);
+						if (visibleMemberType == null) {
+							visibleMemberType = memberType;
 						} else {
-							ReferenceBinding[] itsInterfaces = anInterface.superInterfaces();
-							if (itsInterfaces != NoSuperInterfaces) {
-								if (++lastPosition == interfacesToVisit.length)
-									System.arraycopy(
-										interfacesToVisit,
-										0,
-										interfacesToVisit = new ReferenceBinding[lastPosition * 2][],
-										0,
-										lastPosition);
-								interfacesToVisit[lastPosition] = itsInterfaces;
-							}
+							ambiguous = new ProblemReferenceBinding(typeName, Ambiguous);
+							break done;
+						}
+					} else {
+						ReferenceBinding[] itsInterfaces = anInterface.superInterfaces();
+						if (itsInterfaces != NoSuperInterfaces) {
+							if (++lastPosition == interfacesToVisit.length)
+								System.arraycopy(interfacesToVisit, 0, interfacesToVisit = new ReferenceBinding[lastPosition * 2][], 0, lastPosition);
+							interfacesToVisit[lastPosition] = itsInterfaces;
 						}
 					}
 				}
 			}
-			// bit reinitialization
-			for (int i = 0; i <= lastPosition; i++) {
-				ReferenceBinding[] interfaces = interfacesToVisit[i];
-				for (int j = 0, length = interfaces.length; j < length; j++)
-					interfaces[j].tagBits &= ~InterfaceVisited;
-			}
-			if (ambiguous != null)
-				return ambiguous;
 		}
-		if (visibleMemberType != null)
-			return visibleMemberType;
-		if (notVisible)
-			return new ProblemReferenceBinding(typeName, NotVisible);
-		return null;
+
+		// bit reinitialization
+		for (int i = 0; i <= lastPosition; i++) {
+			ReferenceBinding[] interfaces = interfacesToVisit[i];
+			for (int j = 0, length = interfaces.length; j < length; j++)
+				interfaces[j].tagBits &= ~InterfaceVisited;
+		}
+		if (ambiguous != null) return ambiguous;
 	}
+
+	if (visibleMemberType != null)
+		return visibleMemberType;
+	if (notVisible)
+		return new ProblemReferenceBinding(typeName, NotVisible);
+	return null;
+}
+// Internal use only
 

@@ -1,0 +1,56 @@
+/**
+ * @see SearchPattern#matches(AstNode, boolean)
+ */
+protected boolean matches(AstNode node, boolean resolve) {
+	if (!(node instanceof MessageSend)) return false;
+
+	MessageSend messageSend = (MessageSend)node;
+
+	// selector
+	if (this.selector != null && !this.matchesName(this.selector, messageSend.selector))
+		return false;
+
+	// receiver type
+	MethodBinding binding = messageSend.binding;
+	ReferenceBinding receiverType = 
+		binding == null ? 
+			null : 
+			(!isVirtualInvoke(messageSend) ? binding.declaringClass : (ReferenceBinding)messageSend.receiverType);
+	if (resolve && receiverType != null) {
+		if (this.isVirtualInvoke(messageSend)) {
+			if (!this.matchesAsSubtype(receiverType, this.declaringSimpleName, this.declaringQualification)
+				&& !this.matchesType(this.allSuperDeclaringTypeNames, receiverType)) {
+					return false;
+			}
+		} else {
+			if (!this.matchesType(this.declaringSimpleName, this.declaringQualification, receiverType))
+				return false;
+		}
+	}
+
+	// return type
+	if (resolve && binding != null) {
+		if (!this.matchesType(this.returnSimpleName, this.returnQualification, binding.returnType))
+			return false;
+	}
+		
+	// argument types
+	int argumentCount = this.parameterSimpleNames == null ? -1 : this.parameterSimpleNames.length;
+	if (argumentCount > -1) {
+		int parameterCount = messageSend.arguments == null ? 0 : messageSend.arguments.length;
+		if (parameterCount != argumentCount)
+			return false;
+
+		if (resolve && binding != null) {
+			for (int i = 0; i < parameterCount; i++) {
+				char[] qualification = this.parameterQualifications[i];
+				char[] type = this.parameterSimpleNames[i];
+				if (!this.matchesType(type, qualification, binding.parameters[i]))
+					return false;
+			}
+		}
+	}
+
+	return true;
+}
+
