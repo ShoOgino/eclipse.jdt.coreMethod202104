@@ -26,7 +26,7 @@
 					return;
 					
 				case IResourceChangeEvent.PRE_AUTO_BUILD :
-					if(delta != null) {
+					if(isAffectedBy(delta)) { // avoid populating for SYNC or MARKER deltas
 						this.checkProjectsBeingAddedOrRemoved(delta);
 						
 						// update the classpath related markers
@@ -50,30 +50,25 @@
 					break;
 					
 				case IResourceChangeEvent.POST_CHANGE :
-					try {
-						boolean hasExternalJarToRefresh = false;
-						if (this.refreshedElements != null) {
-							try {
-								hasExternalJarToRefresh = createExternalArchiveDelta(null);
-							} catch (JavaModelException e) {
-								e.printStackTrace();
+					if (isAffectedBy(delta)) {
+						try {
+							if (this.refreshedElements != null) {
+								try {
+									createExternalArchiveDelta(null);
+								} catch (JavaModelException e) {
+									e.printStackTrace();
+								}
 							}
-						}
-						if (delta != null) {
 							IJavaElementDelta translatedDelta = this.processResourceDelta(delta);
 							if (translatedDelta != null) { 
 								this.manager.registerJavaModelDelta(translatedDelta);
 							}
 							this.manager.fire(null, ElementChangedEvent.POST_CHANGE);
-						} else {
-							if (hasExternalJarToRefresh) {
-								this.manager.fire(null, ElementChangedEvent.POST_CHANGE);
-							}
+						} finally {
+							// workaround for bug 15168 circular errors not reported 
+							this.manager.javaProjectsCache = null;
+							this.removedRoots = null;
 						}
-					} finally {
-						// workaround for bug 15168 circular errors not reported 
-						this.manager.javaProjectsCache = null;
-						this.removedRoots = null;
 					}
 			}
 		}
