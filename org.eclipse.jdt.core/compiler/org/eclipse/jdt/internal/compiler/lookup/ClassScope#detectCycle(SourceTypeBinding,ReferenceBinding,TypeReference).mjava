@@ -1,65 +1,60 @@
-	// Answer whether a cycle was found between the sourceType & the superType
-	private boolean detectCycle(
-		SourceTypeBinding sourceType,
-		ReferenceBinding superType,
-		TypeReference reference) {
-		if (sourceType == superType) {
-			problemReporter().hierarchyCircularity(sourceType, superType, reference);
-			sourceType.tagBits |= HierarchyHasProblems;
-			return true;
+private boolean detectCycle(SourceTypeBinding sourceType, ReferenceBinding superType, TypeReference reference) {
+	if (sourceType == superType) {
+		problemReporter().hierarchyCircularity(sourceType, superType, reference);
+		sourceType.tagBits |= HierarchyHasProblems;
+		return true;
+	}
+
+	if (superType.isBinaryBinding()) {
+		// force its superclass & superinterfaces to be found... 2 possibilities exist - the source type is included in the hierarchy of:
+		//		- a binary type... this case MUST be caught & reported here
+		//		- another source type... this case is reported against the other source type
+		boolean hasCycle = false;
+		if (superType.superclass() != null) {
+			if (sourceType == superType.superclass()) {
+				problemReporter().hierarchyCircularity(sourceType, superType, reference);
+				sourceType.tagBits |= HierarchyHasProblems;
+				superType.tagBits |= HierarchyHasProblems;
+				return true;
+			}
+			hasCycle |= detectCycle(sourceType, superType.superclass(), reference);
+			if ((superType.superclass().tagBits & HierarchyHasProblems) != 0) {
+				sourceType.tagBits |= HierarchyHasProblems;
+				superType.tagBits |= HierarchyHasProblems; // propagate down the hierarchy
+			}
 		}
 
-		if (superType.isBinaryBinding()) {
-			// force its superclass & superinterfaces to be found... 2 possibilities exist - the source type is included in the hierarchy of:
-			//		- a binary type... this case MUST be caught & reported here
-			//		- another source type... this case is reported against the other source type
-			boolean hasCycle = false;
-			if (superType.superclass() != null) {
-				if (sourceType == superType.superclass()) {
+		ReferenceBinding[] itsInterfaces = superType.superInterfaces();
+		if (itsInterfaces != NoSuperInterfaces) {
+			for (int i = 0, length = itsInterfaces.length; i < length; i++) {
+				ReferenceBinding anInterface = itsInterfaces[i];
+				if (sourceType == anInterface) {
 					problemReporter().hierarchyCircularity(sourceType, superType, reference);
 					sourceType.tagBits |= HierarchyHasProblems;
 					superType.tagBits |= HierarchyHasProblems;
 					return true;
 				}
-				hasCycle |= detectCycle(sourceType, superType.superclass(), reference);
-				if ((superType.superclass().tagBits & HierarchyHasProblems) != 0) {
+				hasCycle |= detectCycle(sourceType, anInterface, reference);
+				if ((anInterface.tagBits & HierarchyHasProblems) != 0) {
 					sourceType.tagBits |= HierarchyHasProblems;
-					superType.tagBits |= HierarchyHasProblems; // propagate down the hierarchy
+					superType.tagBits |= HierarchyHasProblems;
 				}
 			}
-
-			ReferenceBinding[] itsInterfaces = superType.superInterfaces();
-			if (itsInterfaces != NoSuperInterfaces) {
-				for (int i = 0, length = itsInterfaces.length; i < length; i++) {
-					ReferenceBinding anInterface = itsInterfaces[i];
-					if (sourceType == anInterface) {
-						problemReporter().hierarchyCircularity(sourceType, superType, reference);
-						sourceType.tagBits |= HierarchyHasProblems;
-						superType.tagBits |= HierarchyHasProblems;
-						return true;
-					}
-					hasCycle |= detectCycle(sourceType, anInterface, reference);
-					if ((anInterface.tagBits & HierarchyHasProblems) != 0) {
-						sourceType.tagBits |= HierarchyHasProblems;
-						superType.tagBits |= HierarchyHasProblems;
-					}
-				}
-			}
-			return hasCycle;
 		}
-
-		if ((superType.tagBits & EndHierarchyCheck) == 0
-			&& (superType.tagBits & BeginHierarchyCheck) != 0) {
-			problemReporter().hierarchyCircularity(sourceType, superType, reference);
-			sourceType.tagBits |= HierarchyHasProblems;
-			superType.tagBits |= HierarchyHasProblems;
-			return true;
-		}
-		if ((superType.tagBits & BeginHierarchyCheck) == 0)
-			// ensure if this is a source superclass that it has already been checked
-			 ((SourceTypeBinding) superType).scope.connectTypeHierarchyWithoutMembers();
-		if ((superType.tagBits & HierarchyHasProblems) != 0)
-			sourceType.tagBits |= HierarchyHasProblems;
-		return false;
+		return hasCycle;
 	}
+
+	if ((superType.tagBits & EndHierarchyCheck) == 0 && (superType.tagBits & BeginHierarchyCheck) != 0) {
+		problemReporter().hierarchyCircularity(sourceType, superType, reference);
+		sourceType.tagBits |= HierarchyHasProblems;
+		superType.tagBits |= HierarchyHasProblems;
+		return true;
+	}
+	if ((superType.tagBits & BeginHierarchyCheck) == 0)
+		// ensure if this is a source superclass that it has already been checked
+		((SourceTypeBinding) superType).scope.connectTypeHierarchyWithoutMembers();
+	if ((superType.tagBits & HierarchyHasProblems) != 0)
+		sourceType.tagBits |= HierarchyHasProblems;
+	return false;
+}
 
