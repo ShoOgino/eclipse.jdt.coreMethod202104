@@ -24,14 +24,15 @@ protected boolean buildStructure(OpenableElementInfo info, final IProgressMonito
 	// generate structure and compute syntax problems if needed
 	CompilationUnitStructureRequestor requestor = new CompilationUnitStructureRequestor(this, unitInfo, newElements);
 	boolean computeProblems = computeProblems(info);
+	WorkingCopyElementInfo workingCopyElementInfo = computeProblems ? (WorkingCopyElementInfo)unitInfo : null;
 	IProblemFactory factory = 
 		computeProblems 
-			?  CompilationUnitProblemFinder.getProblemFactory(getElementName().toCharArray(), (WorkingCopyElementInfo)unitInfo, pm) 
+			?  CompilationUnitProblemFinder.getProblemFactory(getElementName().toCharArray(), workingCopyElementInfo, pm) 
 			:  	new DefaultProblemFactory();
 	SourceElementParser parser = new SourceElementParser(requestor, factory, new CompilerOptions(getJavaProject().getOptions(true)));
 	requestor.parser = parser;
 	if (computeProblems) {
-		((WorkingCopyElementInfo)unitInfo).problems = new ArrayList();
+		workingCopyElementInfo.beginReporting();
 	}
 	CompilationUnitDeclaration unit = parser.parseCompilationUnit(new org.eclipse.jdt.internal.compiler.env.ICompilationUnit() {
 			public char[] getContents() {
@@ -50,17 +51,15 @@ protected boolean buildStructure(OpenableElementInfo info, final IProgressMonito
 	
 	// update timestamp (might be IResource.NULL_STAMP if original does not exist)
 	if (underlyingResource == null) {
-		CompilationUnit original = new CompilationUnit((IPackageFragment)getParent(), getElementName(), DefaultCompilationUnitOwner.PRIMARY);
+		CompilationUnit original = new CompilationUnit((IPackageFragment)getParent(), getElementName(), DefaultWorkingCopyOwner.PRIMARY);
 		underlyingResource = original.getResource();
 	}
 	unitInfo.fTimestamp = ((IFile)underlyingResource).getModificationStamp();
 	
 	// compute other problems if needed
 	if (computeProblems){
-		CompilationUnitProblemFinder.process(unit, this, (WorkingCopyElementInfo)unitInfo, pm); 
-	
-		// TODO: can now report problems as they are computed
-		reportProblemsIfNeeded((WorkingCopyElementInfo)info);
+		CompilationUnitProblemFinder.process(unit, this, workingCopyElementInfo, pm);
+		workingCopyElementInfo.endReporting();
 	}		
 	
 	return unitInfo.isStructureKnown();
