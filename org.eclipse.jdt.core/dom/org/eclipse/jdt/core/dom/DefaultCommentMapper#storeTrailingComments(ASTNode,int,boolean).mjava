@@ -24,7 +24,17 @@
 		int nodeEnd = node.getStartPosition()+node.getLength()-1;
 		if (nodeEnd == nextStart) {
 			// special case for last child of its parent
-			this.trailingComments.put(node, new int[] { -1, -1 });
+			if (++this.trailingPtr == 0) {
+				this.trailingNodes = new ASTNode[STORAGE_INCREMENT];
+				this.trailingIndexes = new int[STORAGE_INCREMENT][];
+				this.lastTrailingPtr = -1;
+			} else if (this.trailingPtr == this.trailingNodes.length) {
+				int newLength = (this.trailingPtr*3/2)+STORAGE_INCREMENT;
+				System.arraycopy(this.trailingNodes, 0, this.trailingNodes = new ASTNode[newLength], 0, this.trailingPtr);
+				System.arraycopy(this.trailingIndexes, 0, this.trailingIndexes = new int[newLength][], 0, this.trailingPtr);
+			}
+			this.trailingNodes[this.trailingPtr] = node;
+			this.trailingIndexes[this.trailingPtr] = new int[] { -1, -1 };
 			return nodeEnd;
 		}
 		int extended = nodeEnd;
@@ -102,8 +112,42 @@
 				}
 			}
 			// Store trailing comments indexes
-			this.trailingComments.put(node, new int[] { startIdx, endIdx });
+			if (++this.trailingPtr == 0) {
+				this.trailingNodes = new ASTNode[STORAGE_INCREMENT];
+				this.trailingIndexes = new int[STORAGE_INCREMENT][];
+				this.lastTrailingPtr = -1;
+			} else if (this.trailingPtr == this.trailingNodes.length) {
+				int newLength = (this.trailingPtr*3/2)+STORAGE_INCREMENT;
+				System.arraycopy(this.trailingNodes, 0, this.trailingNodes = new ASTNode[newLength], 0, this.trailingPtr);
+				System.arraycopy(this.trailingIndexes, 0, this.trailingIndexes = new int[newLength][], 0, this.trailingPtr);
+			}
+			this.trailingNodes[this.trailingPtr] = node;
+			int[] nodeRange = new int[] { startIdx, endIdx };
+			this.trailingIndexes[this.trailingPtr] = nodeRange;
+			// Compute new extended end
 			extended = this.comments[endIdx].getStartPosition()+this.comments[endIdx].getLength()-1;
+			// Look for children unresolved extended end
+			ASTNode previousNode = node;
+			int ptr = this.trailingPtr - 1; // children extended end were stored before
+			unresolved: while (ptr >= 0) {
+				int[] range = this.trailingIndexes[ptr];
+				if (range[0] != -1 || range[1] != -1) break; // there's no more unresolved nodes
+				ASTNode unresolved = this.trailingNodes[ptr];
+				if (previousNode != unresolved.getParent()) break; // we're no longer in node ancestor hierarchy
+				this.trailingIndexes[ptr] = nodeRange;
+				previousNode = unresolved;
+				ptr--; // get previous node
+			}
+			// Remove remaining unresolved nodes
+			if (ptr > this.lastTrailingPtr) {
+				int offset = ptr - this.lastTrailingPtr;
+				for (int i=ptr+1; i<=this.trailingPtr; i++) {
+					this.trailingNodes[i-offset] = this.trailingNodes[i];
+					this.trailingIndexes[i-offset] = this.trailingIndexes[i];
+				}
+				this.trailingPtr -= offset;
+			}
+			this.lastTrailingPtr = this.trailingPtr;
 		}
 		return extended;
 	}
