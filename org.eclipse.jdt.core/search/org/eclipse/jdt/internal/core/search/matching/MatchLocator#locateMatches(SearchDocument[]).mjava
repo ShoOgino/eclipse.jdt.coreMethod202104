@@ -31,14 +31,14 @@ public void locateMatches(SearchDocument[] searchDocuments) throws CoreException
 			this.handleFactory = new HandleFactory();
 
 		if (this.progressMonitor != null) {
-			// 1 for file path, 4 for parsing and binding creation, 5 for binding resolution? //$NON-NLS-1$
-			this.progressMonitor.beginTask("", searchDocuments.length * (((InternalSearchPattern)this.pattern).mustResolve ? 10 : 5)); //$NON-NLS-1$
+			this.progressMonitor.beginTask("", searchDocuments.length); //$NON-NLS-1$
 		}
 
 		// initialize pattern for polymorphic search (ie. method reference pattern)
 		this.patternLocator.initializePolymorphicSearch(this);
 
 		JavaProject previousJavaProject = null;
+		int skipped = 0;
 		PossibleMatchSet matchSet = new PossibleMatchSet();
 		Util.sort(searchDocuments, new Util.Comparer() {
 			public int compare(Object a, Object b) {
@@ -52,7 +52,10 @@ public void locateMatches(SearchDocument[] searchDocuments) throws CoreException
 			// skip duplicate paths
 			SearchDocument searchDocument = searchDocuments[i];
 			String pathString = searchDocument.getPath();
-			if (i > 0 && pathString.equals(searchDocuments[i - 1].getPath())) continue;
+			if (i > 0 && pathString.equals(searchDocuments[i - 1].getPath())) {
+				skipped++;
+				continue;
+			}
 
 			Openable openable;
 			org.eclipse.jdt.core.ICompilationUnit workingCopy = null;
@@ -78,14 +81,15 @@ public void locateMatches(SearchDocument[] searchDocuments) throws CoreException
 					} catch (JavaModelException e) {
 						// problem with classpath in this project -> skip it
 					}
+					if (this.progressMonitor != null)
+						this.progressMonitor.worked(skipped);
 					matchSet.reset();
 				}
 				previousJavaProject = javaProject;
+				skipped = 0;
 			}
 			matchSet.add(new PossibleMatch(this, resource, openable, searchDocument));
-
-			if (this.progressMonitor != null)
-				this.progressMonitor.worked(1);
+			skipped++;
 		}
 
 		// last project
@@ -95,6 +99,8 @@ public void locateMatches(SearchDocument[] searchDocuments) throws CoreException
 			} catch (JavaModelException e) {
 				// problem with classpath in last project -> ignore
 			}
+			if (this.progressMonitor != null)
+				this.progressMonitor.worked(skipped);
 		} 
 
 		if (this.progressMonitor != null)

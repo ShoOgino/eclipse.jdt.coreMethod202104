@@ -2,11 +2,22 @@ protected void locateMatches(JavaProject javaProject, PossibleMatch[] possibleMa
 	initialize(javaProject, length);
 
 	// create and resolve binding (equivalent to beginCompilation() in Compiler)
-	boolean bindingsWereCreated = true;
+	boolean mustResolve = ((InternalSearchPattern)this.pattern).mustResolve;
+	boolean bindingsWereCreated = mustResolve;
 	try {
-		for (int i = start, maxUnits = start + length; i < maxUnits; i++)
-			buildBindings(possibleMatches[i]);
-		lookupEnvironment.completeTypeBindings();
+		for (int i = start, maxUnits = start + length; i < maxUnits; i++) {
+			PossibleMatch possibleMatch = possibleMatches[i];
+			try {
+				parseAndBuildBindings(possibleMatch, mustResolve);
+				if (!mustResolve)
+					process(possibleMatch, bindingsWereCreated);
+			} finally {
+				if (!mustResolve)
+					possibleMatch.cleanUp();
+			}
+		}
+		if (mustResolve)
+			lookupEnvironment.completeTypeBindings();
 
 		// create hierarchy resolver if needed
 		IType focusType = getFocusType();
@@ -20,6 +31,10 @@ protected void locateMatches(JavaProject javaProject, PossibleMatch[] possibleMa
 		bindingsWereCreated = false;
 	}
 
+	if (!mustResolve) {
+		return;
+	}
+	
 	// possible match resolution
 	for (int i = 0; i < this.numberOfMatches; i++) {
 		if (this.progressMonitor != null && this.progressMonitor.isCanceled())
@@ -44,11 +59,8 @@ protected void locateMatches(JavaProject javaProject, PossibleMatch[] possibleMa
 						String.valueOf(numberOfMatches),
 						new String(possibleMatch.parsedUnit.getFileName())}));
 			// cleanup compilation unit result
-			possibleMatch.parsedUnit.cleanUp();
-			possibleMatch.parsedUnit = null;
+			possibleMatch.cleanUp();
 		}
-		if (this.progressMonitor != null)
-			this.progressMonitor.worked(5);
 	}
 }
 
