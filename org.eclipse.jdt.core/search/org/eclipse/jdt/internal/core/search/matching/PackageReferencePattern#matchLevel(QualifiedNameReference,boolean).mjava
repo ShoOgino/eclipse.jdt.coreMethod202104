@@ -1,0 +1,72 @@
+/**
+ * Returns whether this package reference pattern matches the given qualified name reference.
+ * Look at resolved information only if specified.
+ */
+private int matchLevel(QualifiedNameReference qNameRef, boolean resolve) {
+	if (!resolve) {
+		if (this.pkgName == null) {
+			return POSSIBLE_MATCH;
+		} else {
+			switch (this.matchMode) {
+				case EXACT_MATCH:
+				case PREFIX_MATCH:
+					if (CharOperation.prefixEquals(this.pkgName, CharOperation.concatWith(qNameRef.tokens, '.'), this.isCaseSensitive)) {
+						return POSSIBLE_MATCH;
+					} else {
+						return IMPOSSIBLE_MATCH;
+					}
+				case PATTERN_MATCH:
+					char[] pattern = this.pkgName[this.pkgName.length-1] == '*' ? this.pkgName : CharOperation.concat(this.pkgName, ".*".toCharArray()); //$NON-NLS-1$
+					if (CharOperation.match(pattern, CharOperation.concatWith(qNameRef.tokens, '.'), this.isCaseSensitive)) {
+						return POSSIBLE_MATCH;
+					} else {
+						return IMPOSSIBLE_MATCH;
+					}
+				default:
+					return IMPOSSIBLE_MATCH;
+			}
+		}
+	} else {
+		Binding binding = qNameRef.binding;
+		if (binding == null) {
+			return INACCURATE_MATCH;
+		} else {
+			TypeBinding typeBinding = null;
+			char[][] tokens = qNameRef.tokens;
+			int lastIndex = tokens.length-1;
+			switch (qNameRef.bits & Statement.RestrictiveFlagMASK) {
+				case BindingIds.FIELD : // reading a field
+					typeBinding = ((FieldBinding)binding).declaringClass;
+					// no valid match amongst fields
+					int otherBindingsCount = qNameRef.otherBindings == null ? 0 : qNameRef.otherBindings.length;			
+					lastIndex -= otherBindingsCount + 1;
+					if (lastIndex < 0) return IMPOSSIBLE_MATCH;
+					break;
+				case BindingIds.LOCAL : // reading a local variable
+					return IMPOSSIBLE_MATCH; // no package match in it
+				case BindingIds.TYPE : //=============only type ==============
+					typeBinding = (TypeBinding)binding;
+			}
+			if (typeBinding instanceof ArrayBinding) {
+				typeBinding = ((ArrayBinding)typeBinding).leafComponentType;
+			}
+			if (typeBinding == null) {
+				return INACCURATE_MATCH;
+			} else {
+				if (typeBinding instanceof ReferenceBinding) {
+					PackageBinding pkgBinding = ((ReferenceBinding)typeBinding).fPackage;
+					if (pkgBinding == null) {
+						return INACCURATE_MATCH;
+					} else if (this.matches(pkgBinding.compoundName)) {
+						return ACCURATE_MATCH;
+					} else {
+						return IMPOSSIBLE_MATCH;
+					}
+				} else {
+					return IMPOSSIBLE_MATCH;
+				}
+			}
+		}
+	}
+}
+
