@@ -1,0 +1,55 @@
+	/*
+	 * Internal variant which can create marker on project for invalid entries
+	 * and caches the resolved classpath on perProjectInfo.
+	 * If requested, return a special classpath (RESOLUTION_IN_PROGRESS) if the classpath is being resolved.
+	 */
+	public IClasspathEntry[] getResolvedClasspath(
+		boolean ignoreUnresolvedEntry,
+		boolean generateMarkerOnError,
+		boolean returnResolutionInProgress)
+		throws JavaModelException {
+
+		JavaModelManager.PerProjectInfo perProjectInfo = null;
+		if (ignoreUnresolvedEntry && !generateMarkerOnError) {
+			perProjectInfo = getPerProjectInfo();
+			if (perProjectInfo != null) {
+				// resolved path is cached on its info
+				IClasspathEntry[] infoPath = perProjectInfo.resolvedClasspath;
+				if (infoPath != null && (returnResolutionInProgress || infoPath != RESOLUTION_IN_PROGRESS)) {
+					return infoPath;
+				}
+			}
+		}
+		Map reverseMap = perProjectInfo == null ? null : new HashMap(5);
+		IClasspathEntry[] resolvedPath = null;
+		boolean nullOldResolvedCP = perProjectInfo != null && perProjectInfo.resolvedClasspath == null;
+		try {
+			// protect against misbehaving clients (see https://bugs.eclipse.org/bugs/show_bug.cgi?id=61040)
+			if (nullOldResolvedCP) perProjectInfo.resolvedClasspath = RESOLUTION_IN_PROGRESS;
+			resolvedPath = getResolvedClasspath(
+				getRawClasspath(generateMarkerOnError, !generateMarkerOnError), 
+				generateMarkerOnError ? getOutputLocation() : null, 
+				ignoreUnresolvedEntry, 
+				generateMarkerOnError,
+				reverseMap);
+		} finally {
+			if (nullOldResolvedCP) perProjectInfo.resolvedClasspath = null;
+		}
+
+		if (perProjectInfo != null){
+			if (perProjectInfo.rawClasspath == null // .classpath file could not be read
+				&& generateMarkerOnError 
+				&& JavaProject.hasJavaNature(this.project)) {
+					// flush .classpath format markers (bug 39877), but only when file cannot be read (bug 42366)
+					this.flushClasspathProblemMarkers(false, true);
+					this.createClasspathProblemMarker(new JavaModelStatus(
+						IJavaModelStatusConstants.INVALID_CLASSPATH_FILE_FORMAT,
+						Util.bind("classpath.cannotReadClasspathFile", this.getElementName()))); //$NON-NLS-1$
+			}
+
+			perProjectInfo.resolvedClasspath = resolvedPath;
+			perProjectInfo.resolvedPathToRawEntries = reverseMap;
+		}
+		return resolvedPath;
+	}
+
