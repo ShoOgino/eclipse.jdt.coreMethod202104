@@ -1,0 +1,94 @@
+/**
+ * Ensures that multiple member Java elements contained within different
+ * compilation units can be deleted.
+ * Verifies that the correct changed deltas are generated.
+ */
+public void testDeleteMultipleMembersFromVariousCUs() throws CoreException {
+	createFolder("P/a/b/c");
+	createFile(
+		"P/a/b/c/X.java",
+		"package a.b.c;\n" +
+		"import java.util.Vector;\n" +
+		"import java.util.Enumeration;\n" +
+		"public class X {\n" +
+		"  public static void main(String[] args) {\n" +
+		"    System.out.println(\"Hello World\");\n" +
+		"  }\n" +
+		"  static class Bar {\n" +
+		"    private final java.lang.String test = \"testminor\";\n" +
+		"    public Bar() {\n" +
+		"      super();\n" +
+		"    }\n" +
+		"    private void test() {\n" +
+		"    }\n" +
+		"  }\n" +
+		"}"
+	);
+	createFile(
+		"P/a/b/Y.java",
+		"package a.b;\n" +
+		"public class Y {\n" +
+		"  int foo;\n" +
+		"  public static void main(String[] args) {\n" +
+		"    System.out.println(\"Hello World\");\n" +
+		"  }\n" +
+		"}"
+	);
+	
+	// elements to be deleted:
+	// from a/b/c/X.java:
+	//   java.util.Vector
+	//	  main
+	//   Bar (inner type)
+	//	    Bar (constructor)
+	//	    test
+	//   Bar (inner type, same as above)
+
+	// from a/b/Y.java
+	//   foo
+	//   main
+	
+	ICompilationUnit cuX = getCompilationUnit("P/a/b/c/X.java");
+	IType typeX = cuX.getType("X");
+	IType typeBar = typeX.getType("Bar");
+
+	IJavaElement[] toBeDeleted = new IJavaElement[8];
+	toBeDeleted[0] = cuX.getImport("java.util.Vector");
+	toBeDeleted[1] = typeX.getMethod("main", new String[] {"[QString;"});
+	toBeDeleted[2] = typeBar;
+	toBeDeleted[3] = typeBar.getMethod("Bar", new String[] {});
+	toBeDeleted[4] = typeBar.getMethod("test", new String[] {});
+	toBeDeleted[5] = typeBar;
+	
+	ICompilationUnit cuY = getCompilationUnit("P/a/b/Y.java");
+	IType typeY = cuY.getType("Y");
+	
+	toBeDeleted[6] = typeY.getField("foo");
+	toBeDeleted[7] = typeY.getMethod("main", new String[] {"[QString;"});
+	
+	try {
+		startDeltas();
+		assertDeletion(toBeDeleted);
+		assertDeltas(
+			"Unexpected delta",
+			"P[*]: {CHILDREN}\n" + 
+			"	[project root][*]: {CHILDREN}\n" + 
+			"		a.b.c[*]: {CHILDREN}\n" + 
+			"			X.java[*]: {CHILDREN | FINE GRAINED}\n" + 
+			"				[import container][*]: {CHILDREN | FINE GRAINED}\n" + 
+			"					import java.util.Vector[-]: {}\n" + 
+			"				X[*]: {CHILDREN | FINE GRAINED}\n" + 
+			"					main[-]: {}\n" + 
+			"					Bar[-]: {}\n" + 
+			"		a.b[*]: {CHILDREN}\n" + 
+			"			Y.java[*]: {CHILDREN | FINE GRAINED}\n" + 
+			"				Y[*]: {CHILDREN | FINE GRAINED}\n" + 
+			"					foo[-]: {}\n" + 
+			"					main[-]: {}"
+		);
+	} finally {
+		stopDeltas();
+		deleteFolder("P/a");
+	}
+}
+
