@@ -1,0 +1,119 @@
+	/**
+	 * @see ISearchableNameEnvironment
+	 */
+	public void findTypes(char[] prefix, final ISearchRequestor storage) {
+
+		/*
+			if (true){
+				findTypes(new String(prefix), storage, INameLookup.ACCEPT_CLASSES | INameLookup.ACCEPT_INTERFACES);
+				return;		
+			}
+		*/
+		try {
+			final String excludePath;
+			if (this.unitToSkip != null) {
+				if (!(this.unitToSkip instanceof IJavaElement)) {
+					// revert to model investigation
+					findTypes(
+						new String(prefix),
+						storage,
+						INameLookup.ACCEPT_CLASSES | INameLookup.ACCEPT_INTERFACES);
+					return;
+				}
+				excludePath =
+					((IJavaElement) this.unitToSkip)
+						.getUnderlyingResource()
+						.getFullPath()
+						.toString();
+			} else {
+				excludePath = null;
+			}
+			int lastDotIndex = CharOperation.lastIndexOf('.', prefix);
+			char[] qualification, simpleName;
+			if (lastDotIndex < 0) {
+				qualification = null;
+				simpleName = CharOperation.toLowerCase(prefix);
+			} else {
+				qualification = CharOperation.subarray(prefix, 0, lastDotIndex);
+				simpleName =
+					CharOperation.toLowerCase(
+						CharOperation.subarray(prefix, lastDotIndex + 1, prefix.length));
+			}
+
+			SearchEngine searchEngine = new SearchEngine();
+
+			IProject projectRsc = (IProject) this.project.getUnderlyingResource();
+			IJavaSearchScope scope =
+				searchEngine.createJavaSearchScope(new IResource[] { projectRsc });
+
+			IProgressMonitor progressMonitor = new IProgressMonitor() {
+				boolean isCanceled = false;
+				public void beginTask(String name, int totalWork) {
+				}
+				public void done() {
+				}
+				public void internalWorked(double work) {
+				}
+				public boolean isCanceled() {
+					return isCanceled;
+				}
+				public void setCanceled(boolean value) {
+					isCanceled = value;
+				}
+				public void setTaskName(String name) {
+				}
+				public void subTask(String name) {
+				}
+				public void worked(int work) {
+				}
+			};
+			ITypeNameRequestor nameRequestor = new ITypeNameRequestor() {
+				public void acceptClass(
+					char[] packageName,
+					char[] simpleTypeName,
+					char[][] enclosingTypeNames,
+					String path) {
+					if (excludePath != null && excludePath.equals(path))
+						return;
+					if (enclosingTypeNames != null && enclosingTypeNames.length > 0)
+						return; // accept only top level types
+					storage.acceptClass(packageName, simpleTypeName, 0);
+				}
+				public void acceptInterface(
+					char[] packageName,
+					char[] simpleTypeName,
+					char[][] enclosingTypeNames,
+					String path) {
+					if (excludePath != null && excludePath.equals(path))
+						return;
+					if (enclosingTypeNames != null && enclosingTypeNames.length > 0)
+						return; // accept only top level types
+					storage.acceptInterface(packageName, simpleTypeName, 0);
+				}
+			};
+			try {
+				searchEngine.searchAllTypeNames(
+					projectRsc.getWorkspace(),
+					qualification,
+					simpleName,
+					PREFIX_MATCH,
+					CASE_INSENSITIVE,
+					IJavaSearchConstants.TYPE,
+					scope,
+					nameRequestor,
+					CANCEL_IF_NOT_READY_TO_SEARCH,
+					progressMonitor);
+			} catch (OperationCanceledException e) {
+				findTypes(
+					new String(prefix),
+					storage,
+					INameLookup.ACCEPT_CLASSES | INameLookup.ACCEPT_INTERFACES);
+			}
+		} catch (JavaModelException e) {
+			findTypes(
+				new String(prefix),
+				storage,
+				INameLookup.ACCEPT_CLASSES | INameLookup.ACCEPT_INTERFACES);
+		}
+	}
+

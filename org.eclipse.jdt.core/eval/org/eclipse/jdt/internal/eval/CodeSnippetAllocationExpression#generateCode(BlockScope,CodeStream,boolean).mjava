@@ -1,0 +1,69 @@
+	public void generateCode(
+		BlockScope currentScope,
+		CodeStream codeStream,
+		boolean valueRequired) {
+
+		int pc = codeStream.position;
+		ReferenceBinding allocatedType = binding.declaringClass;
+
+		if (binding.canBeSeenBy(allocatedType, this, currentScope)) {
+			codeStream.new_(allocatedType);
+			if (valueRequired) {
+				codeStream.dup();
+			}
+			// better highlight for allocation: display the type individually
+			codeStream.recordPositionsFrom(pc, type);
+
+			// handling innerclass instance allocation
+			if (allocatedType.isNestedType()) {
+				codeStream.generateSyntheticArgumentValues(
+					currentScope,
+					allocatedType,
+					enclosingInstance(),
+					this);
+			}
+			// generate the arguments for constructor
+			if (arguments != null) {
+				for (int i = 0, count = arguments.length; i < count; i++) {
+					arguments[i].generateCode(currentScope, codeStream, true);
+				}
+			}
+			// invoke constructor
+			codeStream.invokespecial(binding);
+		} else {
+			// private emulation using reflect
+			((CodeSnippetCodeStream) codeStream).generateEmulationForConstructor(
+				currentScope,
+				binding);
+			// generate arguments
+			if (arguments != null) {
+				int argsLength = arguments.length;
+				codeStream.generateInlinedValue(argsLength);
+				codeStream.newArray(
+					currentScope,
+					new ArrayBinding(currentScope.getType(TypeBinding.JAVA_LANG_OBJECT), 1));
+				codeStream.dup();
+				for (int i = 0; i < argsLength; i++) {
+					codeStream.generateInlinedValue(i);
+					arguments[i].generateCode(currentScope, codeStream, true);
+					if (binding.parameters[i].isBaseType()) {
+						codeStream.generateObjectWrapperForType(binding.parameters[i]);
+					}
+					codeStream.aastore();
+					if (i < argsLength - 1) {
+						codeStream.dup();
+					}
+				}
+			} else {
+				codeStream.generateInlinedValue(0);
+				codeStream.newArray(
+					currentScope,
+					new ArrayBinding(currentScope.getType(TypeBinding.JAVA_LANG_OBJECT), 1));
+			}
+			((CodeSnippetCodeStream) codeStream)
+				.invokeJavaLangReflectConstructorNewInstance();
+			codeStream.checkcast(allocatedType);
+		}
+		codeStream.recordPositionsFrom(pc, this);
+	}
+

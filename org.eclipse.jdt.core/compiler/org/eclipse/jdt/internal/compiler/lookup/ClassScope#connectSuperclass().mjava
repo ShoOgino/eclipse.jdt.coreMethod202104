@@ -1,0 +1,54 @@
+	private boolean connectSuperclass() {
+		SourceTypeBinding sourceType = referenceContext.binding;
+		if (referenceContext.superclass == null) {
+			if (isJavaLangObject(sourceType))
+				return true;
+			sourceType.superclass = getJavaLangObject();
+			compilationUnitScope().addTypeReference(sourceType.superclass);
+			return !detectCycle(sourceType, sourceType.superclass, null);
+			// ensure Object is initialized if it comes from a source file
+		}
+
+		ReferenceBinding superclass = findSupertype(referenceContext.superclass);
+		if (superclass != null) { // is null if a cycle was detected cycle
+			if (!superclass.isValidBinding()) {
+				problemReporter().invalidSuperclass(
+					sourceType,
+					referenceContext.superclass,
+					superclass);
+			} else
+				if (superclass.isInterface()) {
+					problemReporter().superclassMustBeAClass(
+						sourceType,
+						referenceContext.superclass,
+						superclass);
+				} else
+					if (superclass.isFinal()) {
+						problemReporter().classExtendFinalClass(
+							sourceType,
+							referenceContext.superclass,
+							superclass);
+					} else
+						if (isJavaLangObject(sourceType)) {
+							// can only happen if Object extends another type... will never happen unless we're testing for it.
+							sourceType.tagBits |= HierarchyHasProblems;
+							sourceType.superclass = null;
+							return true;
+						} else {
+							// only want to reach here when no errors are reported
+							referenceContext.superclass.binding = superclass;
+							sourceType.superclass = superclass;
+							return true;
+						}
+		}
+
+		sourceType.tagBits |= HierarchyHasProblems;
+		if (!isJavaLangObject(sourceType)) {
+			sourceType.superclass = getJavaLangObject();
+			if ((sourceType.superclass.tagBits & BeginHierarchyCheck) == 0)
+				detectCycle(sourceType, sourceType.superclass, null);
+			// ensure Object is initialized if it comes from a source file
+		}
+		return false; // reported some error against the source type
+	}
+

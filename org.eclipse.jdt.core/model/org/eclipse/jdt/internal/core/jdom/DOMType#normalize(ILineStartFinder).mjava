@@ -1,0 +1,66 @@
+	/**
+	 * Normalizes this <code>DOMNode</code>'s source positions to include whitespace preceeding
+	 * the node on the line on which the node starts, and all whitespace after the node up to
+	 * the next node's start
+	 */
+	void normalize(ILineStartFinder finder) {
+		// perform final changes to the open and close body ranges
+		int openBodyEnd, closeBodyStart;
+		DOMNode first = (DOMNode) getFirstChild();
+		closeBodyStart = fCloseBodyRange[1];
+		if (isDetailed()) {
+			if (first == null) {
+				openBodyEnd = fCloseBodyRange[0] - 1;
+			} else {
+				openBodyEnd = first.getStartPosition();
+				int lineStart = finder.getLineStart(openBodyEnd);
+				openBodyEnd--;
+				if (lineStart > fOpenBodyRange[0])
+					openBodyEnd = lineStart - 1;
+			}
+		} else {
+			if (first != null) {
+				// look for the open body
+				openBodyEnd = CharArrayOps.indexOf('{', fDocument, fNameRange[1] + 1);
+				if (openBodyEnd < 0 || openBodyEnd >= first.getStartPosition()) {
+					openBodyEnd = first.getStartPosition() - 1;
+				} else {
+					int lineStart = finder.getLineStart(first.getStartPosition());
+					if (lineStart > openBodyEnd) {
+						openBodyEnd = lineStart - 1;
+					} else {
+						openBodyEnd = first.getStartPosition() - 1;
+					}
+				}
+				if (fDocument[closeBodyStart] != '}') {
+					// look for the body end
+					Scanner scanner = new Scanner();
+					scanner.setSourceBuffer(
+						CharArrayOps.subarray(
+							fDocument,
+							fLastChild.getEndPosition() + 1,
+							closeBodyStart - fLastChild.getEndPosition() + 1));
+
+					try {
+						int currentToken = scanner.getNextToken();
+						while (currentToken != TerminalSymbols.TokenNameRBRACE
+							&& currentToken != TerminalSymbols.TokenNameEOF) {
+							currentToken = scanner.getNextToken();
+						}
+						if (currentToken == TerminalSymbols.TokenNameRBRACE) {
+							closeBodyStart = fLastChild.getEndPosition() + scanner.currentPosition;
+						}
+					} catch (InvalidInputException e) {
+						// leave closeBodyStart as is
+					}
+
+				}
+			} else {
+				openBodyEnd = fCloseBodyRange[0] - 1;
+			}
+		}
+		setOpenBodyRangeEnd(openBodyEnd);
+		setCloseBodyRangeStart(closeBodyStart);
+		super.normalize(finder);
+	}
+

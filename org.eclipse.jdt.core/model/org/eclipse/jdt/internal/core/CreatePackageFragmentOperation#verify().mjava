@@ -1,0 +1,46 @@
+	/**
+	 * Possible failures: <ul>
+	 *  <li>NO_ELEMENTS_TO_PROCESS - the root supplied to the operation is
+	 * 		<code>null</code>.
+	 *	<li>INVALID_NAME - the name provided to the operation 
+	 * 		is <code>null</code> or is not a valid package fragment name.
+	 *	<li>READ_ONLY - the root provided to this operation is read only.
+	 *	<li>NAME_COLLISION - there is a pre-existing resource (file)
+	 * 		with the same name as a folder in the package fragment's hierarchy.
+	 *	<li>ELEMENT_NOT_PRESENT - the underlying resource for the root is missing
+	 * </ul>
+	 * @see IJavaModelStatus
+	 * @see JavaNamingConventions
+	 */
+	public IJavaModelStatus verify() {
+		if (getParentElement() == null) {
+			return new JavaModelStatus(IJavaModelStatusConstants.NO_ELEMENTS_TO_PROCESS);
+		}
+
+		if (fName == null
+			|| (fName.length() > 0 && !JavaConventions.validatePackageName(fName).isOK())) {
+			return new JavaModelStatus(IJavaModelStatusConstants.INVALID_NAME, fName);
+		}
+		IPackageFragmentRoot root = (IPackageFragmentRoot) getParentElement();
+		if (root.isReadOnly()) {
+			return new JavaModelStatus(IJavaModelStatusConstants.READ_ONLY, root);
+		}
+		String[] names = Signature.getSimpleNames(fName);
+		try {
+			IContainer parentFolder = (IContainer) root.getUnderlyingResource();
+			int i;
+			for (i = 0; i < names.length; i++) {
+				IResource subFolder = parentFolder.findMember(names[i]);
+				if (subFolder != null) {
+					if (subFolder.getType() != IResource.FOLDER) {
+						return new JavaModelStatus(IJavaModelStatusConstants.NAME_COLLISION);
+					}
+					parentFolder = (IContainer) subFolder;
+				}
+			}
+		} catch (JavaModelException npe) {
+			return npe.getJavaModelStatus();
+		}
+		return JavaModelStatus.VERIFIED_OK;
+	}
+

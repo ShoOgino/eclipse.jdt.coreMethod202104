@@ -1,0 +1,70 @@
+	/**
+	 * Returns the package fragment roots identified by the given entry.
+	 */
+	public IPackageFragmentRoot[] getPackageFragmentRoots(IClasspathEntry entry) {
+
+		entry = JavaCore.getResolvedClasspathEntry(entry);
+		if (entry == null){
+			return new IPackageFragmentRoot[] {}; // variable not found			
+		}
+		IPath path= entry.getPath();
+		IWorkspaceRoot workspaceRoot = getWorkspace().getRoot();
+
+		if (entry.getContentKind() == IPackageFragmentRoot.K_BINARY) {
+			String ext= path.getFileExtension();
+			IPackageFragmentRoot root= null;
+			if (ext != null && (ext.equalsIgnoreCase("zip") || ext.equalsIgnoreCase("jar"))) {
+				// jar
+				// removeFirstSegment removes the part relative to the project which is retrieve 
+				// through workspace.getDefaultContentLocation
+				if (path.isAbsolute() && getWorkspace().getRoot().findMember(path) == null) {
+					// file system jar
+					root= new JarPackageFragmentRoot(path.toOSString(), this);
+				} else {
+					// resource jar
+					root= new JarPackageFragmentRoot(workspaceRoot.getFile(path), this);
+				}
+				return new IPackageFragmentRoot[] {root};
+			}
+		}
+		IPath projectPath= getProject().getFullPath();
+		if (projectPath.isPrefixOf(path)) {
+			// local to this project
+			IResource resource= null;
+			// change zrh
+			if (path.segmentCount() > 1) {
+				resource= workspaceRoot.getFolder(path);
+			} else {
+				resource= workspaceRoot.findMember(path);
+			}
+			IPackageFragmentRoot root= new PackageFragmentRoot(resource, this);
+			return new IPackageFragmentRoot[] {root};
+		} else {
+			// another project
+			// change zrh
+			if (path.segmentCount() != 1)
+				return new IPackageFragmentRoot[] {}; // invalid path for a project
+			String project= path.segment(0);
+			IJavaProject javaProject= getJavaModel().getJavaProject(project);
+			Vector sourceRoots= new Vector();
+			IPackageFragmentRoot[] roots= null;
+			try {
+				roots= javaProject.getPackageFragmentRoots();
+			} catch (JavaModelException e) {
+				return new IPackageFragmentRoot[] {};
+			}
+			for (int i= 0; i < roots.length; i++) {
+				try {
+					if (roots[i].getKind() == IPackageFragmentRoot.K_SOURCE) {
+						sourceRoots.addElement(roots[i]);
+					}
+				} catch (JavaModelException e) {
+					// do nothing if the root does not exist
+				}
+			}
+			IPackageFragmentRoot[] copy= new IPackageFragmentRoot[sourceRoots.size()];
+			sourceRoots.copyInto(copy);
+			return copy;
+		}
+	}
+

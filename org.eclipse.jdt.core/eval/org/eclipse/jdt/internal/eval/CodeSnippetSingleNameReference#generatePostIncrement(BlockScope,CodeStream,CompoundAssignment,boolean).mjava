@@ -1,0 +1,143 @@
+	public void generatePostIncrement(
+		BlockScope currentScope,
+		CodeStream codeStream,
+		CompoundAssignment postIncrement,
+		boolean valueRequired) {
+		switch (bits & RestrictiveFlagMASK) {
+			case FIELD : // assigning to a field
+				FieldBinding fieldBinding = (FieldBinding) binding;
+				if (fieldBinding
+					.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
+					if (fieldBinding.isStatic()) {
+						codeStream.getstatic(fieldBinding);
+					} else {
+						if ((bits & DepthMASK) != 0) {
+							Object[] emulationPath =
+								currentScope.getExactEmulationPath(
+									currentScope.enclosingSourceType().enclosingTypeAt(
+										(bits & DepthMASK) >> DepthSHIFT));
+							if (emulationPath == null) {
+								// internal error, per construction we should have found it
+								currentScope.problemReporter().needImplementation();
+							} else {
+								codeStream.generateOuterAccess(emulationPath, this, currentScope);
+							}
+						} else {
+							generateReceiver(codeStream);
+						}
+						codeStream.dup();
+						codeStream.getfield(fieldBinding);
+					}
+					if (valueRequired) {
+						if (fieldBinding.isStatic()) {
+							if ((fieldBinding.type == LongBinding)
+								|| (fieldBinding.type == DoubleBinding)) {
+								codeStream.dup2();
+							} else {
+								codeStream.dup();
+							}
+						} else { // Stack:  [owner][old field value]  ---> [old field value][owner][old field value]
+							if ((fieldBinding.type == LongBinding)
+								|| (fieldBinding.type == DoubleBinding)) {
+								codeStream.dup2_x1();
+							} else {
+								codeStream.dup_x1();
+							}
+						}
+					}
+					codeStream.generateConstant(
+						postIncrement.expression.constant,
+						implicitConversion);
+					codeStream.sendOperator(postIncrement.operator, fieldBinding.type.id);
+					codeStream.generateImplicitConversion(
+						postIncrement.assignmentImplicitConversion);
+					fieldStore(codeStream, fieldBinding, null, false);
+				} else {
+					if (fieldBinding.isStatic()) {
+						codeStream.aconst_null();
+					} else {
+						if ((bits & DepthMASK) != 0) {
+							// internal error, per construction we should have found it
+							// not yet supported
+							currentScope.problemReporter().needImplementation();
+						} else {
+							generateReceiver(codeStream);
+						}
+					}
+					((CodeSnippetCodeStream) codeStream).generateEmulatedReadAccessForField(
+						fieldBinding);
+					if (valueRequired) {
+						if ((fieldBinding.type == LongBinding)
+							|| (fieldBinding.type == DoubleBinding)) {
+							codeStream.dup2();
+						} else {
+							codeStream.dup();
+						}
+					}
+					((CodeSnippetCodeStream) codeStream).generateEmulationForField(fieldBinding);
+					if ((fieldBinding.type == LongBinding)
+						|| (fieldBinding.type == DoubleBinding)) {
+						codeStream.dup_x2();
+						codeStream.pop();
+						if (fieldBinding.isStatic()) {
+							codeStream.aconst_null();
+						} else {
+							generateReceiver(codeStream);
+						}
+						codeStream.dup_x2();
+						codeStream.pop();
+					} else {
+						codeStream.dup_x1();
+						codeStream.pop();
+						if (fieldBinding.isStatic()) {
+							codeStream.aconst_null();
+						} else {
+							generateReceiver(codeStream);
+						}
+						codeStream.dup_x1();
+						codeStream.pop();
+					}
+					codeStream.generateConstant(
+						postIncrement.expression.constant,
+						implicitConversion);
+					codeStream.sendOperator(postIncrement.operator, fieldBinding.type.id);
+					codeStream.generateImplicitConversion(
+						postIncrement.assignmentImplicitConversion);
+					((CodeSnippetCodeStream) codeStream).generateEmulatedWriteAccessForField(
+						fieldBinding);
+				}
+				return;
+			case LOCAL : // assigning to a local variable
+				LocalVariableBinding localBinding = (LocalVariableBinding) binding;
+				// using incr bytecode if possible
+				if (localBinding.type == IntBinding) {
+					if (valueRequired) {
+						codeStream.load(localBinding);
+					}
+					if (postIncrement.operator == PLUS) {
+						codeStream.iinc(localBinding.resolvedPosition, 1);
+					} else {
+						codeStream.iinc(localBinding.resolvedPosition, -1);
+					}
+				} else {
+					codeStream.load(localBinding);
+					if (valueRequired) {
+						if ((localBinding.type == LongBinding)
+							|| (localBinding.type == DoubleBinding)) {
+							codeStream.dup2();
+						} else {
+							codeStream.dup();
+						}
+					}
+					codeStream.generateConstant(
+						postIncrement.expression.constant,
+						implicitConversion);
+					codeStream.sendOperator(postIncrement.operator, localBinding.type.id);
+					codeStream.generateImplicitConversion(
+						postIncrement.assignmentImplicitConversion);
+
+					codeStream.store(localBinding, false);
+				}
+		}
+	}
+

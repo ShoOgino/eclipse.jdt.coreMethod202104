@@ -1,0 +1,71 @@
+	/**
+	 * Possible failures: <ul>
+	 *  <li>NO_ELEMENTS_TO_PROCESS - the project supplied to the operation is
+	 * 		<code>null</code>.
+	 *	<li>NULL_PATH - the output location path supplied to the operation
+	 * 		is <code>null</code>.
+	 *	<li>PATH_OUTSIDE_PROJECT - the output location path supplied to the operation
+	 * 		is outside of the project supplied to this operation.
+	 *	<li>DEVICE_PATH - the path supplied to this operation must not specify a 
+	 * 		device
+	 *	<li>RELATIVE_PATH - the path supplied to this operation must be
+	 *		an absolute path
+	 *	<li>INVALID_PATH - the output location cannot overlap any package fragment
+	 *		root, except the project folder.
+	 *  <li>ELEMENT_DOES_NOT_EXIST - the Java project does not exist
+	 * </ul>
+	 */
+	public IJavaModelStatus verify() {
+		IJavaModelStatus status = super.verify();
+		if (!status.isOK()) {
+			return status;
+		}
+		if (fOutputLocation == null) {
+			return new JavaModelStatus(IJavaModelStatusConstants.NULL_PATH);
+		}
+
+		if (fOutputLocation.isAbsolute()) {
+			IProject project = ((IJavaProject) fElementsToProcess[0]).getProject();
+
+			if (project.getFullPath().isPrefixOf(fOutputLocation)) {
+				//project relative path
+				String projectName = fOutputLocation.segment(0);
+				if (!projectName.equals(fElementsToProcess[0].getElementName())) {
+					//a workspace relative path outside of this project
+					return new JavaModelStatus(
+						IJavaModelStatusConstants.PATH_OUTSIDE_PROJECT,
+						fOutputLocation);
+				}
+			} else {
+				return new JavaModelStatus(
+					IJavaModelStatusConstants.DEVICE_PATH,
+					fOutputLocation);
+			}
+		} else {
+			return new JavaModelStatus(
+				IJavaModelStatusConstants.RELATIVE_PATH,
+				fOutputLocation);
+		}
+
+		IClasspathEntry[] cp = null;
+		IJavaProject javaProject = (IJavaProject) getElementToProcess();
+		try {
+			cp = javaProject.getResolvedClasspath(true);
+		} catch (JavaModelException e) {
+			return e.getJavaModelStatus();
+		}
+		IPath projectPath = javaProject.getProject().getFullPath();
+		for (int i = 0; i < cp.length; i++) {
+			IPath entry = cp[i].getPath();
+			if (!entry.equals(projectPath)
+				&& !entry.equals(fOutputLocation)
+				&& (fOutputLocation.isPrefixOf(entry) || entry.isPrefixOf(fOutputLocation))) {
+				return new JavaModelStatus(
+					IJavaModelStatusConstants.INVALID_PATH,
+					fOutputLocation);
+			}
+		}
+
+		return JavaModelStatus.VERIFIED_OK;
+	}
+

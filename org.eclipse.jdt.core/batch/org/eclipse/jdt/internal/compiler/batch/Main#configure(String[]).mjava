@@ -1,0 +1,373 @@
+	/*
+	Decode the command line arguments 
+	 */
+	private void configure(String[] argv) throws InvalidInputException {
+		if ((argv == null) || (argv.length == 0))
+			throw new InvalidInputException("no source file specified");
+		final int InsideClasspath = 1;
+		final int InsideDestinationPath = 2;
+		final int TargetSetting = 4;
+		final int InsideLog = 8;
+		final int InsideRepetition = 16;
+		final int Default = 0;
+		int DEFAULT_SIZE_CLASSPATH = 4;
+		boolean noWarnOptionInUsed = false;
+		boolean warnOptionInUsed = false;
+		int pathCount = 0;
+		int index = -1, filesCount = 0, argCount = argv.length;
+		int mode = Default;
+		repetitions = 0;
+		boolean versionIDRequired = false;
+		boolean printUsageRequired = false;
+
+		while (++index < argCount) {
+			String currentArg = argv[index].trim();
+			if (currentArg.endsWith(".java")) {
+				if (filenames == null) {
+					filenames = new String[argCount - index];
+				} else
+					if (filesCount == filenames.length) {
+						int length = filenames.length;
+						System.arraycopy(
+							filenames,
+							0,
+							(filenames = new String[length + argCount - index]),
+							0,
+							length);
+					}
+				filenames[filesCount++] = currentArg;
+				mode = Default;
+				continue;
+			}
+			if (currentArg.equals("-log")) {
+				if (log != null)
+					throw new InvalidInputException("duplicate log specification: " + currentArg);
+				mode = InsideLog;
+				continue;
+			}
+			if (currentArg.equals("-repeat")) {
+				if (repetitions > 0)
+					throw new InvalidInputException(
+						"duplicate repeat specification: " + currentArg);
+				mode = InsideRepetition;
+				continue;
+			}
+			if (currentArg.equals("-d")) {
+				if (destinationPath != null)
+					throw new InvalidInputException(
+						"duplicate output path specification: " + currentArg);
+				mode = InsideDestinationPath;
+				continue;
+			}
+			if (currentArg.equals("-classpath")) {
+				if (pathCount > 0)
+					throw new InvalidInputException(
+						"duplicate classpath specification: " + currentArg);
+				classpaths = new String[DEFAULT_SIZE_CLASSPATH];
+				mode = InsideClasspath;
+				continue;
+			}
+			if (currentArg.equals("-progress")) {
+				mode = Default;
+				showProgress = true;
+				continue;
+			}
+			if (currentArg.equals("-proceedOnError")) {
+				mode = Default;
+				proceedOnError = true;
+				continue;
+			}
+			if (currentArg.equals("-time")) {
+				mode = Default;
+				timer = true;
+				continue;
+			}
+			if (currentArg.equals("-version") || currentArg.equals("-v")) {
+				versionIDRequired = true;
+				continue;
+			}
+			if (currentArg.equals("-help")) {
+				printUsageRequired = true;
+				continue;
+			}
+			if (currentArg.equals("-noImportError")) {
+				mode = Default;
+				importProblemIsError = false;
+				continue;
+			}
+			if (currentArg.equals("-noExit")) {
+				mode = Default;
+				systemExitWhenFinished = false;
+				continue;
+			}
+			if (currentArg.equals("-verbose")) {
+				mode = Default;
+				verbose = true;
+				continue;
+			}
+			if (currentArg.equals("-referenceInfo")) {
+				mode = Default;
+				produceRefInfo = true;
+				continue;
+			}
+			if (currentArg.startsWith("-g")) {
+				mode = Default;
+				debugMask = 0; // reinitialize the default value
+				String debugOption = currentArg;
+				int length = currentArg.length();
+				if (length == 2) {
+					debugMask =
+						CompilerOptions.Lines | CompilerOptions.Vars | CompilerOptions.Source;
+					continue;
+				}
+				if (length > 3) {
+					if (length == 7 && debugOption.equals("-g:none"))
+						continue;
+					StringTokenizer tokenizer =
+						new StringTokenizer(debugOption.substring(3, debugOption.length()), ",");
+					while (tokenizer.hasMoreTokens()) {
+						String token = tokenizer.nextToken();
+						if (token.equals("vars")) {
+							debugMask |= CompilerOptions.Vars;
+						} else
+							if (token.equals("lines")) {
+								debugMask |= CompilerOptions.Lines;
+							} else
+								if (token.equals("source")) {
+									debugMask |= CompilerOptions.Source;
+								} else {
+									throw new InvalidInputException("invalid debug option: " + debugOption);
+								}
+					}
+					continue;
+				}
+				throw new InvalidInputException("invalid debug option: " + debugOption);
+			}
+			if (currentArg.startsWith("-nowarn")) {
+				noWarnOptionInUsed = true;
+				if (warnOptionInUsed)
+					throw new InvalidInputException("duplicate usage of warning configuration");
+				mode = Default;
+				warningMask = TemporaryWarning;
+				// reinitialize the default value (still see TemporaryWarning)		
+				continue;
+			}
+			if (currentArg.startsWith("-warn")) {
+				warnOptionInUsed = true;
+				if (noWarnOptionInUsed)
+					throw new InvalidInputException("duplicate usage of warning configuration");
+				mode = Default;
+				String warningOption = currentArg;
+				int length = currentArg.length();
+				if (length == 10 && warningOption.equals("-warn:none")) {
+					warningMask = TemporaryWarning;
+					// reinitialize the default value (still see TemporaryWarning)
+					continue;
+				}
+				if (length < 6)
+					throw new InvalidInputException(
+						"invalid warning configuration: " + warningOption);
+				StringTokenizer tokenizer =
+					new StringTokenizer(warningOption.substring(6, warningOption.length()), ",");
+				int tokenCounter = 0;
+				warningMask = 0; // reinitialize the default value				
+				while (tokenizer.hasMoreTokens()) {
+					String token = tokenizer.nextToken();
+					tokenCounter++;
+					if (token.equals("constructorName")) {
+						warningMask |= CompilerOptions.MethodWithConstructorName;
+					} else
+						if (token.equals("packageDefaultMethod")) {
+							warningMask |= CompilerOptions.OverriddenPackageDefaultMethod;
+						} else
+							if (token.equals("maskedCatchBlocks")) {
+								warningMask |= CompilerOptions.MaskedCatchBlock;
+							} else
+								if (token.equals("deprecation")) {
+									warningMask |= CompilerOptions.UsingDeprecatedAPI;
+								} else
+									if (token.equals("unusedLocals")) {
+										warningMask |= CompilerOptions.UnusedLocalVariable;
+									} else
+										if (token.equals("unusedArguments")) {
+											warningMask |= CompilerOptions.UnusedArgument;
+										} else
+											if (token.equals("syntheticAccess")) {
+												warningMask |= CompilerOptions.AccessEmulation;
+											} else {
+												throw new InvalidInputException("invalid warning: " + token);
+											}
+				}
+				if (tokenCounter == 0)
+					throw new InvalidInputException("invalid warning option: " + currentArg);
+				continue;
+			}
+			if (currentArg.equals("-target")) {
+				mode = TargetSetting;
+				continue;
+			}
+			if (currentArg.equals("-preserveAllLocals")) {
+				preserveAllLocalVariables = true;
+				continue;
+			}
+			if (mode == TargetSetting) {
+				if (currentArg.equals("1.1")) {
+					targetJDK = CompilerOptions.JDK1_1;
+				} else
+					if (currentArg.equals("1.2")) {
+						targetJDK = CompilerOptions.JDK1_2;
+					} else {
+						throw new InvalidInputException(
+							"target JDK is either '1.1' or '1.2': " + currentArg);
+					}
+				mode = Default;
+				continue;
+			}
+			if (mode == InsideLog) {
+				log = currentArg;
+				mode = Default;
+				continue;
+			}
+			if (mode == InsideRepetition) {
+				try {
+					repetitions = Integer.parseInt(currentArg);
+					if (repetitions <= 0) {
+						throw new InvalidInputException(
+							"repetition must be a positive integer: " + currentArg);
+					}
+				} catch (NumberFormatException e) {
+					throw new InvalidInputException(
+						"repetition must be a positive integer: " + currentArg);
+				}
+				mode = Default;
+				continue;
+			}
+			if (mode == InsideDestinationPath) {
+				destinationPath = currentArg;
+				mode = Default;
+				continue;
+			}
+			if (mode == InsideClasspath) {
+				StringTokenizer tokenizer = new StringTokenizer(currentArg, File.pathSeparator);
+				while (tokenizer.hasMoreTokens()) {
+					int length;
+					if ((length = classpaths.length) <= pathCount) {
+						System.arraycopy(
+							classpaths,
+							0,
+							(classpaths = new String[length * 2]),
+							0,
+							length);
+					}
+					classpaths[pathCount++] = tokenizer.nextToken();
+				}
+				mode = Default;
+				continue;
+			}
+			//default is input directory
+			currentArg = currentArg.replace('/', File.separatorChar);
+			if (currentArg.endsWith(File.separator))
+				currentArg =
+					currentArg.substring(0, currentArg.length() - File.separator.length());
+			File dir = new File(currentArg);
+			if (!dir.isDirectory())
+				throw new InvalidInputException("directory does not exist: " + currentArg);
+			FileFinder finder = new FileFinder();
+			try {
+				finder.find(dir, ".JAVA", verbose);
+			} catch (Exception e) {
+				throw new InvalidInputException(
+					"i/o error : unable to retrieve .JAVA files in directory: " + currentArg);
+			}
+			if (filenames != null) {
+				// some source files were specified explicitly
+				String results[] = finder.resultFiles;
+				int length = results.length;
+				System.arraycopy(
+					filenames,
+					0,
+					(filenames = new String[length + filesCount]),
+					0,
+					filesCount);
+				System.arraycopy(results, 0, filenames, filesCount, length);
+				filesCount += length;
+			} else {
+				filenames = finder.resultFiles;
+				filesCount = filenames.length;
+			}
+			mode = Default;
+			continue;
+		}
+
+		/*
+		 * Standalone options
+		 */
+		if (versionIDRequired) {
+			out.println(
+				"Eclipse Java Compiler " + this.versionID + ", Copyright IBM Corp 2000\n");
+			return;
+		}
+
+		if (printUsageRequired) {
+			printUsage();
+			return;
+		}
+
+		if (filesCount != 0)
+			System.arraycopy(
+				filenames,
+				0,
+				(filenames = new String[filesCount]),
+				0,
+				filesCount);
+		if (pathCount == 0) {
+			String classProp = System.getProperty("LFclasspath");
+			if ((classProp == null) || (classProp.length() == 0)) {
+				out.println(
+					"no classpath defined (LF_CLASSPATH), using default directory instead");
+				classProp = ".";
+			}
+			StringTokenizer tokenizer = new StringTokenizer(classProp, File.pathSeparator);
+			classpaths = new String[tokenizer.countTokens()];
+			while (tokenizer.hasMoreTokens()) {
+				classpaths[pathCount++] = tokenizer.nextToken();
+			}
+		}
+
+		if (classpaths == null)
+			classpaths = new String[0];
+		System.arraycopy(
+			classpaths,
+			0,
+			(classpaths = new String[pathCount]),
+			0,
+			pathCount);
+		for (int i = 0, max = classpaths.length; i < max; i++) {
+			File file = new File(classpaths[i]);
+			if (!file.exists())
+				throw new InvalidInputException("incorrect classpath: " + classpaths[i]);
+		}
+		if (destinationPath == null) {
+			destinationPath = System.getProperty("user.dir");
+		} else
+			if ("none".equals(destinationPath)) {
+				destinationPath = null;
+			}
+
+		if (filenames == null)
+			throw new InvalidInputException("no source file specified");
+
+		if (log != null) {
+			try {
+				out = new PrintWriter(new FileOutputStream(log, false));
+			} catch (IOException e) {
+				throw new InvalidInputException("cannot open .log file");
+			}
+		} else {
+			showProgress = false;
+		}
+		if (repetitions == 0) {
+			repetitions = 1;
+		}
+	}
+

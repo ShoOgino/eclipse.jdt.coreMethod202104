@@ -1,0 +1,251 @@
+	/**
+	 * Method pattern are formed by [declaringType.]selector[(parameterTypes)][returnType]
+	 * e.g. java.lang.Runnable.run() void
+	 *		main(*)
+	 */
+	private static SearchPattern createMethodPattern(
+		String patternString,
+		int limitTo,
+		int matchMode,
+		boolean isCaseSensitive) {
+
+		StringTokenizer tokenizer = new StringTokenizer(patternString, " .(,)", true);
+		final int InsideSelector = 1;
+		final int InsideParameter = 2;
+		final int InsideReturnType = 3;
+		String lastToken = null;
+
+		String declaringType = null, selector = null, parameterType = null;
+		String[] parameterTypes = null;
+		int parameterCount = -1;
+		String returnType = null;
+		boolean foundClosingParenthesis = false;
+		int mode = InsideSelector;
+		while (tokenizer.hasMoreTokens()) {
+			String token = tokenizer.nextToken();
+			switch (mode) {
+
+				// read declaring type and selector
+				case InsideSelector :
+					if (token.equals(".")) {
+						if (declaringType == null) {
+							if (selector == null)
+								return null;
+							declaringType = selector;
+						} else {
+							declaringType += token + selector;
+						}
+						selector = null;
+					} else
+						if (token.equals("(")) {
+							parameterTypes = new String[5];
+							parameterCount = 0;
+							mode = InsideParameter;
+						} else
+							if (token.equals(" ")) {
+								if (!(" ".equals(lastToken) || ".".equals(lastToken))) {
+									mode = InsideReturnType;
+								}
+							} else { // name
+								if (selector != null)
+									return null;
+								selector = token;
+							}
+					break;
+					// read parameter types
+				case InsideParameter :
+					if (token.equals(" ")) {
+					} else
+						if (token.equals(",")) {
+							if (parameterType == null)
+								return null;
+							if (parameterTypes.length == parameterCount) {
+								System.arraycopy(
+									parameterTypes,
+									0,
+									parameterTypes = new String[parameterCount * 2],
+									0,
+									parameterCount);
+							}
+							parameterTypes[parameterCount++] = parameterType;
+							parameterType = null;
+						} else
+							if (token.equals(")")) {
+								foundClosingParenthesis = true;
+								if (parameterType != null) {
+									if (parameterTypes.length == parameterCount) {
+										System.arraycopy(
+											parameterTypes,
+											0,
+											parameterTypes = new String[parameterCount * 2],
+											0,
+											parameterCount);
+									}
+									parameterTypes[parameterCount++] = parameterType;
+								}
+								mode = InsideReturnType;
+							} else {
+								if (parameterType == null) {
+									parameterType = token;
+								} else {
+									if (!(".".equals(lastToken) || ".".equals(token) || "[]".equals(token)))
+										return null;
+									parameterType += token;
+								}
+							}
+					break;
+					// read return type
+				case InsideReturnType :
+					if (!token.equals(" ")) {
+						if (returnType == null) {
+							returnType = token;
+						} else {
+							if (!(!(".".equals(lastToken) || ".".equals(token) || "[]".equals(token))))
+								return null;
+							returnType += token;
+						}
+					}
+			}
+			lastToken = token;
+		}
+		// parenthesis mismatch
+		if (parameterCount > 0 && !foundClosingParenthesis)
+			return null;
+		if (selector == null)
+			return null;
+
+		char[] selectorChars = selector.toCharArray();
+		if (selectorChars.length == 1 && selectorChars[0] == '*')
+			selectorChars = null;
+
+		char[] declaringTypeQualification = null, declaringTypeSimpleName = null;
+		char[] returnTypeQualification = null, returnTypeSimpleName = null;
+		char[][] parameterTypeQualifications = null, parameterTypeSimpleNames = null;
+
+		// extract declaring type infos
+		if (declaringType != null) {
+			char[] declaringTypePart = declaringType.toCharArray();
+			int lastDotPosition = CharOperation.lastIndexOf('.', declaringTypePart);
+			if (lastDotPosition >= 0) {
+				declaringTypeQualification =
+					CharOperation.subarray(declaringTypePart, 0, lastDotPosition);
+				if (declaringTypeQualification.length == 1
+					&& declaringTypeQualification[0] == '*')
+					declaringTypeQualification = null;
+				declaringTypeSimpleName =
+					CharOperation.subarray(
+						declaringTypePart,
+						lastDotPosition + 1,
+						declaringTypePart.length);
+			} else {
+				declaringTypeQualification = null;
+				declaringTypeSimpleName = declaringTypePart;
+			}
+			if (declaringTypeSimpleName.length == 1 && declaringTypeSimpleName[0] == '*')
+				declaringTypeSimpleName = null;
+		}
+		// extract parameter types infos
+		if (parameterCount >= 0) {
+			parameterTypeQualifications = new char[parameterCount][];
+			parameterTypeSimpleNames = new char[parameterCount][];
+			for (int i = 0; i < parameterCount; i++) {
+				char[] parameterTypePart = parameterTypes[i].toCharArray();
+				int lastDotPosition = CharOperation.lastIndexOf('.', parameterTypePart);
+				if (lastDotPosition >= 0) {
+					parameterTypeQualifications[i] =
+						CharOperation.subarray(parameterTypePart, 0, lastDotPosition);
+					if (parameterTypeQualifications[i].length == 1
+						&& parameterTypeQualifications[i][0] == '*')
+						parameterTypeQualifications[i] = null;
+					parameterTypeSimpleNames[i] =
+						CharOperation.subarray(
+							parameterTypePart,
+							lastDotPosition + 1,
+							parameterTypePart.length);
+				} else {
+					parameterTypeQualifications[i] = null;
+					parameterTypeSimpleNames[i] = parameterTypePart;
+				}
+				if (parameterTypeSimpleNames[i].length == 1
+					&& parameterTypeSimpleNames[i][0] == '*')
+					parameterTypeSimpleNames[i] = null;
+			}
+		}
+		// extract return type infos
+		if (returnType != null) {
+			char[] returnTypePart = returnType.toCharArray();
+			int lastDotPosition = CharOperation.lastIndexOf('.', returnTypePart);
+			if (lastDotPosition >= 0) {
+				returnTypeQualification =
+					CharOperation.subarray(returnTypePart, 0, lastDotPosition);
+				if (returnTypeQualification.length == 1 && returnTypeQualification[0] == '*')
+					returnTypeQualification = null;
+				returnTypeSimpleName =
+					CharOperation.subarray(
+						returnTypePart,
+						lastDotPosition + 1,
+						returnTypePart.length);
+			} else {
+				returnTypeQualification = null;
+				returnTypeSimpleName = returnTypePart;
+			}
+			if (returnTypeSimpleName.length == 1 && returnTypeSimpleName[0] == '*')
+				returnTypeSimpleName = null;
+		}
+		SearchPattern searchPattern = null;
+		switch (limitTo) {
+			case IJavaSearchConstants.DECLARATIONS :
+				searchPattern =
+					new MethodDeclarationPattern(
+						selectorChars,
+						matchMode,
+						isCaseSensitive,
+						declaringTypeQualification,
+						declaringTypeSimpleName,
+						returnTypeQualification,
+						returnTypeSimpleName,
+						parameterTypeQualifications,
+						parameterTypeSimpleNames);
+				break;
+			case IJavaSearchConstants.REFERENCES :
+				searchPattern =
+					new MethodReferencePattern(
+						selectorChars,
+						matchMode,
+						isCaseSensitive,
+						declaringTypeQualification,
+						declaringTypeSimpleName,
+						returnTypeQualification,
+						returnTypeSimpleName,
+						parameterTypeQualifications,
+						parameterTypeSimpleNames);
+				break;
+			case IJavaSearchConstants.ALL_OCCURRENCES :
+				searchPattern =
+					new OrPattern(
+						new MethodDeclarationPattern(
+							selectorChars,
+							matchMode,
+							isCaseSensitive,
+							declaringTypeQualification,
+							declaringTypeSimpleName,
+							returnTypeQualification,
+							returnTypeSimpleName,
+							parameterTypeQualifications,
+							parameterTypeSimpleNames),
+						new MethodReferencePattern(
+							selectorChars,
+							matchMode,
+							isCaseSensitive,
+							declaringTypeQualification,
+							declaringTypeSimpleName,
+							returnTypeQualification,
+							returnTypeSimpleName,
+							parameterTypeQualifications,
+							parameterTypeSimpleNames));
+				break;
+		}
+		return searchPattern;
+
+	}
+

@@ -1,0 +1,101 @@
+	/**
+	 *
+	 * INTERNAL USE-ONLY
+	 */
+	protected void consumeEnterVariable() {
+		// EnterVariable ::= $empty
+		boolean isLocalDeclaration = isLocalDeclaration();
+		if (!isLocalDeclaration && (variablesCounter[nestedType] != 0)) {
+			requestor.exitField(lastFieldBodyEndPosition, lastFieldEndPosition);
+		}
+		char[] name = identifierStack[identifierPtr];
+		long namePosition = identifierPositionStack[identifierPtr--];
+		int extendedTypeDimension = intStack[intPtr--];
+
+		AbstractVariableDeclaration declaration;
+		if (nestedMethod[nestedType] != 0) {
+			// create the local variable declarations
+			declaration =
+				new LocalDeclaration(
+					null,
+					name,
+					(int) (namePosition >>> 32),
+					(int) namePosition);
+		} else {
+			// create the field declaration
+			declaration =
+				new FieldDeclaration(
+					null,
+					name,
+					(int) (namePosition >>> 32),
+					(int) namePosition);
+		}
+		identifierLengthPtr--;
+		TypeReference type;
+		int variableIndex = variablesCounter[nestedType];
+		int typeDim = 0;
+		if (variableIndex == 0) {
+			// first variable of the declaration (FieldDeclaration or LocalDeclaration)
+			if (nestedMethod[nestedType] != 0) {
+				// local declaration
+				declaration.declarationSourceStart = intStack[intPtr--];
+				declaration.modifiersSourceStart = intStack[intPtr--];
+				declaration.modifiers = intStack[intPtr--];
+				type = getTypeReference(typeDim = intStack[intPtr--]); // type dimension
+				pushOnAstStack(type);
+			} else {
+				// field declaration
+				type = getTypeReference(typeDim = intStack[intPtr--]); // type dimension
+				pushOnAstStack(type);
+				declaration.declarationSourceStart = intStack[intPtr--];
+				declaration.modifiersSourceStart = intStack[intPtr--];
+				declaration.modifiers = intStack[intPtr--];
+			}
+		} else {
+			type = (TypeReference) astStack[astPtr - variableIndex];
+			typeDim = type.dimensions();
+			AbstractVariableDeclaration previousVariable =
+				(AbstractVariableDeclaration) astStack[astPtr];
+			declaration.declarationSourceStart = previousVariable.declarationSourceStart;
+			declaration.modifiers = previousVariable.modifiers;
+			declaration.modifiersSourceStart = previousVariable.modifiersSourceStart;
+		}
+
+		localIntPtr = intPtr;
+
+		if (extendedTypeDimension == 0) {
+			declaration.type = type;
+		} else {
+			int dimension = typeDim + extendedTypeDimension;
+			//on the identifierLengthStack there is the information about the type....
+			int baseType;
+			if ((baseType = identifierLengthStack[identifierLengthPtr + 1]) < 0) {
+				//it was a baseType
+				declaration.type = TypeReference.baseTypeReference(-baseType, dimension);
+			} else {
+				declaration.type = type.copyDims(dimension);
+			}
+		}
+		variablesCounter[nestedType]++;
+		nestedMethod[nestedType]++;
+		pushOnAstStack(declaration);
+
+		int[] javadocPositions = intArrayStack[intArrayPtr];
+		if (!isLocalDeclaration) {
+			requestor.enterField(
+				declaration.declarationSourceStart,
+				javadocPositions,
+				declaration.modifiers,
+				declaration.modifiersSourceStart,
+				returnTypeName(declaration.type),
+				type.sourceStart(),
+				type.sourceEnd(),
+				typeDims,
+				name,
+				(int) (namePosition >>> 32),
+				(int) namePosition,
+				extendedTypeDimension,
+				extendedTypeDimension == 0 ? -1 : endPosition);
+		}
+	}
+

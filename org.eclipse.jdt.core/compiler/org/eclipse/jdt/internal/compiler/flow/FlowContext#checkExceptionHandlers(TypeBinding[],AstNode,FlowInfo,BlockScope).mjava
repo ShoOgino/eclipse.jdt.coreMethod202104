@@ -1,0 +1,114 @@
+	public void checkExceptionHandlers(
+		TypeBinding[] raisedExceptions,
+		AstNode location,
+		FlowInfo flowInfo,
+		BlockScope scope) {
+
+		// check that all the argument exception types are handled
+
+		// JDK Compatible implementation - when an exception type is thrown, 
+		// all related catch blocks are marked as reachable... instead of those only
+		// until the point where it is safely handled (Smarter - see comment at the end)
+
+		int remainingCount; // counting the number of remaining unhandled exceptions
+		int raisedCount; // total number of exceptions raised
+		if ((raisedExceptions == null)
+			|| ((raisedCount = raisedExceptions.length) == 0))
+			return;
+		remainingCount = raisedCount;
+
+		// duplicate the array of raised exceptions since it will be updated
+		// (null replaces any handled exception)
+		System.arraycopy(
+			raisedExceptions,
+			0,
+			(raisedExceptions = new TypeBinding[raisedCount]),
+			0,
+			raisedCount);
+		FlowContext traversedContext = this;
+		while (traversedContext != null) {
+			AstNode sub;
+			if (((sub = traversedContext.subRoutine()) != null) && sub.cannotReturn()) {
+				// traversing a non-returning subroutine means that all unhandled 
+				// exceptions will actually never get sent...
+				return;
+			}
+
+			// filter exceptions that are locally caught from the most enclosing 
+			// try statement to the outer ones.
+			if (traversedContext instanceof ExceptionHandlingFlowContext) {
+				ExceptionHandlingFlowContext exceptionContext =
+					(ExceptionHandlingFlowContext) traversedContext;
+				ReferenceBinding[] caughtExceptions;
+				if ((caughtExceptions = exceptionContext.handledExceptions) != NoExceptions) {
+					int caughtCount = caughtExceptions.length;
+					boolean[] locallyCaught = new boolean[raisedCount]; // at most
+
+					for (int caughtIndex = 0; caughtIndex < caughtCount; caughtIndex++) {
+						ReferenceBinding caughtException = caughtExceptions[caughtIndex];
+						for (int raisedIndex = 0; raisedIndex < raisedCount; raisedIndex++) {
+							TypeBinding raisedException;
+							if ((raisedException = raisedExceptions[raisedIndex]) != null) {
+								switch (scope.compareTypes(raisedException, caughtException)) {
+									case EqualOrMoreSpecific :
+										exceptionContext.recordHandlingException(
+											caughtException,
+											flowInfo.unconditionalInits(),
+											raisedException,
+											location,
+											locallyCaught[raisedIndex]);
+										// was already definitely caught ?
+										if (!locallyCaught[raisedIndex]) {
+											locallyCaught[raisedIndex] = true;
+											// remember that this exception has been definitely caught
+											remainingCount--;
+										}
+										break;
+									case MoreGeneric :
+										exceptionContext.recordHandlingException(
+											caughtException,
+											flowInfo.unconditionalInits(),
+											raisedException,
+											location,
+											false);
+										// was not caught already per construction
+								}
+							}
+						}
+					}
+					// remove locally caught exceptions from the remaining ones
+					for (int i = 0; i < raisedCount; i++) {
+						if (locallyCaught[i]) {
+							raisedExceptions[i] = null; // removed from the remaining ones.
+						}
+					}
+				}
+				// method treatment for unchecked exceptions
+				if (exceptionContext.isMethodContext) {
+					for (int i = 0; i < raisedCount; i++) {
+						TypeBinding raisedException;
+						if ((raisedException = raisedExceptions[i]) != null) {
+							if (scope
+								.areTypesCompatible(raisedException, scope.getJavaLangRuntimeException())
+								|| scope.areTypesCompatible(raisedException, scope.getJavaLangError())) {
+								remainingCount--;
+								raisedExceptions[i] = null;
+							}
+						}
+					}
+				}
+			}
+			if (remainingCount == 0)
+				return;
+			traversedContext = traversedContext.parent;
+		}
+
+		// if reaches this point, then there are some remaining unhandled exception types.	
+		for (int i = 0; i < raisedCount; i++) {
+			TypeBinding exception;
+			if ((exception = raisedExceptions[i]) != null) {
+				scope.problemReporter().unhandledException(exception, location, scope);
+			}
+		}
+	}
+

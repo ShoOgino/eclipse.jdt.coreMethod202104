@@ -1,0 +1,151 @@
+	/*
+		| mapping mappingSequence targetFieldKey traversedType investigateArguments staticInvocationSite
+		  targetDepth nameEnvironment |
+	
+		targetDepth := expectedEnclosingClass enclosingDepth.
+		targetFieldKey := 'this$' , targetDepth printString.  "$NON-NLS$"
+		mappingSequence := OrderedCollection new.
+		investigateArguments := enclosingMethod isConstructor.
+		staticInvocationSite := enclosingMethod isJavaStatic.
+		nameEnvironment := enclosingMethod nameEnvironment.
+	
+		"If possible looks through the available constructor arguments (if we are in context only)"
+		investigateArguments
+			ifTrue: [
+				(mapping :=
+					self generatedConstructorArguments "get back an argument local"
+						at: targetFieldKey
+						ifAbsent: [])
+							notNil
+								ifTrue: [
+									(mapping resolvedType
+										isCompatibleWith: expectedEnclosingClass
+										in: nameEnvironment)
+											ifTrue: [
+												^mappingSequence
+													add: mapping;
+													yourself]]].
+	
+		"Cannot look into synthetic field on static invocation site"
+		staticInvocationSite ifTrue: [^nil].
+	
+		"We now have to compute the <[argument|field]field*> sequence to retrieve the correct enclosing instance,
+			using the traversedType collection from one of them we will be able to reach the correct
+			target type, but difficult to foresee the correct one since the fields this$0... this$n may
+			be sparsely allocated."
+		traversedType := self.
+	
+		[traversedType isNil] whileFalse: [| info |
+			info :=
+				(investigateArguments and: [traversedType == self])
+					ifTrue: [ "use argument" traversedType generatedConstructorArguments]
+					ifFalse: [ "use field" traversedType generatedAccessFields].
+			mapping :=
+				info "try a direct shortcut"
+					at: targetFieldKey
+					ifAbsent: [
+						info "one level-up"
+							at: 'this$' , (traversedType enclosingDepth - 1) printString  "$NON-NLS$"
+							ifAbsent: [ "cannot proceed" ^nil]].
+			mappingSequence add: mapping.
+	
+			"If the mapping matches the expected type, then we are done."
+			((mapping isJavaFieldDescriptor ifTrue: [mapping type] ifFalse: [mapping resolvedType])
+				isCompatibleWith: expectedEnclosingClass
+				in: nameEnvironment)
+					ifTrue: [^mappingSequence].
+	
+			"Go to the next enclosing type"
+			traversedType := traversedType enclosingType].
+	
+	
+		"Not suitable enclosing instance available -- should never reach this point since detected above"
+		enclosingMethod errorInterface
+			abortDueToInternalError: (NlsCatJDEV indexedMsg: 439).  "$NLS$ Failed to emulate access to enclosing instance"
+		^nil
+	
+	*/
+	/**
+	 * This retrieves the argument that maps to an enclosing instance of the suitable type,
+	 * 	if not found then answers nil -- do not create one
+	
+	 *		#implicitThis								:  the implicit this will be ok
+	 *		#((arg) this$n)								: available as a constructor arg
+	 * 		#((arg) this$n access$m... access$p) 		: available as as a constructor arg + a sequence of synthetic accessors to synthetic fields
+	 * 		#((fieldDescr) this$n access#m... access$p)	: available as a first synthetic field + a sequence of synthetic accessors to synthetic fields
+	 * 		nil 		 								: not found
+	 *
+	 *	EXACT MATCH VERSION - no type compatibility is performed
+	 */
+	public Object[] getExactEmulationPath(ReferenceBinding targetEnclosingType) {
+		MethodScope currentMethodScope = this.methodScope();
+		SourceTypeBinding sourceType = currentMethodScope.enclosingSourceType();
+
+		// identity check
+		if ((!currentMethodScope.isStatic) && (sourceType == targetEnclosingType)) {
+			return EmulationPathToImplicitThis; // implicit this is good enough
+		}
+		if (!sourceType.isNestedType()
+			|| sourceType.isStatic()) { // no emulation from within non-inner types
+			return null;
+		}
+		boolean insideConstructor =
+			currentMethodScope.isInsideInitializerOrConstructor();
+		// use synthetic constructor arguments if possible
+		if (insideConstructor) {
+			SyntheticArgumentBinding syntheticArg;
+			if ((syntheticArg =
+				((NestedTypeBinding) sourceType).getSyntheticArgument(
+					targetEnclosingType,
+					this))
+				!= null) {
+				return new Object[] { syntheticArg };
+			}
+		}
+		// use a direct synthetic field then
+		if (!currentMethodScope.isStatic) {
+			FieldBinding syntheticField;
+			if ((syntheticField = sourceType.getSyntheticField(targetEnclosingType, this))
+				!= null) {
+				return new Object[] { syntheticField };
+			}
+			// could be reached through a sequence of enclosing instance link (nested members)
+			Object[] path = new Object[2]; // probably at least 2 of them
+			ReferenceBinding currentType = sourceType.enclosingType();
+			if (insideConstructor) {
+				path[0] =
+					((NestedTypeBinding) sourceType).getSyntheticArgument(
+						(SourceTypeBinding) currentType,
+						this);
+			} else {
+				path[0] = sourceType.getSyntheticField((SourceTypeBinding) currentType, this);
+			}
+			if (path[0] != null) { // keep accumulating
+				int count = 1;
+				ReferenceBinding currentEnclosingType;
+				while ((currentEnclosingType = currentType.enclosingType()) != null) {
+					//done?
+					if (currentType == targetEnclosingType)
+						break;
+					syntheticField =
+						((NestedTypeBinding) currentType).getSyntheticField(
+							(SourceTypeBinding) currentEnclosingType,
+							this);
+					if (syntheticField == null)
+						break;
+					// append inside the path
+					if (count == path.length) {
+						System.arraycopy(path, 0, (path = new Object[count + 1]), 0, count);
+					}
+					// private access emulation is necessary since synthetic field is private
+					path[count++] = syntheticField.getSyntheticReadAccess();
+					currentType = currentEnclosingType;
+				}
+				if (currentType == targetEnclosingType) {
+					return path;
+				}
+			}
+		}
+		return null;
+	}
+

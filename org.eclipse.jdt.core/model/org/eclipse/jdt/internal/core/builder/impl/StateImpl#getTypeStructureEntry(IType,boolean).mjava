@@ -1,0 +1,52 @@
+	/**
+	 * Returns the type structure entry for the given type handle.  
+	 * If lazyBuildCU is true, performs lazy building of compilation units if necessary.
+	 * Always performs lazy building of class files if necessary.
+	 * Returns null if no type descriptor can be found.
+	 */
+	protected TypeStructureEntry getTypeStructureEntry(
+		IType handle,
+		boolean lazyBuildCU) {
+		TypeStructureEntry tsEntry =
+			(TypeStructureEntry) fPrincipalStructureTable.get(handle);
+		if (tsEntry != null) {
+			return tsEntry;
+		}
+
+		// TBD: Doesn't handle lazy builds.
+
+		/* get the source element */
+		IPackage pkg = handle.getPackage();
+		SourceEntry sEntry = getSourceEntry(handle);
+		if (sEntry == null) {
+			return null;
+		}
+
+		/* if its a class file, parse it */
+		if (sEntry.isBinary()) {
+			//byte[] bytes = getElementContentBytes(sEntry);
+			// Canonicalize package part of type handle
+			handle = canonicalize(pkg).getClassHandle(handle.getSimpleName());
+			tsEntry = new TypeStructureEntry(sEntry, handle);
+			//tsEntry.setCRC32(getBinaryOutput().crc32(bytes));
+			fPrincipalStructureTable.put(handle, tsEntry);
+		} else
+			if (lazyBuildCU) {
+				if (fProblemReporter.hasProblems(sEntry)) {
+					// If the entry has problems, that's a sure sign it has already been compiled.
+					// Don't try again.
+					return null;
+				}
+
+				// make sure the entry is a compilation unit
+				PackageElement unit = packageElementFromSourceEntry(sEntry);
+
+				// compile it 
+				new BatchImageBuilder(this).lazyBuild(unit);
+
+				// try to get the entry again; may still be null 
+				tsEntry = (TypeStructureEntry) fPrincipalStructureTable.get(handle);
+			}
+		return tsEntry;
+	}
+

@@ -1,0 +1,90 @@
+	protected void attachOrphanCompletionNode() {
+		if (this.isOrphanCompletionNode) {
+			AstNode orphan = this.assistNode;
+			this.isOrphanCompletionNode = false;
+
+			/* if in context of a type, then persists the identifier into a fake field return type */
+			if (currentElement instanceof RecoveredType) {
+				RecoveredType recoveredType = (RecoveredType) currentElement;
+				/* filter out cases where scanner is still inside type header */
+				if (recoveredType.foundOpeningBrace) {
+					/* generate a pseudo field with a completion on type reference */
+					if (orphan instanceof TypeReference) {
+						currentElement =
+							currentElement.add(new CompletionOnFieldType((TypeReference) orphan), 0);
+						return;
+					}
+				}
+			}
+			/* if in context of a method, persists if inside arguments as a type */
+			if (currentElement instanceof RecoveredMethod) {
+				RecoveredMethod recoveredMethod = (RecoveredMethod) currentElement;
+				/* only consider if inside method header */
+				if (!recoveredMethod.foundOpeningBrace) {
+					//if (rParenPos < lParenPos){ // inside arguments
+					if (orphan instanceof TypeReference) {
+						currentElement =
+							currentElement.parent.add(new CompletionOnFieldType((TypeReference) orphan), 0);
+						return;
+					}
+				}
+			}
+
+			// add the completion node to the method declaration or constructor declaration
+			if (orphan instanceof Statement) {
+				/* check for completion at the beginning of method body
+					behind an invalid signature
+				 */
+				RecoveredMethod method = currentElement.enclosingMethod();
+				if (method != null) {
+					AbstractMethodDeclaration methodDecl = method.methodDeclaration;
+					if ((methodDecl.bodyStart == methodDecl.sourceEnd + 1)
+						// was missing opening brace
+						&& (scanner.searchLineNumber(orphan.sourceStart)
+							== scanner.searchLineNumber(methodDecl.sourceEnd))) {
+						return;
+					}
+				}
+				// add the completion node as a statement to the list of block statements
+				currentElement = currentElement.add((Statement) orphan, 0);
+				return;
+			}
+		}
+
+		// the following code applies only in methods, constructors or initializers
+		if ((!this.inMethodStack[this.inMethodPtr]
+			&& !this.inInitializerStack[this.inInitializerPtr])) {
+			return;
+		}
+
+		// push top expression on ast stack if it contains the completion node
+		Expression expression;
+		if (this.expressionPtr > -1
+			&& containsCompletionNode(
+				expression = this.expressionStack[this.expressionPtr])) {
+			/* check for completion at the beginning of method body
+				behind an invalid signature
+			 */
+			RecoveredMethod method = currentElement.enclosingMethod();
+			if (method != null) {
+				AbstractMethodDeclaration methodDecl = method.methodDeclaration;
+				if ((methodDecl.bodyStart == methodDecl.sourceEnd + 1)
+					// was missing opening brace
+					&& (scanner.searchLineNumber(expression.sourceStart)
+						== scanner.searchLineNumber(methodDecl.sourceEnd))) {
+					return;
+				}
+			}
+			if (expression instanceof AllocationExpression) {
+				// keep the context if it is an allocation expression
+				Statement statement =
+					(Statement) wrapWithExplicitConstructorCallIfNeeded(expression);
+				currentElement = currentElement.add(statement, 0);
+			} else {
+				Statement statement =
+					(Statement) wrapWithExplicitConstructorCallIfNeeded(this.assistNode);
+				currentElement = currentElement.add(statement, 0);
+			}
+		}
+	}
+

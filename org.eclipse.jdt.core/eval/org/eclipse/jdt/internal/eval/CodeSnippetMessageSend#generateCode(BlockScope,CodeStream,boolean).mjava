@@ -1,0 +1,130 @@
+	/**
+	 * MessageSend code generation
+	 *
+	 * @param currentScope org.eclipse.jdt.internal.compiler.lookup.BlockScope
+	 * @param codeStream org.eclipse.jdt.internal.compiler.codegen.CodeStream
+	 * @param valueRequired boolean
+	 */
+	public void generateCode(
+		BlockScope currentScope,
+		CodeStream codeStream,
+		boolean valueRequired) {
+
+		int pc = codeStream.position;
+
+		if (binding.canBeSeenBy(receiverType, this, currentScope)) {
+			// generate receiver/enclosing instance access
+			boolean isStatic = binding.isStatic();
+			// outer access ?
+			if (!isStatic && ((bits & DepthMASK) != 0)) {
+				// outer method can be reached through emulation
+				Object[] path =
+					currentScope.getExactEmulationPath(
+						currentScope.enclosingSourceType().enclosingTypeAt(
+							(bits & DepthMASK) >> DepthSHIFT));
+				if (path == null) {
+					// emulation was not possible (should not happen per construction)
+					currentScope.problemReporter().needImplementation();
+				} else {
+					codeStream.generateOuterAccess(path, this, currentScope);
+				}
+			} else {
+				receiver.generateCode(currentScope, codeStream, !isStatic);
+			}
+			// generate arguments
+			if (arguments != null) {
+				for (int i = 0, max = arguments.length; i < max; i++) {
+					arguments[i].generateCode(currentScope, codeStream, true);
+				}
+			}
+			// actual message invocation
+			if (isStatic) {
+				codeStream.invokestatic(binding);
+			} else {
+				if (receiver.isSuper()) {
+					codeStream.invokespecial(binding);
+				} else {
+					if (binding.declaringClass.isInterface()) {
+						codeStream.invokeinterface(binding);
+					} else {
+						codeStream.invokevirtual(binding);
+					}
+				}
+			}
+		} else {
+			((CodeSnippetCodeStream) codeStream).generateEmulationForMethod(
+				currentScope,
+				binding);
+			// generate receiver/enclosing instance access
+			boolean isStatic = binding.isStatic();
+			// outer access ?
+			if (!isStatic && ((bits & DepthMASK) != 0)) {
+				// not supported yet
+				currentScope.problemReporter().needImplementation();
+			} else {
+				receiver.generateCode(currentScope, codeStream, !isStatic);
+			}
+			if (isStatic) {
+				// we need an object on the stack which is ignored for the method invocation
+				codeStream.aconst_null();
+			}
+			// generate arguments
+			if (arguments != null) {
+				int argsLength = arguments.length;
+				codeStream.generateInlinedValue(argsLength);
+				codeStream.newArray(
+					currentScope,
+					new ArrayBinding(currentScope.getType(TypeBinding.JAVA_LANG_OBJECT), 1));
+				codeStream.dup();
+				for (int i = 0; i < argsLength; i++) {
+					codeStream.generateInlinedValue(i);
+					arguments[i].generateCode(currentScope, codeStream, true);
+					if (binding.parameters[i].isBaseType()) {
+						codeStream.generateObjectWrapperForType(binding.parameters[i]);
+					}
+					codeStream.aastore();
+					if (i < argsLength - 1) {
+						codeStream.dup();
+					}
+				}
+			} else {
+				codeStream.generateInlinedValue(0);
+				codeStream.newArray(
+					currentScope,
+					new ArrayBinding(currentScope.getType(TypeBinding.JAVA_LANG_OBJECT), 1));
+			}
+			((CodeSnippetCodeStream) codeStream).invokeJavaLangReflectMethodInvoke();
+
+			// convert the return value to the appropriate type for primitive types
+			if (binding.returnType.isBaseType()) {
+				int typeID = binding.returnType.id;
+				if (typeID == T_void) {
+					// remove the null from the stack
+					codeStream.pop();
+				}
+				((CodeSnippetCodeStream) codeStream).checkcast(typeID);
+				((CodeSnippetCodeStream) codeStream).getBaseTypeValue(typeID);
+			} else {
+				codeStream.checkcast(binding.returnType);
+			}
+		}
+		// operation on the returned value
+		if (valueRequired) {
+			// implicit conversion if necessary
+			codeStream.generateImplicitConversion(implicitConversion);
+		} else {
+			// pop return value if any
+			switch (binding.returnType.id) {
+				case T_long :
+				case T_double :
+					codeStream.pop2();
+					break;
+				case T_void :
+					break;
+				default :
+					codeStream.pop();
+			}
+		}
+		codeStream.recordPositionsFrom(pc, this);
+	}
+

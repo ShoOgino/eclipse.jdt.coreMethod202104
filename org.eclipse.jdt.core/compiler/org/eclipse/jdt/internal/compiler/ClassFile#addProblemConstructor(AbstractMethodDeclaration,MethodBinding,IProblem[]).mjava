@@ -1,0 +1,64 @@
+	/**
+	 * INTERNAL USE-ONLY
+	 * Generate the byte for a problem method info that correspond to a boggus constructor.
+	 *
+	 * @param method org.eclipse.jdt.internal.compiler.ast.AbstractMethodDeclaration
+	 * @param methodBinding org.eclipse.jdt.internal.compiler.nameloopkup.MethodBinding
+	 * @param problem org.eclipse.jdt.internal.compiler.problem.Problem[]
+	 */
+	public void addProblemConstructor(
+		AbstractMethodDeclaration method,
+		MethodBinding methodBinding,
+		IProblem[] problems) {
+
+		// always clear the strictfp/native/abstract bit for a problem method
+		methodBinding.modifiers &= ~(AccStrictfp | AccNative | AccAbstract);
+
+		generateMethodInfoHeader(methodBinding);
+		// We know that we won't get more than 1 attribute: the code attribute
+		contents[contentsOffset++] = 0;
+		contents[contentsOffset++] = 1; // Code attribute
+		int codeAttributeOffset = contentsOffset;
+		generateCodeAttributeHeader();
+		final ProblemReporter problemReporter = method.scope.problemReporter();
+		codeStream.reset(method, this);
+		String problemString = "";
+		if (problems != null) {
+			int max = problems.length;
+			StringBuffer buffer = new StringBuffer(25);
+			int count = 0;
+			for (int i = 0; i < max; i++) {
+				IProblem problem = problems[i];
+				if ((problem != null) && (problem.isError())) {
+					buffer.append("\t" + problem.getMessage() + "\n");
+					count++;
+					if (problemLine == 0) {
+						problemLine = problem.getSourceLineNumber();
+					}
+				}
+			} // insert the top line afterwards, once knowing how many problems we have to consider
+			if (count > 1) {
+				buffer.insert(0, "Unresolved compilation problems: \n");
+			} else {
+				buffer.insert(0, "Unresolved compilation problem: \n");
+			}
+			problemString = buffer.toString();
+		}
+
+		// return codeStream.generateCodeAttributeForProblemMethod(comp.options.runtimeExceptionNameForCompileError, "")
+		int[] exceptionHandler =
+			codeStream.generateCodeAttributeForProblemMethod(
+				problemReporter.options.runtimeExceptionNameForCompileError,
+				problemString);
+		completeCodeAttributeForProblemMethod(
+			method,
+			methodBinding,
+			codeAttributeOffset,
+			exceptionHandler,
+			((SourceTypeBinding) methodBinding.declaringClass)
+				.scope
+				.referenceCompilationUnit()
+				.compilationResult
+				.lineSeparatorPositions);
+	}
+

@@ -1,0 +1,245 @@
+	public static SearchPattern createPattern(IJavaElement element, int limitTo) {
+		SearchPattern searchPattern = null;
+		int lastDot;
+		switch (element.getElementType()) {
+			case IJavaElement.FIELD :
+				IField field = (IField) element;
+				String fullDeclaringName =
+					field.getDeclaringType().getFullyQualifiedName().replace('$', '.');
+				;
+				lastDot = fullDeclaringName.lastIndexOf('.');
+				char[] declaringSimpleName =
+					(lastDot != -1 ? fullDeclaringName.substring(lastDot + 1) : fullDeclaringName)
+						.toCharArray();
+				char[] declaringQualification =
+					lastDot != -1 ? fullDeclaringName.substring(0, lastDot).toCharArray() : null;
+				char[] name = field.getElementName().toCharArray();
+				char[] typeSimpleName;
+				char[] typeQualification;
+				try {
+					String typeSignature =
+						Signature.toString(field.getTypeSignature()).replace('$', '.');
+					lastDot = typeSignature.lastIndexOf('.');
+					typeSimpleName =
+						(lastDot != -1 ? typeSignature.substring(lastDot + 1) : typeSignature)
+							.toCharArray();
+					typeQualification =
+						lastDot != -1 ? typeSignature.substring(0, lastDot).toCharArray() : null;
+				} catch (JavaModelException e) {
+					return null;
+				}
+				switch (limitTo) {
+					case IJavaSearchConstants.DECLARATIONS :
+						searchPattern =
+							new FieldDeclarationPattern(
+								name,
+								EXACT_MATCH,
+								CASE_SENSITIVE,
+								declaringQualification,
+								declaringSimpleName,
+								typeQualification,
+								typeSimpleName);
+						break;
+					case IJavaSearchConstants.REFERENCES :
+						searchPattern =
+							new FieldReferencePattern(
+								name,
+								EXACT_MATCH,
+								CASE_SENSITIVE,
+								declaringQualification,
+								declaringSimpleName,
+								typeQualification,
+								typeSimpleName);
+						break;
+					case IJavaSearchConstants.ALL_OCCURRENCES :
+						searchPattern =
+							new OrPattern(
+								new FieldDeclarationPattern(
+									name,
+									EXACT_MATCH,
+									CASE_SENSITIVE,
+									declaringQualification,
+									declaringSimpleName,
+									typeQualification,
+									typeSimpleName),
+								new FieldReferencePattern(
+									name,
+									EXACT_MATCH,
+									CASE_SENSITIVE,
+									declaringQualification,
+									declaringSimpleName,
+									typeQualification,
+									typeSimpleName));
+						break;
+				}
+				break;
+			case IJavaElement.IMPORT_DECLARATION :
+				String elementName = element.getElementName();
+				IImportDeclaration importDecl = (IImportDeclaration) element;
+				if (importDecl.isOnDemand()) {
+					lastDot = elementName.lastIndexOf('.');
+					if (lastDot == -1)
+						return null; // invalid import declaration
+					searchPattern =
+						createPackagePattern(
+							elementName.substring(0, lastDot),
+							limitTo,
+							EXACT_MATCH,
+							CASE_SENSITIVE);
+				} else {
+					searchPattern = createTypePattern(elementName, limitTo);
+				}
+				break;
+			case IJavaElement.METHOD :
+				IMethod method = (IMethod) element;
+				boolean isConstructor;
+				try {
+					isConstructor = method.isConstructor();
+				} catch (JavaModelException e) {
+					return null;
+				}
+				fullDeclaringName =
+					method.getDeclaringType().getFullyQualifiedName().replace('$', '.');
+				lastDot = fullDeclaringName.lastIndexOf('.');
+				declaringSimpleName =
+					(lastDot != -1 ? fullDeclaringName.substring(lastDot + 1) : fullDeclaringName)
+						.toCharArray();
+				declaringQualification =
+					lastDot != -1 ? fullDeclaringName.substring(0, lastDot).toCharArray() : null;
+				char[] selector = method.getElementName().toCharArray();
+				char[] returnSimpleName;
+				char[] returnQualification;
+				try {
+					String returnType =
+						Signature.toString(method.getReturnType()).replace('$', '.');
+					lastDot = returnType.lastIndexOf('.');
+					returnSimpleName =
+						(lastDot != -1 ? returnType.substring(lastDot + 1) : returnType).toCharArray();
+					returnQualification =
+						lastDot != -1 ? returnType.substring(0, lastDot).toCharArray() : null;
+				} catch (JavaModelException e) {
+					return null;
+				}
+				String[] parameterTypes = method.getParameterTypes();
+				int paramCount = parameterTypes.length;
+				char[][] parameterSimpleNames = new char[paramCount][];
+				char[][] parameterQualifications = new char[paramCount][];
+				for (int i = 0; i < paramCount; i++) {
+					String signature = Signature.toString(parameterTypes[i]).replace('$', '.');
+					lastDot = signature.lastIndexOf('.');
+					parameterSimpleNames[i] =
+						(lastDot != -1 ? signature.substring(lastDot + 1) : signature).toCharArray();
+					parameterQualifications[i] =
+						lastDot != -1 ? signature.substring(0, lastDot).toCharArray() : null;
+				}
+				switch (limitTo) {
+					case IJavaSearchConstants.DECLARATIONS :
+						if (isConstructor) {
+							searchPattern =
+								new ConstructorDeclarationPattern(
+									declaringSimpleName,
+									EXACT_MATCH,
+									CASE_SENSITIVE,
+									declaringQualification,
+									parameterQualifications,
+									parameterSimpleNames);
+						} else {
+							searchPattern =
+								new MethodDeclarationPattern(
+									selector,
+									EXACT_MATCH,
+									CASE_SENSITIVE,
+									declaringQualification,
+									declaringSimpleName,
+									returnQualification,
+									returnSimpleName,
+									parameterQualifications,
+									parameterSimpleNames);
+						}
+						break;
+					case IJavaSearchConstants.REFERENCES :
+						if (isConstructor) {
+							searchPattern =
+								new ConstructorReferencePattern(
+									declaringSimpleName,
+									EXACT_MATCH,
+									CASE_SENSITIVE,
+									declaringQualification,
+									parameterQualifications,
+									parameterSimpleNames);
+						} else {
+							searchPattern =
+								new MethodReferencePattern(
+									selector,
+									EXACT_MATCH,
+									CASE_SENSITIVE,
+									declaringQualification,
+									declaringSimpleName,
+									returnQualification,
+									returnSimpleName,
+									parameterQualifications,
+									parameterSimpleNames);
+						}
+						break;
+					case IJavaSearchConstants.ALL_OCCURRENCES :
+						if (isConstructor) {
+							searchPattern =
+								new OrPattern(
+									new ConstructorDeclarationPattern(
+										declaringSimpleName,
+										EXACT_MATCH,
+										CASE_SENSITIVE,
+										declaringQualification,
+										parameterQualifications,
+										parameterSimpleNames),
+									new ConstructorReferencePattern(
+										declaringSimpleName,
+										EXACT_MATCH,
+										CASE_SENSITIVE,
+										declaringQualification,
+										parameterQualifications,
+										parameterSimpleNames));
+						} else {
+							searchPattern =
+								new OrPattern(
+									new MethodDeclarationPattern(
+										selector,
+										EXACT_MATCH,
+										CASE_SENSITIVE,
+										declaringQualification,
+										declaringSimpleName,
+										returnQualification,
+										returnSimpleName,
+										parameterQualifications,
+										parameterSimpleNames),
+									new MethodReferencePattern(
+										selector,
+										EXACT_MATCH,
+										CASE_SENSITIVE,
+										declaringQualification,
+										declaringSimpleName,
+										returnQualification,
+										returnSimpleName,
+										parameterQualifications,
+										parameterSimpleNames));
+						}
+						break;
+				}
+				break;
+			case IJavaElement.TYPE :
+				IType type = (IType) element;
+				searchPattern = createTypePattern(type.getFullyQualifiedName(), limitTo);
+				break;
+			case IJavaElement.PACKAGE_DECLARATION :
+			case IJavaElement.PACKAGE_FRAGMENT :
+				searchPattern =
+					createPackagePattern(
+						element.getElementName(),
+						limitTo,
+						EXACT_MATCH,
+						CASE_SENSITIVE);
+				break;
+		}
+		return searchPattern;
+	}
+

@@ -1,0 +1,96 @@
+	/**
+	 * Iterates through the children of a package fragment and adds all visible source element entries to the table.
+	 */
+	protected void getSourceElementEntries(
+		IPackage pkg,
+		IPath path,
+		LookupTable entryTable) {
+		try {
+			IPackageFragmentRoot root = null;
+			IPackageFragment frag = null;
+			boolean isDefault = pkg.isUnnamed();
+			String pkgName =
+				isDefault ? IPackageFragment.DEFAULT_PACKAGE_NAME : pkg.getName();
+			String pkgPath = pkgName.replace('.', '/');
+			if (isZipElement(path)) {
+				IResource member = null;
+				if (!path.isAbsolute()
+					|| getProject().getWorkspace().getRoot().findMember(path) != null) {
+					root = getJavaProject().getPackageFragmentRoot(getFile(path));
+				} else {
+					root = getJavaProject().getPackageFragmentRoot(path.toOSString());
+				}
+				frag = root.getPackageFragment(pkgName);
+			} else {
+				IPackageFragmentRoot[] roots = getPackageFragmentRootsInClassPath();
+				for (int i = 0; i < roots.length; ++i) {
+					IPackageFragmentRoot testRoot = roots[i];
+					if (!testRoot.isArchive()
+						&& testRoot.getUnderlyingResource().getFullPath().isPrefixOf(path)) {
+						root = testRoot;
+						frag = testRoot.getPackageFragment(pkgName);
+						break;
+					}
+				}
+			}
+			boolean isArchive = root.isArchive();
+			if (!isArchive && !root.exists()) {
+				return;
+			}
+			if (isArchive
+				&& root.getUnderlyingResource() != null
+				&& !root.getUnderlyingResource().isLocal(IResource.DEPTH_ZERO)) {
+				return;
+			}
+			if (frag == null || !frag.exists()) {
+				return;
+			}
+			IPath entryPath = null;
+			String zipEntryPath = null;
+			String zipEntryFileName = null;
+			((PackageFragment) frag).refreshChildren();
+			ICompilationUnit[] units = frag.getCompilationUnits();
+			for (int i = 0; i < units.length; ++i) {
+				ICompilationUnit unit = units[i];
+				String fileName = unit.getElementName();
+				/* see if a source entry exists for this file name */
+				if (entryTable.get(fileName) == null) {
+					if (isArchive) {
+						entryPath = path;
+						zipEntryPath = isDefault || pkgPath.length() == 0 ? null : pkgPath;
+						zipEntryFileName = fileName;
+					} else {
+						entryPath = unit.getUnderlyingResource().getFullPath();
+						zipEntryPath = null;
+						zipEntryFileName = null;
+					}
+					SourceEntry sEntry = new SourceEntry(entryPath, zipEntryPath, zipEntryFileName);
+					entryTable.put(fileName, sEntry);
+				}
+			}
+			IClassFile[] classFiles = frag.getClassFiles();
+			for (int i = 0; i < classFiles.length; ++i) {
+				IClassFile classFile = classFiles[i];
+				String fileName = classFile.getElementName();
+				/* see if a source entry exists for this file name */
+				if (entryTable.get(fileName) == null) {
+					if (isArchive) {
+						entryPath = path;
+						zipEntryPath = isDefault || pkgPath.length() == 0 ? null : pkgPath;
+						zipEntryFileName = fileName;
+					} else {
+						if (!classFile.getUnderlyingResource().isLocal(IResource.DEPTH_ZERO))
+							continue;
+						entryPath = classFile.getUnderlyingResource().getFullPath();
+						zipEntryPath = null;
+						zipEntryFileName = null;
+					}
+					SourceEntry sEntry = new SourceEntry(entryPath, zipEntryPath, zipEntryFileName);
+					entryTable.put(fileName, sEntry);
+				}
+			}
+		} catch (JavaModelException e) {
+			throw internalException(e);
+		}
+	}
+

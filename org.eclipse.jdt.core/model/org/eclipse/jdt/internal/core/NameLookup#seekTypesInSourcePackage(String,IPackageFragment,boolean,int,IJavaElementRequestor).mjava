@@ -1,0 +1,65 @@
+	/**
+	 * Performs type search in a source package.
+	 */
+	protected void seekTypesInSourcePackage(
+		String name,
+		IPackageFragment pkg,
+		boolean partialMatch,
+		int acceptFlags,
+		IJavaElementRequestor requestor) {
+		ICompilationUnit[] compilationUnits = null;
+		try {
+			compilationUnits = pkg.getCompilationUnits();
+		} catch (JavaModelException npe) {
+			return; // the package is not present
+		}
+		int length = compilationUnits.length;
+		String matchName = name;
+		int index = name.indexOf('$');
+		boolean memberType = false;
+		if (index != -1) {
+			//the compilation unit name of the inner type
+			matchName = name.substring(0, index);
+			memberType = true;
+		}
+
+		/**
+		 * In the following, matchName will never have the extension ".java" and 
+		 * the compilationUnits always will. So add it if we're looking for 
+		 * an exact match.
+		 */
+		String unitName = partialMatch ? matchName.toLowerCase() : matchName + ".java";
+
+		for (int i = 0; i < length; i++) {
+			if (requestor.isCanceled())
+				return;
+			ICompilationUnit compilationUnit = compilationUnits[i];
+
+			if (nameMatches(unitName, compilationUnit, partialMatch)) {
+				IType[] types = null;
+				try {
+					types = compilationUnit.getTypes();
+				} catch (JavaModelException npe) {
+					continue; // the compilation unit is not present
+				}
+				int typeLength = types.length;
+				for (int j = 0; j < typeLength; j++) {
+					if (requestor.isCanceled())
+						return;
+					IType type = types[j];
+					if (nameMatches(matchName, type, partialMatch)
+						&& acceptType(type, acceptFlags))
+						if (!memberType) {
+							requestor.acceptType(type);
+						} else {
+							seekQualifiedMemberTypes(
+								name.substring(index + 1, name.length()),
+								type,
+								partialMatch,
+								requestor);
+						}
+				}
+			}
+		}
+	}
+

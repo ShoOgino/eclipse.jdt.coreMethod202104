@@ -1,0 +1,100 @@
+	public FlowInfo analyseAssignment(
+		BlockScope currentScope,
+		FlowContext flowContext,
+		FlowInfo flowInfo,
+		Assignment assignment,
+		boolean isCompound) {
+		if (assignment.expression != null) {
+			flowInfo =
+				assignment
+					.expression
+					.analyseCode(currentScope, flowContext, flowInfo)
+					.unconditionalInits();
+		}
+		// determine the rank until which we now we do not need any actual value for the field access
+		int otherBindingsCount = otherBindings == null ? 0 : otherBindings.length;
+		int indexOfFirstValueRequired = otherBindingsCount;
+		while (indexOfFirstValueRequired > 0) {
+			FieldBinding otherBinding = otherBindings[indexOfFirstValueRequired - 1];
+			if (otherBinding.isStatic())
+				break; // no longer need any value before this point
+			indexOfFirstValueRequired--;
+		}
+
+		FieldBinding lastFieldBinding = null;
+		if ((bits & FIELD) != 0) {
+			// reading from a field
+			// check if final blank field
+			if ((lastFieldBinding = (FieldBinding) binding).isFinal()
+				&& currentScope.allowBlankFinalFieldAssignment(lastFieldBinding)) {
+				if (!flowInfo.isDefinitelyAssigned(lastFieldBinding)) {
+					currentScope.problemReporter().uninitializedBlankFinalField(
+						lastFieldBinding,
+						this);
+				}
+			}
+		} else {
+			if ((bits & LOCAL) != 0) {
+				// first binding is a local variable
+				LocalVariableBinding localBinding;
+				if (!flowInfo
+					.isDefinitelyAssigned(localBinding = (LocalVariableBinding) binding)) {
+					currentScope.problemReporter().uninitializedLocalVariable(localBinding, this);
+				}
+				if (!flowInfo.isFakeReachable())
+					localBinding.used = true;
+			}
+		}
+		if (indexOfFirstValueRequired == 0) {
+			manageEnclosingInstanceAccessIfNecessary(currentScope);
+			// only for first binding
+		}
+		// all intermediate field accesses are read accesses
+		if (otherBindings != null) {
+			int start = indexOfFirstValueRequired == 0 ? 0 : indexOfFirstValueRequired - 1;
+			for (int i = start; i < otherBindingsCount; i++) {
+				if (lastFieldBinding != null) { // could be null if first was a local variable
+					manageSyntheticReadAccessIfNecessary(currentScope, lastFieldBinding, i);
+				}
+				lastFieldBinding = otherBindings[i];
+			}
+		}
+		if (isCompound) {
+			if (binding == lastFieldBinding
+				&& currentScope.allowBlankFinalFieldAssignment(lastFieldBinding)
+				&& (!flowInfo.isDefinitelyAssigned(lastFieldBinding))) {
+				currentScope.problemReporter().uninitializedBlankFinalField(
+					lastFieldBinding,
+					this);
+			}
+			manageSyntheticReadAccessIfNecessary(
+				currentScope,
+				lastFieldBinding,
+				binding == lastFieldBinding ? 0 : otherBindings.length);
+		}
+		// the last field access is a write access
+		if (lastFieldBinding.isFinal()) {
+			// in a context where it can be assigned?
+			if (currentScope.allowBlankFinalFieldAssignment(lastFieldBinding)) {
+				if (flowInfo.isPotentiallyAssigned(lastFieldBinding)) {
+					if (indexOfFirstFieldBinding == 1) {
+						// was an implicit reference to the first field binding
+						currentScope.problemReporter().duplicateInitializationOfBlankFinalField(
+							lastFieldBinding,
+							this);
+					} else {
+						currentScope.problemReporter().cannotAssignToFinalField(lastFieldBinding, this);
+						// attempting to assign a non implicit reference
+					}
+				}
+				flowInfo.markAsDefinitelyAssigned(lastFieldBinding);
+				flowContext.recordSettingFinal(lastFieldBinding, this);
+			} else {
+				currentScope.problemReporter().cannotAssignToFinalField(lastFieldBinding, this);
+			}
+		}
+		// equivalent to valuesRequired[maxOtherBindings]
+		manageSyntheticWriteAccessIfNecessary(currentScope, lastFieldBinding);
+		return flowInfo;
+	}
+

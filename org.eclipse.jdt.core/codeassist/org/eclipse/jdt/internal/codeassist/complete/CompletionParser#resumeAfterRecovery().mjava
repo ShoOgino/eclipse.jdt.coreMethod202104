@@ -1,0 +1,58 @@
+	/*
+	 * Reset context so as to resume to regular parse loop
+	 * If unable to reset for resuming, answers false.
+	 *
+	 * Move checkpoint location, reset internal stacks and
+	 * decide which grammar goal is activated.
+	 */
+	protected boolean resumeAfterRecovery() {
+
+		if (this.assistNode != null) {
+			// if an assist node has been found and a recovered element exists,
+			// mark enclosing blocks as to be preserved
+			if (this.currentElement != null) {
+				currentElement.preserveEnclosingBlocks();
+			}
+			/* if reached [eof] inside method body, but still inside nested type,
+				or inside a field initializer, should continue in diet mode until 
+				the end of the method body or compilation unit */
+			if ((scanner.eofPosition == cursorLocation + 1)
+				&& (!(referenceContext instanceof CompilationUnitDeclaration)
+					|| insideFieldInitializer())) {
+
+				/*	disabled since does not handle possible field/message refs, i.e. Obj[ASSIST HERE]ect.registerNatives()		    
+				// consume extra tokens which were part of the qualified reference
+				//   so that the replaced source comprises them as well 
+				if (this.assistNode instanceof NameReference){
+					int oldEof = scanner.eofPosition;
+					scanner.eofPosition = currentElement.topElement().sourceEnd()+1;
+					scanner.currentPosition = this.cursorLocation+1;
+					int token = -1;
+					try {
+						do {
+							// first token might not have to be a dot
+							if (token >= 0 || !this.completionBehindDot){
+								if ((token = scanner.getNextToken()) != TokenNameDOT) break;
+							}
+							if ((token = scanner.getNextToken()) != TokenNameIdentifier) break;
+							this.assistNode.sourceEnd = scanner.currentPosition - 1;
+						} while (token != TokenNameEOF);
+					} catch (InvalidInputException e){
+					} finally {
+						scanner.eofPosition = oldEof;
+					}
+				}
+				*/
+				/* restart in diet mode for finding sibling constructs */
+				if (currentElement.enclosingType() != null) {
+					lastCheckPoint = this.assistNode.sourceEnd + 1;
+					scanner.eofPosition = currentElement.topElement().sourceEnd() + 1;
+				} else {
+					this.resetStacks();
+					return false;
+				}
+			}
+		}
+		return super.resumeAfterRecovery();
+	}
+

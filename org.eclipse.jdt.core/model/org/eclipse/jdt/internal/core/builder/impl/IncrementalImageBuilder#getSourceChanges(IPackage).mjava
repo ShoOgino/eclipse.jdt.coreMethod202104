@@ -1,0 +1,45 @@
+	/**
+	 * Returns a set of paths of files which are changing in the given package.
+	 */
+	protected Dictionary getSourceChanges(IPackage pkgHandle) {
+		Dictionary set = new Hashtable(30);
+
+		/* do for each fragment of this package */
+		IPath[] newFrags = fNewState.getPackageMap().getFragments(pkgHandle);
+		for (int i = 0; i < newFrags.length; i++) {
+			IPath fragPath = newFrags[i];
+
+			/* find the JCUs for this package */
+			IResourceDelta[] fileDeltas = null;
+			for (Enumeration e = fChangedPkgOrZips.elements(); e.hasMoreElements();) {
+				IResourceDelta pkgDelta = (IResourceDelta) e.nextElement();
+				if (pkgDelta.getFullPath().equals(fragPath)) {
+					/* A zip file is changing.  Don't bother optimizing this case -- too complex. */
+					if (!fNewState.isZipElement(fragPath)) {
+						fileDeltas = pkgDelta.getAffectedChildren(IResourceDelta.CHANGED);
+					}
+					break;
+				}
+			}
+			if (fileDeltas != null) {
+				/* do for each changed file in this fragment */
+				for (int j = 0; j < fileDeltas.length; j++) {
+					IResourceDelta fileDelta = fileDeltas[j];
+					// See 1FVSC75: ITPJCORE:ALL - SCENARIO B1 - Builder should check F_CONTENT on changed files
+					if (fileDelta.getKind() == IResourceDelta.CHANGED
+						&& (fileDelta.getFlags() & IResourceDelta.CONTENT) != 0) {
+						IPath path = fileDelta.getFullPath();
+
+						/* skip non-java resources */
+						String extension = path.getFileExtension();
+						if (extension != null
+							&& (extension.equalsIgnoreCase("java") || extension.equalsIgnoreCase("class"))) {
+							set.put(path, path);
+						}
+					}
+				}
+			}
+		}
+		return set;
+	}
+

@@ -1,0 +1,69 @@
+	// count how many times this constructor is referenced from other local constructors
+	public void analyseCode(
+		ClassScope classScope,
+		InitializationFlowContext initializerFlowContext,
+		FlowInfo flowInfo) {
+		if (ignoreFurtherInvestigation)
+			return;
+		try {
+			ExceptionHandlingFlowContext constructorContext =
+				new ExceptionHandlingFlowContext(
+					initializerFlowContext.parent,
+					this,
+					binding.thrownExceptions,
+					scope,
+					FlowInfo.DeadEnd);
+			initializerFlowContext.checkInitializerExceptions(
+				scope,
+				constructorContext,
+				flowInfo);
+
+			// propagate to constructor call
+			if (constructorCall != null) {
+				// if calling 'this(...)', then flag all non-static fields as definitely
+				// set since they are supposed to be set inside other local constructor
+				if (constructorCall.accessMode == ExplicitConstructorCall.This) {
+					FieldBinding[] fields = binding.declaringClass.fields();
+					for (int i = 0, count = fields.length; i < count; i++) {
+						FieldBinding field;
+						if (!(field = fields[i]).isStatic()) {
+							flowInfo.markAsDefinitelyAssigned(field);
+						}
+					}
+				}
+				flowInfo = constructorCall.analyseCode(scope, constructorContext, flowInfo);
+			}
+			// propagate to statements
+			if (statements != null) {
+				for (int i = 0, count = statements.length; i < count; i++) {
+					Statement stat;
+					if (!flowInfo.complainIfUnreachable((stat = statements[i]), scope)) {
+						flowInfo = stat.analyseCode(scope, constructorContext, flowInfo);
+					}
+				}
+			}
+			// check for missing returning path
+			needFreeReturn =
+				!((flowInfo == FlowInfo.DeadEnd) || flowInfo.isFakeReachable());
+
+			// check missing blank final field initializations
+			if ((constructorCall != null)
+				&& (constructorCall.accessMode != ExplicitConstructorCall.This)) {
+				flowInfo = flowInfo.mergedWith(initializerFlowContext.initsOnReturn);
+				FieldBinding[] fields = binding.declaringClass.fields();
+				for (int i = 0, count = fields.length; i < count; i++) {
+					FieldBinding field;
+					if ((!(field = fields[i]).isStatic())
+						&& field.isFinal()
+						&& (!flowInfo.isDefinitelyAssigned(fields[i]))) {
+						scope.problemReporter().uninitializedBlankFinalField(
+							field,
+							isDefaultConstructor ? (AstNode) scope.referenceType() : this);
+					}
+				}
+			}
+		} catch (AbortMethod e) {
+			this.ignoreFurtherInvestigation = true;
+		}
+	}
+

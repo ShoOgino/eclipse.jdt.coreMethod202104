@@ -1,0 +1,67 @@
+	protected NameReference getUnspecifiedReference() {
+		/* build a (unspecified) NameReference which may be qualified*/
+
+		int completionIndex;
+
+		/* no need to take action if not inside completed identifiers */
+		if ((completionIndex = indexOfAssistIdentifier()) < 0) {
+			return super.getUnspecifiedReference();
+		}
+
+		int length = identifierLengthStack[identifierLengthPtr];
+		if (CharOperation.equals(assistIdentifier(), SUPER)) {
+			Reference reference;
+			if (completionIndex > 0) { // qualified super
+				// discard 'super' from identifier stacks
+				identifierLengthStack[identifierLengthPtr] = completionIndex;
+				int ptr = identifierPtr -= (length - completionIndex);
+				reference =
+					new SelectionOnQualifiedSuperReference(
+						getTypeReference(0),
+						(int) (identifierPositionStack[ptr + 1] >>> 32),
+						(int) identifierPositionStack[ptr + 1]);
+			} else { // standard super
+				identifierPtr -= length;
+				identifierLengthPtr--;
+				reference =
+					new SelectionOnSuperReference(
+						(int) (identifierPositionStack[identifierPtr + 1] >>> 32),
+						(int) identifierPositionStack[identifierPtr + 1]);
+			}
+			pushOnAstStack(reference);
+			this.assistNode = reference;
+			this.lastCheckPoint = reference.sourceEnd + 1;
+			restartRecovery = true; // force to restart in recovery mode
+			isOrphanCompletionNode = true;
+			return new SingleNameReference(new char[0], 0); // dummy reference
+		}
+		NameReference nameReference;
+		/* retrieve identifiers subset and whole positions, the completion node positions
+			should include the entire replaced source. */
+		char[][] subset = identifierSubSet(completionIndex);
+		identifierLengthPtr--;
+		identifierPtr -= length;
+		long[] positions = new long[length];
+		System.arraycopy(
+			identifierPositionStack,
+			identifierPtr + 1,
+			positions,
+			0,
+			length);
+		/* build specific completion on name reference */
+		if (completionIndex == 0) {
+			/* completion inside first identifier */
+			nameReference =
+				this.createSingleAssistNameReference(assistIdentifier(), positions[0]);
+		} else {
+			/* completion inside subsequent identifier */
+			nameReference =
+				this.createQualifiedAssistNameReference(subset, assistIdentifier(), positions);
+		}
+		assistNode = nameReference;
+		this.lastCheckPoint = nameReference.sourceEnd + 1;
+		isOrphanCompletionNode = true;
+		restartRecovery = true; // force to restart into recovery mode
+		return nameReference;
+	}
+

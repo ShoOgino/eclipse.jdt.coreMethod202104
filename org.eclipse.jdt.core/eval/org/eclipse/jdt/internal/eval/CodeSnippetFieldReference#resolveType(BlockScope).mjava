@@ -1,0 +1,69 @@
+	public TypeBinding resolveType(BlockScope scope) {
+		// Answer the signature type of the field.
+		// constants are propaged when the field is final
+		// and initialized with a (compile time) constant 
+
+		// regular receiver reference 
+		receiverType = receiver.resolveType(scope);
+		if (receiverType == null) {
+			constant = NotAConstant;
+			return null;
+		}
+		// the case receiverType.isArrayType and token = 'length' is handled by the scope API
+		binding = scope.getField(receiverType, token, this);
+		FieldBinding firstAttempt = binding;
+		boolean isNotVisible = false;
+		if (!binding.isValidBinding()) {
+			if (binding instanceof ProblemFieldBinding
+				&& ((ProblemFieldBinding) binding).problemId() == NotVisible) {
+				isNotVisible = true;
+				if (this.evaluationContext.declaringTypeName != null) {
+					delegateThis = scope.getField(scope.enclosingSourceType(), DELEGATE_THIS, this);
+					if (delegateThis == null) {
+						; // if not found then internal error, field should have been found
+						constant = NotAConstant;
+						scope.problemReporter().invalidField(this, receiverType);
+						return null;
+					}
+				} else {
+					constant = NotAConstant;
+					scope.problemReporter().invalidField(this, receiverType);
+					return null;
+				}
+				CodeSnippetScope localScope = new CodeSnippetScope(scope);
+				binding = localScope.getFieldForCodeSnippet(delegateThis.type, token, this);
+			}
+		}
+
+		if (!binding.isValidBinding()) {
+			constant = NotAConstant;
+			if (isNotVisible) {
+				binding = firstAttempt;
+			}
+			scope.problemReporter().invalidField(this, receiverType);
+			return null;
+		}
+
+		if (isFieldUseDeprecated(binding, scope))
+			scope.problemReporter().deprecatedField(binding, this);
+
+		// check for this.x in static is done in the resolution of the receiver
+		constant =
+			FieldReference.getConstantFor(
+				binding,
+				receiver == ThisReference.ThisImplicit,
+				this,
+				0);
+		if (!receiver.isThis())
+			constant = NotAConstant;
+
+		// if the binding declaring class is not visible, need special action
+		// for runtime compatibility on 1.2 VMs : change the declaring class of the binding
+		if (binding.declaringClass != receiverType
+			&& binding.declaringClass != null // array.length
+			&& binding.constant == NotAConstant
+			&& !binding.declaringClass.canBeSeenBy(scope))
+			binding = new FieldBinding(binding, (ReferenceBinding) receiverType);
+		return binding.type;
+	}
+

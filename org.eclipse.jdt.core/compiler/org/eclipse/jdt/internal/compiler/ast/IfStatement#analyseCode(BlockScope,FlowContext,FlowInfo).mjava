@@ -1,0 +1,87 @@
+	public FlowInfo analyseCode(
+		BlockScope currentScope,
+		FlowContext flowContext,
+		FlowInfo flowInfo) {
+		FlowInfo thenFlowInfo, elseFlowInfo;
+
+		// process the condition
+		flowInfo = condition.analyseCode(currentScope, flowContext, flowInfo);
+
+		// process the THEN part
+		if (thenStatement == null) {
+			thenFlowInfo = flowInfo.initsWhenTrue();
+		} else {
+			Constant cst;
+			thenFlowInfo =
+				((((cst = condition.constant) != NotAConstant)
+					&& (cst.booleanValue() == false))
+					|| (((cst = condition.conditionalConstant()) != NotAConstant)
+						&& (cst.booleanValue() == false)))
+					? (flowInfo.initsWhenTrue().copy().markAsFakeReachable(true))
+					: flowInfo.initsWhenTrue().copy();
+			// Save info for code gen
+			thenInitStateIndex =
+				currentScope.methodScope().recordInitializationStates(thenFlowInfo);
+			if (!thenFlowInfo.complainIfUnreachable(thenStatement, currentScope)) {
+				thenFlowInfo =
+					thenStatement.analyseCode(currentScope, flowContext, thenFlowInfo);
+			}
+		};
+		// optimizing the jump around the ELSE part
+		thenExit = (thenFlowInfo == FlowInfo.DeadEnd) || thenFlowInfo.isFakeReachable();
+
+		// process the ELSE part
+		if (elseStatement == null) {
+			elseFlowInfo = flowInfo.initsWhenFalse();
+		} else {
+			Constant cst;
+			elseFlowInfo =
+				((((cst = condition.constant) != NotAConstant) && (cst.booleanValue() == true))
+					|| (((cst = condition.conditionalConstant()) != NotAConstant)
+						&& (cst.booleanValue() == true)))
+					? (flowInfo.initsWhenFalse().copy().markAsFakeReachable(true))
+					: flowInfo.initsWhenFalse().copy();
+			// Save info for code gen
+			elseInitStateIndex =
+				currentScope.methodScope().recordInitializationStates(elseFlowInfo);
+			if (!elseFlowInfo.complainIfUnreachable(elseStatement, currentScope)) {
+				elseFlowInfo =
+					elseStatement.analyseCode(currentScope, flowContext, elseFlowInfo);
+			}
+		}
+
+		// merge THEN & ELSE initializations
+		FlowInfo mergedInfo;
+		if ((condition.constant != NotAConstant)
+			&& (condition.constant.booleanValue() == true)) {
+			if (thenExit) {
+				mergedInfo = elseFlowInfo.markAsFakeReachable(true);
+				mergedInitStateIndex =
+					currentScope.methodScope().recordInitializationStates(mergedInfo);
+				return mergedInfo;
+			} else {
+				mergedInitStateIndex =
+					currentScope.methodScope().recordInitializationStates(thenFlowInfo);
+				return thenFlowInfo;
+			}
+		} else {
+			if ((condition.constant != NotAConstant)
+				&& (condition.constant.booleanValue() == false)) {
+				if (elseFlowInfo.isDeadEnd()) {
+					mergedInfo = thenFlowInfo.markAsFakeReachable(true);
+					mergedInitStateIndex =
+						currentScope.methodScope().recordInitializationStates(mergedInfo);
+					return mergedInfo;
+				} else {
+					mergedInitStateIndex =
+						currentScope.methodScope().recordInitializationStates(elseFlowInfo);
+					return elseFlowInfo;
+				}
+			}
+		}
+		mergedInfo = thenFlowInfo.mergedWith(elseFlowInfo.unconditionalInits());
+		mergedInitStateIndex =
+			currentScope.methodScope().recordInitializationStates(mergedInfo);
+		return mergedInfo;
+	}
+

@@ -1,0 +1,87 @@
+	/* Answer true if the receiver is visible to the type provided by the scope.
+	* InvocationSite implements isSuperAccess() to provide additional information
+	* if the receiver is protected.
+	*
+	* NOTE: Cannot invoke this method with a compilation unit scope.
+	*/
+	public final boolean canBeSeenByForCodeSnippet(
+		MethodBinding methodBinding,
+		TypeBinding receiverType,
+		InvocationSite invocationSite,
+		Scope scope) {
+		if (methodBinding.isPublic())
+			return true;
+
+		ReferenceBinding invocationType = (ReferenceBinding) receiverType;
+		if (invocationType == methodBinding.declaringClass
+			&& invocationType == receiverType)
+			return true;
+
+		if (methodBinding.isProtected()) {
+			// answer true if the invocationType is the declaringClass or they are in the same package
+			// OR the invocationType is a subclass of the declaringClass
+			//    AND the receiverType is the invocationType or its subclass
+			//    OR the method is a static method accessed directly through a type
+			if (invocationType == methodBinding.declaringClass)
+				return true;
+			if (invocationType.fPackage == methodBinding.declaringClass.fPackage)
+				return true;
+			if (methodBinding.declaringClass.isSuperclassOf(invocationType)) {
+				if (invocationSite.isSuperAccess())
+					return true;
+				// receiverType can be an array binding in one case... see if you can change it
+				if (receiverType instanceof ArrayBinding)
+					return false;
+				if (invocationType == receiverType
+					|| invocationType.isSuperclassOf((ReferenceBinding) receiverType))
+					return true;
+				if (methodBinding.isStatic())
+					return true; // see 1FMEPDL - return invocationSite.isTypeAccess();
+			}
+			return false;
+		}
+
+		if (methodBinding.isPrivate()) {
+			// answer true if the receiverType is the declaringClass
+			// AND the invocationType and the declaringClass have a common enclosingType
+			if (receiverType != methodBinding.declaringClass)
+				return false;
+
+			if (invocationType != methodBinding.declaringClass) {
+				ReferenceBinding outerInvocationType = invocationType;
+				ReferenceBinding temp = outerInvocationType.enclosingType();
+				while (temp != null) {
+					outerInvocationType = temp;
+					temp = temp.enclosingType();
+				}
+
+				ReferenceBinding outerDeclaringClass = methodBinding.declaringClass;
+				temp = outerDeclaringClass.enclosingType();
+				while (temp != null) {
+					outerDeclaringClass = temp;
+					temp = temp.enclosingType();
+				}
+				if (outerInvocationType != outerDeclaringClass)
+					return false;
+			}
+			return true;
+		}
+
+		// isDefault()
+		if (invocationType.fPackage != methodBinding.declaringClass.fPackage)
+			return false;
+
+		// receiverType can be an array binding in one case... see if you can change it
+		if (receiverType instanceof ArrayBinding)
+			return false;
+		ReferenceBinding type = (ReferenceBinding) receiverType;
+		PackageBinding declaringPackage = methodBinding.declaringClass.fPackage;
+		do {
+			if (methodBinding.declaringClass == type)
+				return true;
+			if (declaringPackage != type.fPackage)
+				return false;
+		} while ((type = type.superclass()) != null);
+		return false;
+	}
+

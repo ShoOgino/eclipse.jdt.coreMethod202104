@@ -1,0 +1,89 @@
+	public TypeBinding resolveType(BlockScope scope) {
+
+		// use the id of the type to navigate into the table
+		TypeBinding leftTb = left.resolveType(scope);
+		TypeBinding rightTb = right.resolveType(scope);
+		if (leftTb == null || rightTb == null) {
+			constant = Constant.NotAConstant;
+			return null;
+		}
+		int leftId = leftTb.id;
+		int rightId = rightTb.id;
+		if (leftId > 15
+			|| rightId > 15) { // must convert String + Object || Object + String
+			if (leftId == T_String) {
+				rightId = T_Object;
+			} else
+				if (rightId == T_String) {
+					leftId = T_Object;
+				} else {
+					constant = Constant.NotAConstant;
+					scope.problemReporter().invalidOperator(this, leftTb, rightTb);
+					return null;
+				}
+		}
+		if (((bits & OperatorMASK) >> OperatorSHIFT) == PLUS) {
+			if (leftId == T_String
+				&& rightTb.isArrayType()
+				&& ((ArrayBinding) rightTb).elementsType(scope) == CharBinding)
+				scope.problemReporter().signalNoImplicitStringConversionForCharArrayExpression(
+					right);
+			else
+				if (rightId == T_String
+					&& leftTb.isArrayType()
+					&& ((ArrayBinding) leftTb).elementsType(scope) == CharBinding)
+					scope.problemReporter().signalNoImplicitStringConversionForCharArrayExpression(
+						left);
+		}
+
+		// the code is an int
+		// (cast)  left   Op (cast)  rigth --> result
+		//  0000   0000       0000   0000      0000
+		//  <<16   <<12       <<8    <<4       <<0
+
+		// Don't test for result = 0. If it is zero, some more work is done.
+		// On the one hand when it is not zero (correct code) we avoid doing the test	
+		int result =
+			ResolveTypeTables[(bits & OperatorMASK) >> OperatorSHIFT][(leftId << 4)
+				+ rightId];
+		left.implicitConversion = result >>> 12;
+		right.implicitConversion = (result >>> 4) & 0x000FF;
+		TypeBinding type;
+		bits |= result & 0xF;
+		switch (result & 0xF) { // record the current ReturnTypeID
+			// only switch on possible result type.....
+			case T_boolean :
+				type = BooleanBinding;
+				break;
+			case T_byte :
+				type = ByteBinding;
+				break;
+			case T_char :
+				type = CharBinding;
+				break;
+			case T_double :
+				type = DoubleBinding;
+				break;
+			case T_float :
+				type = FloatBinding;
+				break;
+			case T_int :
+				type = IntBinding;
+				break;
+			case T_long :
+				type = LongBinding;
+				break;
+			case T_String :
+				type = scope.getJavaLangString();
+				break;
+			default : //error........
+				constant = Constant.NotAConstant;
+				scope.problemReporter().invalidOperator(this, leftTb, rightTb);
+				return null;
+		}
+
+		// compute the constant when valid
+		computeConstant(scope, leftId, rightId);
+		return type;
+	}
+

@@ -1,0 +1,157 @@
+	/*
+	 * The APIs with an extra argument is used whenever there are two references to the same variable which
+	 * are optimized in one access: e.g "a = a + 1" optimized into "a++".
+	 */
+	public void generateCompoundAssignment(
+		BlockScope currentScope,
+		CodeStream codeStream,
+		MethodBinding writeAccessor,
+		Expression expression,
+		int operator,
+		int assignmentImplicitConversion,
+		boolean valueRequired) {
+		switch (bits & RestrictiveFlagMASK) {
+			case FIELD : // assigning to a field
+				FieldBinding fieldBinding = (FieldBinding) binding;
+				if (fieldBinding.isStatic()) {
+					if (fieldBinding
+						.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
+						codeStream.getstatic(fieldBinding);
+					} else {
+						// used to store the value
+						 ((CodeSnippetCodeStream) codeStream).generateEmulationForField(fieldBinding);
+						codeStream.aconst_null();
+
+						// used to retrieve the actual value
+						codeStream.aconst_null();
+						((CodeSnippetCodeStream) codeStream).generateEmulatedReadAccessForField(
+							fieldBinding);
+					}
+				} else {
+					if (fieldBinding
+						.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
+						if ((bits & DepthMASK) != 0) {
+							Object[] emulationPath =
+								currentScope.getExactEmulationPath(
+									currentScope.enclosingSourceType().enclosingTypeAt(
+										(bits & DepthMASK) >> DepthSHIFT));
+							if (emulationPath == null) {
+								// internal error, per construction we should have found it
+								currentScope.problemReporter().needImplementation();
+							} else {
+								codeStream.generateOuterAccess(emulationPath, this, currentScope);
+							}
+						} else {
+							generateReceiver(codeStream);
+						}
+						codeStream.dup();
+						codeStream.getfield(fieldBinding);
+					} else {
+						if ((bits & DepthMASK) != 0) {
+							// internal error, per construction we should have found it
+							// not yet supported
+							currentScope.problemReporter().needImplementation();
+						}
+						// used to store the value
+						 ((CodeSnippetCodeStream) codeStream).generateEmulationForField(fieldBinding);
+						generateReceiver(codeStream);
+
+						// used to retrieve the actual value
+						codeStream.dup();
+						((CodeSnippetCodeStream) codeStream).generateEmulatedReadAccessForField(
+							fieldBinding);
+					}
+				}
+				break;
+			case LOCAL : // assigning to a local variable (cannot assign to outer local)
+				LocalVariableBinding localBinding = (LocalVariableBinding) binding;
+				Constant assignConstant;
+				int increment;
+				// using incr bytecode if possible
+				switch (localBinding.type.id) {
+					case T_String :
+						codeStream.generateStringAppend(currentScope, this, expression);
+						if (valueRequired) {
+							codeStream.dup();
+						}
+						codeStream.store(localBinding, false);
+						return;
+					case T_int :
+						if (((assignConstant = expression.constant) != NotAConstant)
+							&& ((increment = assignConstant.intValue()) == (short) increment)) {
+							// 16 bits value
+							switch (operator) {
+								case PLUS :
+									codeStream.iinc(localBinding.resolvedPosition, increment);
+									if (valueRequired) {
+										codeStream.load(localBinding);
+									}
+									return;
+								case MINUS :
+									codeStream.iinc(localBinding.resolvedPosition, -increment);
+									if (valueRequired) {
+										codeStream.load(localBinding);
+									}
+									return;
+							}
+						}
+					default :
+						codeStream.load(localBinding);
+				}
+		}
+		// perform the actual compound operation
+		int operationTypeID;
+		if ((operationTypeID = implicitConversion >> 4) == T_String) {
+			codeStream.generateStringAppend(currentScope, null, expression);
+		} else {
+			// promote the array reference to the suitable operation type
+			codeStream.generateImplicitConversion(implicitConversion);
+			// generate the increment value (will by itself  be promoted to the operation value)
+			if (expression == IntLiteral.One) { // prefix operation
+				codeStream.generateConstant(expression.constant, implicitConversion);
+			} else {
+				expression.generateCode(currentScope, codeStream, true);
+			}
+			// perform the operation
+			codeStream.sendOperator(operator, operationTypeID);
+			// cast the value back to the array reference type
+			codeStream.generateImplicitConversion(assignmentImplicitConversion);
+		}
+		// store the result back into the variable
+		switch (bits & RestrictiveFlagMASK) {
+			case FIELD : // assigning to a field
+				FieldBinding fieldBinding = (FieldBinding) binding;
+				if (fieldBinding
+					.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
+					fieldStore(codeStream, (FieldBinding) binding, writeAccessor, valueRequired);
+				} else {
+					// current stack is:
+					// field receiver value
+					if (valueRequired) {
+						if ((fieldBinding.type == LongBinding)
+							|| (fieldBinding.type == DoubleBinding)) {
+							codeStream.dup2_x2();
+						} else {
+							codeStream.dup_x2();
+						}
+					}
+					// current stack is:
+					// value field receiver value				
+					((CodeSnippetCodeStream) codeStream).generateEmulatedWriteAccessForField(
+						fieldBinding);
+				}
+				return;
+			case LOCAL : // assigning to a local variable
+				LocalVariableBinding localBinding = (LocalVariableBinding) binding;
+				if (valueRequired) {
+					if ((localBinding.type == LongBinding)
+						|| (localBinding.type == DoubleBinding)) {
+						codeStream.dup2();
+					} else {
+						codeStream.dup();
+					}
+				}
+				codeStream.store(localBinding, false);
+		}
+	}
+

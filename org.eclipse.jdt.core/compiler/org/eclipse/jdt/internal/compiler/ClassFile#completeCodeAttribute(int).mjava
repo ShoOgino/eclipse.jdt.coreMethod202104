@@ -1,0 +1,318 @@
+	/**
+	 * INTERNAL USE-ONLY
+	 * That method completes the creation of the code attribute by setting
+	 * - the attribute_length
+	 * - max_stack
+	 * - max_locals
+	 * - code_length
+	 * - exception table
+	 * - and debug attributes if necessary.
+	 *
+	 * @param codeStream org.eclipse.jdt.internal.compiler.codegen.CodeStream
+	 * @param codeAttributeOffset <CODE>int</CODE>
+	 */
+	public void completeCodeAttribute(int codeAttributeOffset) {
+		// reinitialize the localContents with the byte modified by the code stream
+		byte[] localContents = contents = codeStream.bCodeStream;
+		int localContentsOffset = codeStream.classFileOffset;
+		// codeAttributeOffset is the position inside localContents byte array before we started to write
+		// any information about the codeAttribute
+		// That means that to write the attribute_length you need to offset by 2 the value of codeAttributeOffset
+		// to get the right position, 6 for the max_stack etc...
+		int contentsLength;
+		int code_length = codeStream.position;
+		if (code_length > 65535) {
+			codeStream.methodDeclaration.scope.problemReporter().bytecodeExceeds64KLimit(
+				codeStream.methodDeclaration);
+		}
+		if (localContentsOffset + 20 >= (contentsLength = localContents.length)) {
+			System.arraycopy(
+				contents,
+				0,
+				(localContents = contents = new byte[contentsLength + INCREMENT_SIZE]),
+				0,
+				contentsLength);
+		}
+		int max_stack = codeStream.stackMax;
+		localContents[codeAttributeOffset + 6] = (byte) (max_stack >> 8);
+		localContents[codeAttributeOffset + 7] = (byte) max_stack;
+		int max_locals = codeStream.maxLocals;
+		localContents[codeAttributeOffset + 8] = (byte) (max_locals >> 8);
+		localContents[codeAttributeOffset + 9] = (byte) max_locals;
+		localContents[codeAttributeOffset + 10] = (byte) (code_length >> 24);
+		localContents[codeAttributeOffset + 11] = (byte) (code_length >> 16);
+		localContents[codeAttributeOffset + 12] = (byte) (code_length >> 8);
+		localContents[codeAttributeOffset + 13] = (byte) code_length;
+
+		// write the exception table
+		int exceptionHandlersNumber = codeStream.exceptionHandlersNumber;
+		ExceptionLabel[] exceptionHandlers = codeStream.exceptionHandlers;
+		int exSize;
+		if (localContentsOffset + (exSize = (exceptionHandlersNumber * 8 + 2))
+			>= (contentsLength = localContents.length)) {
+			System.arraycopy(
+				contents,
+				0,
+				(localContents =
+					contents =
+						new byte[contentsLength + (exSize > INCREMENT_SIZE ? exSize : INCREMENT_SIZE)]),
+				0,
+				contentsLength);
+		}
+		// there is no exception table, so we need to offset by 2 the current offset and move 
+		// on the attribute generation
+		localContents[localContentsOffset++] = (byte) (exceptionHandlersNumber >> 8);
+		localContents[localContentsOffset++] = (byte) exceptionHandlersNumber;
+		for (int i = 0; i < exceptionHandlersNumber; i++) {
+			ExceptionLabel exceptionHandler = exceptionHandlers[i];
+			int start = exceptionHandler.start;
+			localContents[localContentsOffset++] = (byte) (start >> 8);
+			localContents[localContentsOffset++] = (byte) start;
+			int end = exceptionHandler.end;
+			localContents[localContentsOffset++] = (byte) (end >> 8);
+			localContents[localContentsOffset++] = (byte) end;
+			int handlerPC = exceptionHandler.position;
+			localContents[localContentsOffset++] = (byte) (handlerPC >> 8);
+			localContents[localContentsOffset++] = (byte) handlerPC;
+			if (exceptionHandler.exceptionType == null) {
+				// any exception handler
+				localContents[localContentsOffset++] = 0;
+				localContents[localContentsOffset++] = 0;
+			} else {
+				int nameIndex;
+				if (exceptionHandler.exceptionType == TypeBinding.NullBinding) {
+					/* represents ClassNotFoundException, see class literal access*/
+					nameIndex = constantPool.literalIndexForJavaLangClassNotFoundException();
+				} else {
+					nameIndex = constantPool.literalIndex(exceptionHandler.exceptionType);
+				}
+				localContents[localContentsOffset++] = (byte) (nameIndex >> 8);
+				localContents[localContentsOffset++] = (byte) nameIndex;
+			}
+		}
+
+		// debug attributes
+		int codeAttributeAttributeOffset = localContentsOffset;
+		int attributeNumber = 0;
+		// leave two bytes for the attribute_length
+		localContentsOffset += 2;
+
+		// first we handle the linenumber attribute
+		if (codeStream.generateLineNumberAttributes) {
+			/* Create and add the line number attribute (used for debugging) 
+			 * Build the pairs of:
+			 * 	(bytecodePC lineNumber)
+			 * according to the table of start line indexes and the pcToSourceMap table
+			 * contained into the codestream
+			 */
+			/** OLD CODE
+					int[][] pcToSourceMapTable;
+			int previousLineNumber;
+			int[] flatTable;
+			int index;
+			int startLineIndexes[] = codeStream.methodDeclaration.scope.referenceCompilationUnit().compilationResult.lineSeparatorPositions;
+			int max = startLineIndexes.length;
+			*/
+			int[] pcToSourceMapTable;
+			if (((pcToSourceMapTable = codeStream.pcToSourceMap) != null)
+				&& (codeStream.pcToSourceMapSize != 0)) {
+				int lineNumberNameIndex =
+					constantPool.literalIndex(AttributeNamesConstants.LineNumberTableName);
+				if (localContentsOffset + 8 >= (contentsLength = localContents.length)) {
+					System.arraycopy(
+						contents,
+						0,
+						(localContents = contents = new byte[contentsLength + INCREMENT_SIZE]),
+						0,
+						contentsLength);
+				}
+				localContents[localContentsOffset++] = (byte) (lineNumberNameIndex >> 8);
+				localContents[localContentsOffset++] = (byte) lineNumberNameIndex;
+				int lineNumberTableOffset = localContentsOffset;
+				localContentsOffset += 6;
+				// leave space for attribute_length and line_number_table_length
+				/** OLD CODE
+				previousLineNumber = 0;
+				
+				// Seems like do would be better, but this preserves the existing behavior.
+				
+				flatTable = new int[code_length];
+				for (int i = codeStream.pcToSourceMapSize - 1; i >= 0; i--) {
+					// entry contains the following structure:
+					// position 1: startPC
+					// position 2: endPC
+					// position 3: sourceStart
+					// position 4: sourceEnd
+					// Compute the line number for a given source position
+					index = searchLineNumber(startLineIndexes, pcToSourceMapTable[i][2]);
+					for (int j = pcToSourceMapTable[i][0]; j < pcToSourceMapTable[i][1]; j++)
+						flatTable[j] = index;
+				}
+				previousLineNumber = -1;
+				
+				*/
+				int numberOfEntries = 0;
+				int length = codeStream.pcToSourceMapSize;
+				/** OLD CODE
+					int length = flatTable.length;
+							for (int i = 0; i < length; i++) {
+					if (flatTable[i] != previousLineNumber) {
+						previousLineNumber = flatTable[i];
+						// write the entry
+						if (localContentsOffset + 4 >= (contentsLength = localContents.length)) {
+							System.arraycopy(contents, 0, (localContents = contents = new byte[contentsLength + INCREMENT_SIZE]), 0, contentsLength);
+						}
+						localContents[localContentsOffset++] = (byte) (i >> 8);
+						localContents[localContentsOffset++] = (byte) i;
+						localContents[localContentsOffset++] = (byte) (previousLineNumber >> 8);
+						localContents[localContentsOffset++] = (byte) previousLineNumber;
+						numberOfEntries++;
+					}
+				}
+				*/
+				for (int i = 0; i < length;) {
+					// write the entry
+					if (localContentsOffset + 4 >= (contentsLength = localContents.length)) {
+						System.arraycopy(
+							contents,
+							0,
+							(localContents = contents = new byte[contentsLength + INCREMENT_SIZE]),
+							0,
+							contentsLength);
+					}
+					int pc = pcToSourceMapTable[i++];
+					localContents[localContentsOffset++] = (byte) (pc >> 8);
+					localContents[localContentsOffset++] = (byte) pc;
+					int lineNumber = pcToSourceMapTable[i++];
+					localContents[localContentsOffset++] = (byte) (lineNumber >> 8);
+					localContents[localContentsOffset++] = (byte) lineNumber;
+					numberOfEntries++;
+				}
+				// now we change the size of the line number attribute
+				int lineNumberAttr_length = numberOfEntries * 4 + 2;
+				localContents[lineNumberTableOffset++] = (byte) (lineNumberAttr_length >> 24);
+				localContents[lineNumberTableOffset++] = (byte) (lineNumberAttr_length >> 16);
+				localContents[lineNumberTableOffset++] = (byte) (lineNumberAttr_length >> 8);
+				localContents[lineNumberTableOffset++] = (byte) lineNumberAttr_length;
+				localContents[lineNumberTableOffset++] = (byte) (numberOfEntries >> 8);
+				localContents[lineNumberTableOffset++] = (byte) numberOfEntries;
+				attributeNumber++;
+			}
+		}
+
+		// then we do the local variable attribute
+		if (codeStream.generateLocalVariableTableAttributes) {
+			int localVariableTableOffset = localContentsOffset;
+			int numberOfEntries = 0;
+			int localVariableNameIndex =
+				constantPool.literalIndex(AttributeNamesConstants.LocalVariableTableName);
+			if (localContentsOffset + 8 >= (contentsLength = localContents.length)) {
+				System.arraycopy(
+					contents,
+					0,
+					(localContents = contents = new byte[contentsLength + INCREMENT_SIZE]),
+					0,
+					contentsLength);
+			}
+			localContents[localContentsOffset++] = (byte) (localVariableNameIndex >> 8);
+			localContents[localContentsOffset++] = (byte) localVariableNameIndex;
+			localContentsOffset += 6;
+			// leave space for attribute_length and local_variable_table_length
+			int nameIndex;
+			int descriptorIndex;
+			if (!codeStream.methodDeclaration.isStatic()) {
+				numberOfEntries++;
+				if (localContentsOffset + 10 >= (contentsLength = localContents.length)) {
+					System.arraycopy(
+						contents,
+						0,
+						(localContents = contents = new byte[contentsLength + INCREMENT_SIZE]),
+						0,
+						contentsLength);
+				}
+				localContentsOffset += 2; // the startPC for this is always 0
+				localContents[localContentsOffset++] = (byte) (code_length >> 8);
+				localContents[localContentsOffset++] = (byte) code_length;
+				nameIndex = constantPool.literalIndex(QualifiedNamesConstants.This);
+				localContents[localContentsOffset++] = (byte) (nameIndex >> 8);
+				localContents[localContentsOffset++] = (byte) nameIndex;
+				descriptorIndex =
+					constantPool.literalIndex(
+						codeStream.methodDeclaration.binding.declaringClass.signature());
+				localContents[localContentsOffset++] = (byte) (descriptorIndex >> 8);
+				localContents[localContentsOffset++] = (byte) descriptorIndex;
+				localContentsOffset += 2; // the resolved position for this is always 0
+			}
+			for (int i = 0; i < codeStream.allLocalsCounter; i++) {
+				LocalVariableBinding localVariable = codeStream.locals[i];
+				for (int j = 0; j < localVariable.initializationCount; j++) {
+					int startPC = localVariable.initializationPCs[j << 1];
+					int endPC = localVariable.initializationPCs[(j << 1) + 1];
+					if (startPC != endPC) { // only entries for non zero length
+						int currentLength;
+						if (endPC == -1) {
+							localVariable.declaringScope.problemReporter().abortDueToInternalError(
+								"SANITY CHECK: Invalid attribute for local variable "
+									+ new String(localVariable.name),
+								(AstNode) localVariable.declaringScope.methodScope().referenceContext);
+						}
+						if (localContentsOffset + 10 >= (contentsLength = localContents.length)) {
+							System.arraycopy(
+								contents,
+								0,
+								(localContents = contents = new byte[contentsLength + INCREMENT_SIZE]),
+								0,
+								contentsLength);
+						}
+						// now we can safely add the local entry
+						numberOfEntries++;
+						localContents[localContentsOffset++] = (byte) (startPC >> 8);
+						localContents[localContentsOffset++] = (byte) startPC;
+						int length = endPC - startPC;
+						localContents[localContentsOffset++] = (byte) (length >> 8);
+						localContents[localContentsOffset++] = (byte) length;
+						nameIndex = constantPool.literalIndex(localVariable.name);
+						localContents[localContentsOffset++] = (byte) (nameIndex >> 8);
+						localContents[localContentsOffset++] = (byte) nameIndex;
+						descriptorIndex = constantPool.literalIndex(localVariable.type.signature());
+						localContents[localContentsOffset++] = (byte) (descriptorIndex >> 8);
+						localContents[localContentsOffset++] = (byte) descriptorIndex;
+						int resolvedPosition = localVariable.resolvedPosition;
+						localContents[localContentsOffset++] = (byte) (resolvedPosition >> 8);
+						localContents[localContentsOffset++] = (byte) resolvedPosition;
+					}
+				}
+			}
+			int value = numberOfEntries * 10 + 2;
+			localVariableTableOffset += 2;
+			localContents[localVariableTableOffset++] = (byte) (value >> 24);
+			localContents[localVariableTableOffset++] = (byte) (value >> 16);
+			localContents[localVariableTableOffset++] = (byte) (value >> 8);
+			localContents[localVariableTableOffset++] = (byte) value;
+			localContents[localVariableTableOffset++] = (byte) (numberOfEntries >> 8);
+			localContents[localVariableTableOffset] = (byte) numberOfEntries;
+			attributeNumber++;
+		}
+		// update the number of attributes
+		// ensure first that there is enough space available inside the localContents array
+		if (codeAttributeAttributeOffset + 2
+			>= (contentsLength = localContents.length)) {
+			System.arraycopy(
+				contents,
+				0,
+				(localContents = contents = new byte[contentsLength + INCREMENT_SIZE]),
+				0,
+				contentsLength);
+		}
+		localContents[codeAttributeAttributeOffset++] = (byte) (attributeNumber >> 8);
+		localContents[codeAttributeAttributeOffset] = (byte) attributeNumber;
+
+		// update the attribute length
+		int codeAttributeLength = localContentsOffset - (codeAttributeOffset + 6);
+		localContents[codeAttributeOffset + 2] = (byte) (codeAttributeLength >> 24);
+		localContents[codeAttributeOffset + 3] = (byte) (codeAttributeLength >> 16);
+		localContents[codeAttributeOffset + 4] = (byte) (codeAttributeLength >> 8);
+		localContents[codeAttributeOffset + 5] = (byte) codeAttributeLength;
+		contentsOffset = localContentsOffset;
+	}
+

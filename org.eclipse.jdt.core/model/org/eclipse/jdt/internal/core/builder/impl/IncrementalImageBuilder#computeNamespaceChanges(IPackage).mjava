@@ -1,0 +1,110 @@
+	/**
+	 * Computes namespace changes for each added, removed and changed class file or JCU
+	 * in an affected package.
+	 */
+	protected void computeNamespaceChanges(IPackage pkg) {
+
+		/**
+		 * Must remove syntax problems for all source entries in this package
+		 * in the old state, regardless of whether they contributed to the old
+		 * state's namespace.  This must be done before computing the new namespace
+		 * because the computation may reveal new errors that we don't want to remove.
+		 */
+		Hashtable oldTable = new Hashtable(21);
+		SourceEntry[] oldEntries = fOldState.getSourceEntries(pkg);
+		if (oldEntries != null) {
+			for (int i = 0; i < oldEntries.length; i++) {
+				SourceEntry oldEntry = oldEntries[i];
+				fNewState.getProblemReporter().removeSyntaxErrors(oldEntry);
+				oldTable.put(oldEntry.getFileName(), oldEntry);
+			}
+		}
+		Vector vTypeNames = new Vector();
+		SourceEntry[] newEntries = fNewState.getSourceEntries(pkg);
+		if (newEntries != null) {
+			Dictionary sourceChanges = getSourceChanges(pkg);
+			for (int i = 0; i < newEntries.length; ++i) {
+				SourceEntry newEntry = newEntries[i];
+				SourceEntry oldEntry = (SourceEntry) oldTable.remove(newEntry.getFileName());
+				if (oldEntry == null) {
+					/* Added. Issue indictment based only on file name. */
+					vTypeNames.addElement(newEntry.getName());
+				} else {
+					if (!oldEntry.equals(newEntry)
+						|| sourceChanges.get(newEntry.getPath()) != null) {
+						/* Changed. Issue indictments by comparing source types with previously built types. */
+						PackageElement element = new PackageElement(pkg, newEntry);
+						computeNamespaceChanges(element, vTypeNames);
+					}
+				}
+			}
+		}
+		/* Only removed source entries should remain in oldTable now. */
+		for (Enumeration e = oldTable.elements(); e.hasMoreElements();) {
+			SourceEntry oldEntry = (SourceEntry) e.nextElement();
+			/* Removed. Issue indictment based only on file name. */
+			vTypeNames.addElement(oldEntry.getName());
+		}
+		if (vTypeNames.isEmpty()) {
+			return;
+		}
+		IndictmentSet indicts = new IndictmentSet();
+		Hashtable nestedIndictsTable = null;
+		for (Enumeration e = vTypeNames.elements(); e.hasMoreElements();) {
+			String name = (String) e.nextElement();
+			int lastDollar = name.lastIndexOf('$');
+			if (lastDollar == -1) {
+				indicts.add(Indictment.createTypeIndictment(name));
+			} else {
+				// Nested type.  Issue indictments as if containing type was a package.
+				// Dependencies on missing member types look like namespace dependencies on
+				// package with same name as enclosing type.
+				String qualification = name.substring(0, lastDollar);
+				// Convert qualification from $ separated to . separated.
+				// For example if name = "A$B$C", typeName = "C" and qualification = "A.B".
+				qualification = qualification.replace('$', '.');
+				String typeName = name.substring(lastDollar + 1);
+
+				// Issue indictments, not relative to current package.
+				// This catches dependencies on missing types in same package (e.g. ref is A.B).
+				IPackage nestedPkg = fDC.getImage().getPackageHandle(qualification, false);
+				nestedPkg = fNewState.canonicalize(nestedPkg);
+				if (nestedIndictsTable == null) {
+					nestedIndictsTable = new Hashtable(11);
+				}
+				IndictmentSet nestedIndicts = (IndictmentSet) nestedIndictsTable.get(nestedPkg);
+				if (nestedIndicts == null) {
+					nestedIndicts = new IndictmentSet();
+					nestedIndictsTable.put(nestedPkg, nestedIndicts);
+				}
+				nestedIndicts.add(Indictment.createTypeIndictment(typeName));
+
+				// Issue indictments, relative to current package (only if not unnamed package).
+				// This catches dependencies on missing types in other packages (e.g. ref is some.other.pkg.A.B).
+				if (!pkg.isUnnamed()) {
+					nestedPkg =
+						fDC.getImage().getPackageHandle(pkg.getName() + '.' + qualification, false);
+					if (nestedIndictsTable == null) {
+						nestedIndictsTable = new Hashtable(11);
+					}
+					nestedIndicts = (IndictmentSet) nestedIndictsTable.get(nestedPkg);
+					if (nestedIndicts == null) {
+						nestedIndicts = new IndictmentSet();
+						nestedIndictsTable.put(nestedPkg, nestedIndicts);
+					}
+					nestedIndicts.add(Indictment.createTypeIndictment(typeName));
+				}
+			}
+		}
+		if (!indicts.isEmpty()) {
+			issueIndictments(pkg, indicts, false);
+		}
+		if (nestedIndictsTable != null) {
+			for (Enumeration e = nestedIndictsTable.keys(); e.hasMoreElements();) {
+				IPackage nestedPkg = (IPackage) e.nextElement();
+				IndictmentSet nestedIndicts = (IndictmentSet) nestedIndictsTable.get(nestedPkg);
+				issueIndictments(pkg, nestedIndicts, false);
+			}
+		}
+	}
+

@@ -1,0 +1,134 @@
+	/**
+	 * INTERNAL USE-ONLY
+	 * Generate the byte for a problem method info that correspond to a boggus method.
+	 *
+	 * @param method org.eclipse.jdt.internal.compiler.ast.AbstractMethodDeclaration
+	 * @param methodBinding org.eclipse.jdt.internal.compiler.nameloopkup.MethodBinding
+	 * @param problem org.eclipse.jdt.internal.compiler.problem.Problem[]
+	 */
+	public void addProblemMethod(
+		AbstractMethodDeclaration method,
+		MethodBinding methodBinding,
+		IProblem[] problems) {
+		if (methodBinding.isAbstract() && methodBinding.declaringClass.isInterface()) {
+			method.abort(AbstractMethodDeclaration.AbortType);
+		}
+		// always clear the strictfp/native/abstract bit for a problem method
+		methodBinding.modifiers &= ~(AccStrictfp | AccNative | AccAbstract);
+
+		generateMethodInfoHeader(methodBinding);
+		// leave two spaces for the number of attributes
+		int attributeOffset = contentsOffset;
+		contentsOffset += 2;
+		ReferenceBinding[] thrownsExceptions;
+		int attributeNumber = 0;
+		int contentsLength;
+
+		if ((thrownsExceptions = methodBinding.thrownExceptions) != NoExceptions) {
+			// The method has a throw clause. So we need to add an exception attribute
+			// check that there is enough space to write all the bytes for the exception attribute
+			int length = thrownsExceptions.length;
+			if (contentsOffset + (8 + length * 2) >= (contentsLength = contents.length)) {
+				System.arraycopy(
+					contents,
+					0,
+					(contents =
+						new byte[contentsLength + Math.max(INCREMENT_SIZE, (8 + length * 2))]),
+					0,
+					contentsLength);
+			}
+			int exceptionNameIndex =
+				constantPool.literalIndex(AttributeNamesConstants.ExceptionsName);
+			contents[contentsOffset++] = (byte) (exceptionNameIndex >> 8);
+			contents[contentsOffset++] = (byte) exceptionNameIndex;
+			// The attribute length = length * 2 + 2 in case of a exception attribute
+			int attributeLength = length * 2 + 2;
+			contents[contentsOffset++] = (byte) (attributeLength >> 24);
+			contents[contentsOffset++] = (byte) (attributeLength >> 16);
+			contents[contentsOffset++] = (byte) (attributeLength >> 8);
+			contents[contentsOffset++] = (byte) attributeLength;
+			contents[contentsOffset++] = (byte) (length >> 8);
+			contents[contentsOffset++] = (byte) length;
+			for (int i = 0; i < length; i++) {
+				int exceptionIndex = constantPool.literalIndex(thrownsExceptions[i]);
+				contents[contentsOffset++] = (byte) (exceptionIndex >> 8);
+				contents[contentsOffset++] = (byte) exceptionIndex;
+			}
+			attributeNumber++;
+		}
+
+		// Deprecated attribute
+		// Check that there is enough space to write the deprecated attribute
+		if (contentsOffset + 6 >= (contentsLength = contents.length)) {
+			System.arraycopy(
+				contents,
+				0,
+				(contents = new byte[contentsLength + INCREMENT_SIZE]),
+				0,
+				contentsLength);
+		}
+		if (methodBinding.isDeprecated()) {
+			int deprecatedAttributeNameIndex =
+				constantPool.literalIndex(AttributeNamesConstants.DeprecatedName);
+			contents[contentsOffset++] = (byte) (deprecatedAttributeNameIndex >> 8);
+			contents[contentsOffset++] = (byte) deprecatedAttributeNameIndex;
+			// the length of a deprecated attribute is equals to 0
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+
+			attributeNumber++;
+		}
+
+		int codeAttributeOffset = contentsOffset;
+		generateCodeAttributeHeader();
+		final ProblemReporter problemReporter = method.scope.problemReporter();
+		codeStream.reset(method, this);
+		String problemString = "";
+		if (problems != null) {
+			int max = problems.length;
+			StringBuffer buffer = new StringBuffer(25);
+			int count = 0;
+			for (int i = 0; i < max; i++) {
+				IProblem problem = problems[i];
+				if ((problem != null)
+					&& (problem.isError())
+					&& (problem.getSourceStart() >= method.declarationSourceStart)
+					&& (problem.getSourceEnd() <= method.declarationSourceEnd)) {
+					buffer.append("\t" + problem.getMessage() + "\n");
+					count++;
+					if (problemLine == 0) {
+						problemLine = problem.getSourceLineNumber();
+					}
+					problems[i] = null;
+				}
+			} // insert the top line afterwards, once knowing how many problems we have to consider
+			if (count > 1) {
+				buffer.insert(0, "Unresolved compilation problems: \n");
+			} else {
+				buffer.insert(0, "Unresolved compilation problem: \n");
+			}
+			problemString = buffer.toString();
+		}
+
+		// return codeStream.generateCodeAttributeForProblemMethod(comp.options.runtimeExceptionNameForCompileError, "")
+		int[] exceptionHandler =
+			codeStream.generateCodeAttributeForProblemMethod(
+				problemReporter.options.runtimeExceptionNameForCompileError,
+				problemString);
+		attributeNumber++; // code attribute
+		completeCodeAttributeForProblemMethod(
+			method,
+			methodBinding,
+			codeAttributeOffset,
+			exceptionHandler,
+			((SourceTypeBinding) methodBinding.declaringClass)
+				.scope
+				.referenceCompilationUnit()
+				.compilationResult
+				.lineSeparatorPositions);
+		contents[attributeOffset++] = (byte) (attributeNumber >> 8);
+		contents[attributeOffset] = (byte) attributeNumber;
+	}
+

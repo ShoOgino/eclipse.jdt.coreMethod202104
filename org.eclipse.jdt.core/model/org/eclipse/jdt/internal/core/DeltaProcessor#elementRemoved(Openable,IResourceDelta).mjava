@@ -1,0 +1,53 @@
+/**
+ * Generic processing for a removed element:<ul>
+ * <li>Close the element, removing its structure from the cache
+ * <li>Remove the element from its parent's cache of children
+ * <li>Add a REMOVED entry in the delta
+ * </ul>
+ * When a package fragment root is removed, and it is on its project's classpath,
+ * the classpath entry is marked to be removed when delta translation it done.
+ * We postpone removing the classpath entry until delta translation is complete
+ * so the factory can still translate resources into JavaElements for resources
+ * which are children of the root. The delta for the removed mark is also annotated
+ * with the F_REMOVED_FROM_CLASSPATH change flag.
+ */
+protected void elementRemoved(Openable element, IResourceDelta delta) {
+	close(element);
+	removeFromParentInfo(element);
+	fCurrentDelta.removed(element);
+
+	switch(element.getElementType()){
+		case IJavaElement.JAVA_PROJECT :
+			JavaModelManager.getJavaModelManager().removePerProjectInfo((JavaProject) element);
+			break;
+		case IJavaElement.PACKAGE_FRAGMENT_ROOT :
+			// when a root on the classpath is removed, the classpath must be updated
+			if (isOnClasspath(element)) {
+				rootRemoved((IPackageFragmentRoot)element);
+				JavaElementDelta rootDelta = fCurrentDelta.find(element);
+				rootDelta.setFlags(rootDelta.getFlags() | IJavaElementDelta.F_REMOVED_FROM_CLASSPATH);
+				//1G1TW2T - get rid of namelookup since it holds onto obsolete cached info 
+				JavaProject project = (JavaProject)element.getJavaProject();
+				try {
+					project.getJavaProjectElementInfo().setNameLookup(null);
+				} catch(JavaModelException e){
+				}				
+			}
+			break;
+		case IJavaElement.PACKAGE_FRAGMENT :
+			//1G1TW2T - get rid of namelookup since it holds onto obsolete cached info 
+			if (isOnClasspath(element)) {
+				JavaProject project = (JavaProject)element.getJavaProject();
+				try {
+					project.getJavaProjectElementInfo().setNameLookup(null);
+				} catch(JavaModelException e){
+				}
+			}
+			break;
+		case IJavaElement.JAVA_MODEL:
+			element.getJavaModelManager().getIndexManager().reset();
+			element.getJavaModelManager().fModelInfo = null;
+			break;
+	}
+}
+

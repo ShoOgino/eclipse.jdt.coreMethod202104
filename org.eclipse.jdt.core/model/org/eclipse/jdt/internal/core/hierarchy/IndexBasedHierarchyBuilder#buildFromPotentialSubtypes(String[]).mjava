@@ -1,0 +1,95 @@
+	/**
+	 * Configure this type hierarchy based on the given potential subtypes.
+	 */
+	private void buildFromPotentialSubtypes(String[] allPotentialSubTypes) {
+		// sort by projects
+		/*
+		 * NOTE: To workaround pb with hierarchy resolver that requests top  
+		 * level types in the process of caching an enclosing type, this needs to
+		 * be sorted in reverse alphabetical order so that top level types are cached
+		 * before their inner types.
+		 */
+		Util.sortReverseOrder(allPotentialSubTypes);
+
+		Vector infos = new Vector();
+		Vector units = new Vector();
+
+		IType focusType = this.getType();
+
+		// create element infos for subtypes
+		JavaModelManager manager = JavaModelManager.getJavaModelManager();
+		IWorkspace workspace = focusType.getJavaProject().getProject().getWorkspace();
+		HandleFactory factory = new HandleFactory(workspace.getRoot(), manager);
+		IJavaProject currentProject = null;
+		for (int i = 0, length = allPotentialSubTypes.length; i < length; i++) {
+			try {
+				String resourcePath = allPotentialSubTypes[i];
+				Openable handle = factory.createOpenable(resourcePath);
+				if (handle == null)
+					continue; // match is outside classpath
+				IJavaProject project = handle.getJavaProject();
+				if (currentProject == null) {
+					currentProject = project;
+					infos = new Vector(5);
+					units = new Vector(5);
+				} else
+					if (!currentProject.equals(project)) {
+						this.buildForProject((JavaProject) currentProject, infos, units);
+						currentProject = project;
+						infos = new Vector(5);
+						units = new Vector(5);
+					}
+				if (handle.isOpen()) {
+					// reuse the info from the java model cache
+					if (handle instanceof CompilationUnit) {
+						this.addInfoFromOpenCU((CompilationUnit) handle, infos);
+					} else
+						if (handle instanceof ClassFile) {
+							this.addInfoFromOpenClassFile((ClassFile) handle, infos);
+						}
+				} else {
+					HierarchyBinaryType binaryType =
+						(HierarchyBinaryType) binariesFromIndexMatches.get(resourcePath);
+					if (binaryType != null) {
+						this.addInfoFromBinaryIndexMatch(handle, binaryType, infos);
+					} else {
+						// create a temporary info
+						IJavaElement pkg = handle.getParent();
+						PackageFragmentRoot root = (PackageFragmentRoot) pkg.getParent();
+						if (root.isArchive()) {
+							// class file in a jar
+							this.createInfoFromClassFileInJar(handle, infos);
+						} else {
+							// file in a directory
+							IPath path = new Path(resourcePath);
+							IFile file = workspace.getRoot().getFile(path);
+							String osPath = file.getLocation().toOSString();
+							if (handle instanceof CompilationUnit) {
+								// compilation unit in a directory
+								this.createCompilationUnitFromPath(handle, osPath, units);
+							} else
+								if (handle instanceof ClassFile) {
+									// class file in a directory
+									this.createInfoFromClassFile(handle, osPath, infos);
+								}
+						}
+					}
+				}
+				worked(1);
+			} catch (JavaModelException e) {
+				continue;
+			}
+		}
+		try {
+			if (currentProject == null)
+				currentProject = focusType.getJavaProject(); // case of no potential subtypes
+			this.buildForProject((JavaProject) currentProject, infos, units);
+		} catch (JavaModelException e) {
+		}
+
+		// Add focus if not already in (case of a type with no explicit super type)
+		if (!this.hierarchy.contains(focusType)) {
+			this.hierarchy.addRootClass(focusType);
+		}
+	}
+

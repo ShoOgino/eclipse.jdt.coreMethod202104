@@ -1,0 +1,71 @@
+	/**
+	 * Internal updating of a variable value (null path meaning removal).
+	 */
+	private static void updateVariableValue(
+		String variableName,
+		IPath path,
+		IProgressMonitor monitor)
+		throws JavaModelException {
+
+		// gather classpath information for updating
+		Hashtable affectedProjects = new Hashtable(5);
+		JavaModelManager manager = JavaModelManager.getJavaModelManager();
+		try {
+			IJavaModel model = manager.getJavaModel();
+			if (model != null) {
+				IJavaProject[] projects = model.getJavaProjects();
+				nextProject : for (int i = 0, max = projects.length; i < max; i++) {
+					IClasspathEntry[] entries = projects[i].getRawClasspath();
+					for (int j = 0, cplength = entries.length; j < cplength; j++) {
+						IClasspathEntry oldEntry = entries[j];
+						if (oldEntry.getEntryKind() == IClasspathEntry.CPE_VARIABLE) {
+							IPath sourcePath, sourceRootPath;
+							if (oldEntry.getPath().segment(0).equals(variableName)
+								|| ((sourcePath = oldEntry.getSourceAttachmentPath()) != null
+									&& sourcePath.segment(0).equals(variableName))
+								|| ((sourceRootPath = oldEntry.getSourceAttachmentRootPath()) != null
+									&& sourceRootPath.segment(0).equals(variableName))) {
+								affectedProjects.put(projects[i], projects[i].getResolvedClasspath(true));
+								continue nextProject;
+							}
+						}
+					}
+				}
+			}
+		} catch (JavaModelException e) {
+		}
+
+		if (path == null) {
+			Variables.remove(variableName);
+		} else {
+			// new variable value is assigned
+			Variables.put(variableName, path);
+		}
+
+		if (!affectedProjects.isEmpty()) {
+			boolean wasFiring = manager.isFiring();
+			try {
+				if (wasFiring)
+					manager.stopDeltas();
+				// propagate classpath change
+				Enumeration projectsToUpdate = affectedProjects.keys();
+				while (projectsToUpdate.hasMoreElements()) {
+					JavaProject project = (JavaProject) projectsToUpdate.nextElement();
+					project
+						.setRawClasspath(
+							project.getRawClasspath(),
+							monitor,
+							project.getWorkspace().isAutoBuilding(),
+					// force build if in auto build mode
+					 (IClasspathEntry[]) affectedProjects.get(project));
+				}
+			} finally {
+				manager.mergeDeltas();
+				if (wasFiring) {
+					manager.startDeltas();
+					manager.fire();
+				}
+			}
+		}
+	}
+

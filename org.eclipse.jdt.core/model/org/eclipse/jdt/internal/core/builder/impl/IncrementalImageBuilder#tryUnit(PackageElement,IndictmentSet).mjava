@@ -1,0 +1,58 @@
+	/**
+	 * Conducts a trial on a single compilation unit.  Returns true if the unit
+	 * is guilty.  The sentence is compilation without possibility of parole.
+	 */
+	protected boolean tryUnit(PackageElement unit, IndictmentSet indictments) {
+
+		/* innocent unless proven guilty */
+		final boolean GUILTY = true, INNOCENT = false;
+
+		/* quick test to see if there's no indictments */
+		if (indictments.isEmpty()) {
+			return INNOCENT;
+		}
+
+		/* automatically guilty if there is an upstream hierarchy change */
+		if (indictments.hasHierarchyIndictment()) {
+			return GUILTY;
+		}
+
+		/* gather the evidence */
+		ReferenceInfo evidence = fNewState.getReferencesForPackageElement(unit);
+
+		/* Unable to index unit, convict and let compiler try it */
+		if (evidence == null) {
+			return GUILTY;
+		}
+		if (indictments.tryAllEvidence(evidence)) {
+			return GUILTY;
+		}
+
+		/**
+		 * If a subtype of the originator of a method indictment redefines
+		 * the method for which there is an indictment, it must be recompiled.
+		 */
+		if (tryMethodDeclarations(unit, indictments)) {
+			return GUILTY;
+		}
+
+		/**
+		 * If this type is a subtype of the originator of an abstract method
+		 * indictment, it may need to be recompiled.
+		 */
+		if (tryAbstractMethodIndictments(unit, indictments)) {
+			return GUILTY;
+		}
+
+		/**
+		 * If there have been changes to constructors in the direct superclass,
+		 * it must be recompiled.
+		 */
+		if (tryZeroArgConstructorInSuperclass(unit, indictments)) {
+			return GUILTY;
+		}
+
+		/* evidence is exhausted and unit has not been convicted */
+		return INNOCENT;
+	}
+

@@ -1,0 +1,51 @@
+	public FlowInfo analyseCode(
+		BlockScope currentScope,
+		FlowContext flowContext,
+		FlowInfo flowInfo) {
+		flowInfo = testExpression.analyseCode(currentScope, flowContext, flowInfo);
+		SwitchFlowContext switchContext =
+			new SwitchFlowContext(flowContext, this, (breakLabel = new Label()));
+
+		// analyse the block by considering specially the case/default statements (need to bind them 
+		// to the entry point)
+		FlowInfo caseInits = FlowInfo.DeadEnd;
+		// in case of statements before the first case
+		preSwitchInitStateIndex =
+			currentScope.methodScope().recordInitializationStates(flowInfo);
+		int caseIndex = 0;
+		if (statements != null) {
+			for (int i = 0, max = statements.length; i < max; i++) {
+				Statement statement = statements[i];
+				if ((caseIndex < caseCount)
+					&& (statement == cases[caseIndex])) {
+					// statements[i] is a case or a default case
+					caseIndex++;
+					caseInits = caseInits.mergedWith(flowInfo.copy().unconditionalInits());
+				} else {
+					if (statement == defaultCase) {
+						caseInits = caseInits.mergedWith(flowInfo.copy().unconditionalInits());
+					}
+				}
+				if (!caseInits.complainIfUnreachable(statement, scope)) {
+					caseInits = statement.analyseCode(scope, switchContext, caseInits);
+				}
+			}
+		}
+
+		// if no default case, then record it may jump over the block directly to the end
+		if (defaultCase == null) {
+			// only retain the potential initializations
+			flowInfo.addPotentialInitializationsFrom(
+				caseInits.mergedWith(switchContext.initsOnBreak));
+			mergedInitStateIndex =
+				currentScope.methodScope().recordInitializationStates(flowInfo);
+			return flowInfo;
+		}
+
+		// merge all branches inits
+		FlowInfo mergedInfo = caseInits.mergedWith(switchContext.initsOnBreak);
+		mergedInitStateIndex =
+			currentScope.methodScope().recordInitializationStates(mergedInfo);
+		return mergedInfo;
+	}
+

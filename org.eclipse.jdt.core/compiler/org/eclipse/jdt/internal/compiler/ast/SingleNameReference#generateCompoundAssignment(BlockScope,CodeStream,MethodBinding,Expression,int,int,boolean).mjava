@@ -1,0 +1,117 @@
+	/*
+	 * The APIs with an extra argument is used whenever there are two references to the same variable which
+	 * are optimized in one access: e.g "a = a + 1" optimized into "a++".
+	 */
+	public void generateCompoundAssignment(
+		BlockScope currentScope,
+		CodeStream codeStream,
+		MethodBinding writeAccessor,
+		Expression expression,
+		int operator,
+		int assignmentImplicitConversion,
+		boolean valueRequired) {
+		switch (bits & RestrictiveFlagMASK) {
+			case FIELD : // assigning to a field
+				FieldBinding fieldBinding;
+				if ((fieldBinding = (FieldBinding) binding).isStatic()) {
+					if ((syntheticAccessors == null) || (syntheticAccessors[READ] == null)) {
+						codeStream.getstatic(fieldBinding);
+					} else {
+						codeStream.invokestatic(syntheticAccessors[READ]);
+					}
+				} else {
+					if ((bits & DepthMASK) != 0) {
+						Object[] emulationPath =
+							currentScope.getExactEmulationPath(
+								currentScope.enclosingSourceType().enclosingTypeAt(
+									(bits & DepthMASK) >> DepthSHIFT));
+						if (emulationPath == null) {
+							// internal error, per construction we should have found it
+							currentScope.problemReporter().needImplementation();
+						} else {
+							codeStream.generateOuterAccess(emulationPath, this, currentScope);
+						}
+					} else {
+						codeStream.aload_0();
+					}
+					codeStream.dup();
+					if ((syntheticAccessors == null) || (syntheticAccessors[READ] == null)) {
+						codeStream.getfield(fieldBinding);
+					} else {
+						codeStream.invokestatic(syntheticAccessors[READ]);
+					}
+				}
+				break;
+			case LOCAL : // assigning to a local variable (cannot assign to outer local)
+				LocalVariableBinding localBinding = (LocalVariableBinding) binding;
+				Constant assignConstant;
+				int increment;
+				// using incr bytecode if possible
+				switch (localBinding.type.id) {
+					case T_String :
+						codeStream.generateStringAppend(currentScope, this, expression);
+						if (valueRequired) {
+							codeStream.dup();
+						}
+						codeStream.store(localBinding, false);
+						return;
+					case T_int :
+						if (((assignConstant = expression.constant) != NotAConstant)
+							&& ((increment = assignConstant.intValue()) == (short) increment)) {
+							// 16 bits value
+							switch (operator) {
+								case PLUS :
+									codeStream.iinc(localBinding.resolvedPosition, increment);
+									if (valueRequired) {
+										codeStream.load(localBinding);
+									}
+									return;
+								case MINUS :
+									codeStream.iinc(localBinding.resolvedPosition, -increment);
+									if (valueRequired) {
+										codeStream.load(localBinding);
+									}
+									return;
+							}
+						}
+					default :
+						codeStream.load(localBinding);
+				}
+		}
+		// perform the actual compound operation
+		int operationTypeID;
+		if ((operationTypeID = implicitConversion >> 4) == T_String) {
+			codeStream.generateStringAppend(currentScope, null, expression);
+		} else {
+			// promote the array reference to the suitable operation type
+			codeStream.generateImplicitConversion(implicitConversion);
+			// generate the increment value (will by itself  be promoted to the operation value)
+			if (expression == IntLiteral.One) { // prefix operation
+				codeStream.generateConstant(expression.constant, implicitConversion);
+			} else {
+				expression.generateCode(currentScope, codeStream, true);
+			}
+			// perform the operation
+			codeStream.sendOperator(operator, operationTypeID);
+			// cast the value back to the array reference type
+			codeStream.generateImplicitConversion(assignmentImplicitConversion);
+		}
+		// store the result back into the variable
+		switch (bits & RestrictiveFlagMASK) {
+			case FIELD : // assigning to a field
+				fieldStore(codeStream, (FieldBinding) binding, writeAccessor, valueRequired);
+				return;
+			case LOCAL : // assigning to a local variable
+				LocalVariableBinding localBinding = (LocalVariableBinding) binding;
+				if (valueRequired) {
+					if ((localBinding.type == LongBinding)
+						|| (localBinding.type == DoubleBinding)) {
+						codeStream.dup2();
+					} else {
+						codeStream.dup();
+					}
+				}
+				codeStream.store(localBinding, false);
+		}
+	}
+

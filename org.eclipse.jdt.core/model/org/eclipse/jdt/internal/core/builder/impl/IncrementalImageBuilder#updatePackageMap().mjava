@@ -1,0 +1,116 @@
+	/**
+	 * Updates or rebuilds the package map with the affected package fragments.
+	 * After, the added/removed/changed builder packages are known.
+	 */
+	protected void updatePackageMap() {
+		// Simply rebuild if adding or removing packages, rather than trying to do this
+		// incrementally, which is tricky.  E.g. a package should not really be added if its
+		// project does not appear in the class path.
+		boolean rebuild = hasPackageMapChanges();
+		if (rebuild) {
+			fNewState.buildInitialPackageMap();
+		}
+
+		/* Set of affected package handles */
+		Vector affected = new Vector();
+
+		/* Process changed package fragments (package map not affected). *
+		 * Due to changing class paths, a package which is changing in the source *
+		 * may actually be added / removed rather than changed.  Figure out which. */
+		for (Enumeration e = fChangedPkgOrZips.elements(); e.hasMoreElements();) {
+			IResourceDelta delta = (IResourceDelta) e.nextElement();
+			IPackage[] pkgHandles = null;
+
+			/* Look in the new state only if the package has not been removed */
+			if (delta.getKind() != IResourceDelta.REMOVED) {
+				pkgHandles = fNewState.getPathMap().packageHandlesFromPath(delta.getFullPath());
+				for (int i = 0; i < pkgHandles.length; i++) {
+					if (!affected.contains(pkgHandles[i])) {
+						affected.addElement(pkgHandles[i]);
+					}
+				}
+			}
+			/* Look in the old state only if the package has not been added */
+			if (delta.getKind() != IResourceDelta.ADDED) {
+				pkgHandles = fOldState.getPathMap().packageHandlesFromPath(delta.getFullPath());
+				for (int i = 0; i < pkgHandles.length; i++) {
+					if (!affected.contains(pkgHandles[i])) {
+						affected.addElement(pkgHandles[i]);
+					}
+				}
+			}
+		}
+
+		/* Partition affected packages into added/removed/changed */
+		fAddedPackageHandles = new Vector();
+		fRemovedPackageHandles = new Vector();
+		fChangedPackageHandles = new Vector();
+		PackageMap oldMap = fOldState.getPackageMap();
+		PackageMap newMap = fNewState.getPackageMap();
+		for (Enumeration e = affected.elements(); e.hasMoreElements();) {
+			IPackage pkg = (IPackage) e.nextElement();
+			if (oldMap.containsPackage(pkg)) {
+				if (newMap.containsPackage(pkg)) {
+					fChangedPackageHandles.addElement(pkg);
+				} else {
+					fRemovedPackageHandles.addElement(pkg);
+				}
+			} else {
+				if (newMap.containsPackage(pkg)) {
+					fAddedPackageHandles.addElement(pkg);
+				} else {
+					// This can occur if there are changes to a package
+					// which does not appear in either the old or new class path.
+					// Ignore it.
+				}
+			}
+		}
+
+		/* Check for added/removed/changed packages due to added/removed fragments and/or class path changes */
+		if (rebuild) {
+			for (Enumeration e = oldMap.getAllPackages(); e.hasMoreElements();) {
+				IPackage pkg = (IPackage) e.nextElement();
+				IPath[] newFragments = newMap.getFragments(pkg);
+				if (newFragments == null) {
+					// package has been removed due to class path change;
+					// may also have been removed due to source change
+					if (!fRemovedPackageHandles.contains(pkg)) {
+						fRemovedPackageHandles.addElement(pkg);
+					}
+				} else
+					if (!Util.equalArraysOrNull(oldMap.getFragments(pkg), newFragments)) {
+						// package has changed package fragments due to class path change;
+						// may also have source change
+						if (!fChangedPackageHandles.contains(pkg)) {
+							fChangedPackageHandles.addElement(pkg);
+						}
+					}
+			}
+			for (Enumeration e = newMap.getAllPackages(); e.hasMoreElements();) {
+				IPackage pkg = (IPackage) e.nextElement();
+				if (!oldMap.containsPackage(pkg)) {
+					// package has been added due to class path change;
+					// may also have been added due to source change
+					if (!fAddedPackageHandles.contains(pkg)) {
+						fAddedPackageHandles.addElement(pkg);
+					}
+				}
+			}
+		}
+
+		/* Add all affected packages to fAffectedPackages. */
+		fAffectedPackages = new Hashtable(11);
+		for (Enumeration e = fAddedPackageHandles.elements(); e.hasMoreElements();) {
+			IPackage pkg = (IPackage) e.nextElement();
+			fAffectedPackages.put(pkg, pkg);
+		}
+		for (Enumeration e = fRemovedPackageHandles.elements(); e.hasMoreElements();) {
+			IPackage pkg = (IPackage) e.nextElement();
+			fAffectedPackages.put(pkg, pkg);
+		}
+		for (Enumeration e = fChangedPackageHandles.elements(); e.hasMoreElements();) {
+			IPackage pkg = (IPackage) e.nextElement();
+			fAffectedPackages.put(pkg, pkg);
+		}
+	}
+

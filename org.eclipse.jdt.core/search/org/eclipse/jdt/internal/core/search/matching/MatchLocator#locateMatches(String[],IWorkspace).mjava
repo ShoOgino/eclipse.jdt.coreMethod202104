@@ -1,0 +1,73 @@
+	/**
+	 * Locate the matches in the given files and report them using the search requestor. 
+	 */
+	public void locateMatches(String[] filePaths, IWorkspace workspace)
+		throws JavaModelException {
+		Util.sort(filePaths); // sort by projects
+		JavaModelManager manager = JavaModelManager.getJavaModelManager();
+		HandleFactory factory = new HandleFactory(workspace.getRoot(), manager);
+		JavaProject previousJavaProject = null;
+		int length = filePaths.length;
+		double increment = 100.0 / length;
+		double totalWork = 0;
+		int lastProgress = 0;
+		boolean couldInitializePattern = false;
+		for (int i = 0; i < length; i++) {
+			IProgressMonitor monitor = this.collector.getProgressMonitor();
+			if (monitor != null && monitor.isCanceled()) {
+				throw new OperationCanceledException();
+			}
+			String pathString = filePaths[i];
+			this.currentOpenable = factory.createOpenable(pathString);
+			if (this.currentOpenable == null)
+				continue; // match is outside classpath
+
+			// create new parser and lookup environment if this is a new project
+			try {
+				JavaProject javaProject = (JavaProject) this.currentOpenable.getJavaProject();
+				this.currentResource = this.currentOpenable.getUnderlyingResource();
+				if (this.currentResource == null) { // case of a file in an external jar
+					this.currentResource = javaProject.getProject();
+				}
+				if (!javaProject.equals(previousJavaProject)) {
+					// create parser for this project
+					couldInitializePattern = this.createParser(javaProject);
+					previousJavaProject = javaProject;
+				}
+				if (!couldInitializePattern)
+					continue;
+				// the pattern could not be initialized: the match cannot be in this project
+			} catch (JavaModelException e) {
+				// file doesn't exist -> skip it
+				continue;
+			}
+
+			// locate matches in current file and report them
+			try {
+				if (this.currentOpenable instanceof CompilationUnit) {
+					this.locateMatchesInCompilationUnit();
+				} else
+					if (this.currentOpenable instanceof org.eclipse.jdt.internal.core.ClassFile) {
+						this.locateMatchesInClassFile();
+					}
+			} catch (AbortCompilation e) {
+				// problem with class path: it could not find base classes
+				throw new JavaModelException(
+					e,
+					IJavaModelStatusConstants.BUILDER_INITIALIZATION_ERROR);
+			} catch (CoreException e) {
+				if (e instanceof JavaModelException) {
+					throw (JavaModelException) e;
+				} else {
+					throw new JavaModelException(e);
+				}
+			}
+			if (monitor != null) {
+				totalWork = totalWork + increment;
+				int worked = (int) totalWork - lastProgress;
+				monitor.worked(worked);
+				lastProgress = (int) totalWork;
+			}
+		}
+	}
+

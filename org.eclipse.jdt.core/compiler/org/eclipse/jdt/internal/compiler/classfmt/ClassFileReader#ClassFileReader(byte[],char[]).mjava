@@ -1,0 +1,166 @@
+	/**
+	 * @param classFileBytes actual bytes of a .class file
+	 * @param fileName actual name of the file that contains the bytes, can be null
+	 */
+	public ClassFileReader(byte classFileBytes[], char[] fileName)
+		throws ClassFormatException {
+		// This method looks ugly but is actually quite simple, the constantPool is constructed
+		// in 3 passes.  All non-primitive constant pool members that usually refer to other members
+		// by index are tweaked to have their value in inst vars, this minor cost at read-time makes
+		// all subsequent uses of the constant pool element faster.
+		super(classFileBytes, 0);
+		classFileName = fileName;
+		int readOffset = 10;
+		try {
+			constantPoolCount = this.u2At(8);
+			// Pass #1 - Fill in all primitive constants
+			constantPoolOffsets = new int[constantPoolCount];
+			for (int i = 1; i < constantPoolCount; i++) {
+				int tag = this.u1At(readOffset);
+				switch (tag) {
+					case Utf8Tag :
+						constantPoolOffsets[i] = readOffset;
+						readOffset += u2At(readOffset + 1);
+						readOffset += ConstantUtf8FixedSize;
+						break;
+					case IntegerTag :
+						constantPoolOffsets[i] = readOffset;
+						readOffset += ConstantIntegerFixedSize;
+						break;
+					case FloatTag :
+						constantPoolOffsets[i] = readOffset;
+						readOffset += ConstantFloatFixedSize;
+						break;
+					case LongTag :
+						constantPoolOffsets[i] = readOffset;
+						readOffset += ConstantLongFixedSize;
+						i++;
+						break;
+					case DoubleTag :
+						constantPoolOffsets[i] = readOffset;
+						readOffset += ConstantDoubleFixedSize;
+						i++;
+						break;
+					case ClassTag :
+						constantPoolOffsets[i] = readOffset;
+						readOffset += ConstantClassFixedSize;
+						break;
+					case StringTag :
+						constantPoolOffsets[i] = readOffset;
+						readOffset += ConstantStringFixedSize;
+						break;
+					case FieldRefTag :
+						constantPoolOffsets[i] = readOffset;
+						readOffset += ConstantFieldRefFixedSize;
+						break;
+					case MethodRefTag :
+						constantPoolOffsets[i] = readOffset;
+						readOffset += ConstantMethodRefFixedSize;
+						break;
+					case InterfaceMethodRefTag :
+						constantPoolOffsets[i] = readOffset;
+						readOffset += ConstantInterfaceMethodRefFixedSize;
+						break;
+					case NameAndTypeTag :
+						constantPoolOffsets[i] = readOffset;
+						readOffset += ConstantNameAndTypeFixedSize;
+				}
+			}
+			// Read and validate access flags
+			accessFlags = u2At(readOffset);
+			readOffset += 2;
+
+			// Read the classname, use exception handlers to catch bad format
+			classNameIndex = u2At(readOffset);
+			className = getConstantClassNameAt(classNameIndex);
+			readOffset += 2;
+
+			// Read the superclass name, can be null for java.lang.Object
+			int superclassNameIndex = u2At(readOffset);
+			readOffset += 2;
+			// if superclassNameIndex is equals to 0 there is no need to set a value for the 
+			// field superclassName. null is fine.
+			if (superclassNameIndex != 0) {
+				superclassName = getConstantClassNameAt(superclassNameIndex);
+			}
+
+			// Read the interfaces, use exception handlers to catch bad format
+			interfacesCount = u2At(readOffset);
+			readOffset += 2;
+			if (interfacesCount != 0) {
+				interfaceNames = new char[interfacesCount][];
+				for (int i = 0; i < interfacesCount; i++) {
+					interfaceNames[i] = getConstantClassNameAt(u2At(readOffset));
+					readOffset += 2;
+				}
+			}
+			// Read the fields, use exception handlers to catch bad format
+			fieldsCount = u2At(readOffset);
+			readOffset += 2;
+			if (fieldsCount != 0) {
+				FieldInfo field;
+				fields = new FieldInfo[fieldsCount];
+				for (int i = 0; i < fieldsCount; i++) {
+					field = new FieldInfo(reference, constantPoolOffsets, readOffset);
+					fields[i] = field;
+					readOffset += field.sizeInBytes();
+				}
+			}
+			// Read the methods
+			methodsCount = u2At(readOffset);
+			readOffset += 2;
+			if (methodsCount != 0) {
+				methods = new MethodInfo[methodsCount];
+				MethodInfo method;
+				for (int i = 0; i < methodsCount; i++) {
+					method = new MethodInfo(reference, constantPoolOffsets, readOffset);
+					methods[i] = method;
+					readOffset += method.sizeInBytes();
+				}
+			}
+
+			// Read the attributes
+			int attributesCount = u2At(readOffset);
+			readOffset += 2;
+
+			for (int i = 0; i < attributesCount; i++) {
+				int utf8Offset = constantPoolOffsets[u2At(readOffset)];
+				char[] attributeName = utf8At(utf8Offset + 3, u2At(utf8Offset + 1));
+				if (CharOperation.equals(attributeName, DeprecatedName)) {
+					accessFlags |= AccDeprecated;
+				} else {
+					if (CharOperation.equals(attributeName, InnerClassName)) {
+						int innerOffset = readOffset + 6;
+						int number_of_classes = u2At(innerOffset);
+						if (number_of_classes != 0) {
+							innerInfos = new InnerClassInfo[number_of_classes];
+							for (int j = 0; j < number_of_classes; j++) {
+								innerInfos[j] =
+									new InnerClassInfo(reference, constantPoolOffsets, innerOffset + 2);
+								if (classNameIndex == innerInfos[j].innerClassNameIndex) {
+									innerInfo = innerInfos[j];
+									innerInfoIndex = j;
+								}
+								innerOffset += 8;
+							}
+						}
+					} else {
+						if (CharOperation.equals(attributeName, SourceName)) {
+							utf8Offset = constantPoolOffsets[u2At(readOffset + 6)];
+							sourceFileName = utf8At(utf8Offset + 3, u2At(utf8Offset + 1));
+						} else {
+							if (CharOperation.equals(attributeName, SyntheticName)) {
+								accessFlags |= AccSynthetic;
+							}
+						}
+					}
+				}
+				readOffset += (6 + u4At(readOffset + 2));
+			}
+		} catch (Exception e) {
+			throw new ClassFormatException(
+				ClassFormatException.ErrTruncatedInput,
+				readOffset);
+		}
+	}
+

@@ -1,0 +1,47 @@
+	/**
+	 * NOTE: <code>null</code> specifies default classpath, and an empty
+	 * array specifies an empty classpath.
+	 *
+	 * @exception NotPresentException if this project does not exist.
+	 */
+	protected void setRawClasspath0(IClasspathEntry[] entries) throws JavaModelException {
+		JavaProjectElementInfo info= getJavaProjectElementInfo();
+
+		synchronized(info){
+			if (entries == null) {
+				entries= defaultClasspath();
+			}
+
+			// clear the existing children
+			info.setChildren(new IPackageFragmentRoot[] {});
+			info.setRawClasspath(entries);
+
+			IndexManager indexManager = ((JavaModelManager)JavaModelManager.getJavaModelManager()).getIndexManager();
+			
+			// determine the new children
+			for (int i= 0; i < entries.length; i++) {
+				IClasspathEntry entry= entries[i];
+				IPackageFragmentRoot[] roots= getPackageFragmentRoots(entry);
+				for (int j= 0; j < roots.length; j++) {
+					PackageFragmentRoot root= (PackageFragmentRoot)roots[j];
+					if (root.exists0()){
+						if (root.isArchive()) {
+							IResource rsc= root.getUnderlyingResource();
+							if (rsc == null) {
+								if (indexManager != null) indexManager.indexJarFile(root, getUnderlyingResource().getName());
+							} else {
+								if (indexManager != null) indexManager.indexJarFile((IFile) rsc, getUnderlyingResource().getName());
+							}
+						}
+						info.addChild(roots[j]);
+					}
+				}
+			}
+			// flush namelookup (holds onto caches)
+			info.setNameLookup(null);
+			// See PR 1G8BFWS: ITPJUI:WINNT - internal jar appearing twice in packages view
+			resetNonJavaResourcesForPackageFragmentRoots();
+			((JavaProjectElementInfo) getElementInfo()).setNonJavaResources(null);
+		}
+	}
+
