@@ -1,0 +1,53 @@
+	/**
+	 * Locate the matches amongst the matching openables.
+	 */
+	private void locateMatches(JavaProject previousJavaProject) throws JavaModelException {
+		MatchingOpenable[] openables = this.matchingOpenables.getMatchingOpenables(previousJavaProject.getPackageFragmentRoots());
+	
+		// binding creation
+		for (int i = 0, length = openables.length; i < length; i++) { 
+			openables[i].buildTypeBindings();
+		}
+
+		// binding resolution
+		boolean shouldResolve = true;
+		try {
+			this.lookupEnvironment.completeTypeBindings();
+		} catch (AbortCompilation e) {
+			// problem with class path: it could not find base classes
+			// continue reporting innacurate matches (since bindings will be null)
+			shouldResolve = false;
+		}
+
+		// matching openable resolution
+		for (int i = 0, length = openables.length; i < length; i++) { 
+			IProgressMonitor monitor = this.collector.getProgressMonitor();
+			if (monitor != null && monitor.isCanceled()) {
+				throw new OperationCanceledException();
+			}
+			
+			try {
+				this.currentMatchingOpenable = openables[i];
+				
+				// skip type has it is hidden so not visible
+				if (this.currentMatchingOpenable.hasAlreadyDefinedType()) {
+					continue;
+				}
+				
+				this.currentMatchingOpenable.shouldResolve = shouldResolve;
+				this.currentMatchingOpenable.locateMatches();
+				this.currentMatchingOpenable.reset();
+			} catch (AbortCompilation e) {
+				// problem with class path: it could not find base classes
+				// continue and try next matching openable
+			} catch (CoreException e) {
+				if (e instanceof JavaModelException) {
+					throw (JavaModelException) e;
+				} else {
+					throw new JavaModelException(e);
+				}
+			}
+		}
+		this.currentMatchingOpenable = null;
+	}
+
