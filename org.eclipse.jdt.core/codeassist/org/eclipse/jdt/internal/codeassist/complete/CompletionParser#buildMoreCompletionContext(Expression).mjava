@@ -138,6 +138,78 @@ private void buildMoreCompletionContext(Expression expression) {
 //					assistNodeParent = operatorExpression;
 //				}
 				break nextElement;
+			case K_ARRAY_INITIALIZER :
+				ArrayInitializer arrayInitializer = new ArrayInitializer();
+				arrayInitializer.expressions = new Expression[]{expression};
+				expressionPtr -= expressionLengthStack[expressionLengthPtr--];
+				
+				if(expressionLengthPtr > -1
+					&& expressionPtr > -1
+					&& this.expressionStack[expressionPtr] != null
+					&& this.expressionStack[expressionPtr].sourceStart > info) {
+					expressionLengthPtr--;	
+				}
+					
+				lastCheckPoint = scanner.currentPosition;
+				
+				if(topKnownElementKind(COMPLETION_OR_ASSIST_PARSER, 1) == K_ARRAY_CREATION) {
+					ArrayAllocationExpression allocationExpression = new ArrayAllocationExpression();
+					allocationExpression.type = getTypeReference(0);
+					int length = expressionLengthStack[expressionLengthPtr];
+					allocationExpression.dimensions = new Expression[length];
+
+					allocationExpression.initializer = arrayInitializer;
+					assistNodeParent = allocationExpression;
+				} else if(currentElement instanceof RecoveredField) {
+					RecoveredField recoveredField = (RecoveredField) currentElement;
+					if(recoveredField.fieldDeclaration.type.dimensions() == 0) {
+						Block block = new Block(0);
+						block.sourceStart = info;
+						currentElement = currentElement.add(block, 1);
+					} else {
+						statement = arrayInitializer;
+					}
+				} else if(currentElement instanceof RecoveredLocalVariable) {
+					RecoveredLocalVariable recoveredLocalVariable = (RecoveredLocalVariable) currentElement;
+					if(recoveredLocalVariable.localDeclaration.type.dimensions() == 0) {
+						Block block = new Block(0);
+						block.sourceStart = info;
+						currentElement = currentElement.add(block, 1);
+					} else {
+						statement = arrayInitializer;
+					}
+				} else {
+					statement = arrayInitializer;
+				}
+				break nextElement;
+			case K_ARRAY_CREATION :
+				ArrayAllocationExpression allocationExpression = new ArrayAllocationExpression();
+				allocationExpression.type = getTypeReference(0);
+				allocationExpression.dimensions = new Expression[]{expression};
+				
+				assistNodeParent = allocationExpression;
+				break nextElement;
+			case K_ASSISGNMENT_OPERATOR :
+				if(expressionPtr > 0 && expressionStack[expressionPtr - 1] != null) {
+					Assignment assignment;
+					if(info == EQUAL) {
+						assignment = new Assignment(
+							expressionStack[expressionPtr - 1],
+							expression,
+							expression.sourceEnd
+						);
+					} else {
+						assignment = new CompoundAssignment(
+							expressionStack[expressionPtr - 1],
+							expression,
+							info,
+							expression.sourceEnd
+						);
+					}
+					assistNodeParent = assignment;
+				}
+				break nextElement;
+				
 		}
 	}
 	if(assistNodeParent != null) {
