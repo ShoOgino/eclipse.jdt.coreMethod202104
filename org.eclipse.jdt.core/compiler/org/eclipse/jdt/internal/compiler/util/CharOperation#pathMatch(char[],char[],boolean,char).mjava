@@ -1,0 +1,104 @@
+/**
+ * Path char[] pattern matching, accepting wild-cards '**', '*' and '?'.
+ * Path pattern matching is enhancing regular pattern matching in supporting extra rule where '**' represent
+ * any folder combination.
+ * Special rules: 
+ * - foo\  is equivalent to foo\**   
+ * - *.java is equivalent to **\*.java
+ * When not case sensitive, the pattern is assumed to already be lowercased, the
+ * name will be lowercased character per character as comparing.
+ */
+public static final boolean pathMatch(char[] pattern, char[] filepath, boolean isCaseSensitive, char pathSeparator) {
+
+	if (filepath == null) return false; // null name cannot match
+	if (pattern == null) return true; // null pattern is equivalent to '*'
+
+	// offsets inside pattern
+	int pSegmentStart = 0, pLength = pattern.length;
+	int pSegmentEnd = CharOperation.indexOf(pathSeparator, pattern);
+	if (pSegmentEnd < 0) pSegmentEnd = pLength;
+
+	// offsets inside filepath
+	int fSegmentStart = 0, fLength = filepath.length;
+	int fSegmentEnd = CharOperation.indexOf(pathSeparator, filepath);
+	if (fSegmentEnd < 0) fSegmentEnd = fLength;
+
+	// special case: pattern foo is equivalent to **\foo (not absolute)
+	boolean freeLeadingDoubleStar = pattern[0] != pathSeparator;
+	
+	// special case: pattern foo\ is equivalent to foo\**
+	boolean freeTrailingDoubleStar = pattern[pLength-1] == pathSeparator;
+		
+	// first segments
+	while (pSegmentStart < pLength
+				&& !freeLeadingDoubleStar
+				&& !(pSegmentEnd == pSegmentStart+2
+					&& pattern[pSegmentStart] == '*' 
+					&& pattern[pSegmentStart+1] == '*')) {
+					
+		if (fSegmentStart >= fLength) return false;
+		if (!CharOperation.match(pattern, pSegmentStart, pSegmentEnd, filepath, fSegmentStart, fSegmentEnd, isCaseSensitive)) {
+			return false;
+		}
+
+		// jump to next segment		
+		pSegmentEnd = CharOperation.indexOf(pathSeparator, pattern, pSegmentStart = pSegmentEnd+1); // skip separator
+		if (pSegmentEnd < 0) pSegmentEnd = pLength;
+		
+		fSegmentEnd = CharOperation.indexOf(pathSeparator, filepath, fSegmentStart = fSegmentEnd+1); // skip separator
+		if (fSegmentEnd < 0) fSegmentEnd = fLength;
+	}
+
+	/* check sequence of doubleStar+segment */
+	int pSegmentRestart;
+	if (pSegmentEnd == pSegmentStart+2
+				&& pattern[pSegmentStart] == '*' 
+				&& pattern[pSegmentStart+1] == '*'){
+		pSegmentEnd = CharOperation.indexOf(pathSeparator, pattern, pSegmentStart = pSegmentEnd+1); // skip separator
+		if (pSegmentEnd < 0) pSegmentEnd = pLength;
+		pSegmentRestart = pSegmentStart;
+	} else {
+		pSegmentRestart = 0; // force fSegmentStart check
+	}
+	int fSegmentRestart = fSegmentStart;
+	checkSegment: while (fSegmentStart < fLength && pSegmentStart < pLength){
+		/* segment is ending */
+		if (pSegmentEnd == pSegmentStart+2
+					&& pattern[pSegmentStart] == '*' 
+					&& pattern[pSegmentStart+1] == '*') {
+			pSegmentEnd = CharOperation.indexOf(pathSeparator, pattern, pSegmentStart = pSegmentEnd+1); // skip separator
+			if (pSegmentEnd < 0) pSegmentEnd = pLength;
+			pSegmentRestart = pSegmentStart;
+			fSegmentRestart = fSegmentStart;
+			continue checkSegment;
+		}
+		/* chech current path segment */
+		if (!CharOperation.match(pattern, pSegmentStart, pSegmentEnd, filepath, fSegmentStart, fSegmentEnd, isCaseSensitive)) {
+			// mismatch - restart current segment
+			pSegmentEnd = CharOperation.indexOf(pathSeparator, pattern, pSegmentStart = pSegmentRestart);
+			if (pSegmentEnd < 0) pSegmentEnd = pLength;
+
+			fSegmentRestart = CharOperation.indexOf(pathSeparator, filepath, fSegmentRestart+1); // skip separator
+			if (fSegmentRestart < 0) {
+				fSegmentRestart = fLength;
+			} else {
+				fSegmentRestart++;
+			}
+			fSegmentEnd = CharOperation.indexOf(pathSeparator, filepath, fSegmentStart = fSegmentRestart);
+			if (fSegmentEnd < 0) fSegmentEnd = fLength;
+			continue checkSegment;
+		}
+		// jump to next segment		
+		pSegmentEnd = CharOperation.indexOf(pathSeparator, pattern, pSegmentStart = pSegmentEnd+1); // skip separator
+		if (pSegmentEnd < 0) pSegmentEnd = pLength;
+		
+		fSegmentEnd = CharOperation.indexOf(pathSeparator, filepath, fSegmentStart = fSegmentEnd+1); // skip separator
+		if (fSegmentEnd < 0) fSegmentEnd = fLength;
+	}
+
+	return (pSegmentRestart >= pSegmentEnd)
+				|| (fSegmentStart >= fLength && pSegmentStart >= pLength)	
+				|| (pSegmentStart == pLength - 2 && pattern[pSegmentStart] == '*' && pattern[pSegmentStart+1] == '*')
+				|| (pSegmentStart == pLength &&  freeTrailingDoubleStar); 
+}
+
