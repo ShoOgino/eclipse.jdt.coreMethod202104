@@ -1,0 +1,58 @@
+	/**
+	 * Create handle by adding child to parent obtained by recursing into parent scopes.
+	 */
+	private IJavaElement createElement(Scope scope, int elementPosition, ICompilationUnit unit, HashSet existingElements) {
+		IJavaElement newElement = null;
+	
+		switch(scope.kind) {
+			case Scope.COMPILATION_UNIT_SCOPE :
+				newElement = unit;
+				break;			
+			case Scope.CLASS_SCOPE :
+					IJavaElement parentElement = createElement(scope.parent, elementPosition, unit, existingElements);
+				switch (parentElement.getElementType()) {
+					case IJavaElement.COMPILATION_UNIT :
+						newElement = ((ICompilationUnit)parentElement).getType(new String(scope.enclosingSourceType().sourceName));
+						break;						
+					case IJavaElement.TYPE :
+					case IJavaElement.FIELD :
+					case IJavaElement.INITIALIZER :
+					case IJavaElement.METHOD :
+						newElement = ((IMember)parentElement).getType(new String(scope.enclosingSourceType().sourceName), 1);
+						break;						
+				}
+				break;
+			case Scope.METHOD_SCOPE :
+				IType parentType = (IType) createElement(scope.parent, elementPosition, unit, existingElements);
+				MethodScope methodScope = (MethodScope) scope;
+				if (methodScope.isInsideInitializer()) {
+					// inside field or initializer, must find proper one
+					TypeDeclaration type = methodScope.referenceType();
+					for (int i = 0, length = type.fields.length; i < length; i++) {
+						FieldDeclaration field = type.fields[i];
+						if (field.sourceStart < elementPosition && field.sourceEnd > elementPosition) {
+							if (field.isField()) {
+								newElement = parentType.getField(new String(field.name));
+							} else {
+								newElement = parentType.getInitializer(1);
+							}
+							break;
+						}
+					}
+				} else {
+					// method element
+					AbstractMethodDeclaration method = methodScope.referenceMethod();
+					newElement = parentType.getMethod(new String(method.selector), Util.typeParameterSignatures(method));
+				}
+				break;				
+			case Scope.BLOCK_SCOPE :
+				newElement = createElement(scope.parent, elementPosition, unit, existingElements);
+				break;
+		}
+		// increment occurrence count if collision is detected
+		if (newElement != null) {
+			while (!existingElements.add(newElement)) ((JavaElement)newElement).occurrenceCount++;
+		}
+		return newElement;
+	}
+
