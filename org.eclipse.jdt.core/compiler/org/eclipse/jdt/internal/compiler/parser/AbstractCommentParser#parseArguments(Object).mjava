@@ -1,0 +1,104 @@
+	/*
+	 * Parse argument in @see tag method reference
+	 */
+	private Object parseArguments(Object receiver) throws InvalidInputException {
+
+		// Init
+		int modulo = 0; // should be 2 for (Type,Type,...) or 3 for (Type arg,Type arg,...)
+		int iToken = 0;
+		char[] argName = null;
+		List arguments = new ArrayList(10);
+		
+		// Parse arguments declaration if method reference
+		nextArg : while (this.index < this.scanner.eofPosition) {
+
+			// Read argument type reference
+			Object typeRef;
+			try {
+				typeRef = parseQualifiedName(false);
+			} catch (InvalidInputException e) {
+				break nextArg;
+			}
+			boolean firstArg = modulo == 0;
+			if (firstArg) { // verify position
+				if (iToken != 0)
+					break nextArg;
+			} else if ((iToken % modulo) != 0) {
+					break nextArg;
+			}
+			if (typeRef == null) {
+				if (firstArg && this.currentTokenType == TerminalTokens.TokenNameRPAREN) {
+					return createMethodReference(receiver, null);
+				}
+				break nextArg;
+			}
+			int argEnd = this.scanner.getCurrentTokenEndPosition();
+			iToken++;
+
+			// Read possible array declaration
+			int dim = 0;
+			if (readToken() == TerminalTokens.TokenNameLBRACKET) {
+				while (readToken() == TerminalTokens.TokenNameLBRACKET) {
+					consumeToken();
+					if (readToken() != TerminalTokens.TokenNameRBRACKET) {
+						break nextArg;
+					}
+					consumeToken();
+					dim++;
+				}
+				argEnd = this.scanner.getCurrentTokenEndPosition();
+			}
+
+			// Read argument name
+			if (readToken() == TerminalTokens.TokenNameIdentifier) {
+				consumeToken();
+				if (firstArg) { // verify position
+					if (iToken != 1)
+						break nextArg;
+				} else if ((iToken % modulo) != 1) {
+						break nextArg;
+				}
+				if (argName == null) { // verify that all arguments name are declared
+					if (!firstArg) {
+						break nextArg;
+					}
+				}
+				argName = this.scanner.getCurrentIdentifierSource();
+				argEnd = this.scanner.getCurrentTokenEndPosition();
+				iToken++;
+			} else if (argName != null) { // verify that no argument name is declared
+				break nextArg;
+			}
+			
+			// Verify token position
+			if (firstArg) {
+				modulo = iToken + 1;
+			} else {
+				if ((iToken % modulo) != (modulo - 1)) {
+					break nextArg;
+				}
+			}
+
+			// Read separator or end arguments declaration
+			int token = readToken();
+			char[] name = argName == null ? new char[0] : argName;
+			if (token == TerminalTokens.TokenNameCOMMA) {
+				// Create new argument
+				Object argument = createArgumentReference(name, dim, typeRef, argEnd);
+				arguments.add(argument);
+				consumeToken();
+				iToken++;
+			} else if (token == TerminalTokens.TokenNameRPAREN) {
+				// Create new argument
+				Object argument = createArgumentReference(name, dim, typeRef, argEnd);
+				arguments.add(argument);
+				return createMethodReference(receiver, arguments);
+			} else {
+				break nextArg;
+			}
+		}
+
+		// Something Invalid input: reset ast stacks pointers
+		throw new InvalidInputException();
+	}
+

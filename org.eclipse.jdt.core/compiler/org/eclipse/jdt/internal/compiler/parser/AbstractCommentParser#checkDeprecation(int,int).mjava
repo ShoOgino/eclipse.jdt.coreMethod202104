@@ -1,0 +1,145 @@
+	/* (non-Javadoc)
+	 * Returns true if tag @deprecated is present in javadoc comment.
+	 * 
+	 * If javadoc checking is enabled, will also construct an Javadoc node, which will be stored into Parser.javadoc
+	 * slot for being consumed later on.
+	 */
+	public boolean checkDeprecation(int javadocStart, int javadocEnd) {
+
+		boolean validComment = true;
+		try {
+			// Init
+			this.index = javadocStart +3;
+			this.endComment = javadocEnd - 2;
+			this.astLengthPtr = -1;
+			this.astPtr = -1;
+			this.currentTokenType = -1;
+			this.scanner.resetTo(this.index, this.endComment);
+			this.inlineTagStarted = false;
+			this.lineStarted = false;
+			char nextCharacter= 0, previousChar;
+			int charPosition = -1, inlineStartPosition = 0;
+			this.returnStatement = null;
+			this.inherited = false;
+			this.deprecated = false;
+			initLineEnd();
+			
+			// Loop on each comment character
+			while (this.index < this.endComment) {
+				int previousPosition = this.index;
+				previousChar = nextCharacter;
+				
+				// Calculate line end (cannot use this.scanner.linePtr as scanner does not parse line ends again)
+				if (this.index > this.lineEnd) {
+					updateLineEnd();
+					this.lineStarted = false;
+				}
+				
+				// Read next char only if token was consumed
+				if (this.currentTokenType < 0) {
+					nextCharacter = readChar(); // consider unicodes
+				} else {
+					switch (this.currentTokenType) {
+						case TerminalTokens.TokenNameRBRACE:
+							nextCharacter = '}';
+							break;
+						case TerminalTokens.TokenNameMULTIPLY:
+							nextCharacter = '*';
+							break;
+					default:
+							nextCharacter = this.scanner.currentCharacter;
+					}
+					consumeToken();
+				}
+				
+				switch (nextCharacter) {
+					case '@' :
+						boolean valid = false;
+						// Start tag parsing only if we are on line beginning or at inline tag beginning
+						if (!this.lineStarted || previousChar == '{') {
+							this.lineStarted = true;
+							if (this.inlineTagStarted) {
+								this.inlineTagStarted = false;
+								if (this.sourceParser != null) this.sourceParser.problemReporter().javadocInvalidTag(inlineStartPosition, charPosition);
+								validComment = false;
+							} else {
+								if (previousChar == '{') {
+									this.inlineTagStarted = true;
+								}
+								this.scanner.resetTo(this.index, this.endComment);
+								this.currentTokenType = -1; // flush token cache at line begin
+								try {
+									int tk = readTokenAndConsume();
+									this.tagSourceStart = this.scanner.getCurrentTokenStartPosition();
+									this.tagSourceEnd = this.scanner.getCurrentTokenEndPosition();
+									switch (tk) {
+										case TerminalTokens.TokenNameIdentifier :
+											char[] tag = this.scanner.getCurrentIdentifierSource();
+											if (CharOperation.equals(tag, TAG_DEPRECATED)) {
+												this.deprecated = true;
+												valid = true;
+											} else if (CharOperation.equals(tag, TAG_INHERITDOC)) {
+												this.inherited = true;
+												valid = true;
+											} else if (CharOperation.equals(tag, TAG_PARAM)) {
+												valid = parseParam();
+											} else if (CharOperation.equals(tag, TAG_EXCEPTION)) {
+												valid = parseThrows();
+											} else if (CharOperation.equals(tag, TAG_SEE) ||
+													CharOperation.equals(tag, TAG_LINK) ||
+													CharOperation.equals(tag, TAG_LINKPLAIN)) {
+												valid = parseSee();
+											} else {
+												valid = parseTag();
+											}
+											break;
+										case TerminalTokens.TokenNamereturn :
+											valid = parseReturn();
+											break;
+										case TerminalTokens.TokenNamethrows :
+											valid = parseThrows();
+											break;
+									}
+									if (!valid) {
+										this.inlineTagStarted = false;
+										validComment = false;
+									}
+								} catch (InvalidInputException e) {
+									consumeToken();
+								}
+							}
+						}
+						break;
+					case '\r':
+					case '\n':
+						this.lineStarted = false;
+						break;
+					case '}' :
+						if (this.inlineTagStarted) this.inlineTagStarted = false;
+						this.lineStarted = true;
+						charPosition = previousPosition;
+						break;
+					case '{' :
+						if (this.inlineTagStarted) {
+							this.inlineTagStarted = false;
+							if (this.sourceParser != null) this.sourceParser.problemReporter().javadocInvalidTag(inlineStartPosition, this.index);
+						} else {
+							inlineStartPosition = previousPosition;
+						}
+						break;
+					case '*' :
+						charPosition = previousPosition;
+						break;
+					default :
+						charPosition = previousPosition;
+						if (!this.lineStarted && !CharOperation.isWhitespace(nextCharacter)) {
+							this.lineStarted = true;
+						}
+				}
+			}
+		} finally {
+			updateJavadoc();
+		}
+		return validComment;
+	}
+
