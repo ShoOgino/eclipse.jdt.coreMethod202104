@@ -1,0 +1,44 @@
+/**
+ * Renames the element to the container with optional 
+ * forcing. The operation should succeed, so any exceptions
+ * encountered are thrown.
+ */
+public void renamePositive(IJavaElement[] elements, IJavaElement[] destinations, String[] names, boolean force, boolean originalShouldExist, IProgressMonitor monitor) throws JavaModelException {
+	// if forcing, ensure that a name collision exists
+	int i;
+	if (force) {
+		for (i = 0; i < elements.length; i++) {
+			IJavaElement e = elements[i];
+			IJavaElement collision = generateHandle(e, names[i], e.getParent());
+			assertTrue("Collision does not exist", collision.exists());
+		}
+	}
+
+	// rename
+	getJavaModel().rename(elements, destinations, names, force, monitor);
+	for (i = 0; i < elements.length; i++) {
+		// generate the new element	handle
+		IJavaElement e = elements[i];
+		IJavaElement renamed = generateHandle(e, names[i], e.getParent());
+		assertTrue("Renamed element should exist", renamed.exists());
+		if (!originalShouldExist) {
+			assertTrue("Original element should not exist", !e.exists());
+		}
+		IJavaElementDelta destDelta = getDeltaFor(renamed.getParent());
+		if (isMainType(e, e.getParent())) {
+			assertTrue("Renamed compilation unit as result of main type not added", destDelta != null && destDelta.getKind() == IJavaElementDelta.ADDED);
+			assertTrue("Added children not correct for element copy", destDelta.getElement().equals(renamed.getParent()));
+			assertTrue("flag should be F_MOVED_FROM", (destDelta.getFlags() & IJavaElementDelta.F_MOVED_FROM) > 0);
+			assertTrue("moved from handle should be original", destDelta.getMovedFromElement().equals(e.getParent()));
+		} else {
+			assertTrue("Destination container not changed", destDelta != null && deltaChildrenChanged(destDelta));
+			IJavaElementDelta[] deltas = destDelta.getAddedChildren();
+			assertTrue("Added children not correct for element rename", deltas.length > i && deltas[i].getElement().equals(renamed));
+			assertTrue("kind should be K_ADDED", deltas[i].getKind() == IJavaElementDelta.ADDED);
+			deltas = destDelta.getRemovedChildren();
+			assertTrue("Removed children not correct for element rename", deltas.length > i && deltas[i].getElement().equals(e));
+			assertTrue("kind should be K_REMOVED", deltas[i].getKind() == IJavaElementDelta.REMOVED);
+		}
+	}
+}
+

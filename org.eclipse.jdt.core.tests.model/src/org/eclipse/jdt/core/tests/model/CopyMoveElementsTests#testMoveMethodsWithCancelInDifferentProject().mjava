@@ -1,0 +1,55 @@
+/**
+ * Ensures that a method moves across differnt projects can be cancelled.
+ */
+public void testMoveMethodsWithCancelInDifferentProject() throws CoreException {
+	try {
+		this.createFile(
+			"/P/src/X.java",
+			"public class X {\n" +
+			"  void foo(String s) {\n" +
+			"  }\n" +
+			"  void bar() {\n" +
+			"  }\n" +
+			"}"
+		);
+		final IType typeSource = getCompilationUnit("/P/src/X.java").getType("X");
+	
+		this.createJavaProject("P2", new String[] {"src"}, "bin");
+		this.createFile(
+			"/P2/src/Y.java",
+			"public class Y {\n" +
+			"  void foo(String s) {\n" +
+			"  }\n" +
+			"}"
+		);
+		final IType typeDest = getCompilationUnit("/P2/src/Y.java").getType("Y");
+	
+		final IProgressMonitor monitor = TestProgressMonitor.getInstance();
+		final boolean[] isCanceled = new boolean[] {false};
+		try {
+			Runnable runnable = new Runnable() {
+				public void run() {
+					try {
+						movePositive(typeSource.getMethods(), new IJavaElement[] {typeDest}, null, null, false, monitor);
+					} catch (JavaModelException jme) {
+						assertTrue("Code not correct for JavaModelException: " + jme, false);					
+						return;
+					} catch (OperationCanceledException e) {
+						isCanceled[0] = true;
+						return;
+					}
+				}
+			};
+			Thread runner = new Thread(runnable);
+			runner.setPriority(Thread.MIN_PRIORITY);
+			monitor.setCanceled(true);
+			runner.start();
+			runner.join(5000);
+			assertTrue("Operation should have thrown an operation canceled exception", isCanceled[0]);
+		} catch (InterruptedException ie) {
+		}
+	} finally {
+		this.deleteProject("P2");
+	}
+}
+

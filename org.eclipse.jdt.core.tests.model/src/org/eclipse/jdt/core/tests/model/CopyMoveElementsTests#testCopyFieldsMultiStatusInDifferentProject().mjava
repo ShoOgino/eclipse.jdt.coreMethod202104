@@ -1,0 +1,60 @@
+/**
+ * Ensures that a multi status exception is generated when copying fields.
+ */
+public void testCopyFieldsMultiStatusInDifferentProject() throws CoreException {
+	try {
+		this.createFile(
+			"/P/src/X.java",
+			"public class X {\n" +
+			"  int foo;\n" +
+			"  Object bar;\n" +
+			"  char[] fred;\n" +
+			"}"
+		);
+		IType typeSource = getCompilationUnit("/P/src/X.java").getType("X");
+	
+		this.createJavaProject("P2", new String[] {"src"}, "bin");
+		this.createFile(
+			"/P2/src/Y.java",
+			"public class Y {\n" +
+			"}"
+		);
+		IType typeDest = getCompilationUnit("/P2/src/Y.java").getType("Y");
+	
+		IField[] fieldsSource = typeSource.getFields();
+		IJavaElement[] dests = new IJavaElement[fieldsSource.length];
+		for (int i = 0; i < dests.length; i++) {
+			dests[i] = typeDest;
+		}
+		dests[1] = (IJavaElement)fieldsSource[0]; //invalid destination
+		dests[2]=  (IJavaElement)fieldsSource[0];
+
+		startDeltas();
+		boolean e= false;
+		try {
+			typeDest.getJavaModel().copy(fieldsSource, dests, null, null, false, null);
+		} catch (JavaModelException jme) {
+			assertTrue("Should be multistatus", jme.getStatus().isMultiStatus());
+			assertTrue("Should be an invalid destination", ((IJavaModelStatus)jme.getStatus().getChildren()[0]).getCode()== IJavaModelStatusConstants.INVALID_DESTINATION);
+			e = true;
+		}
+		assertTrue("Should have been an exception", e);
+		
+		assertDeltas(
+			"Unexpected delta",
+			"P2[*]: {CHILDREN}\n" + 
+			"	src[*]: {CHILDREN}\n" + 
+			"		[default][*]: {CHILDREN}\n" + 
+			"			Y.java[*]: {CHILDREN | FINE GRAINED}\n" + 
+			"				Y[*]: {CHILDREN | FINE GRAINED}\n" + 
+			"					foo[+]: {}"
+		);
+
+		IJavaElement copy= generateHandle(fieldsSource[0], null, typeDest);
+		assertTrue("Copy should exist", copy.exists());
+	} finally {
+		stopDeltas();
+		this.deleteProject("P2");
+	}
+}
+
