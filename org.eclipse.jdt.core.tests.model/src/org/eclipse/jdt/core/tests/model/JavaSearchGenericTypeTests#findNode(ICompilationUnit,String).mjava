@@ -1,0 +1,78 @@
+	private ASTNode findNode(ICompilationUnit cu, String selection) throws JavaModelException {
+		class EndVisit extends RuntimeException {
+			private static final long serialVersionUID = 1L;
+		}
+		// Get dom compilation unit
+		ASTParser parser = ASTParser.newParser(AST.JLS3);
+		parser.setSource(cu);
+		parser.setResolveBindings(false);
+
+		// Look for selection
+		final CompilationUnit unit = (CompilationUnit) parser.createAST(null);
+		List comments = unit.getCommentList();
+		Javadoc selectionComment = null;
+		for (int i=0, size=comments.size(); i<size && selectionComment==null; i++) {
+			Comment comment = (Comment) comments.get(i);
+			if (comment.isDocComment()) {
+				Javadoc javadoc = (Javadoc) comment;
+				if (javadoc.tags().size() == 1) {
+					TagElement tagElement = (TagElement) javadoc.tags().get(0);
+					if (tagElement.fragments().size() == 1) {
+						ASTNode node = (ASTNode) tagElement.fragments().get(0);
+						if (node.getNodeType() == ASTNode.TEXT_ELEMENT) {
+							TextElement text = (TextElement) node;
+							if (selection.equals(text.getText())) {
+								selectionComment = javadoc;
+							}
+						}
+					}
+				}
+			}
+		}
+		if (selectionComment == null) {
+			StringBuffer msg = new StringBuffer("No javadoc comment /** ");
+			msg.append(selection);
+			msg.append(" */ was found in ");
+			msg.append(cu.getElementName());
+			msg.append(":\n");
+			msg.append(cu.getBuffer().getCharacters());
+			assertTrue(msg.toString(), false);
+			return null;
+		}
+
+		class Visitor extends ASTVisitor {
+			ASTNode found;
+			Javadoc javadoc;
+			Visitor(Javadoc comment) {
+				this.javadoc = comment;
+			}
+			public void preVisit(ASTNode node) {
+				if (node instanceof CompilationUnit) return;
+				int nodeStart = unit.getExtendedStartPosition(node);
+				int nodeLength = unit.getExtendedLength(node);
+				if ((nodeStart+nodeLength) == this.javadoc.getStartPosition()|| nodeStart == (this.javadoc.getStartPosition()+this.javadoc.getLength())) {
+					this.found = node;
+					throw new EndVisit();
+				}
+			}
+		}
+		
+		// Visit to find node position
+		Visitor visitor = new Visitor(selectionComment);
+		try {
+			unit.accept(visitor);
+		} catch (EndVisit e) {
+			return visitor.found;
+		}
+		StringBuffer msg = new StringBuffer("No node with positions (");
+		msg.append(selectionComment.getStartPosition());
+		msg.append(',');
+		msg.append(selectionComment.getStartPosition()+selectionComment.getLength()-1);
+		msg.append(")  was found in ");
+		msg.append(cu.getElementName());
+		msg.append(":\n");
+		msg.append(cu.getBuffer().getCharacters());
+		assertTrue(msg.toString(), false);
+		return null;
+	}
+
