@@ -1,0 +1,69 @@
+	/**
+	 * Tests the actual Java Model buffer cache to ensure that it fills and empties
+	 * as expected. This test first closes all open buffers to ensure the cache
+	 * is empty.
+	 *
+	 * <p>60 compilation units are opened to fill the cache.
+	 */
+	public void testBufferRecycling() throws CoreException {
+		Enumeration openBuffers= BufferManager.getDefaultBufferManager().getOpenBuffers();
+		while (openBuffers.hasMoreElements()) {
+			IBuffer buf= (IBuffer)openBuffers.nextElement();
+			buf.close();
+		}
+		openBuffers= BufferManager.getDefaultBufferManager().getOpenBuffers();
+		assertTrue("buffer cache not empty", !openBuffers.hasMoreElements());
+		
+		try {
+			createJavaProject("P");
+			for (int i = 0; i < 61; i++) {
+				createFile(
+					"P/X" + i + ".java",
+					"public class X" + i + " {\n" +
+					"}"
+				);
+			}
+			IPackageFragment pkg= getPackage("P");
+			ICompilationUnit[] cus = pkg.getCompilationUnits();
+		
+			// fill the cache - open 60 buffers
+			int max = 60;
+			for (int i= 0; i < max; i++) {
+				cus[i].getBuffer();
+			}
+		
+			// should be 60 buffers now
+			openBuffers= BufferManager.getDefaultBufferManager().getOpenBuffers();
+			int count= 0;
+			while (openBuffers.hasMoreElements()) {
+				openBuffers.nextElement();
+				count++;
+			}
+			assertEquals("incorrect numbers of open buffers (1)", max, count);
+		
+			// open one more buffer should cause the cache to free up 2/3rds of its space
+			// which means 40 buffers will be closed, and 1 will be added (this one),
+			// totalling 21 = 60 - 40 + 1.
+			cus[max].getBuffer();
+			openBuffers= BufferManager.getDefaultBufferManager().getOpenBuffers();
+			count= 0;
+			while (openBuffers.hasMoreElements()) {
+				openBuffers.nextElement();
+				count++;
+			}
+			assertEquals("incorrect numbers of open buffers (2)", 21, count);	
+		
+			//re-opening a previous open buffer should work fine
+			cus[0].getBuffer();
+			openBuffers= BufferManager.getDefaultBufferManager().getOpenBuffers();
+			count= 0;
+			while (openBuffers.hasMoreElements()) {
+				openBuffers.nextElement();
+				count++;
+			}
+			assertEquals("incorrect numbers of open buffers (3)", 22, count);	
+		} finally {
+			deleteProject("P");
+		}
+	}
+

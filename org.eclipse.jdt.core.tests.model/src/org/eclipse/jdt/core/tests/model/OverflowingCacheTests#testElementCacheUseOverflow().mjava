@@ -1,0 +1,46 @@
+	/**
+	 * Creates an empty ElementCache of size 500, inserts 1000 elements.
+	 * Nine of every ten entries cannot be removed - there are 1000 entries,
+	 * leaving 900 entries which can't be closed. Thetable size should equal
+	 * 900 when done with an overflow of 400.
+	 *
+	 * @see #hasUnsavedChanges(int)
+	 */
+	public void testElementCacheUseOverflow() {
+		int spaceLimit = 500;
+		int entryCount = 1000;
+		
+		OverflowingLRUCache cache = new ElementCache(spaceLimit);
+		OverflowingTestOpenable[] openables = new OverflowingTestOpenable[entryCount];
+		for (int i = 0; i < entryCount; i++) {
+			openables[i] = new OverflowingTestOpenable(new OverflowingTestBuffer(hasUnsavedChanges(i), null), cache);
+			cache.put(openables[i], Integer.toString(i));
+		}
+	
+		Hashtable table = cache.getEntryTable();
+		assertEquals("Hashtable wrong size", 900, table.size());	 	
+		int actualCurrent = cache.getCurrentSpace();
+		assertEquals("current space incorrect", 900, actualCurrent);
+		int actualOverflow = cache.getOverflow();
+		assertEquals("overflow space incorrect", 400, actualOverflow);
+		
+		for (int i = entryCount - 1; i >= 0; i--) {
+			if (hasUnsavedChanges(i)) {
+				Object value = cache.get(openables[i]);
+				assertEquals("wrong value (" + i + ")", Integer.toString(i), value);
+			}
+		}
+	
+		// the cache should shrink back to the spaceLimit as we save entries with unsaved changes
+		for (int i= 0; i < entryCount; i++) {
+			openables[i].save(null, false);
+		}
+		// now add another entry to remove saved openables.
+		cache.put(Integer.toString(1001), new OverflowingTestOpenable(new OverflowingTestBuffer(false, null), cache));
+		// now the size should be back to 500, with 0 overflow
+		actualCurrent = cache.getCurrentSpace();
+		assertEquals("current space incorrect (after flush)", 168, actualCurrent);
+		actualOverflow = cache.getOverflow();
+		assertEquals("overflow space incorrect (after flush)", 0, actualOverflow);	
+	}
+

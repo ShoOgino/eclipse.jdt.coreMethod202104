@@ -1,0 +1,54 @@
+	/**
+	 * Creates an empty BufferCache of size 500, inserts 1000 buffers.
+	 * Nine of every ten entries cannot be removed - there are 1000 entries,
+	 * leaving 900 entries which can't be closed. The table size should equal
+	 * 900 when done with an overflow of 400.
+	 *
+	 * @see #hasUnsavedChanges(int)
+	 */
+	public void testBufferCacheUseOverflow() {
+		int spaceLimit = 500;
+		int entryCount = 1000;
+		
+		OverflowingLRUCache cache = new BufferCache(spaceLimit);
+		OverflowingTestOpenable[] openables = new OverflowingTestOpenable[entryCount];
+		OverflowingTestBuffer[] buffers= new OverflowingTestBuffer[entryCount];
+		for (int i = 0; i < entryCount; i++) {
+			boolean hasUnsavedChanges = hasUnsavedChanges(i);
+			buffers[i]= new OverflowingTestBuffer(hasUnsavedChanges, cache);
+			openables[i] = new OverflowingTestOpenable(buffers[i], null);
+			cache.put(openables[i], buffers[i]);
+		}
+	
+		Hashtable table = cache.getEntryTable();
+		assertEquals("Hashtable wrong size", 900, table.size());	 	
+		
+		int actualCurrent = cache.getCurrentSpace();
+		assertEquals("current space incorrect", 900, actualCurrent);
+		
+		int actualOverflow = cache.getOverflow();
+		assertEquals("overflow space incorrect", 400, actualOverflow);
+		
+		for (int i = entryCount - 1; i >= 0; i--) {
+			if (hasUnsavedChanges(i)) {
+				Object value = cache.get(openables[i]);
+				assertEquals("wrong value (" + i + ")", buffers[i], value);
+			}
+		}
+	
+		// the cache should shrink back to the spaceLimit as we save entries with unsaved changes
+		for (int i= 0; i < entryCount; i++) {
+			buffers[i].save(null, false);
+		}
+		// now add another entry to remove saved openables.
+		OverflowingTestBuffer buffer1= new OverflowingTestBuffer(false, cache);
+		IOpenable openable1= new OverflowingTestOpenable(buffer1, null);
+		cache.put(openable1, buffer1);
+		
+		// now the size should be back to 168, with 0 overflow
+		actualCurrent = cache.getCurrentSpace();
+		assertEquals("current space incorrect (after flush)", 168, actualCurrent);
+		actualOverflow = cache.getOverflow();
+		assertEquals("overflow space incorrect (after flush)", 0, actualOverflow);	
+	}
+
