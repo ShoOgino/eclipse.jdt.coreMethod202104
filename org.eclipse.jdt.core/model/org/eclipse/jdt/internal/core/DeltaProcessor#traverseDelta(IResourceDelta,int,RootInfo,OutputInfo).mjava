@@ -1,0 +1,147 @@
+	/**
+	 * Converts an <code>IResourceDelta</code> and its children into
+	 * the corresponding <code>IJavaElementDelta</code>s.
+	 * Return whether the delta corresponds to a resource on the classpath.
+	 * If it is not a resource on the classpath, it will be added as a non-java
+	 * resource by the sender of this method.
+	 */
+	protected boolean traverseDelta(
+		IResourceDelta delta, 
+		int elementType, 
+		RootInfo rootInfo,
+		OutputInfo outputInfo) {
+			
+		IResource res = delta.getResource();
+	
+		// set stack of elements
+		if (this.currentElement == null && rootInfo != null) {
+			this.currentElement = (Openable)rootInfo.project;
+		}
+		
+		// process current delta
+		boolean processChildren = true;
+		if (rootInfo != null || res instanceof IProject) {
+			processChildren = this.updateCurrentDeltaAndIndex(delta, elementType, rootInfo);
+		} else {
+			// not yet inside a package fragment root
+			processChildren = true;
+		}
+		
+		// get the project's output location and traverse mode
+		if (outputInfo == null) outputInfo = this.outputInfo(rootInfo, res);
+	
+		// process children if needed
+		if (processChildren) {
+			IResourceDelta[] children = delta.getAffectedChildren();
+			boolean oneChildOnClasspath = false;
+			int length = children.length;
+			IResourceDelta[] orphanChildren = new IResourceDelta[length];
+			Openable parent = null;
+			boolean isValidParent = true;
+			for (int i = 0; i < length; i++) {
+				IResourceDelta child = children[i];
+				IResource childRes = child.getResource();
+	
+				// check source attachment change
+				this.checkSourceAttachmentChange(child, childRes);
+				
+				// find out whether the child is a package fragment root of the current project
+				IPath childPath = childRes.getFullPath();
+				RootInfo childInfo = rootInfo == null ? (RootInfo)this.roots.get(childPath) : null;
+				if (childInfo != null && !childInfo.project.getProject().getFullPath().isPrefixOf(childPath)) {
+					// package fragment root of another project (dealt with later)
+					childInfo = null;
+				}
+				
+				// compute child type
+				int childType = 
+					this.elementType(
+						childRes, 
+						child.getKind(),
+						child.getFlags(),
+						elementType, 
+						rootInfo == null ? childInfo : rootInfo
+					);
+						
+				// are changes in output location filtered out ?
+				boolean outputIsFiltered = this.isOutputFiltered(outputInfo, childRes, childType);
+				
+				// traverse delta for child in the same project
+				if (!outputIsFiltered) {
+					if (childType == -1
+						|| !this.traverseDelta(child, childType, rootInfo == null ? childInfo : rootInfo, outputInfo)) {
+						try {
+							if (rootInfo != null) {
+								if (!isValidParent) continue; 
+								if (parent == null) {
+									if (this.currentElement == null 
+											|| !this.currentElement.getJavaProject().equals(rootInfo.project)) {
+										// force the currentProject to be used
+										this.currentElement = (Openable)rootInfo.project;
+									}
+									if (elementType == IJavaElement.JAVA_PROJECT
+										|| (elementType == IJavaElement.PACKAGE_FRAGMENT_ROOT 
+											&& res instanceof IProject)) { 
+										// NB: attach non-java resource to project (not to its package fragment root)
+										parent = (Openable)rootInfo.project;
+									} else {
+										parent = this.createElement(res, elementType, rootInfo);
+									}
+									if (parent == null) {
+										isValidParent = false;
+										continue;
+									}
+								}
+								// add child as non java resource
+								nonJavaResourcesChanged(parent, child);
+							} else {
+								orphanChildren[i] = child;
+							}
+						} catch (JavaModelException e) {
+						}
+					} else {
+						oneChildOnClasspath = true;
+					}
+				}
+								
+				// if child was not a package fragment root of the current project
+				// but it is a package fragment root of another project, traverse delta too
+				if (childInfo == null && (childInfo = (RootInfo)this.roots.get(childPath)) != null) {
+					this.traverseDelta(child, IJavaElement.PACKAGE_FRAGMENT_ROOT, childInfo, null); // binary output of childInfo.project cannot be this root
+					// NB: No need to check the return value as the child can only be on the classpath
+				}
+	
+				// if the child is a package fragment root of one or several other projects
+				ArrayList rootList;
+				if ((rootList = (ArrayList)this.otherRoots.get(childPath)) != null) {
+					Iterator iterator = rootList.iterator();
+					while (iterator.hasNext()) {
+						childInfo = (RootInfo) iterator.next();
+						this.traverseDelta(child, IJavaElement.PACKAGE_FRAGMENT_ROOT, childInfo, null); // binary output of childInfo.project cannot be this root
+					}
+				}
+			}
+			if (oneChildOnClasspath || res instanceof IProject) {
+				// add orphan children (case of non java resources under project)
+				IProject rscProject = res.getProject();
+				JavaProject adoptiveProject = (JavaProject)JavaCore.create(rscProject);
+				if (adoptiveProject != null 
+					&& this.hasJavaNature(rscProject)) { // delta iff Java project (18698)
+					for (int i = 0; i < length; i++) {
+						if (orphanChildren[i] != null) {
+							try {
+								nonJavaResourcesChanged(adoptiveProject, orphanChildren[i]);
+							} catch (JavaModelException e) {
+							}
+						}
+					}
+				}
+			} // else resource delta will be added by parent
+			return isValidParent && (rootInfo != null || oneChildOnClasspath);
+		} else {
+			// if not on classpath or if the element type is -1, 
+			// it's a non-java resource
+			return rootInfo != null && elementType != -1;
+		}
+	}
+
