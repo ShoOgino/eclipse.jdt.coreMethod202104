@@ -1,0 +1,82 @@
+	/*
+	 * Check whether the updated file is affecting some of the properties of a given project (like
+	 * its classpath persisted as a file).
+	 * Also force classpath problems to be refresh if not running in autobuild mode.
+	 * NOTE: It can induce resource changes, and cannot be called during POST_CHANGE notification.
+	 *
+	 */
+	private void performPreBuildCheck(IResourceDelta delta, Map preferredClasspaths, Map preferredOutputs) {
+		IResource resource = delta.getResource();
+		boolean processChildren = false;
+		
+		switch (resource.getType()) {
+	
+			case IResource.ROOT :
+				if (delta.getKind() == IResourceDelta.CHANGED) {
+					processChildren = true;
+				}
+				break;
+			case IResource.PROJECT :
+				IProject project = (IProject)resource;
+				int kind = delta.getKind();
+				boolean isJavaProject = JavaProject.hasJavaNature(project);
+				switch (kind) {
+					case IResourceDelta.ADDED:
+						processChildren = isJavaProject;
+						this.rootsToRefresh.add(project.getFullPath());
+						break;
+					case IResourceDelta.CHANGED:
+						processChildren = isJavaProject;
+						if ((delta.getFlags() & IResourceDelta.OPEN) != 0) {
+							// project opened or closed: remember  project and its dependents
+							this.rootsToRefresh.add(project.getFullPath());
+							if (isJavaProject) {
+								JavaProject javaProject = (JavaProject)JavaCore.create(project);
+								javaProject.updateClasspathMarkers(preferredClasspaths, preferredOutputs); // in case .classpath got modified while closed
+							}
+						} else if ((delta.getFlags() & IResourceDelta.DESCRIPTION) != 0) {
+							if (!JavaProject.hasJavaNature(project)) {
+								// project no longer has Java nature, discard Java related obsolete markers
+								JavaProject javaProject = (JavaProject)JavaCore.create(project);
+								this.rootsToRefresh.add(project.getFullPath());
+								// flush classpath markers
+								javaProject.
+									flushClasspathProblemMarkers(
+										true, // flush cycle markers
+										true  //flush classpath format markers
+									);
+									
+								// remove problems and tasks created  by the builder
+								JavaBuilder.removeProblemsAndTasksFor(project);
+							}
+						}
+						break;
+					case IResourceDelta.REMOVED:
+						this.rootsToRefresh.add(project.getFullPath());
+						break;
+				}
+				break;
+			case IResource.FILE :
+				/* check classpath file change */
+				IFile file = (IFile) resource;
+				if (file.getName().equals(JavaProject.CLASSPATH_FILENAME)) {
+					this.rootsToRefresh.add(file.getProject().getFullPath());
+					JavaProject javaProject = (JavaProject)JavaCore.create(file.getProject());
+					javaProject.updateClasspathMarkers(preferredClasspaths, preferredOutputs);
+					break;
+				}
+//				/* check custom preference file change */
+//				if (file.getName().equals(JavaProject.PREF_FILENAME)) {
+//					reconcilePreferenceFileUpdate(delta, file, project);
+//					break;
+//				}
+				break;
+		}
+		if (processChildren) {
+			IResourceDelta[] children = delta.getAffectedChildren();
+			for (int i = 0; i < children.length; i++) {
+				performPreBuildCheck(children[i], preferredClasspaths, preferredOutputs);
+			}
+		}
+	}
+

@@ -7,6 +7,8 @@
 	 */
 	private void checkProjectsBeingAddedOrRemoved(IResourceDelta delta) {
 		IResource resource = delta.getResource();
+		boolean processChildren = false;
+
 		switch (resource.getType()) {
 			case IResource.ROOT :
 				// workaround for bug 15168 circular errors not reported 
@@ -17,96 +19,107 @@
 						// java model doesn't exist: never happens
 					}
 				}
-				
-				IResourceDelta[] children = delta.getAffectedChildren();
-				for (int i = 0, length = children.length; i < length; i++) {
-					this.checkProjectsBeingAddedOrRemoved(children[i]);
-				}
+				processChildren = true;
 				break;
 			case IResource.PROJECT :
 				// NB: No need to check project's nature as if the project is not a java project:
 				//     - if the project is added or changed this is a noop for projectsBeingDeleted
 				//     - if the project is closed, it has already lost its java nature
-				int deltaKind = delta.getKind();
-				if (deltaKind == IResourceDelta.ADDED) {
-					// remember project and its dependents
-					IProject project = (IProject)resource;
-					JavaProject javaProject = (JavaProject)JavaCore.create(project);
-					this.addToRootsToRefreshWithDependents(javaProject);
-					
-					// workaround for bug 15168 circular errors not reported 
-					if (JavaProject.hasJavaNature(project)) {
-						this.addToParentInfo(javaProject);
-					}
-
-				} else if (deltaKind == IResourceDelta.CHANGED) {
-					IProject project = (IProject)resource;
-					if ((delta.getFlags() & IResourceDelta.OPEN) != 0) {
-						// project opened or closed: remember  project and its dependents
+				switch (delta.getKind()) {
+					case IResourceDelta.ADDED :
+						// remember project and its dependents
+						IProject project = (IProject)resource;
 						JavaProject javaProject = (JavaProject)JavaCore.create(project);
 						this.addToRootsToRefreshWithDependents(javaProject);
+						// workaround for bug 15168 circular errors not reported 
+						if (JavaProject.hasJavaNature(project)) {
+							this.addToParentInfo(javaProject);
+						}
+						this.state.rootsAreStale = true; 
+						break;
 						
-						// workaround for bug 15168 circular errors not reported 
-						if (project.isOpen()) {
-							if (JavaProject.hasJavaNature(project)) {
-								this.addToParentInfo(javaProject);
-							}
-						} else {
-							javaProject = (JavaProject)this.manager.getJavaModel().findJavaProject(project);
-							if (javaProject != null) {
-								try {
-									javaProject.close();
-								} catch (JavaModelException e) {
-									// java project doesn't exist: ignore
+					case IResourceDelta.CHANGED : 
+							project = (IProject)resource;
+							if ((delta.getFlags() & IResourceDelta.OPEN) != 0) {
+								// project opened or closed: remember  project and its dependents
+								javaProject = (JavaProject)JavaCore.create(project);
+								this.addToRootsToRefreshWithDependents(javaProject);
+								
+								// workaround for bug 15168 circular errors not reported 
+								if (project.isOpen()) {
+									if (JavaProject.hasJavaNature(project)) {
+										this.addToParentInfo(javaProject);
+									}
+								} else {
+									try {
+										javaProject.close();
+									} catch (JavaModelException e) {
+										// java project doesn't exist: ignore
+									}
+									this.removeFromParentInfo(javaProject);
+									this.manager.removePerProjectInfo(javaProject);
 								}
-								this.removeFromParentInfo(javaProject);
-							}
-						}
-					} else if ((delta.getFlags() & IResourceDelta.DESCRIPTION) != 0) {
-						boolean wasJavaProject = this.manager.getJavaModel().findJavaProject(project) != null;
-						boolean isJavaProject = JavaProject.hasJavaNature(project);
-						if (wasJavaProject != isJavaProject) {
-							// java nature added or removed: remember  project and its dependents
-							JavaProject javaProject = (JavaProject)JavaCore.create(project);
-							this.addToRootsToRefreshWithDependents(javaProject);
-
-							// workaround for bug 15168 circular errors not reported 
-							if (isJavaProject) {
-								this.addToParentInfo(javaProject);
+							} else if ((delta.getFlags() & IResourceDelta.DESCRIPTION) != 0) {
+								boolean wasJavaProject = this.manager.getJavaModel().findJavaProject(project) != null;
+								boolean isJavaProject = JavaProject.hasJavaNature(project);
+								if (wasJavaProject != isJavaProject) { 
+									// java nature added or removed: remember  project and its dependents
+									javaProject = (JavaProject)JavaCore.create(project);
+									this.addToRootsToRefreshWithDependents(javaProject);
+		
+									// workaround for bug 15168 circular errors not reported 
+									if (isJavaProject) {
+										this.addToParentInfo(javaProject);
+									} else {
+										this.state.rootsAreStale = true;
+										// remove classpath cache so that initializeRoots() will not consider the project has a classpath
+										this.manager.removePerProjectInfo((JavaProject)JavaCore.create(project));
+										// close project
+										try {
+											javaProject.close();
+										} catch (JavaModelException e) {
+											// java project doesn't exist: ignore
+										}
+										this.removeFromParentInfo(javaProject);
+									}
+								} else {
+									// in case the project was removed then added then changed (see bug 19799)
+									if (JavaProject.hasJavaNature(project)) { // need nature check - 18698
+										this.addToParentInfo((JavaProject)JavaCore.create(project));
+									}
+								}
 							} else {
-								// flush classpath markers
-								javaProject.
-									flushClasspathProblemMarkers(
-										true, // flush cycle markers
-										true  //flush classpath format markers
-									);
-									
-								// remove problems and tasks created  by the builder
-								JavaBuilder.removeProblemsAndTasksFor(project);
+								// workaround for bug 15168 circular errors not reported 
+								// in case the project was removed then added then changed
+								if (JavaProject.hasJavaNature(project)) { // need nature check - 18698
+									this.addToParentInfo((JavaProject)JavaCore.create(project));
+									processChildren = true;
+								}						
+							}		
+							break;
 
-								// close project
-								try {
-									javaProject.close();
-								} catch (JavaModelException e) {
-									// java project doesn't exist: ignore
-								}
-								this.removeFromParentInfo(javaProject);
-							}
-						} else {
-							// in case the project was removed then added then changed (see bug 19799)
-							if (JavaProject.hasJavaNature(project)) { // need nature check - 18698
-								this.addToParentInfo((JavaProject)JavaCore.create(project));
-							}
-						}
-					} else {
-						// workaround for bug 15168 circular errors not reported 
-						// in case the project was removed then added then changed
-						if (JavaProject.hasJavaNature(project)) { // need nature check - 18698
-							this.addToParentInfo((JavaProject)JavaCore.create(project));
-						}						
-					}					
+					case IResourceDelta.REMOVED : 
+							// remove classpath cache so that initializeRoots() will not consider the project has a classpath
+							this.manager.removePerProjectInfo((JavaProject)JavaCore.create(resource));
+							this.state.rootsAreStale = true;
+							break;
 				}
 				break;
+			case IResource.FILE :
+				IFile file = (IFile) resource;
+				/* classpath file change */
+				if (file.getName().equals(JavaProject.CLASSPATH_FILENAME)) {
+					reconcileClasspathFileUpdate(delta, (JavaProject)JavaCore.create(file.getProject()));
+					this.state.rootsAreStale = true;
+				}
+				break;
+				
+		}
+		if (processChildren) {
+			IResourceDelta[] children = delta.getAffectedChildren();
+			for (int i = 0; i < children.length; i++) {
+				checkProjectsBeingAddedOrRemoved(children[i]);
+			}
 		}
 	}
 
