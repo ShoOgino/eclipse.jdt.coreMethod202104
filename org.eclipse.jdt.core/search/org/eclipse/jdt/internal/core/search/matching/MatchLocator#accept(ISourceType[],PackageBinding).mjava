@@ -5,75 +5,25 @@
 		ISourceType sourceType = sourceTypes[0];
 		while (sourceType.getEnclosingType() != null)
 			sourceType = sourceType.getEnclosingType();
-		CompilationUnitDeclaration unit = null;
 		if (sourceType instanceof SourceTypeElementInfo) {
 			// get source
 			SourceTypeElementInfo elementInfo = (SourceTypeElementInfo) sourceType;
 			IType type = elementInfo.getHandle();
 			try {
-				final IFile file = (IFile) type.getUnderlyingResource();
-				final char[] source = Util.getResourceContentsAsCharArray(file);
-
-				// get main type name
-				final String fileName = file.getFullPath().lastSegment();
-				final char[] mainTypeName =
-					fileName.substring(0, fileName.length() - 5).toCharArray();
-
-				// source unit
-				ICompilationUnit sourceUnit = new ICompilationUnit() {
-					public char[] getContents() {
-						return source;
-					}
-					public char[] getFileName() {
-						return fileName.toCharArray();
-					}
-					public char[] getMainTypeName() {
-						return mainTypeName;
-					}
-				};
-
-				// diet parse
-				MatchSet originalMatchSet = this.parser.matchSet;
-				try {
-					this.parser.matchSet = new MatchSet(this);
-					CompilationResult compilationResult = new CompilationResult(sourceUnit, 0, 0);
-					unit = this.parser.dietParse(sourceUnit, compilationResult);
-				} finally {
-					if (originalMatchSet == null) {
-						if (!this.parser.matchSet.isEmpty() 
-								&& unit != null) {
-							// potential matches were found while initializing the search pattern
-							// from the lookup environment: add them in the list of potential matches
-							PotentialMatch potentialMatch = 
-								new PotentialMatch(
-									this,
-									file, 
-									(CompilationUnit)type.getCompilationUnit(), 
-									unit,
-									this.parser.matchSet);
-							this.addPotentialMatch(potentialMatch);
-						}
-						this.parser.matchSet = null;
-					} else {
-						this.parser.matchSet = originalMatchSet;
-					}
-				}
+				this.buildBindings(type.getCompilationUnit());
 			} catch (JavaModelException e) {
-				unit = null;
+				// nothing we can do here: ignore
 			}
 		} else {
 			CompilationResult result =
 				new CompilationResult(sourceType.getFileName(), 0, 0);
-			unit =
+			CompilationUnitDeclaration unit =
 				SourceTypeConverter.buildCompilationUnit(
 					sourceTypes,
 					true,
 					true,
 					lookupEnvironment.problemReporter,
 					result);
-		}
-
-		if (unit != null) {
 			this.lookupEnvironment.buildTypeBindings(unit);
 			this.lookupEnvironment.completeTypeBindings(unit, true);
 			this.parsedUnits.put(sourceType.getQualifiedName(), unit);
