@@ -1,0 +1,71 @@
+public void parse(ConstructorDeclaration cd, CompilationUnitDeclaration unit, boolean recordLineSeparator) {
+	//only parse the method body of cd
+	//fill out its statements
+
+	//convert bugs into parse error
+
+	initialize();
+	goForBlockStatementsopt();
+	if (recordLineSeparator) {
+		this.scanner.recordLineSeparator = true;
+	}
+	this.nestedMethod[this.nestedType]++;
+	pushOnRealBlockStack(0);
+	
+	this.referenceContext = cd;
+	this.compilationUnit = unit;
+
+	this.scanner.resetTo(cd.bodyStart, cd.bodyEnd);
+	try {
+		parse();
+	} catch (AbortCompilation ex) {
+		this.lastAct = ERROR_ACTION;
+	} finally {
+		this.nestedMethod[this.nestedType]--;
+	}
+
+	checkNonNLSAfterBodyEnd(cd.declarationSourceEnd);
+	
+	if (this.lastAct == ERROR_ACTION) {
+		initialize();
+		return;
+	}
+
+	//statements
+	cd.explicitDeclarations = this.realBlockStack[this.realBlockPtr--];
+	int length;
+	if ((length = this.astLengthStack[this.astLengthPtr--]) != 0) {
+		this.astPtr -= length;
+		if (this.astStack[this.astPtr + 1] instanceof ExplicitConstructorCall)
+			//avoid a isSomeThing that would only be used here BUT what is faster between two alternatives ?
+			{
+			System.arraycopy(
+				this.astStack, 
+				this.astPtr + 2, 
+				cd.statements = new Statement[length - 1], 
+				0, 
+				length - 1); 
+			cd.constructorCall = (ExplicitConstructorCall) this.astStack[this.astPtr + 1];
+		} else { //need to add explicitly the super();
+			System.arraycopy(
+				this.astStack, 
+				this.astPtr + 1, 
+				cd.statements = new Statement[length], 
+				0, 
+				length); 
+			cd.constructorCall = SuperReference.implicitSuperConstructorCall();
+		}
+	} else {
+		cd.constructorCall = SuperReference.implicitSuperConstructorCall();
+		if (!containsComment(cd.bodyStart, cd.bodyEnd)) {
+			cd.bits |= ASTNode.UndocumentedEmptyBlockMASK;
+		}		
+	}
+
+	if (cd.constructorCall.sourceEnd == 0) {
+		cd.constructorCall.sourceEnd = cd.sourceEnd;
+		cd.constructorCall.sourceStart = cd.sourceStart;
+	}
+}
+// A P I
+
