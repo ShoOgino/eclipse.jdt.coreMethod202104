@@ -20,16 +20,22 @@
 	 * If finally there is a subset of comments, then store start and end indexes 
 	 * in trailing comments table.
 	 */
-	int storeTrailingComments(ASTNode node, int nextStart, Scanner scanner, boolean lastChild) {
+	int storeTrailingComments(ASTNode node, int nextStart,  boolean lastChild) {
+
 		// Init extended position
 		int nodeEnd = node.getStartPosition()+node.getLength()-1;
+		if (nodeEnd == nextStart) {
+			// special case for last child of its parent
+			this.trailingComments.put(node, new int[] { -1, -1 });
+			return nodeEnd;
+		}
 		int extended = nodeEnd;
 		
 		// Get line number
-		int nodeEndLine = scanner.getLineNumber(nodeEnd);
+		int nodeEndLine = this.scanner.getLineNumber(nodeEnd);
 		
 		// Find comments range index
-		int idx = getCommentIndex(this.commentIndex, nodeEnd, 1);
+		int idx = getCommentIndex(0, nodeEnd, 1);
 		if (idx == -1) {
 			return nodeEnd;
 		}
@@ -50,10 +56,10 @@
 				// stop search on condition 1)
 				break;
 			} else if (previousEnd < commentStart) {
-				scanner.resetTo(previousEnd, commentStart);
+				this.scanner.resetTo(previousEnd, commentStart);
 				try {
-					int token = scanner.getNextToken();
-					if (token != TerminalTokens.TokenNameWHITESPACE || scanner.currentPosition != commentStart) {
+					int token = this.scanner.getNextToken();
+					if (token != TerminalTokens.TokenNameWHITESPACE || this.scanner.currentPosition != commentStart) {
 						// stop search on condition 2)
 						// if first index fails, then there's no extended position in fact...
 						if (idx == startIdx) {
@@ -67,7 +73,7 @@
 					return nodeEnd;
 				}
 				// verify that there's no more than one line between node/comments
-				char[] gap = scanner.getCurrentIdentifierSource();
+				char[] gap = this.scanner.getCurrentIdentifierSource();
 				int nbrLine = 0;
 				int pos = -1;
 				while ((pos=CharOperation.indexOf('\n', gap,pos+1)) >= 0) {
@@ -79,7 +85,7 @@
 				}
 			}
 			// Store index if we're on the same line than node end
-			int commentLine = scanner.getLineNumber(commentStart);
+			int commentLine = this.scanner.getLineNumber(commentStart);
 			if (commentLine == nodeEndLine) {
 				sameLineIdx = idx;
 			}
@@ -90,8 +96,8 @@
 		if (endIdx != -1) {
 			// Verify that following node start is separated
 			if (!lastChild) {
-				int nextLine = scanner.getLineNumber(nextStart);
-				int previousLine = scanner.getLineNumber(previousEnd);
+				int nextLine = this.scanner.getLineNumber(nextStart);
+				int previousLine = this.scanner.getLineNumber(previousEnd);
 				if((nextLine - previousLine) <= 1) {
 					if (sameLineIdx == -1) return nodeEnd;
 					endIdx = sameLineIdx;
@@ -100,7 +106,6 @@
 			// Store trailing comments indexes
 			this.trailingComments.put(node, new int[] { startIdx, endIdx });
 			extended = this.comments[endIdx].getStartPosition()+this.comments[endIdx].getLength()-1;
-			this.commentIndex = endIdx;
 		}
 		return extended;
 	}
