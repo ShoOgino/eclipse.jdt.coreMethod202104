@@ -1,6 +1,23 @@
 protected void consumeToken(int token) {
 	int previous = this.previousToken;
 	int previousIdentifierPtr = this.previousIdentifierPtr;
+	
+	if (isInsideMethod() || isInsideFieldInitialization()) {
+		switch(token) {
+			case TokenNameLPAREN:
+				popElement(K_BETWEEN_NEW_AND_LEFT_BRACKET);
+				break;
+			case TokenNameLBRACE:
+				popElement(K_BETWEEN_NEW_AND_LEFT_BRACKET);
+				break;
+			case TokenNameLBRACKET:
+				popElement(K_BETWEEN_NEW_AND_LEFT_BRACKET);
+				break;
+			case TokenNameRBRACE:
+				popElement(K_BLOCK_DELIMITER);
+				break;
+		}
+	}
 	super.consumeToken(token);
 
 	// if in field initializer (directly or not), on the completion identifier and not in recovery mode yet
@@ -9,12 +26,12 @@ protected void consumeToken(int token) {
 	if (token == TokenNameIdentifier
 			&& this.identifierStack[this.identifierPtr] == assistIdentifier()
 			&& this.currentElement == null
-			&& this.insideFieldInitialization()) {
+			&& this.isIndirectlyInsideFieldInitialization()) {
 		this.scanner.eofPosition = cursorLocation < Integer.MAX_VALUE ? cursorLocation+1 : cursorLocation;
 	}
 	
 	// if in a method or if in a field initializer 
-	if (this.inMethodStack[this.inMethodPtr] || this.inFieldInitializationStack[this.inFieldInitializationPtr]) {
+	if (isInsideMethod() || isInsideFieldInitialization()) {
 		switch (token) {
 			case TokenNameDOT:
 				switch (previous) {
@@ -25,7 +42,7 @@ protected void consumeToken(int token) {
 						this.invocationType = SUPER_RECEIVER;
 						break;
 					case TokenNameIdentifier: // eg. bar[.]fred()
-						if (!this.betweenNewAndLeftBraket) { // eg. not new z.y[.]X()
+						if (topKnownElementKind(COMPLETION_OR_ASSIST_PARSER) != K_BETWEEN_NEW_AND_LEFT_BRACKET) {
 							if (this.identifierPtr != previousIdentifierPtr) { // if identifier has been consumed, eg. this.x[.]fred()
 								this.invocationType = EXPLICIT_RECEIVER;
 							} else {
@@ -37,10 +54,6 @@ protected void consumeToken(int token) {
 				break;
 			case TokenNameIdentifier:
 				if (previous == TokenNameDOT) { // eg. foo().[fred]()
-					// if current identifier is the empty completion one
-					if (identifierStack[identifierPtr] == CompletionScanner.EmptyCompletionIdentifier){
-						this.completionBehindDot = true;
-					}
 					if (this.invocationType != SUPER_RECEIVER // eg. not super.[fred]()
 						&& this.invocationType != NAME_RECEIVER // eg. not bar.[fred]()
 						&& this.invocationType != ALLOCATION // eg. not new foo.[Bar]()
@@ -52,7 +65,7 @@ protected void consumeToken(int token) {
 				}
 				break;	
 			case TokenNamenew:
-				this.betweenNewAndLeftBraket = true;
+				pushOnElementStack(K_BETWEEN_NEW_AND_LEFT_BRACKET);
 				this.qualifier = this.expressionPtr; // NB: even if there is no qualification, set it to the expression ptr so that the number of arguments are correctly computed
 				if (previous == TokenNameDOT) { // eg. fred().[new] X()
 					this.invocationType = QUALIFIED_ALLOCATION;
@@ -73,60 +86,129 @@ protected void consumeToken(int token) {
 				}
 				break;
 			case TokenNamecatch:
-				this.betweenCatchAndRightParen = true;
+				pushOnElementStack(K_BETWEEN_CATCH_AND_RIGHT_PAREN);
 				break;
 			case TokenNameLPAREN:
-				this.betweenNewAndLeftBraket = false;
-				this.bracketDepth++;
 				if (this.invocationType == NO_RECEIVER || this.invocationType == NAME_RECEIVER) {
 					this.qualifier = this.expressionPtr; // remenber the last expression so that arguments are correctly computed
 				}
 				switch (previous) {
 					case TokenNameIdentifier: // eg. fred[(]) or foo.fred[(])
-						this.pushOnInvocationStacks(this.invocationType, this.qualifier);
+						if (topKnownElementKind(COMPLETION_OR_ASSIST_PARSER) == K_SELECTOR) {
+							this.pushOnElementStack(K_SELECTOR_INVOCATION_TYPE, this.invocationType);
+							this.pushOnElementStack(K_SELECTOR_QUALIFIER, this.qualifier);
+						}
 						this.invocationType = NO_RECEIVER;
 						break;
 					case TokenNamethis: // explicit constructor invocation, eg. this[(]1, 2)
-						this.pushOnInvocationStacks(
-							(this.invocationType == QUALIFIED_ALLOCATION) ? QUALIFIED_ALLOCATION : ALLOCATION, 
-							this.qualifier);
+						if (topKnownElementKind(COMPLETION_OR_ASSIST_PARSER) == K_SELECTOR) {
+							this.pushOnElementStack(K_SELECTOR_INVOCATION_TYPE, (this.invocationType == QUALIFIED_ALLOCATION) ? QUALIFIED_ALLOCATION : ALLOCATION);
+							this.pushOnElementStack(K_SELECTOR_QUALIFIER, this.qualifier);
+						}
 						this.invocationType = NO_RECEIVER;
 						break;
 					case TokenNamesuper: // explicit constructor invocation, eg. super[(]1, 2)
-						this.pushOnInvocationStacks(
-							(this.invocationType == QUALIFIED_ALLOCATION) ? QUALIFIED_ALLOCATION : ALLOCATION, 
-							this.qualifier);
+						if (topKnownElementKind(COMPLETION_OR_ASSIST_PARSER) == K_SELECTOR) {
+							this.pushOnElementStack(K_SELECTOR_INVOCATION_TYPE, (this.invocationType == QUALIFIED_ALLOCATION) ? QUALIFIED_ALLOCATION : ALLOCATION);
+							this.pushOnElementStack(K_SELECTOR_QUALIFIER, this.qualifier);
+						}
 						this.invocationType = NO_RECEIVER;
 						break;
 				}
 				break;
 			case TokenNameLBRACE:
-				this.betweenNewAndLeftBraket = false;
 				this.bracketDepth++;
-				this.pushBlockInvocationPtr();
+				pushOnElementStack(K_BLOCK_DELIMITER);
 				break;
 			case TokenNameLBRACKET:
-				this.betweenNewAndLeftBraket = false;
 				this.bracketDepth++;
 				break; 
 			case TokenNameRBRACE:
 				this.bracketDepth--;
-				if (this.blockInvocationPtr >= 0) this.blockInvocationPtr--;
 				break;
 			case TokenNameRBRACKET:
 				this.bracketDepth--;
 				break; 
 			case TokenNameRPAREN:
-				this.betweenCatchAndRightParen = false;
-				this.bracketDepth--;
-				break;
-			case TokenNameCOLON:
-				if (previous == TokenNameIdentifier) {
-					if (this.labelCounterPtr >= 0) this.labelCounterStack[this.labelCounterPtr]++;
-				}
+				popElement(K_BETWEEN_CATCH_AND_RIGHT_PAREN);
 				break;
 			case TokenNamethrow:
-				this.throwBracketDepth= bracketDepth;
+				pushOnElementStack(K_INSIDE_THROW_STATEMENT, bracketDepth);
+				break;
+			case TokenNameSEMICOLON:
+				if(topKnownElementKind(COMPLETION_OR_ASSIST_PARSER) == K_INSIDE_THROW_STATEMENT
+					&& topKnownElementInfo(COMPLETION_OR_ASSIST_PARSER) == this.bracketDepth) {
+					popElement(K_INSIDE_THROW_STATEMENT);
+				} else if (topKnownElementKind(COMPLETION_OR_ASSIST_PARSER) == K_INSIDE_RETURN_STATEMENT
+					&& topKnownElementInfo(COMPLETION_OR_ASSIST_PARSER) == this.bracketDepth){
+					popElement(K_INSIDE_RETURN_STATEMENT);
+				}
+				break;
+			case TokenNamereturn:
+				pushOnElementStack(K_INSIDE_RETURN_STATEMENT, this.bracketDepth);
+				break;
+			case TokenNameMULTIPLY:
+				pushOnElementStack(K_OPERATOR, MULTIPLY);
+				break;
+			case TokenNameDIVIDE:
+				pushOnElementStack(K_OPERATOR, DIVIDE);
+				break;
+			case TokenNameREMAINDER:
+				pushOnElementStack(K_OPERATOR, REMAINDER);
+				break;
+			case TokenNamePLUS:
+				pushOnElementStack(K_OPERATOR, PLUS);
+				break;
+			case TokenNameMINUS:
+				pushOnElementStack(K_OPERATOR, MINUS);
+				break;
+			case TokenNameLEFT_SHIFT:
+				pushOnElementStack(K_OPERATOR, LEFT_SHIFT);
+				break;
+			case TokenNameRIGHT_SHIFT:
+				pushOnElementStack(K_OPERATOR, RIGHT_SHIFT);
+				break;
+			case TokenNameUNSIGNED_RIGHT_SHIFT:
+				pushOnElementStack(K_OPERATOR, UNSIGNED_RIGHT_SHIFT);
+				break;
+			case TokenNameLESS:
+				pushOnElementStack(K_OPERATOR, LESS);
+				break;
+			case TokenNameGREATER:
+				pushOnElementStack(K_OPERATOR, GREATER);
+				break;
+			case TokenNameLESS_EQUAL:
+				pushOnElementStack(K_OPERATOR, LESS_EQUAL);
+				break;
+			case TokenNameGREATER_EQUAL:
+				pushOnElementStack(K_OPERATOR, GREATER_EQUAL);
+				break;
+			case TokenNameAND:
+				pushOnElementStack(K_OPERATOR, AND);
+				break;
+			case TokenNameXOR:
+				pushOnElementStack(K_OPERATOR, XOR);
+				break;
+			case TokenNameOR:
+				pushOnElementStack(K_OPERATOR, OR);
+				break;
+			case TokenNameAND_AND:
+				pushOnElementStack(K_OPERATOR, AND_AND);
+				break;
+			case TokenNameOR_OR:
+				pushOnElementStack(K_OPERATOR, OR_OR);
+				break;
+			case TokenNamePLUS_PLUS:
+				pushOnElementStack(K_OPERATOR, PLUS_PLUS);
+				break;
+			case TokenNameMINUS_MINUS:
+				pushOnElementStack(K_OPERATOR, MINUS_MINUS);
+				break;
+			case TokenNameTWIDDLE:
+				pushOnElementStack(K_OPERATOR, TWIDDLE);
+				break;
+			case TokenNameNOT:
+				pushOnElementStack(K_OPERATOR, NOT);
 				break;
 		}
 	}

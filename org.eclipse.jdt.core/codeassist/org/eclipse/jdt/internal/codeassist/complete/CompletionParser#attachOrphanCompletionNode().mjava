@@ -1,4 +1,6 @@
 protected void attachOrphanCompletionNode(){
+	if(assistNode == null) return;
+	
 	if (this.isOrphanCompletionNode) {
 		AstNode orphan = this.assistNode;
 		this.isOrphanCompletionNode = false;
@@ -57,31 +59,39 @@ protected void attachOrphanCompletionNode(){
 	}
 	
 	// the following code applies only in methods, constructors or initializers
-	if ((!this.inMethodStack[this.inMethodPtr] && !this.inFieldInitializationStack[this.inFieldInitializationPtr])) { 
+	if ((!isInsideMethod() && !isInsideFieldInitialization())) { 
 		return;
 	}
 	
 	// push top expression on ast stack if it contains the completion node
 	Expression expression;
-	if (this.expressionPtr > -1 && containsCompletionNode(expression = this.expressionStack[this.expressionPtr])) {
-		/* check for completion at the beginning of method body
-			behind an invalid signature
-		 */
-		RecoveredMethod method = currentElement.enclosingMethod();
-		if (method != null){
-			AbstractMethodDeclaration methodDecl = method.methodDeclaration;
-			if ((methodDecl.bodyStart == methodDecl.sourceEnd+1) // was missing opening brace
-				&& (scanner.getLineNumber(expression.sourceStart) == scanner.getLineNumber(methodDecl.sourceEnd))){
-				return;
+	if (this.expressionPtr > -1) {
+		expression = this.expressionStack[this.expressionPtr];
+		CompletionNodeDetector detector = new CompletionNodeDetector(assistNode, expression);
+		if(detector.containsCompletionNode()) {
+			/* check for completion at the beginning of method body
+				behind an invalid signature
+			 */
+			RecoveredMethod method = currentElement.enclosingMethod();
+			if (method != null){
+				AbstractMethodDeclaration methodDecl = method.methodDeclaration;
+				if ((methodDecl.bodyStart == methodDecl.sourceEnd+1) // was missing opening brace
+					&& (scanner.getLineNumber(expression.sourceStart) == scanner.getLineNumber(methodDecl.sourceEnd))){
+					return;
+				}
 			}
-		}
-		if (expression instanceof AllocationExpression) {
-			// keep the context if it is an allocation expression
-			Statement statement = (Statement)wrapWithExplicitConstructorCallIfNeeded(expression);
-			currentElement = currentElement.add(statement, 0);
-		} else {
-			Statement statement = (Statement)wrapWithExplicitConstructorCallIfNeeded(this.assistNode);
-			currentElement = currentElement.add(statement, 0);
+			if(expression == assistNode
+				|| (expression instanceof AllocationExpression
+					&& ((AllocationExpression)expression).type == assistNode)){
+				buildMoreCompletionContext(expression);
+			} else {
+				assistNodeParent = detector.getCompletionNodeParent();
+				if(assistNodeParent != null) {
+					currentElement = currentElement.add((Statement)assistNodeParent, 0);
+				} else {
+					currentElement = currentElement.add(expression, 0);
+				}
+			}
 		}
 	}
 }

@@ -1,0 +1,161 @@
+private void buildMoreCompletionContext(Expression expression) {
+	int i = 0;
+	int kind = -1;
+	nextElement : while((kind = topKnownElementKind(COMPLETION_OR_ASSIST_PARSER, i)) != K_BLOCK_DELIMITER
+		&& kind != 0) {
+		int info = topKnownElementInfo(COMPLETION_OR_ASSIST_PARSER, i);
+		switch (kind) {
+			case K_SELECTOR :
+				if(info == THIS_CONSTRUCTOR || info == SUPER_CONSTRUCTOR) {
+					ExplicitConstructorCall call = new ExplicitConstructorCall(
+						(info == THIS_CONSTRUCTOR) ? 
+							ExplicitConstructorCall.This : 
+							ExplicitConstructorCall.Super
+					);
+					call.arguments = new Expression[] {expression};
+					call.sourceStart = expression.sourceStart;
+					call.sourceEnd = expression.sourceEnd;
+					assistNodeParent = call;
+				} else {
+					int invocationType = topKnownElementInfo(COMPLETION_OR_ASSIST_PARSER, i-1);
+					int qualifierExprPtr = topKnownElementInfo(COMPLETION_OR_ASSIST_PARSER, i-2);
+					
+					// find arguments
+					int length = expressionLengthStack[expressionLengthPtr];
+					
+					// search previous arguments if missing
+					if(expressionLengthPtr > 0 && length == 1) {
+						int start = (int) (identifierPositionStack[info] >>> 32);
+						if(this.expressionStack[expressionPtr-1].sourceStart > start) {
+							length += expressionLengthStack[expressionLengthPtr-1];;	
+						}
+
+					}
+					
+					Expression[] arguments = null;
+					if (length != 0) {
+						arguments = new Expression[length];
+						expressionPtr -= length;
+						System.arraycopy(expressionStack, expressionPtr + 1, arguments, 0, length-1);
+						arguments[length-1] = expression;
+					};
+					
+					if(invocationType != ALLOCATION && invocationType != QUALIFIED_ALLOCATION) {
+						MessageSend messageSend = new MessageSend();
+						messageSend.selector = identifierStack[info];
+						messageSend.arguments = arguments;
+	
+						// find receiver
+						switch (invocationType) {
+							case NO_RECEIVER:
+								messageSend.receiver = ThisReference.ThisImplicit;
+								break;
+							case NAME_RECEIVER:
+								// remove special flags for primitive types
+								while (this.identifierLengthPtr >= 0 && this.identifierLengthStack[this.identifierLengthPtr] < 0) {
+									this.identifierLengthPtr--;
+								}
+								
+								// remove selector 
+								this.identifierPtr--; 
+								this.identifierLengthStack[this.identifierLengthPtr]--;
+								// consume the receiver
+								messageSend.receiver = this.getUnspecifiedReference();
+								break;
+							case SUPER_RECEIVER:
+								messageSend.receiver = SuperReference.Super;
+								break;
+							case EXPLICIT_RECEIVER:
+								messageSend.receiver = this.expressionStack[qualifierExprPtr];
+								break;
+							default :
+								messageSend.receiver = ThisReference.ThisImplicit;
+								break;
+						}
+						assistNodeParent = messageSend;
+					} else {
+						if(invocationType == ALLOCATION) {
+							AllocationExpression allocationExpr = new AllocationExpression();
+							allocationExpr.arguments = arguments;
+							allocationExpr.type = getTypeReference(0);
+							assistNodeParent = allocationExpr;
+						} else {
+							QualifiedAllocationExpression allocationExpr = new QualifiedAllocationExpression();
+							allocationExpr.enclosingInstance = this.expressionStack[qualifierExprPtr];
+							allocationExpr.arguments = arguments;
+							allocationExpr.type = getTypeReference(0);
+							assistNodeParent = allocationExpr;
+						}
+					}
+				}
+				break nextElement;
+			case K_INSIDE_RETURN_STATEMENT :
+				if(info == bracketDepth) {
+					ReturnStatement returnStatement = new ReturnStatement(expression, expression.sourceStart, expression.sourceEnd);
+					if(expression == assistNode) {
+						assistNodeParent = expression;
+					}
+					assistNodeParent = returnStatement;
+				}
+				break nextElement;
+			case K_CAST_STATEMENT :
+				Expression castType;
+				if(this.expressionPtr > 0
+					&& ((castType = this.expressionStack[this.expressionPtr-1]) instanceof TypeReference
+						|| castType instanceof NameReference)) {
+					CastExpression cast = new CastExpression(expression, getTypeReference(castType));
+					cast.sourceStart = castType.sourceStart;
+					cast.sourceEnd= expression.sourceEnd;
+					assistNodeParent = cast;
+				}
+				break nextElement;
+			case K_OPERATOR :
+//				if(expressionPtr > 0) {
+//					Expression operatorExpression;
+//					switch (info) {
+//						case AND_AND :
+//							operatorExpression = new AND_AND_Expression(this.expressionStack[expressionPtr-1], expression, info);
+//							break;
+//						case OR_OR :
+//							operatorExpression = new OR_OR_Expression(this.expressionStack[expressionPtr-1], expression, info);
+//							break;
+//						case PLUS_PLUS :
+//						case MINUS_MINUS :
+//							operatorExpression = new PrefixExpression(expression,IntLiteral.One,info, expression.sourceStart); ;
+//							break;
+//						case TWIDDLE:
+//						case NOT:
+//							operatorExpression = new UnaryExpression(expression, info);
+//							break;
+//						case PLUS:
+//						case MINUS:
+//							
+//							break;
+//						default :
+//							operatorExpression = new BinaryExpression(this.expressionStack[expressionPtr-1], expression, info);
+//							break;
+//					}
+//					assistNodeParent = operatorExpression;
+//				}
+				break nextElement;
+		}
+		i++;
+	}
+	if(assistNodeParent != null) {
+		currentElement = currentElement.add((Statement)assistNodeParent, 0);
+	} else {
+//		if(currentElement instanceof RecoveredField) {
+//			RecoveredField recoveredField = (RecoveredField) currentElement;
+//			if(!recoveredField.alreadyCompletedFieldInitialization) {
+//				assistNodeParent = recoveredField.fieldDeclaration;
+//			}
+//		} else if(currentElement instanceof RecoveredLocalVariable) {
+//			RecoveredLocalVariable recoveredLocalVariable = (RecoveredLocalVariable) currentElement;
+//			if(!recoveredLocalVariable.alreadyCompletedLocalInitialization) {
+//				assistNodeParent = recoveredLocalVariable.localDeclaration;
+//			}
+//		}
+		currentElement = currentElement.add(expression, 0);
+	}
+}
+
