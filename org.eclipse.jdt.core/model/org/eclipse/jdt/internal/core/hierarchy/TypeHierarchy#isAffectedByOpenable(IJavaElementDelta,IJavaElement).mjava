@@ -1,0 +1,68 @@
+/**
+ * Returns true if the given type delta (a compilation unit delta or a class file delta)
+ * could affect this type hierarchy.
+ */
+protected boolean isAffectedByOpenable(IJavaElementDelta delta, IJavaElement element) {
+	// ignore changes to working copies
+	if (element instanceof CompilationUnit && ((CompilationUnit)element).isWorkingCopy()) {
+		return false;
+	}
+		
+	int kind = delta.getKind();
+	switch (kind) {
+		case IJavaElementDelta.REMOVED:
+			return this.files.get(element) != null;
+		case IJavaElementDelta.ADDED:
+			IType[] types = null;
+			try {
+				types = (element instanceof CompilationUnit) ?
+					((CompilationUnit)element).getAllTypes() :
+					new IType[] {((org.eclipse.jdt.internal.core.ClassFile)element).getType()};
+			} catch (JavaModelException e) {
+				e.printStackTrace();
+				return false;
+			}
+			for (int i = 0, length = types.length; i < length; i++) {
+				IType type = types[i];
+				if (typeHasSupertype(type) || subtypesIncludeSupertypeOf(type)) {
+					return true;
+				}
+			}
+			break;
+		case IJavaElementDelta.CHANGED:
+			boolean hasImportChange = false;
+			IJavaElementDelta[] children = delta.getAffectedChildren();
+			for (int i = 0, length = children.length; i < length; i++) {
+				IJavaElementDelta child = children[i];
+				IJavaElement childElement = child.getElement();
+				if (childElement instanceof IType) {
+					// NB: rely on the fact that import statements are before type declarations
+					if (this.isAffectedByType(child, (IType)childElement, hasImportChange)) {
+						return true;
+					}
+				} else if (childElement instanceof ImportContainer) {
+					if (!hasImportChange) {
+						hasImportChange = true;
+						types = null;
+						try {
+							types = (element instanceof CompilationUnit) ?
+								((CompilationUnit)element).getAllTypes() :
+								new IType[] {((org.eclipse.jdt.internal.core.ClassFile)element).getType()};
+						} catch (JavaModelException e) {
+							e.printStackTrace();
+							return false;
+						}
+						for (int j = 0, typesLength = types.length; j < typesLength; j++) {
+							if (includesTypeOrSupertype(types[j])) {
+								return true;
+							}
+						}
+					}
+				}
+			}
+			break;
+		
+	}
+	return false;
+}
+
