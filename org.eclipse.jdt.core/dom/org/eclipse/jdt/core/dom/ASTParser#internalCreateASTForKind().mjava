@@ -62,52 +62,25 @@
 	 * methods applied to nodes of the resulting AST return <code>null</code>.
 	 * </p>
 	 * 
-	 * @param kind the kind of construct to parse: one of 
-	 * {@link #K_CLASS_BODY_DECLARATIONS K_CLASS_BODY_DECLARATIONS},
-	 * {@link #K_EXPRESSION K_EXPRESSION},
-	 * {@link #K_STATEMENTS K_STATEMENTS}
-	 * @param source the source to be parsed
-	 * @param  offset  the index of the first byte to decode
-	 * @param  length  the number of bytes to decode
-	 * @param options the options; if null, <code>JavaCore.getOptions()</code> is used
 	 * @return an AST node whose type depends on the kind of parse
 	 *  requested, with a fallback to a <code>CompilationUnit</code>
 	 *  in the case of severe parsing errors
-	 * @throws IndexOutOfBoundsException
-	 *         if the <code>offset</code> and the <code>length</code>
-	 *         arguments index characters outside the bounds of
-	 *         <code>source</code>
 	 * @see ASTNode#getStartPosition()
 	 * @see ASTNode#getLength()
-	 * @see JavaCore#getOptions()
 	 */
-	private static ASTNode parse(int kind, char[] source, int offset, int length, Map options) {
-		if (kind != K_CLASS_BODY_DECLARATIONS
-				&& kind != K_EXPRESSION
-				&& kind != K_STATEMENTS) {
-			throw new IllegalArgumentException();
-		}
-		if (source == null) {
-			throw new IllegalArgumentException();
-		}
-		if (length < 0 || offset < 0 || offset > source.length - length) {
-		    throw new IndexOutOfBoundsException();
-		}
-		if (options == null) {
-			options = JavaCore.getOptions();
-		}
-		ASTConverter converter = new ASTConverter(options, false, null);
-		converter.compilationUnitSource = source;
-		converter.scanner.setSource(source);
+	private ASTNode internalCreateASTForKind() {
+		ASTConverter converter = new ASTConverter(this.compilerOptions, false, null);
+		converter.compilationUnitSource = this.rawSource;
+		converter.scanner.setSource(this.rawSource);
 		
-		AST ast = AST.newAST(AST.LEVEL_2_0);
+		AST ast = AST.newAST(this.apiLevel);
 		ast.setBindingResolver(new BindingResolver());
 		converter.setAST(ast);
 		CodeSnippetParsingUtil codeSnippetParsingUtil = new CodeSnippetParsingUtil();
 		CompilationUnit compilationUnit = ast.newCompilationUnit();
-		switch(kind) {
+		switch(this.astKind) {
 			case K_STATEMENTS :
-				ConstructorDeclaration constructorDeclaration = codeSnippetParsingUtil.parseStatements(source, offset, length, options, true);
+				ConstructorDeclaration constructorDeclaration = codeSnippetParsingUtil.parseStatements(this.rawSource, this.sourceOffset, this.sourceLength, this.compilerOptions, true);
 				RecordedParsingInformation recordedParsingInformation = codeSnippetParsingUtil.recordedParsingInformation;
 				int[][] comments = recordedParsingInformation.commentPositions;
 				if (comments != null) {
@@ -123,7 +96,7 @@
 							block.statements().add(converter.convert(statements[i]));
 						}
 					}
-					rootNodeToCompilationUnit(ast, converter, compilationUnit, block, recordedParsingInformation);
+					rootNodeToCompilationUnit(ast, compilationUnit, block, recordedParsingInformation);
 					return block;
 				} else {
 					IProblem[] problems = recordedParsingInformation.problems;
@@ -133,7 +106,7 @@
 					return compilationUnit;
 				}
 			case K_EXPRESSION :
-				org.eclipse.jdt.internal.compiler.ast.Expression expression = codeSnippetParsingUtil.parseExpression(source, offset, length, options, true);
+				org.eclipse.jdt.internal.compiler.ast.Expression expression = codeSnippetParsingUtil.parseExpression(this.rawSource, this.sourceOffset, this.sourceLength, this.compilerOptions, true);
 				recordedParsingInformation = codeSnippetParsingUtil.recordedParsingInformation;
 				comments = recordedParsingInformation.commentPositions;
 				if (comments != null) {
@@ -142,7 +115,7 @@
 				compilationUnit.setLineEndTable(recordedParsingInformation.lineEnds);
 				if (expression != null) {
 					Expression expression2 = converter.convert(expression);
-					rootNodeToCompilationUnit(ast, converter, compilationUnit, expression2, codeSnippetParsingUtil.recordedParsingInformation);
+					rootNodeToCompilationUnit(expression2.getAST(), compilationUnit, expression2, codeSnippetParsingUtil.recordedParsingInformation);
 					return expression2;
 				} else {
 					IProblem[] problems = recordedParsingInformation.problems;
@@ -152,7 +125,7 @@
 					return compilationUnit;
 				}
 			case K_CLASS_BODY_DECLARATIONS :
-				final org.eclipse.jdt.internal.compiler.ast.ASTNode[] nodes = codeSnippetParsingUtil.parseClassBodyDeclarations(source, offset, length, options, true);
+				final org.eclipse.jdt.internal.compiler.ast.ASTNode[] nodes = codeSnippetParsingUtil.parseClassBodyDeclarations(this.rawSource, this.sourceOffset, this.sourceLength, this.compilerOptions, true);
 				recordedParsingInformation = codeSnippetParsingUtil.recordedParsingInformation;
 				comments = recordedParsingInformation.commentPositions;
 				if (comments != null) {
@@ -161,7 +134,7 @@
 				compilationUnit.setLineEndTable(recordedParsingInformation.lineEnds);
 				if (nodes != null) {
 					TypeDeclaration typeDeclaration = converter.convert(nodes);
-					rootNodeToCompilationUnit(ast, converter, compilationUnit, typeDeclaration, codeSnippetParsingUtil.recordedParsingInformation);
+					rootNodeToCompilationUnit(typeDeclaration.getAST(), compilationUnit, typeDeclaration, codeSnippetParsingUtil.recordedParsingInformation);
 					return typeDeclaration;
 				} else {
 					IProblem[] problems = recordedParsingInformation.problems;
@@ -171,6 +144,6 @@
 					return compilationUnit;
 				}
 		}
-		throw new IllegalArgumentException();
+		throw new IllegalStateException();
 	}
 

@@ -1,0 +1,105 @@
+	private ASTNode internalCreateAST(IProgressMonitor monitor) {
+		boolean needToResolveBindings = this.resolveBindings;
+		switch(this.astKind) {
+			case K_CLASS_BODY_DECLARATIONS :
+			case K_EXPRESSION :
+			case K_STATEMENTS :
+				if (this.rawSource != null) {
+					if (this.sourceOffset + this.sourceLength > this.rawSource.length) {
+					    throw new IllegalStateException();
+					}
+					return internalCreateASTForKind();
+				}
+				break;
+			case K_COMPILATION_UNIT :
+				CompilationUnitDeclaration compilationUnitDeclaration = null;
+				try {
+					char[] source = null;
+					NodeSearcher searcher = null;
+					char[][] packageName = null;
+					String fileName = null;
+					if (this.compilationUnitSource != null) {
+						try {
+							source = this.compilationUnitSource.getSource().toCharArray();
+						} catch(JavaModelException e) {
+							// no source, then we cannot build anything
+							throw new IllegalStateException();
+						}
+						IPackageFragment packageFragment = (IPackageFragment)this.compilationUnitSource.getAncestor(IJavaElement.PACKAGE_FRAGMENT);
+						if (packageFragment != null){
+							packageName = CharOperation.splitOn('.', packageFragment.getElementName().toCharArray());
+						}
+						fileName = this.compilationUnitSource.getElementName();
+					} else if (this.classFileSource != null) {
+						String sourceString = null;
+						try {
+							sourceString = this.classFileSource.getSource();
+						} catch (JavaModelException e) {
+							// nothing to do
+						}
+					
+						if (sourceString == null) {
+							throw new IllegalStateException();
+						}
+						source = sourceString.toCharArray();
+						try {
+							packageName = CharOperation.splitOn('.', this.classFileSource.getType().getPackageFragment().getElementName().toCharArray());
+							StringBuffer buffer = new StringBuffer(SuffixConstants.SUFFIX_STRING_java);
+							String classFileName = this.classFileSource.getElementName(); // this includes the trailing .class
+							buffer.insert(0, classFileName.toCharArray(), 0, classFileName.indexOf('.'));
+							fileName = String.valueOf(buffer);
+						} catch(JavaModelException e) {
+							needToResolveBindings = false;
+						}
+					} else if (this.rawSource != null) {
+						source = this.rawSource;
+						if (this.unitName == null || this.project == null) {
+							needToResolveBindings = false;
+						} else {
+							fileName = this.unitName;
+							needToResolveBindings = true;
+						}
+					}
+					if (source == null) {
+						throw new IllegalStateException();
+					}
+					if (this.partial) {
+						searcher = new NodeSearcher(this.focalPointPosition);
+					}
+					if (needToResolveBindings) {
+						try {
+							// parse and resolve
+							compilationUnitDeclaration = 
+								CompilationUnitResolver.resolve(
+									source,
+									packageName,
+									fileName,
+									this.project,
+									searcher,
+									false,
+									this.workingCopyOwner,
+									monitor);
+						} catch (JavaModelException e) {
+							compilationUnitDeclaration = CompilationUnitResolver.parse(
+									source,
+									searcher,
+									this.compilerOptions);
+							needToResolveBindings = false;
+						}
+					} else {
+						compilationUnitDeclaration = CompilationUnitResolver.parse(
+								source,
+								searcher,
+								this.compilerOptions);
+						needToResolveBindings = false;
+					}
+					return convert(monitor, compilationUnitDeclaration, source, needToResolveBindings);
+				} finally {
+					if (compilationUnitDeclaration != null && this.resolveBindings) {
+						compilationUnitDeclaration.cleanUp();
+					}
+				}					
+		}
+		throw new IllegalStateException();
+	}
+
