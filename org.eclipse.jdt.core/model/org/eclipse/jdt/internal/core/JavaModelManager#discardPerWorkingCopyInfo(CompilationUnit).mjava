@@ -7,42 +7,33 @@
 	 */
 	public int discardPerWorkingCopyInfo(CompilationUnit workingCopy) throws JavaModelException {
 		synchronized(perWorkingCopyInfos) {
-			PerWorkingCopyInfo info = (PerWorkingCopyInfo)perWorkingCopyInfos.get(workingCopy);
-			if (info != null) {
-				if (--info.useCount == 0) {
-					IJavaElement originalElement = workingCopy.getOriginalElement();
+			WorkingCopyOwner owner = workingCopy.owner;
+			Map pathToPerWorkingCopyInfos = (Map)this.perWorkingCopyInfos.get(owner);
+			if (pathToPerWorkingCopyInfos == null) return -1;
+			
+			IPath path = workingCopy.getPath();
+			PerWorkingCopyInfo info = (PerWorkingCopyInfo)pathToPerWorkingCopyInfos.get(path);
+			if (info == null) return -1;
+			
+			if (--info.useCount == 0) {
+				IJavaElement originalElement = workingCopy.getOriginalElement();
 
-					// remove per working copy info
-					perWorkingCopyInfos.remove(workingCopy);
-
-					// remove infos + close buffer (since no longer working copy)
-					removeInfoAndChildren(workingCopy);
-					workingCopy.closeBuffer();
-					
-					// if original element is not on classpath flush it from the cache 
-					if (!workingCopy.getParent().exists()) {
-						((CompilationUnit)originalElement).close();
-					}
-					
-					// remove working copy from the shared working copy cache if needed
-					// In order to be shared, working copies have to denote the same compilation unit 
-					// AND use the same owner.
-					// Assuming there is a little set of buffer factories, then use a 2 level Map cache.
-					Map perFactoryWorkingCopies = (Map) this.sharedWorkingCopies.get(workingCopy.owner);
-					if (perFactoryWorkingCopies != null){
-						if (perFactoryWorkingCopies.remove(originalElement) != null
-								&& CompilationUnit.SHARED_WC_VERBOSE) {
-							System.out.println("Destroying shared working copy " + workingCopy.toStringWithAncestors());//$NON-NLS-1$
-						}
-						if (perFactoryWorkingCopies.isEmpty()) {
-							this.sharedWorkingCopies.remove(workingCopy.owner);
-						}
-					}
+				// remove per working copy info
+				pathToPerWorkingCopyInfos.remove(path);
+				if (pathToPerWorkingCopyInfos.isEmpty()) {
+					this.perWorkingCopyInfos.remove(owner);
 				}
-				return info.useCount;
-			} else {
-				return -1;
-			}	
+
+				// remove infos + close buffer (since no longer working copy)
+				removeInfoAndChildren(workingCopy);
+				workingCopy.closeBuffer();
+				
+				// if original element is not on classpath flush it from the cache 
+				if (!workingCopy.getParent().exists()) {
+					((CompilationUnit)originalElement).close();
+				}
+			}
+			return info.useCount;
 		}
 	}
 

@@ -41,6 +41,12 @@
 	 * outset.
 	 * </p>
 	 * <p>
+	 * When bindings are created, instead of considering compilation units on disk only
+	 * one can supply a <code>WorkingCopyOwner</code>. Working copies owned 
+	 * by this owner take precedence over the underlying compilation units when looking
+	 * up names and drawing the connections.
+	 * </p>
+	 * <p>
 	 * The name of the compilation unit must be supplied for resolving bindings.
 	 * This name should include the ".java" suffix and match the name of the main
 	 * (public) class or interface declared in the source. For example, if the source
@@ -55,17 +61,68 @@
 	 *    string, or <code>null</code> if <code>javaProject</code> is also <code>null</code>
 	 * @param project the Java project used to resolve names, or 
 	 *    <code>null</code> if bindings are not resolved
+	 * @param owner the owner of working copies that take precedence over underlying 
+	 *   compilation units
 	 * @return the compilation unit node
 	 * @see ASTNode#getFlags()
 	 * @see ASTNode#MALFORMED
 	 * @see ASTNode#getStartPosition()
 	 * @see ASTNode#getLength()
+	 * @see WorkingCopyOwner
+	 * @since 3.0
 	 */
 	public static CompilationUnit parseCompilationUnit(
 		char[] source,
 		String unitName,
-		IJavaProject project) {
+		IJavaProject project,
+		WorkingCopyOwner owner) {
+			
+		if (source == null) {
+			throw new IllegalArgumentException();
+		}
+		if (unitName == null && project != null) {
+			throw new IllegalArgumentException();
+		}
+		if (project == null) {
+			// this just reduces to the other simplest case
+			return parseCompilationUnit(source);
+		}
+	
+		NameLookup lookup = null;
+		try {
+			// set the units to look inside
+			lookup = ((JavaProject)project).getNameLookup();
+			JavaModelManager manager = JavaModelManager.getJavaModelManager();
+			ICompilationUnit[] workingCopies = manager.getWorkingCopies(owner, true/*add primary WCs*/);
+			lookup.setUnitsToLookInside(workingCopies);
+				
+				// parse and resolve
+			CompilationUnitDeclaration compilationUnitDeclaration =
+				CompilationUnitResolver.resolve(
+					source,
+					unitName,
+					project,
+					new AbstractSyntaxTreeVisitorAdapter());
+			ASTConverter converter = new ASTConverter(project.getOptions(true), true);
+			AST ast = new AST();
+			BindingResolver resolver = new DefaultBindingResolver(compilationUnitDeclaration.scope);
+			ast.setBindingResolver(resolver);
+			converter.setAST(ast);
 		
-		return parseCompilationUnit(source, unitName, project, DefaultWorkingCopyOwner.PRIMARY);
+			CompilationUnit cu = converter.convert(compilationUnitDeclaration, source);
+			cu.setLineEndTable(compilationUnitDeclaration.compilationResult.lineSeparatorPositions);
+			resolver.storeModificationCount(ast.modificationCount());
+			return cu;
+		} catch(JavaModelException e) {
+			/* if a JavaModelException is thrown trying to retrieve the name environment
+			 * then we simply do a parsing without creating bindings.
+			 * Therefore all binding resolution will return null.
+			 */
+			return parseCompilationUnit(source);			
+		} finally {
+			if (lookup != null) {
+				lookup.setUnitsToLookInside(null);
+			}
+		}
 	}
 

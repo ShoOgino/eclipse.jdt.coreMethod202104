@@ -1,0 +1,63 @@
+/**
+ * @see IType#resolveType(String, WorkingCopyOwner)
+ */
+public String[][] resolveType(String typeName, WorkingCopyOwner owner) throws JavaModelException {
+	JavaProject project = (JavaProject)getJavaProject();
+	NameLookup lookup = null;
+	try {
+		// set the units to look inside
+		lookup = ((JavaProject)project).getNameLookup();
+		JavaModelManager manager = JavaModelManager.getJavaModelManager();
+		ICompilationUnit[] workingCopies = manager.getWorkingCopies(owner, true/*add primary WCs*/);
+		lookup.setUnitsToLookInside(workingCopies);
+			
+		// resolve
+		ISourceType info = (ISourceType) this.getElementInfo();
+		ISearchableNameEnvironment environment = project.getSearchableNameEnvironment();
+	
+		class TypeResolveRequestor implements ISelectionRequestor {
+			String[][] answers = null;
+			void acceptType(String[] answer){
+				if (answers == null) {
+					answers = new String[][]{ answer };
+				} else {
+					// grow
+					int length = answers.length;
+					System.arraycopy(answers, 0, answers = new String[length+1][], 0, length);
+					answers[length] = answer;
+				}
+			}
+			public void acceptClass(char[] packageName, char[] className, boolean needQualification) {
+				acceptType(new String[]  { new String(packageName), new String(className) });
+			}
+			
+			public void acceptInterface(char[] packageName, char[] interfaceName, boolean needQualification) {
+				acceptType(new String[]  { new String(packageName), new String(interfaceName) });
+			}
+	
+			public void acceptError(IProblem error) {}
+			public void acceptField(char[] declaringTypePackageName, char[] declaringTypeName, char[] name) {}
+			public void acceptMethod(char[] declaringTypePackageName, char[] declaringTypeName, char[] selector, char[][] parameterPackageNames, char[][] parameterTypeNames, boolean isConstructor) {}
+			public void acceptPackage(char[] packageName){}
+	
+		}
+		TypeResolveRequestor requestor = new TypeResolveRequestor();
+		SelectionEngine engine = 
+			new SelectionEngine(environment, requestor, this.getJavaProject().getOptions(true));
+			
+	 	IType[] topLevelTypes = this.getCompilationUnit().getTypes();
+	 	int length = topLevelTypes.length;
+	 	ISourceType[] topLevelInfos = new ISourceType[length];
+	 	for (int i = 0; i < length; i++) {
+			topLevelInfos[i] = (ISourceType)((SourceType)topLevelTypes[i]).getElementInfo();
+		}
+			
+		engine.selectType(info, typeName.toCharArray(), topLevelInfos, false);
+		return requestor.answers;
+	} finally {
+		if (lookup != null) {
+			lookup.setUnitsToLookInside(null);
+		}
+	}
+}
+
