@@ -2,37 +2,45 @@
 * if they are affected by the changes.
 */
 protected void compile(String[] filenames, String[] initialTypeNames) {
-	nameEnvironment.initialTypeNames(initialTypeNames);
-
-	int i = 0;
 	int toDo = filenames.length;
-	boolean inFirstPass = true;
-	while (i < toDo) {
-		ArrayList doNow = new ArrayList(Math.min(toDo, MAX_AT_ONCE));
-		while (i < toDo && doNow.size() < MAX_AT_ONCE) {
-			String filename = filenames[i++];
-			// Although it needed compiling when this method was called, it may have
-			// already been compiled when it was referenced by another unit.
-			if (inFirstPass || workQueue.isWaiting(filename)) {
-				CompilationUnit compUnit = new CompilationUnit(null, filename);
-				doNow.add(compUnit);
-			}
+	if (toDo <= MAX_AT_ONCE) {
+		// do them all now
+		CompilationUnit[] toCompile = new CompilationUnit[toDo];
+		for (int i = 0; i < toDo; i++) {
+			String filename = filenames[i];
+			if (JavaBuilder.DEBUG)
+				System.out.println("About to compile " + filename);
+			toCompile[i] = new CompilationUnit(null, filename);
 		}
-		inFirstPass = false;
-		notifier.checkCancel();
-		if (doNow.size() > 0) {
-			CompilationUnit[] toCompile = new CompilationUnit[doNow.size()];
-			doNow.toArray(toCompile);
-			try {
-				inCompiler = true;
-				compiler.compile(toCompile);
-			} finally {
-				inCompiler = false;
+		compile(toCompile, initialTypeNames, null);
+	} else {
+		int i = 0;
+		boolean compilingFirstGroup = true;
+		while (i < toDo) {
+			int doNow = Math.min(toDo, MAX_AT_ONCE);
+			int index = 0;
+			CompilationUnit[] toCompile = new CompilationUnit[doNow];
+			String[] initialNamesInLoop = new String[doNow];
+			while (i < toDo && index < doNow) {
+				String filename = filenames[i];
+				// Although it needed compiling when this method was called, it may have
+				// already been compiled when it was referenced by another unit.
+				if (compilingFirstGroup || workQueue.isWaiting(filename)) {
+					if (JavaBuilder.DEBUG)
+						System.out.println("About to compile " + filename);
+					toCompile[index] = new CompilationUnit(null, filename);
+					initialNamesInLoop[index++] = initialTypeNames[i];
+				}
+				i++;
 			}
-
-			// Check for cancel immediately after a compile, because the compiler may
-			// have been cancelled but without propagating the correct exception
-			notifier.checkCancel();
+			if (index < doNow) {
+				System.arraycopy(toCompile, 0, toCompile = new CompilationUnit[index], 0, index);
+				System.arraycopy(initialNamesInLoop, 0, initialNamesInLoop = new String[index], 0, index);
+			}
+			String[] additionalFilenames = new String[toDo - i];
+			System.arraycopy(filenames, i, additionalFilenames, 0, additionalFilenames.length);
+			compilingFirstGroup = false;
+			compile(toCompile, initialNamesInLoop, additionalFilenames);
 		}
 	}
 }
