@@ -1,9 +1,13 @@
 private SimpleLookupTable findDeltas() {
 	notifier.subTask(Util.bind("build.readingDelta", currentProject.getName())); //$NON-NLS-1$
 	IResourceDelta delta = getDelta(currentProject);
-	SimpleLookupTable deltas = new SimpleLookupTable(binaryResources.elementSize + 1);
+	SimpleLookupTable deltas = new SimpleLookupTable(3);
 	if (delta != null) {
-		deltas.put(currentProject, delta);
+		if (delta.getKind() != IResourceDelta.NO_CHANGE) {
+			if (DEBUG)
+				System.out.println("Found source delta for: " + currentProject.getName()); //$NON-NLS-1$
+			deltas.put(currentProject, delta);
+		}
 	} else {
 		if (DEBUG)
 			System.out.println("Missing delta for: " + currentProject.getName()); //$NON-NLS-1$
@@ -16,17 +20,24 @@ private SimpleLookupTable findDeltas() {
 	nextProject : for (int i = 0, l = keyTable.length; i < l; i++) {
 		IProject p = (IProject) keyTable[i];
 		if (p != null && p != currentProject) {
-			if (!lastState.isStructurallyChanged(p, getLastState(p))) { // see if we can skip its delta
-				IResource[] binaryResources = (IResource[]) valueTable[i];
-				if (binaryResources.length <= 1)
+			State s = getLastState(p);
+			if (!lastState.isStructurallyChanged(p, s)) { // see if we can skip its delta
+				if (s.wasNoopBuild())
+					continue nextProject; // project has no source folders and can be skipped
+				IResource[] classFoldersAndJars = (IResource[]) valueTable[i];
+				if (classFoldersAndJars.length <= 1)
 					continue nextProject; // project has no structural changes in its output folder
-				binaryResources[0] = null; // skip the output folder
+				classFoldersAndJars[0] = null; // skip the output folder
 			}
 
 			notifier.subTask(Util.bind("build.readingDelta", p.getName())); //$NON-NLS-1$
 			delta = getDelta(p);
 			if (delta != null) {
-				deltas.put(p, delta);
+				if (delta.getKind() != IResourceDelta.NO_CHANGE) {
+					if (DEBUG)
+						System.out.println("Found binary delta for: " + p.getName()); //$NON-NLS-1$
+					deltas.put(p, delta);
+				}
 			} else {
 				if (DEBUG)
 					System.out.println("Missing delta for: " + p.getName());	 //$NON-NLS-1$
