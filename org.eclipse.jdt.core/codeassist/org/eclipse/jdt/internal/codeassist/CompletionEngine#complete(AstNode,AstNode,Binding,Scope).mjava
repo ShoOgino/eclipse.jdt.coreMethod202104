@@ -6,16 +6,16 @@
 		if(astNodeParent != null) {
 			computeExpectedTypes(astNodeParent, scope);
 		}
-
-		// defaults... some nodes will change these
+		
 		if (astNode instanceof CompletionOnFieldType) {
 
 			CompletionOnFieldType field = (CompletionOnFieldType) astNode;
 			CompletionOnSingleTypeReference type = (CompletionOnSingleTypeReference) field.type;
 			token = type.token;
 			setSourceRange(type.sourceStart, type.sourceEnd);
-			//		findKeywords(token, modifiers, scope); // could be the start of a field, method or member type
+			
 			findTypesAndPackages(token, scope);
+			findKeywordsForMember(token, field.modifiers);
 			
 			if(!field.isLocalVariable && field.modifiers == CompilerModifiers.AccDefault) {
 				findMethods(token,null,scope.enclosingSourceType(),scope,new ObjectVector(),false,false,true,null,null,false);
@@ -28,15 +28,16 @@
 				token = type.token;
 				setSourceRange(type.sourceStart, type.sourceEnd);
 				findTypesAndPackages(token, scope);
-				
+				findKeywordsForMember(token, method.modifiers);
+			
 				if(method.modifiers == CompilerModifiers.AccDefault) {
 					findMethods(token,null,scope.enclosingSourceType(),scope,new ObjectVector(),false,false,true,null,null,false);
 				}
 			} else {
 				
 				if (astNode instanceof CompletionOnSingleNameReference) {
-	
-					token = ((CompletionOnSingleNameReference) astNode).token;
+					CompletionOnSingleNameReference singleNameReference = (CompletionOnSingleNameReference) astNode;
+					token = singleNameReference.token;
 					findVariablesAndMethods(
 						token,
 						scope,
@@ -44,7 +45,16 @@
 						scope);
 					// can be the start of a qualified type name
 					findTypesAndPackages(token, scope);
-	
+					findKeywords(token, singleNameReference.possibleKeywords);
+					if(singleNameReference.canBeExplicitConstructor){
+						if(CharOperation.prefixEquals(token, Keywords.THIS, false)) {
+							ReferenceBinding ref = scope.enclosingSourceType();
+							findExplicitConstructors(Keywords.THIS, ref, (MethodScope)scope, singleNameReference);
+						} else if(CharOperation.prefixEquals(token, Keywords.SUPER, false)) {
+							ReferenceBinding ref = scope.enclosingSourceType();
+							findExplicitConstructors(Keywords.SUPER, ref.superclass(), (MethodScope)scope, singleNameReference);
+						}
+					}
 				} else {
 	
 					if (astNode instanceof CompletionOnSingleTypeReference) {
@@ -93,6 +103,12 @@
 									findMemberTypes(token, receiverType, scope, scope.enclosingSourceType());
 	
 									findClassField(token, (TypeBinding) qualifiedBinding, scope);
+									
+									MethodScope methodScope = null;
+									if((scope instanceof MethodScope && !((MethodScope)scope).isStatic)
+										|| ((methodScope = scope.enclosingMethodScope()) != null && !methodScope.isStatic)) {
+										findKeywords(token, new char[][]{Keywords.THIS});
+									}
 	
 									findFields(
 										token,
@@ -173,7 +189,9 @@
 									setSourceRange((int) (completionPosition >>> 32), (int) completionPosition);
 					
 									token = access.token;
-	
+									
+									findKeywords(token, new char[][]{Keywords.NEW});
+									
 									findFieldsAndMethods(
 										token,
 										(TypeBinding) qualifiedBinding,
@@ -310,6 +328,11 @@
 																} else {
 																	token = ((CompletionOnArgumentName) variable).realName;
 																	findVariableNames(token, variable.type, excludeNames, ARGUMENT, variable.modifiers);
+																}
+															} else {
+																if(astNode instanceof CompletionOnKeyword) {
+																	CompletionOnKeyword keyword = (CompletionOnKeyword)astNode;
+																	findKeywords(keyword.getToken(), keyword.getPossibleKeywords());
 																}
 															}
 														}
