@@ -1,7 +1,7 @@
 	/*
 	 * Parse a reference in @see tag
 	 */
-	private Expression parseReference() throws InvalidInputException {
+	private boolean parseReference() throws InvalidInputException {
 		TypeReference typeRef = null;
 		Expression reference = null;
 		nextToken : while (this.index < this.scanner.eofPosition) {
@@ -12,16 +12,12 @@
 					int start = this.scanner.getCurrentTokenStartPosition();
 					if (typeRef == null) {
 						consumeToken();
-						try {
-							if (readToken() == TerminalTokens.TokenNameEOF) {
-								return null;
-							}
-						} catch (InvalidInputException e) {
-							// Do nothing as we want to underline from the beginning of the string
+						if (this.source[this.index] == '\r' || this.source[this.index] == '\n') {
+							return true;
 						}
 					}
-					this.sourceParser.problemReporter().javadocInvalidSeeReference(start, this.lineEnd - 1);
-					return null;
+					this.sourceParser.problemReporter().javadocInvalidSeeReference(start, this.lineEnd);
+					return false;
 				case TerminalTokens.TokenNameLESS :
 					// @see "<a href="URL#Value">label</a>
 					consumeToken();
@@ -29,24 +25,21 @@
 					if (parseHref()) {
 						if (typeRef == null) {
 							consumeToken();
-							try {
-								if (readToken() == TerminalTokens.TokenNameEOF) {
-									return null;
-								}
-							} catch (InvalidInputException e) {
-								// Do nothing as we want to underline from the beginning of the href
+							if (this.source[this.index] == '\r' || this.source[this.index] == '\n') {
+								return true;
 							}
 						}
-						this.sourceParser.problemReporter().javadocInvalidSeeReference(start, this.lineEnd - 1);
+						this.sourceParser.problemReporter().javadocInvalidSeeReference(start, this.lineEnd);
 					}
-					return null;
+					return false;
 				case TerminalTokens.TokenNameERROR :
-					consumeToken();
 					if (this.scanner.currentCharacter == '#') { // @see ...#member
+						consumeToken();
 						reference = parseMember(typeRef);
-						if (reference == null) {
-							return null;
+						if (reference != null) {
+							pushSeeRef(reference);
 						}
+						return false;
 					}
 					break nextToken;
 				case TerminalTokens.TokenNameIdentifier :
@@ -64,20 +57,21 @@
 		if (reference == null) reference = typeRef;
 		if (reference == null) {
 			this.sourceParser.problemReporter().javadocMissingSeeReference(this.tagSourceStart, this.tagSourceEnd);
-			return null;
+			return false;
 		}
-		
-		// Verify that we're at line end
+
+		// Verify that line end does not start with an open parenthese (which could be a constructor reference wrongly written...)
+		// bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=47215
 		int start = this.scanner.getCurrentTokenStartPosition();
 		try {
-			int token = readTokenAndConsume();
+			int token = readToken();
 			if (token != TerminalTokens.TokenNameLPAREN) {
-				return reference;
+				return pushSeeRef(reference);
 			}
 		} catch (InvalidInputException e) {
 			// Do nothing as we report an error after
 		}
-		this.sourceParser.problemReporter().javadocInvalidSeeReference(start, this.lineEnd - 1);
-		return null;
+		this.sourceParser.problemReporter().javadocInvalidSeeReference(start, this.lineEnd);
+		return false;
 	}
 

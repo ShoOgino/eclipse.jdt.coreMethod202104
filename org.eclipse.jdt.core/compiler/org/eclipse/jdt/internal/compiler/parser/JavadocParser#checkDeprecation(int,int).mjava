@@ -9,91 +9,183 @@
 		boolean foundDeprecated = false;
 		try {
 			this.source = this.sourceParser.scanner.source;
+			this.index = javadocStart +3;
+			int endComment = javadocEnd - 2;
 			if (this.checkJavadoc) {
+				// Initialization
 				this.javadoc = new Javadoc(javadocStart, javadocEnd);
 				this.astLengthPtr = -1;
 				this.astPtr = -1;
 				this.currentTokenType = -1;
-			} else if (this.sourceParser.options.getSeverity(CompilerOptions.MissingJavadocComments) != ProblemSeverities.Ignore) {
-				this.javadoc = new Javadoc(javadocStart, javadocEnd);
-			} else {
-				this.javadoc = null;
-			}
-
-			int firstLineNumber = this.sourceParser.scanner.getLineNumber(javadocStart);
-			int lastLineNumber = this.sourceParser.scanner.getLineNumber(javadocEnd);
-
-			// scan line per line, since tags must be at beginning of lines only
-			nextLine : for (int line = firstLineNumber; line <= lastLineNumber; line++) {
-				int lineStart = line == firstLineNumber
-						? javadocStart + 3 // skip leading /**
-						: this.sourceParser.scanner.getLineStart(line);
-				this.index = lineStart;
-				this.lineEnd = line == lastLineNumber
-						? javadocEnd - 2 // remove trailing */
-						: this.sourceParser.scanner.getLineEnd(line);
-				while (this.index < this.lineEnd) {
-					char nextCharacter = readChar(); // consider unicodes
+				this.scanner.startPosition = this.index;
+				this.inlineTagStarted = false;
+				this.lineStarted = false;
+				int lineNumber = this.sourceParser.scanner.getLineNumber(javadocStart);
+				int lastLineNumber = this.sourceParser.scanner.getLineNumber(javadocEnd);
+				this.lineEnd = lineNumber == lastLineNumber ? javadocEnd - 2 : javadocStart + 3;
+				char nextCharacter= 0, previousChar;
+				int charPosition = -1, inlineStartPosition = 0;
+				
+				// Loop on each comment character
+				while (this.index < endComment) {
+					int previousPosition = this.index;
+					previousChar = nextCharacter;
+					
+					// Calculate line end (cannot use this.scanner.linePtr as scanner does not parse line ends again)
+					if (this.index > this.lineEnd) {
+						if (lineNumber < lastLineNumber) {
+							this.lineEnd = this.sourceParser.scanner.getLineEnd(++lineNumber) - 1;
+						} else {
+							this.lineEnd = javadocEnd - 2;
+						}
+						this.lineStarted = false;
+					}
+					
+					// Read next char only if token was consumed
+					if (this.currentTokenType < 0) {
+						nextCharacter = readChar(); // consider unicodes
+					} else {
+						switch (this.currentTokenType) {
+							case TerminalTokens.TokenNameRBRACE:
+								nextCharacter = '}';
+								break;
+							case TerminalTokens.TokenNameMULTIPLY:
+								nextCharacter = '*';
+								break;
+						default:
+								nextCharacter = this.scanner.currentCharacter;
+						}
+						consumeToken();
+					}
+					
 					switch (nextCharacter) {
 						case '@' :
-							if (!this.checkJavadoc) {
-								if ((readChar() == 'd') &&
-									(readChar() == 'e') &&
-									(readChar() == 'p') &&
-									(readChar() == 'r') &&
-									(readChar() == 'e') &&
-									(readChar() == 'c') &&
-									(readChar() == 'a') &&
-									(readChar() == 't') &&
-									(readChar() == 'e') &&
-									(readChar() == 'd')) {
-									// ensure the tag is properly ended: either followed by a space, a tab, line end or asterisk.
-									nextCharacter = readChar();
-									if (Character.isWhitespace(nextCharacter) || nextCharacter == '*') {
-										foundDeprecated = true;
-										break nextLine; // done
+							boolean valid = false;
+							// Start tag parsing only if we are on line beginning or at inline tag beginning
+							if (!this.lineStarted || previousChar == '{') {
+								this.lineStarted = true;
+								if (this.inlineTagStarted) {
+									this.inlineTagStarted = false;
+									int start = this.astStack[this.astPtr].sourceStart;
+									this.sourceParser.problemReporter().javadocInvalidTag(start, charPosition);
+								} else {
+									if (previousChar == '{') {
+										this.inlineTagStarted = true;
+									}
+									this.scanner.resetTo(this.index, endComment);
+									this.currentTokenType = -1; // flush token cache at line begin
+									try {
+										int tk = readTokenAndConsume();
+										this.tagSourceStart = this.scanner.getCurrentTokenStartPosition();
+										this.tagSourceEnd = this.scanner.getCurrentTokenEndPosition();
+										switch (tk) {
+											case TerminalTokens.TokenNameIdentifier :
+												char[] tag = this.scanner.getCurrentIdentifierSource();
+												if (CharOperation.equals(tag, TAG_DEPRECATED)) {
+													foundDeprecated = true;
+													valid = true;
+												} else if (CharOperation.equals(tag, TAG_INHERITDOC)) {
+													this.javadoc.inherited = true;
+													valid = true;
+												} else if (CharOperation.equals(tag, TAG_PARAM)) {
+													valid = parseParam();
+												} else if (CharOperation.equals(tag, TAG_EXCEPTION)) {
+													valid = parseThrows();
+												} else if (CharOperation.equals(tag, TAG_SEE) ||
+														CharOperation.equals(tag, TAG_LINK) ||
+														CharOperation.equals(tag, TAG_LINKPLAIN)) {
+													valid = parseSee();
+												} else {
+													valid = parseTag();
+												}
+												break;
+											case TerminalTokens.TokenNamereturn :
+												valid = parseReturn();
+												break;
+											case TerminalTokens.TokenNamethrows :
+												valid = parseThrows();
+												break;
+										}
+										if (!valid && this.inlineTagStarted) {
+											this.inlineTagStarted = false;
+										}
+									} catch (InvalidInputException e) {
+										consumeToken();
 									}
 								}
-								continue nextLine;
 							}
-							this.scanner.resetTo(this.index, this.lineEnd);
-							this.currentTokenType = -1; // flush token cache at line begin
-							try {
-								int tk = readTokenAndConsume();
-								this.tagSourceStart = this.scanner.getCurrentTokenStartPosition();
-								this.tagSourceEnd = this.scanner.getCurrentTokenEndPosition();
-								switch (tk) {
-									case TerminalTokens.TokenNameIdentifier :
-										char[] tag = this.scanner.getCurrentIdentifierSource();
-										if (CharOperation.equals(tag, TAG_DEPRECATED)) {
-											foundDeprecated = true;
-										} else if (CharOperation.equals(tag, TAG_PARAM)) {
-											parseParam();
-										} else if (CharOperation.equals(tag, TAG_EXCEPTION)) {
-											parseThrows();
-										} else if (CharOperation.equals(tag, TAG_SEE)) {
-											parseSee();
-										}
-										break;
-									case TerminalTokens.TokenNamereturn :
-										parseReturn();
-										break;
-									case TerminalTokens.TokenNamethrows :
-										parseThrows();
-										break;
-								}
-							} catch (InvalidInputException e) {
-								consumeToken();
+							break;
+						case '\r':
+						case '\n':
+							this.lineStarted = false;
+							break;
+						case '}' :
+							if (this.inlineTagStarted) this.inlineTagStarted = false;
+							this.lineStarted = true;
+							charPosition = previousPosition;
+							break;
+						case '{' :
+							if (this.inlineTagStarted) {
+								this.inlineTagStarted = false;
+								this.sourceParser.problemReporter().javadocInvalidTag(inlineStartPosition, this.index);
+							} else {
+								inlineStartPosition = previousPosition;
 							}
-							continue nextLine;
+							break;
 						case '*' :
+							charPosition = previousPosition;
 							break;
 						default :
-							if (!CharOperation.isWhitespace(nextCharacter)) {
-								continue nextLine;
+							charPosition = previousPosition;
+							if (!this.lineStarted && !CharOperation.isWhitespace(nextCharacter)) {
+								this.lineStarted = true;
 							}
 					}
 				}
+			} else {
+				// Init javadoc if necessary
+				if (this.sourceParser.options.getSeverity(CompilerOptions.MissingJavadocComments) != ProblemSeverities.Ignore) {
+					this.javadoc = new Javadoc(javadocStart, javadocEnd);
+				} else {
+					this.javadoc = null;
+				}
+				
+				// Parse comment
+				int firstLineNumber = this.sourceParser.scanner.getLineNumber(javadocStart);
+				int lastLineNumber = this.sourceParser.scanner.getLineNumber(javadocEnd);
+	
+				// scan line per line, since tags must be at beginning of lines only
+				nextLine : for (int line = firstLineNumber; line <= lastLineNumber; line++) {
+					int lineStart = line == firstLineNumber
+							? javadocStart + 3 // skip leading /**
+							: this.sourceParser.scanner.getLineStart(line);
+					this.index = lineStart;
+					this.lineEnd = line == lastLineNumber
+							? javadocEnd - 2 // remove trailing * /
+							: this.sourceParser.scanner.getLineEnd(line);
+					while (this.index < this.lineEnd) {
+						char nextCharacter = readChar(); // consider unicodes
+						if  (nextCharacter == '@' &&
+							(readChar() == 'd') &&
+							(readChar() == 'e') &&
+							(readChar() == 'p') &&
+							(readChar() == 'r') &&
+							(readChar() == 'e') &&
+							(readChar() == 'c') &&
+							(readChar() == 'a') &&
+							(readChar() == 't') &&
+							(readChar() == 'e') &&
+							(readChar() == 'd'))
+						{
+							// ensure the tag is properly ended: either followed by a space, a tab, line end or asterisk.
+							nextCharacter = readChar();
+							if (Character.isWhitespace(nextCharacter) || nextCharacter == '*') {
+								return true;
+							}
+						}
+					}
+				}
+				return false;
 			}
 		} finally {
 			if (this.checkJavadoc) {
