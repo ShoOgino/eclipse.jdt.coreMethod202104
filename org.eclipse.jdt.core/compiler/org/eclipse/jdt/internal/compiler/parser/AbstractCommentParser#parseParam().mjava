@@ -1,40 +1,179 @@
 	/*
 	 * Parse @param tag declaration
 	 */
-	protected boolean parseParam() {
+	protected boolean parseParam() throws InvalidInputException {
 
-		// Store current token state
+		// Store current state
 		int start = this.tagSourceStart;
 		int end = this.tagSourceEnd;
-
-		try {
-			// Push identifier next
-			int token = readToken();
-			switch (token) {
+		boolean tokenWhiteSpace = this.scanner.tokenizeWhiteSpace;
+		this.scanner.tokenizeWhiteSpace = true;
+//		this.scanner.tokenizeLineSeparator = true;
+		
+		// Verify that there are whitespaces after tag
+		int token = readToken();
+		if (token != TerminalTokens.TokenNameWHITESPACE) {
+			if (this.reportProblems) this.sourceParser.problemReporter().javadocInvalidTag(start, this.scanner.getCurrentTokenEndPosition());
+			this.scanner.currentPosition = start;
+			this.index = start;
+			this.currentTokenType = -1;
+			this.scanner.tokenizeWhiteSpace = tokenWhiteSpace;
+			return false;
+		}
+		
+		// Get first non whitespace token
+		boolean hasMultiLines = this.scanner.currentPosition > (this.lineEnd+1);
+		boolean isTypeParam = false;
+		boolean valid = true, empty = true;
+		nextToken: while (true) {
+			this.currentTokenType = -1;
+			switch (token = readToken()) {
 				case TerminalTokens.TokenNameIdentifier :
-					consumeToken();
-					return pushParamName();
-				case TerminalTokens.TokenNameEOF :
-					break;
-				default :
-					start = this.scanner.getCurrentTokenStartPosition();
-					end = getTokenEndPosition();
-					if (end < start) start = this.tagSourceStart;
-					break;
+					if (valid) { 
+						// store param name id
+						this.identifierPtr = -1;
+						this.identifierLengthPtr = -1;
+						pushIdentifier(true);
+						start = this.scanner.getCurrentTokenStartPosition();
+						end = hasMultiLines ? this.lineEnd: this.scanner.getCurrentTokenEndPosition();
+						break nextToken;
+					}
+					// fall through next case to report error
+				case TerminalTokens.TokenNameLESS:
+					if (valid && this.jdk15) {
+						start = this.scanner.getCurrentTokenStartPosition();
+						end = hasMultiLines ? this.lineEnd: this.scanner.getCurrentTokenEndPosition();
+						isTypeParam = true;
+						break nextToken;
+					}
+					// fall through next case to report error
+				default:
+					if (token == TerminalTokens.TokenNameLEFT_SHIFT) isTypeParam = true;
+					if (valid && !hasMultiLines) start = this.scanner.getCurrentTokenStartPosition();
+					valid = false;
+					if (!hasMultiLines) {
+						empty = false;
+						end = hasMultiLines ? this.lineEnd: this.scanner.getCurrentTokenEndPosition();
+						break;
+					}
+					end = this.lineEnd;
+					// when several lines, fall through next case to report problem immediately
+				case TerminalTokens.TokenNameWHITESPACE:
+					if (this.scanner.currentPosition > (this.lineEnd+1)) hasMultiLines = true;
+					if (valid) break;
+					// if not valid fall through next case to report error
+				case TerminalTokens.TokenNameEOF:
+					if (this.reportProblems)
+						if (empty)
+							this.sourceParser.problemReporter().javadocMissingParamName(start, end, this.sourceParser.modifiers);
+						else if (this.jdk15 && isTypeParam)
+							this.sourceParser.problemReporter().javadocInvalidParamTypeParameter(start, end);
+						else
+							this.sourceParser.problemReporter().javadocInvalidParamTagName(start, end);
+					this.scanner.currentPosition = start;
+					this.index = start;
+					this.currentTokenType = -1;
+					this.scanner.tokenizeWhiteSpace = tokenWhiteSpace;
+					return false;
 			}
-		} catch (InvalidInputException e) {
-			end = getTokenEndPosition();
 		}
-
-		// Reset position to avoid missing tokens when new line was encountered
-		this.index = this.tokenPreviousPosition;
-		this.scanner.currentPosition = this.tokenPreviousPosition;
-		this.currentTokenType = -1;
-
+		
+		// Scan more tokens for type parameter declaration
+		if (isTypeParam && this.jdk15) {
+			// Get type parameter name
+			nextToken: while (true) {
+				this.currentTokenType = -1;
+				switch (token = readToken()) {
+					case TerminalTokens.TokenNameWHITESPACE:
+						if (valid && this.scanner.currentPosition <= (this.lineEnd+1)) break;
+						// if not valid fall through next case to report error
+					case TerminalTokens.TokenNameEOF:
+						if (this.reportProblems) this.sourceParser.problemReporter().javadocInvalidParamTypeParameter(start, end);
+						this.scanner.currentPosition = start;
+						this.index = start;
+						this.currentTokenType = -1;
+						this.scanner.tokenizeWhiteSpace = tokenWhiteSpace;
+						return false;
+					case TerminalTokens.TokenNameIdentifier :
+						end = hasMultiLines ? this.lineEnd: this.scanner.getCurrentTokenEndPosition();
+						if (valid) {
+							// store param name id
+							this.identifierPtr = -1;
+							this.identifierLengthPtr = -1;
+							pushIdentifier(true);
+							break nextToken;
+						}
+						break;
+					default:
+						end = hasMultiLines ? this.lineEnd: this.scanner.getCurrentTokenEndPosition();
+						valid = false;
+						break;
+				}
+			}
+			
+			// Get last character of type parameter declaration
+			boolean spaces = false;
+			nextToken: while (true) {
+				this.currentTokenType = -1;
+				switch (token = readToken()) {
+					case TerminalTokens.TokenNameWHITESPACE:
+						if (this.scanner.currentPosition > (this.lineEnd+1)) {
+							// do not accept type parameter declaration on several lines
+							hasMultiLines = true;
+							valid = false;
+						}
+						spaces = true;
+						if (valid) break;
+						// if not valid fall through next case to report error
+					case TerminalTokens.TokenNameEOF:
+						if (this.reportProblems) this.sourceParser.problemReporter().javadocInvalidParamTypeParameter(start, end);
+						this.scanner.currentPosition = start;
+						this.index = start;
+						this.currentTokenType = -1;
+						this.scanner.tokenizeWhiteSpace = tokenWhiteSpace;
+						return false;
+					case TerminalTokens.TokenNameGREATER:
+						end = hasMultiLines ? this.lineEnd: this.scanner.getCurrentTokenEndPosition();
+						if (valid) {
+							break nextToken;
+						}
+						break;
+					default:
+						if (!spaces) end = hasMultiLines ? this.lineEnd: this.scanner.getCurrentTokenEndPosition();
+						valid = false;
+						break;
+				}
+			}
+		}
+		
+		// Verify that tag name is well followed by white spaces
+		if (valid) {
+			this.currentTokenType = -1;
+			int restart = this.scanner.currentPosition;
+			if (readToken() == TerminalTokens.TokenNameWHITESPACE) {
+				this.scanner.currentPosition = restart;
+				this.index = restart;
+				this.scanner.tokenizeWhiteSpace = tokenWhiteSpace;
+				return pushParamName(isTypeParam);
+			}
+		}
+		
 		// Report problem
-		if (this.sourceParser != null) {
-			this.sourceParser.problemReporter().javadocMissingParamName(start, end, this.sourceParser.modifiers);
+		this.currentTokenType = -1;
+		end = hasMultiLines ? this.lineEnd: this.scanner.getCurrentTokenEndPosition();
+		while (readToken() != TerminalTokens.TokenNameWHITESPACE) {
+			this.currentTokenType = -1;
+			end = hasMultiLines ? this.lineEnd: this.scanner.getCurrentTokenEndPosition();
 		}
+		if (this.reportProblems)
+			if (this.jdk15 && isTypeParam)
+				this.sourceParser.problemReporter().javadocInvalidParamTypeParameter(start, end);
+			else
+				this.sourceParser.problemReporter().javadocInvalidParamTagName(start, end);
+		this.scanner.currentPosition = start;
+		this.index = start;
+		this.currentTokenType = -1;
+		this.scanner.tokenizeWhiteSpace = tokenWhiteSpace;
 		return false;
 	}
 
