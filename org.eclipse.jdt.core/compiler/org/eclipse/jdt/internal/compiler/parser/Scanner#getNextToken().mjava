@@ -20,9 +20,14 @@ public int getNextToken() throws InvalidInputException {
 					&& (source[currentPosition] == 'u')) {
 					isWhiteSpace = jumpOverUnicodeWhiteSpace();
 				} else {
-					if (recordLineSeparator
-						&& ((currentCharacter == '\r') || (currentCharacter == '\n')))
-						pushLineSeparator();
+					if ((currentCharacter == '\r') || (currentCharacter == '\n')) {
+						checkNonExternalizeString();
+						if (recordLineSeparator) {
+							pushLineSeparator();
+						} else {
+							linePtr++;
+						}
+					}
 					isWhiteSpace = 
 						(currentCharacter == ' ') || Character.isWhitespace(currentCharacter); 
 				}
@@ -296,16 +301,18 @@ public int getNextToken() throws InvalidInputException {
 						}
 						throw e; // rethrow
 					}
-					if (checkNonExternalizedStringLiterals){ // check for presence of	/*nonNLS*/
-						int lookAhead = currentPosition < source.length && source[currentPosition] == ' ' ? currentPosition+1 : currentPosition;
-						int n = 0;
-						for (; n < NonNLS_TAG.length; n++, lookAhead++){
-							if (lookAhead == source.length)
-								break;
-							if (source[lookAhead] != NonNLS_TAG[n])
-								break;
+					if (checkNonExternalizedStringLiterals){ // check for presence of	NLS tags //$NON-NLS-?$ where ? is an int.
+						currentLineNr = linePtr;
+						if (currentLineNr != previousLineNr) {
+							currentLine= new NLSLine(currentLineNr);
+							lines.add(currentLine);
+							previousLineNr= currentLineNr;
 						}
-						this.wasNonExternalizedStringLiteral = (n != NonNLS_TAG.length);
+						currentLine.add(
+							new StringLiteral(
+								getCurrentTokenSourceString(), 
+								startPosition, 
+								currentPosition - 1));
 					}
 					return TokenNameStringLiteral;
 				case '/' :
@@ -373,13 +380,18 @@ public int getNextToken() throws InvalidInputException {
 									} //jump over the \\
 								}
 								recordComment(false);
-								if (recordLineSeparator
-									&& ((currentCharacter == '\r') || (currentCharacter == '\n')))
-									if (isUnicode) {
-										pushUnicodeLineSeparator();
+								if ((currentCharacter == '\r') || (currentCharacter == '\n')) {
+									checkNonExternalizeString();
+									if (recordLineSeparator) {
+										if (isUnicode) {
+											pushUnicodeLineSeparator();
+										} else {
+											pushLineSeparator();
+										}
 									} else {
-										pushLineSeparator();
+										linePtr++;
 									}
+								}
 								if (tokenizeComments) {
 									if (!isUnicode) {
 										currentPosition--; // reset one character behind
@@ -387,10 +399,10 @@ public int getNextToken() throws InvalidInputException {
 									return TokenNameCOMMENT_LINE;
 								}
 							} catch (IndexOutOfBoundsException e) { //an eof will them be generated
-								if (tokenizeComments) {
-									currentPosition--; // reset one character behind
-									return TokenNameCOMMENT_LINE;
-								}
+									if (tokenizeComments) {
+										currentPosition--; // reset one character behind
+										return TokenNameCOMMENT_LINE;
+									}
 							}
 							break;
 						}
@@ -411,9 +423,14 @@ public int getNextToken() throws InvalidInputException {
 								isJavadoc = true;
 								star = true;
 							}
-							if (recordLineSeparator
-								&& ((currentCharacter == '\r') || (currentCharacter == '\n')))
-								pushLineSeparator();
+							if ((currentCharacter == '\r') || (currentCharacter == '\n')) {
+								checkNonExternalizeString();
+								if (recordLineSeparator) {
+									pushLineSeparator();
+								} else {
+									linePtr++;
+								}
+							}
 							try { //get the next char 
 								if (((currentCharacter = source[currentPosition++]) == '\\')
 									&& (source[currentPosition] == 'u')) {
@@ -431,9 +448,14 @@ public int getNextToken() throws InvalidInputException {
 								}
 								//loop until end of comment */
 								while ((currentCharacter != '/') || (!star)) {
-									if (recordLineSeparator
-										&& ((currentCharacter == '\r') || (currentCharacter == '\n')))
-										pushLineSeparator();
+									if ((currentCharacter == '\r') || (currentCharacter == '\n')) {
+										checkNonExternalizeString();
+										if (recordLineSeparator) {
+											pushLineSeparator();
+										} else {
+											linePtr++;
+										}
+									}
 									star = currentCharacter == '*';
 									//get next char
 									if (((currentCharacter = source[currentPosition++]) == '\\')
