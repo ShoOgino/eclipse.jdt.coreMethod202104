@@ -63,51 +63,71 @@
 					dumpTab(depth);
 				}
 			}
-			boolean containsMultiLineComment = currentString.lastIndexOf("/*") != -1; //$NON-NLS-1$
 			int numberOfSpaces = 0;
 			int max = currentString.length();
-			updateMappedPositionsWhileSplitting(
-				beginningOfLineIndex,
-				beginningOfLineIndex + max);
-			for (int i = 0; i < max; i++) {
-				char currentChar = currentString.charAt(i);
-				switch (currentChar) {
-					case '\r' :
-						break;
-					case '\n' :
-						if (i != max - 1) {
-							// fix for 1FFYL5C: LFCOM:ALL - Incorrect indentation when split with a comment inside a condition
-							// a substring cannot end with a lineSeparatorSequence,
-							// except if it has been added by format() after a one-line comment
+			if (multipleLineCommentCounter != 0) {
+				try {
+					BufferedReader reader = new BufferedReader(new StringReader(currentString));
+					String line = reader.readLine();
+					while (line != null) {
+						updateMappedPositionsWhileSplitting(
+							beginningOfLineIndex,
+							beginningOfLineIndex + line.length() + options.lineSeparatorSequence.length);
+						formattedSource.append(line);
+						beginningOfLineIndex = beginningOfLineIndex + line.length();
+						if ((line = reader.readLine()) != null) {
 							formattedSource.append(options.lineSeparatorSequence);
-							increaseSplitDelta(options.lineSeparatorSequence.length);
-
-							if (containsMultiLineComment) {
-								// fix for 1FGGQCN: LFCOM:ALL - Space management in comments for the formatter
-								dumpTab(currentLineIndentationLevel);
-							} else {
+							beginningOfLineIndex += options.lineSeparatorSequence.length;
+							dumpTab(currentLineIndentationLevel);
+						}
+					}
+					reader.close();
+				} catch(IOException e) {
+					e.printStackTrace();
+				}
+			} else {
+				updateMappedPositionsWhileSplitting(
+					beginningOfLineIndex,
+					beginningOfLineIndex + max);
+				int currentMultipleLineNumber = 0;
+				int previousMultipleLineNumber = -1;
+				int currentPositionInCurrentLineBuffer = 0;
+				int numberOfLineBreaksInCurrentMultipleLineComment = 0;
+				for (int i = 0; i < max; i++) {
+					char currentChar = currentString.charAt(i);
+					switch (currentChar) {
+						case '\r' :
+							break;
+						case '\n' :
+							if (i != max - 1) {
+								// fix for 1FFYL5C: LFCOM:ALL - Incorrect indentation when split with a comment inside a condition
+								// a substring cannot end with a lineSeparatorSequence,
+								// except if it has been added by format() after a one-line comment
+								formattedSource.append(options.lineSeparatorSequence);
+	
 								// 1FGDDV6: LFCOM:WIN98 - Weird splitting on message expression
 								dumpTab(depth - 1);
 							}
-						}
-						break;
-					default :
-						formattedSource.append(currentChar);
+							break;
+						default :
+							formattedSource.append(currentChar);
+					}
 				}
 			}
 			// update positions inside the mappedPositions table
 			if (substringIndex != -1) {
-				int startPosition =
-					beginningOfLineIndex + startSubstringIndexes[substringIndex];
-				updateMappedPositionsWhileSplitting(startPosition, startPosition + max);
+				if (multipleLineCommentCounter == 0) {
+					int startPosition =
+						beginningOfLineIndex + startSubstringIndexes[substringIndex];
+					updateMappedPositionsWhileSplitting(startPosition, startPosition + max);
+				}
 
 				// compute the splitDelta resulting with the operator and blank removal
 				if (substringIndex + 1 != startSubstringIndexes.length) {
 					increaseSplitDelta(
 						startSubstringIndexes[substringIndex]
 							+ max
-							- startSubstringIndexes[substringIndex
-							+ 1]);
+							- startSubstringIndexes[substringIndex + 1]);
 				}
 			}
 			// dump postfix operator?

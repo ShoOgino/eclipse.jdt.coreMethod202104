@@ -13,21 +13,38 @@
 				boolean endOfLine = false;
 				int currentCommentOffset = getCurrentCommentOffset();
 				int beginningOfLineSpaces = 0;
+				endOfLine = false;
+				currentCommentOffset = getCurrentCommentOffset();
+				beginningOfLineSpaces = 0;
+				boolean pendingCarriageReturn = false;
 				for (int i = startPosition, max = scanner.currentPosition; i < max; i++) {
 					char currentCharacter = source[i];
 					switch (currentCharacter) {
 						case '\r' :
-						case '\n' :
+							pendingCarriageReturn = true;
 							endOfLine = true;
-							currentLineBuffer.append(currentCharacter);
+							break;
+						case '\n' :
+							updateMappedPositions(i);
+							if (pendingCarriageReturn) {
+								increaseGlobalDelta(options.lineSeparatorSequence.length - 2);
+							} else {
+								increaseGlobalDelta(options.lineSeparatorSequence.length - 1);
+							}
+							pendingCarriageReturn = false;
+							currentLineBuffer.append(options.lineSeparatorSequence);
 							beginningOfLineSpaces = 0;
+							endOfLine = true;
 							break;
 						case '\t' :
 							if (endOfLine) {
 								// we remove a maximum of currentCommentOffset characters (tabs are converted to space numbers).
 								beginningOfLineSpaces += options.tabSize;
-								if (beginningOfLineSpaces > currentCommentOffset)
+								if (beginningOfLineSpaces > currentCommentOffset) {
 									currentLineBuffer.append(currentCharacter);
+								} else {
+									increaseGlobalDelta(-1);
+								}
 							} else {
 								currentLineBuffer.append(currentCharacter);
 							}
@@ -36,25 +53,38 @@
 							if (endOfLine) {
 								// we remove a maximum of currentCommentOffset characters (tabs are converted to space numbers).
 								beginningOfLineSpaces++;
-								if (beginningOfLineSpaces > currentCommentOffset)
+								if (beginningOfLineSpaces > currentCommentOffset) {
 									currentLineBuffer.append(currentCharacter);
+								} else {
+									increaseGlobalDelta(-1);
+								}
 							} else {
 								currentLineBuffer.append(currentCharacter);
 							}
 							break;
 						default :
-							beginningOfLineSpaces = 0;
-							currentLineBuffer.append(currentCharacter);
-							endOfLine = false;
+							if (pendingCarriageReturn) {
+								pendingCarriageReturn = false;
+								updateMappedPositions(i);
+								increaseGlobalDelta(options.lineSeparatorSequence.length - 1);
+								currentLineBuffer.append(options.lineSeparatorSequence);
+								beginningOfLineSpaces = 0;
+								endOfLine = false;
+							} else {
+								beginningOfLineSpaces = 0;
+								currentLineBuffer.append(currentCharacter);
+								endOfLine = false;								
+							}
 					}
 				}
+				multipleLineCommentCounter++;
 				break;
 			default :
 				currentLineBuffer.append(
 					source,
 					startPosition,
 					scanner.currentPosition - startPosition);
+				updateMappedPositions(startPosition);
 		}
-		updateMappedPositions(startPosition);
 	}
 
