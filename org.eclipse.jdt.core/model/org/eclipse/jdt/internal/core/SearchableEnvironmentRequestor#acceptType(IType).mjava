@@ -3,13 +3,33 @@
  */
 public void acceptType(IType type) {
 	try {
-		if (fUnitToSkip != null && fUnitToSkip.equals(type.getCompilationUnit())){
+		if (this.unitToSkip != null && this.unitToSkip.equals(type.getCompilationUnit())){
 			return;
 		}
+		String packageName = type.getPackageFragment().getElementName();
+		String typeName = type.getElementName();
+		boolean isBinary = type instanceof BinaryType;
+		
+		// determine associated access restriction
+		AccessRestriction accessRestriction = null;
+		
+		if (this.checkAccessRestrictions && (isBinary || !type.getJavaProject().equals(this.project))) {
+			PackageFragmentRoot root = (PackageFragmentRoot)type.getAncestor(IJavaElement.PACKAGE_FRAGMENT_ROOT);
+			ClasspathEntry entry = (ClasspathEntry) this.nameLookup.rootToResolvedEntries.get(root);
+			if (entry != null) { // reverse map always contains resolved CP entry
+				accessRestriction = entry.getImportRestriction();
+				if (accessRestriction != null) {
+					// TODO (philippe) improve char[] <-> String conversions to avoid performing them on the fly
+					char[][] packageChars = CharOperation.splitOn('.', packageName.toCharArray());
+					char[] typeChars = typeName.toCharArray();
+					accessRestriction = accessRestriction.getViolatedRestriction(CharOperation.concatWith(packageChars, typeChars, '/'), null);
+				}
+			}
+		}
 		if (type.isClass()) {
-			fRequestor.acceptClass(type.getPackageFragment().getElementName().toCharArray(), type.getElementName().toCharArray(), type.getFlags());
+			this.requestor.acceptClass(type.getPackageFragment().getElementName().toCharArray(), type.getElementName().toCharArray(), type.getFlags(), accessRestriction);
 		} else {
-			fRequestor.acceptInterface(type.getPackageFragment().getElementName().toCharArray(), type.getElementName().toCharArray(), type.getFlags());
+			this.requestor.acceptInterface(type.getPackageFragment().getElementName().toCharArray(), type.getElementName().toCharArray(), type.getFlags(), accessRestriction);
 		}
 	} catch (JavaModelException jme) {
 		// ignore
