@@ -1,0 +1,76 @@
+	/**
+	 * Bug 87845: [1.5][javadoc][dom] Type references in javadocs should have generic binding, not raw
+	 * @see "https://bugs.eclipse.org/bugs/show_bug.cgi?id=87845"
+	 */
+	public void testBug87845() throws JavaModelException {
+		workingCopies = new ICompilationUnit[1];
+		astLevel = AST.JLS3;
+		workingCopies[0] = getWorkingCopy("/Converter15/src/javadoc/b87845/Test.java",
+			"package javadoc.b87845;\n" + 
+			"public class Test {\n" + 
+			"	public void foo(int a, int b) {} \n" + 
+			"	public void foo(int a, int... args) {}\n" + 
+			"	public void foo(String... args) {}\n" + 
+			"	public void foo(Exception str, boolean... args) {}\n" + 
+			"	/**\n" + 
+			"	* @see Test#foo(int, int)\n" + 
+			"	* @see Test#foo(int, int[])\n" + 
+			"	* @see Test#foo(int, int...)\n" + 
+			"	* @see Test#foo(String[])\n" + 
+			"	* @see Test#foo(String...)\n" + 
+			"	* @see Test#foo(Exception, boolean[])\n" + 
+			"	* @see Test#foo(Exception, boolean...)\n" + 
+			"	*/\n" + 
+			"	public void valid() {}\n" + 
+			"	/**\n" + 
+			"	* @see Test#foo(int)\n" + 
+			"	* @see Test#foo(int, int, int)\n" + 
+			"	* @see Test#foo()\n" + 
+			"	* @see Test#foo(String)\n" + 
+			"	* @see Test#foo(String, String)\n" + 
+			"	* @see Test#foo(Exception)\n" + 
+			"	* @see Test#foo(Exception, boolean)\n" + 
+			"	* @see Test#foo(Exception, boolean, boolean)\n" + 
+			"	*/\n" + 
+			"	public void invalid() {}\n" + 
+			"}\n"
+		);
+		verifyComments(workingCopies[0]);
+		CompilationUnit compilUnit = verifyComments(workingCopies[0]);
+		if (docCommentSupport.equals(JavaCore.ENABLED)) {
+			// Do not need to verify following statement as we know it's ok as verifyComments did not fail
+			Javadoc docComment = (Javadoc) compilUnit.getCommentList().get(0); // get first javadoc comment
+			// Verify last parameter for all methods reference in javadoc comment
+			List tags = docComment.tags();
+			int size = tags.size();
+			for (int i=0; i<size; i++) {
+				TagElement tag = (TagElement) docComment.tags().get(i);				
+				assertEquals("Invalid number of fragment for see reference: "+tag, 1, tag.fragments().size());
+				ASTNode node = (ASTNode) tag.fragments().get(0);
+				assertEquals("Invalid kind of name reference for tag element: "+tag, ASTNode.METHOD_REF, node.getNodeType());
+				MethodRef methodRef = (MethodRef) node;
+				List parameters = methodRef.parameters();
+				int paramSize = parameters.size();
+				for (int j=0; j<paramSize; j++) {
+					node = (ASTNode) parameters.get(j);
+					assertEquals("Invalid kind of method parameter: "+node, ASTNode.METHOD_REF_PARAMETER, node.getNodeType());
+					MethodRefParameter parameter = (MethodRefParameter) node;
+					if (j==(paramSize-1)) {
+						switch (i) {
+							case 2:
+							case 4:
+							case 6:
+								assertTrue("Method parameter \""+parameter+"\" should be varargs!", parameter.isVarargs());
+								break;
+							default:
+								assertFalse("Method parameter \""+parameter+"\" should not be varargs!", parameter.isVarargs());
+								break;
+						}
+					} else {
+						assertFalse("Method parameter \""+parameter+"\" should not be varargs!", parameter.isVarargs());
+					}
+				}
+			}
+		}
+	}
+
