@@ -8,11 +8,10 @@
 
 		if (monitor != null && monitor.isCanceled()) return;
 		
-		boolean needCycleCheck = false;
 		int varLength = variableNames.length;
 		
 		// gather classpath information for updating
-		HashMap affectedProjects = new HashMap(5);
+		final HashMap affectedProjects = new HashMap(5);
 		JavaModelManager manager = JavaModelManager.getJavaModelManager();
 		IJavaModel model = manager.getJavaModel();
 
@@ -62,20 +61,6 @@
 
 							if (variableName.equals(entry.getPath().segment(0))){
 								affectedProjects.put(project, ((JavaProject)project).getResolvedClasspath(true));
-								
-								// also check whether it will be necessary to update proj references and cycle markers
-								if (!needCycleCheck && entry.getPath().segmentCount() ==  1){
-									IPath oldPath = (IPath)JavaModelManager.variableGet(variableName);
-									if (oldPath == JavaModelManager.VariableInitializationInProgress) oldPath = null;
-									if (oldPath != null && oldPath.segmentCount() == 1) {
-										needCycleCheck = true;
-									} else {
-										IPath newPath = variablePaths[k];
-										if (newPath != null && newPath.segmentCount() == 1) {
-											needCycleCheck = true;
-										}
-									}
-								}
 								continue nextProject;
 							}
 							IPath sourcePath, sourceRootPath;
@@ -100,50 +85,36 @@
 		int size = affectedProjects.size();
 		
 		if (!affectedProjects.isEmpty()) {
-			boolean wasFiring = manager.isFiring();
 			try {
-				if (wasFiring)
-					manager.stopDeltas();
-				// propagate classpath change
-				Iterator projectsToUpdate = affectedProjects.keySet().iterator();
-				while (projectsToUpdate.hasNext()) {
-
-					if (monitor != null && monitor.isCanceled()) return;
-
-					JavaProject project = (JavaProject) projectsToUpdate.next();
-					
-					if (!projectsToUpdate.hasNext()) {
-						// re-enable firing for the last operation
-						if (wasFiring) {
-							wasFiring = false;
-							manager.startDeltas();
+				JavaCore.run(
+					new IWorkspaceRunnable() {
+						public void run(IProgressMonitor monitor) throws CoreException {
+							// propagate classpath change
+							Iterator projectsToUpdate = affectedProjects.keySet().iterator();
+							while (projectsToUpdate.hasNext()) {
+			
+								if (monitor != null && monitor.isCanceled()) return;
+			
+								JavaProject project = (JavaProject) projectsToUpdate.next();
+								
+								project
+									.setRawClasspath(
+										project.getRawClasspath(),
+										SetClasspathOperation.ReuseOutputLocation,
+										monitor,
+										!JavaModelManager.IsResourceTreeLocked, // can change resources
+										!JavaModelManager.IsResourceTreeLocked && project.getWorkspace().isAutoBuilding(),// force build if in auto build mode
+										(IClasspathEntry[]) affectedProjects.get(project),
+										false); // updating - no validation
+							}
 						}
-					}
-					project
-						.setRawClasspath(
-							project.getRawClasspath(),
-							SetClasspathOperation.ReuseOutputLocation,
-							monitor,
-							!JavaModelManager.IsResourceTreeLocked, // can change resources
-							!JavaModelManager.IsResourceTreeLocked && project.getWorkspace().isAutoBuilding(),// force build if in auto build mode
-							(IClasspathEntry[]) affectedProjects.get(project),
-							size == 1 && needCycleCheck, // no individual check if more than 1 project to update
-							false); // updating - no validation
-				}
-				if (size > 1 && needCycleCheck){
-					// use workspace runnable for protecting marker manipulation
-//					ResourcesPlugin.getWorkspace().run(
-//						new IWorkspaceRunnable() {
-//							public void run(IProgressMonitor monitor) throws CoreException {
-								JavaProject.updateAllCycleMarkers(); // update them all at once
-//							}
-//						}, 
-//						monitor);					
-				}
-			} finally {
-				if (wasFiring) {
-					manager.startDeltas();
-					// in case of exception traversing, deltas may be fired only in the next #fire() iteration
+					},
+					monitor);
+			} catch (CoreException e) {
+				if (e instanceof JavaModelException) {
+					throw (JavaModelException)e;
+				} else {
+					throw new JavaModelException(e);
 				}
 			}
 		}
