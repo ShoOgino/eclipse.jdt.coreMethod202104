@@ -1,0 +1,71 @@
+    /**
+     * Get node number (level="single"). If the current node matches the supplied pattern, the returned
+     * number is one plus the number of previous siblings that match the pattern. Otherwise,
+     * return the element number of the nearest ancestor that matches the supplied pattern.
+     *
+     * @param node the current node, the one whose node number is required
+     * @param count Pattern that identifies which nodes should be
+     *     counted. Default (null) is the element name if the current node is
+     *      an element, or "node()" otherwise.
+     * @param from Pattern that specifies where counting starts from.
+     *     Default (null) is the root node. (This parameter does not seem
+     *     useful but is included for the sake of XSLT conformance.)
+     * @param controller the controller of the transformation, used if
+     *     the patterns reference context values (e.g. variables)
+     * @exception XPathException when any error occurs in processing
+     * @return the node number established as follows: go to the nearest
+     *     ancestor-or-self that matches the 'count' pattern and that is a
+     *     descendant of the nearest ancestor that matches the 'from' pattern.
+     *      Return one plus the nunber of preceding siblings of that ancestor
+     *      that match the 'count' pattern. If there is no such ancestor,
+     *     return 0.
+     */
+
+    public static int getNumberSingle(NodeInfo node, Pattern count,
+                    Pattern from, Controller controller) throws XPathException {
+
+//        checkNumberable(node);
+
+        if (count==null && from==null) {
+            return getNumberSimple(node, controller);
+        }
+
+        boolean knownToMatch = false;
+        if (count==null) {
+            if (node.getFingerprint()==-1) {	// unnamed node
+                count = NodeKindTest.makeNodeKindTest(node.getNodeKind());
+            } else {
+                count = new NameTest(node);
+            }
+            knownToMatch = true;
+        }
+
+        NodeInfo target = node;
+        while (!(knownToMatch || count.matches(target, controller))) {
+            target = target.getParent();
+            if (target==null) {
+                return 0;
+            }
+            if (from!=null && from.matches(target, controller)) {
+                return 0;
+            }
+        }
+
+        // we've found the ancestor to count from
+
+        SequenceIterator preceding =
+            target.iterateAxis(Axis.PRECEDING_SIBLING, count.getNodeTest());
+                        // pass the filter condition down to the axis enumeration where possible
+        boolean alreadyChecked = (count instanceof NodeTest);
+        int i = 1;
+        while (true) {
+            NodeInfo p = (NodeInfo)preceding.next();
+            if (p == null) {
+                return i;
+            }
+            if (alreadyChecked || count.matches(p, controller)) {
+                i++;
+            }
+        }
+    }
+

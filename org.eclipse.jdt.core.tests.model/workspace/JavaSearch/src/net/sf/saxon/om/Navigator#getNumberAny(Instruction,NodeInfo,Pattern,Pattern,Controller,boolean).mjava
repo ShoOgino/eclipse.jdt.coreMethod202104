@@ -1,0 +1,94 @@
+    /**
+     * Get node number (level="any").
+     * Return one plus the number of previous nodes in the
+     * document that match the supplied pattern
+     *
+     * @exception XPathException
+     * @param inst Identifies the xsl:number instruction; this is relevant
+     *     when the function is memoised to support repeated use of the same
+     *     instruction to number modulple nodes
+     * @param node Identifies the xsl:number instruction; this is
+     *     relevant when the function is memoised to support repeated use of
+     *     the same instruction to number modulple nodes
+     * @param count Pattern that identifies which nodes should be
+     *     counted. Default (null) is the element name if the current node is
+     *      an element, or "node()" otherwise.
+     * @param from Pattern that specifies where counting starts from.
+     *     Default (null) is the root node. Only nodes after the first (most
+     *     recent) node that matches the 'from' pattern are counted.
+     * @param controller The controller
+     * @param hasVariablesInPatterns if the count or from patterns
+     *     contain variables, then it's not safe to get the answer by adding
+     *     one to the number of the most recent node that matches
+     * @return one plus the number of nodes that precede the current node,
+     *     that match the count pattern, and that follow the first node that
+     *     matches the from pattern if specified.
+     */
+
+    public static int getNumberAny(Instruction inst, NodeInfo node, Pattern count,
+                    Pattern from, Controller controller, boolean hasVariablesInPatterns) throws XPathException {
+
+        NodeInfo memoNode = null;
+        int memoNumber = 0;
+        boolean memoise = (!hasVariablesInPatterns && count!=null);
+        if (memoise) {
+            Object[] memo = (Object[])controller.getUserData(inst, "xsl:number");
+            if (memo != null) {
+                memoNode = (NodeInfo)memo[0];
+                memoNumber = ((Integer)memo[1]).intValue();
+            }
+        }
+
+        int num = 0;
+        if (count==null) {
+            if (node.getFingerprint()==-1) {	// unnamed node
+                count = NodeKindTest.makeNodeKindTest(node.getNodeKind());
+            } else {
+                count = new NameTest(node);
+            }
+            num = 1;
+        } else if (count.matches(node, controller)) {
+            num = 1;
+        }
+
+        // We use a special axis invented for the purpose: the union of the preceding and
+        // ancestor axes, but in reverse document order
+
+        // Pass part of the filtering down to the axis iterator if possible
+        NodeTest filter;
+        if (from==null) {
+            filter = count.getNodeTest();
+        } else if (from.getNodeKind()==Type.ELEMENT && count.getNodeKind()==Type.ELEMENT) {
+            filter = NodeKindTest.ELEMENT;
+        } else {
+            filter = AnyNodeTest.getInstance();
+        }
+
+        SequenceIterator preceding =
+            node.iterateAxis(Axis.PRECEDING_OR_ANCESTOR, filter);
+
+        while (true) {
+            NodeInfo prev = (NodeInfo)preceding.next();
+            if (prev == null) {
+                break;
+            }
+            if (from!=null && from.matches(prev, controller)) {
+                return num;
+            }
+            if (count.matches(prev, controller)) {
+                if (num==1 && memoNode!=null && prev.isSameNode(memoNode)) {
+                    num = memoNumber + 1;
+                    break;
+                }
+                num++;
+            }
+        }
+        if (memoise) {
+            Object[] memo = new Object[2];
+            memo[0] = node;
+            memo[1] = new Integer(num);
+            controller.setUserData(inst, "xsl:number", memo);
+        }
+        return num;
+    }
+
