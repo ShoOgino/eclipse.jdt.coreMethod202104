@@ -1,0 +1,75 @@
+void checkForNameClash(MethodBinding currentMethod, MethodBinding inheritedMethod) {
+	// sent from checkMethods() to compare a current method and an inherited method that are not 'equal'
+
+	// error cases:
+	//		abstract class AA<E extends Comparable> { abstract void test(E element); }
+	//		class A extends AA<Integer> { public void test(Integer i) {} }
+	//		public class B extends A { public void test(Comparable i) {} }
+	// AND
+	//		interface I<E extends Comparable> { void test(E element); }
+	//		class A implements I<Integer> { public void test(Integer i) {} }
+	//		public class B extends A { public void test(Comparable i) {} }
+	// AND
+	//		abstract class Y implements EqualityComparable<Integer>, Equivalent<String> {
+	//			public boolean equalTo(Integer other) { return true; }
+	//		}
+	//		interface Equivalent<T> { boolean equalTo(T other); }
+	//		interface EqualityComparable<T> { boolean equalTo(T other); }
+	// AND
+	//		class Y implements EqualityComparable, Equivalent<String>{
+	//			public boolean equalTo(String other) { return true; }
+	//			public boolean equalTo(Object other) { return true; }
+	//		}
+	//		interface Equivalent<T> { boolean equalTo(T other); }
+	//		interface EqualityComparable { boolean equalTo(Object other); }
+
+	if (currentMethod.declaringClass.isInterface()) return;
+
+	if (!detectNameClash(currentMethod, inheritedMethod)) { // check up the hierarchy for skipped inherited methods
+		TypeBinding[] currentParams = currentMethod.parameters;
+		TypeBinding[] inheritedParams = inheritedMethod.parameters;
+		int length = currentParams.length;
+		if (length != inheritedParams.length) return; // no match
+
+		for (int i = 0; i < length; i++)
+			if (currentParams[i] != inheritedParams[i])
+				if (currentParams[i].isBaseType() != inheritedParams[i].isBaseType() || !inheritedParams[i].isCompatibleWith(currentParams[i]))
+					return; // no chance that another inherited method's bridge method can collide
+
+		ReferenceBinding[][] interfacesToVisit = new ReferenceBinding[3][];
+		int lastPosition = -1;
+		ReferenceBinding[] itsInterfaces = null;
+		ReferenceBinding superType = this.type.superclass;
+		while (superType != null && superType.isValidBinding()) {
+			MethodBinding[] methods = superType.getMethods(currentMethod.selector);
+			for (int m = 0, n = methods.length; m < n; m++)
+				if (!areMethodsEqual(currentMethod, methods[m]) && detectNameClash(currentMethod, methods[m]))
+					return;
+			if ((itsInterfaces = superType.superInterfaces()) != NoSuperInterfaces) {
+				if (++lastPosition == interfacesToVisit.length)
+					System.arraycopy(interfacesToVisit, 0, interfacesToVisit = new ReferenceBinding[lastPosition * 2][], 0, lastPosition);
+				interfacesToVisit[lastPosition] = itsInterfaces;
+			}
+			superType = superType.superclass();
+		}
+
+		for (int i = 0; i <= lastPosition; i++) {
+			ReferenceBinding[] interfaces = interfacesToVisit[i];
+			for (int j = 0, l = interfaces.length; j < l; j++) {
+				superType = interfaces[j];
+				if (superType.isValidBinding()) {
+					MethodBinding[] methods = superType.getMethods(currentMethod.selector);
+					for (int m = 0, n = methods.length; m < n; m++)
+						if (!areMethodsEqual(currentMethod, methods[m]) && detectNameClash(currentMethod, methods[m]))
+							return;
+					if ((itsInterfaces = superType.superInterfaces()) != NoSuperInterfaces) {
+						if (++lastPosition == interfacesToVisit.length)
+							System.arraycopy(interfacesToVisit, 0, interfacesToVisit = new ReferenceBinding[lastPosition * 2][], 0, lastPosition);
+						interfacesToVisit[lastPosition] = itsInterfaces;
+					}
+				}
+			}
+		}
+	}
+}
+
