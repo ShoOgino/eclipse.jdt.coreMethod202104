@@ -1,0 +1,64 @@
+	/*
+	 * Computes the root path by scanning the first .java file in this source archive or folder.
+	 * Returns null if could not compute the root path.
+	 */
+	private String computeRootPath() {
+		if (Util.isArchiveFileName(this.sourcePath.lastSegment())) {
+			JavaModelManager manager = JavaModelManager.getJavaModelManager();
+			ZipFile zip = null;
+			try {
+				zip = manager.getZipFile(this.sourcePath);
+				for (Enumeration entries = zip.entries(); entries.hasMoreElements(); ) {
+					ZipEntry entry = (ZipEntry) entries.nextElement();
+					String name;
+					if (!entry.isDirectory() && Util.isJavaFileName(name = entry.getName())) {
+						char[] contents = this.readSource(entry, zip);
+						String rootPath = computeRootPath(name, contents);
+						if (rootPath != null) {
+							return rootPath;
+						}
+					}
+				}
+				return null;
+			} catch (CoreException e) {
+				return null;
+			} finally {
+				manager.closeZipFile(zip); // handle null case
+			}
+		} else {
+			Object target = JavaModel.getTarget(ResourcesPlugin.getWorkspace().getRoot(), this.sourcePath, true);
+			if (target instanceof IFolder) {
+				IFolder folder = (IFolder)target;
+				final String[] rootPathHolder = new String[1];
+				try {
+					folder.accept(new IResourceVisitor() {
+						public boolean visit(IResource resource) throws CoreException {
+							if (resource instanceof IFile && Util.isJavaFileName(resource.getName())) {
+								char[] contents = org.eclipse.jdt.internal.core.Util.getResourceContentsAsCharArray((IFile)resource, encoding);
+								IPath fullPath = resource.getFullPath();
+								int sourcePathSegmentCount = sourcePath.segmentCount();
+								IPath javaFilePath = fullPath.removeFirstSegments(sourcePathSegmentCount);
+								String rootPath = computeRootPath(javaFilePath.toString(), contents);
+								if (rootPath != null) {
+									rootPathHolder[0] = rootPath;
+									throw new CoreException(new JavaModelStatus()); // abort visit
+								}
+							}
+							return true;
+						}
+					});
+				} catch (CoreException e) {
+				}
+				if (rootPathHolder[0] != null) {
+					return rootPathHolder[0];
+				}
+			} else if (target instanceof File) {
+				File file = (File)target;
+				if (file.isDirectory()) {
+					// TODO: Traverse directory
+				}
+			}
+		}
+		return null;
+	}
+
