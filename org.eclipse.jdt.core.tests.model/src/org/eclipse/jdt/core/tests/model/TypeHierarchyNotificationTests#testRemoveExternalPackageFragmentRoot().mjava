@@ -1,0 +1,38 @@
+/**
+ * When a package fragment root is removed from the classpath, but does not impact the
+ * package fragments, the type hierarchy should not change.
+ */
+public void testRemoveExternalPackageFragmentRoot() throws JavaModelException, CoreException, IOException {
+	IJavaProject project= getJavaProject("TypeHierarchyNotification");
+	ICompilationUnit cu = getCompilationUnit("TypeHierarchyNotification", "src", "p", "X.java");
+	IType type = cu.getType("X");
+	ITypeHierarchy h = type.newTypeHierarchy(project, null);
+	h.addTypeHierarchyChangedListener(this);
+
+	// add a classpath entry for the new root
+	IClasspathEntry[] originalCP= project.getRawClasspath();
+	IClasspathEntry newEntry= JavaCore.newSourceEntry(project.getProject().getFullPath().append("extra"));
+	IClasspathEntry[] newCP= new IClasspathEntry[originalCP.length + 1];
+	System.arraycopy(originalCP, 0 , newCP, 0, originalCP.length);
+	newCP[originalCP.length]= newEntry;
+	
+	try {
+		// set classpath
+		project.setRawClasspath(newCP, null);
+
+		// now create the actual resource for the root and populate it
+		this.reset();
+		project.getProject().getFolder("extra").create(false, true, null);
+		IPackageFragmentRoot newRoot= getPackageFragmentRoot("TypeHierarchyNotification", "extra");
+		assertTrue("New root should now be visible", newRoot != null);
+		this.assertOneChange(h);
+
+		// remove a classpath entry that does not impact the type hierarchy
+		this.reset();
+		project.setRawClasspath(originalCP, null);
+		assertTrue("Should not receive change", !this.changeReceived);
+	} finally {
+		h.removeTypeHierarchyChangedListener(this);
+	}
+}
+

@@ -1,0 +1,46 @@
+/**
+ * When a class file is added or removed if the class file intersects package fragments in the type hierarchy,
+ * the type hierarchy has possibly changed (possibly introduce a supertype)
+ */
+public void testAddRemoveClassFile() throws JavaModelException, CoreException, IOException {
+	// Create type hierarchy on 'java.lang.LinkageError' in 'Minimal.zip'
+	IJavaProject project = getJavaProject("TypeHierarchyNotification");
+	ICompilationUnit unit = getCompilationUnit("TypeHierarchyNotification", "src", "p", "MyError.java");
+	IType type = unit.getType("MyError");
+	ITypeHierarchy h = type.newTypeHierarchy(project, null);
+	h.addTypeHierarchyChangedListener(this);
+
+	// Create 'patch' folder and add it to classpath
+	IFolder pathFolder = project.getProject().getFolder("patch");
+	pathFolder.create(true, true, null);
+	IClasspathEntry newEntry = JavaCore.newLibraryEntry(pathFolder.getFullPath(), null, null, false);
+	IClasspathEntry[] classpath = project.getRawClasspath();
+	IClasspathEntry[] newClassPath = new IClasspathEntry[classpath.length+1];
+	newClassPath[0] = newEntry;
+	System.arraycopy(classpath, 0, newClassPath, 1, classpath.length);
+
+	try {
+		// Set new classpath
+		setClasspath(project, newClassPath);
+
+		// Create package 'java.lang' in 'patch'
+		IPackageFragment pf = project.getPackageFragmentRoots()[0].createPackageFragment("java.lang", false, null);
+		h.refresh(null);
+
+		// Test addition of 'Error.class' in 'java.lang' (it should replace the 'Error.class' of the JCL in the hierarchy)
+		this.reset();
+		IFile file = getProject("TypeHierarchyNotification").getFile("Error.class");
+		((IFolder) pf.getUnderlyingResource()).getFile("Error.class").create(file.getContents(false), false, null);
+		this.assertOneChange(h);
+		h.refresh(null);
+		assertEquals("Superclass of MyError should be Error in patch", pf.getClassFile("Error.class").getType(), h.getSuperclass(type));
+
+		// Test removal of 'Error.class'
+		this.reset();
+		deleteResource(pf.getClassFile("Error.class").getUnderlyingResource());
+		this.assertOneChange(h);
+	} finally {
+		h.removeTypeHierarchyChangedListener(this);
+	}
+}
+

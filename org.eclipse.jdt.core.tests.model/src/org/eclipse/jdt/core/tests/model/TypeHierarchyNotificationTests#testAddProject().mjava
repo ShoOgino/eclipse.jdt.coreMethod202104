@@ -1,0 +1,38 @@
+/**
+ * When a project is added that is on the class path of the type hierarchy project,
+ * the type hierarchy should change.
+ */
+public void testAddProject() throws JavaModelException, CoreException, IOException {
+	IJavaProject project= getJavaProject("TypeHierarchyNotification");
+	ICompilationUnit cu = getCompilationUnit("TypeHierarchyNotification", "src", "p", "X.java");
+	IType type = cu.getType("X");
+	ITypeHierarchy h = type.newTypeHierarchy(project, null);
+	h.addTypeHierarchyChangedListener(this);
+
+	// prepare a new classpath entry for the new project
+	IClasspathEntry[] originalCP= project.getRawClasspath();
+	IClasspathEntry newEntry= JavaCore.newProjectEntry(new Path("/NewProject"), false);
+	IClasspathEntry[] newCP= new IClasspathEntry[originalCP.length + 1];
+	System.arraycopy(originalCP, 0 , newCP, 0, originalCP.length);
+	newCP[originalCP.length]= newEntry;
+
+	IProject newProject = null;
+	try {
+		// set the new classpath
+		project.setRawClasspath(newCP, null);
+
+		// now create the actual resource for the root and populate it
+		this.reset();
+		newProject = project.getJavaModel().getWorkspace().getRoot().getProject("NewProject");
+		newProject.create(null);
+		newProject.open(null);
+		IProjectDescription description = newProject.getDescription();
+		description.setNatureIds(new String[] {JavaCore.NATURE_ID});
+		newProject.setDescription(description, null);
+		this.assertOneChange(h);
+	} finally {
+		this.deleteProject("NewProject");
+		h.removeTypeHierarchyChangedListener(this);
+	}
+}
+

@@ -1,0 +1,42 @@
+/**
+ * Test removing a listener while the type hierarchy is notifying listeners.
+ */
+public void testRemoveListener() throws JavaModelException, CoreException, IOException {
+	IJavaProject project= getJavaProject("TypeHierarchyNotification");
+	final ICompilationUnit cu = getCompilationUnit("TypeHierarchyNotification", "src", "p", "X.java");
+	final ICompilationUnit superCU = getCompilationUnit("TypeHierarchyNotification", "src", "b", "B.java");
+	IType type = cu.getType("X");
+	ITypeHierarchy h = type.newTypeHierarchy(project, null);
+	ITypeHierarchyChangedListener listener= new ITypeHierarchyChangedListener() {
+		public void typeHierarchyChanged(ITypeHierarchy th) {
+			changeReceived= true;
+			hierarchy= th;
+			notifications++;
+			th.removeTypeHierarchyChangedListener(this);
+		}
+	};
+	h.addTypeHierarchyChangedListener(listener);
+
+	try {
+		// change the visibility of the super class and the 'extends' of the type we're looking at
+		// in a batch operation
+		getWorkspace().run(
+			new IWorkspaceRunnable() {
+				public void run(IProgressMonitor monitor) throws CoreException {
+					try {
+						changeVisibility(superCU, "public", "private");
+						changeSuper(cu, "B", "a.A");
+					} catch (JavaModelException e) {
+						assertTrue("No exception", false);
+					}
+				}
+			},
+			null
+		);
+
+		this.assertOneChange(h);
+	} finally {
+		h.removeTypeHierarchyChangedListener(this);
+	}
+}
+

@@ -1,0 +1,36 @@
+/**
+ * When a project is deleted that contains package fragments that impact the 
+ * type hierarchy, the type hierarchy should change (and be made invalid)
+ */
+public void testRemoveProject() throws JavaModelException, CoreException, IOException {
+	ITypeHierarchy h = null;
+	try {
+		setUpJavaProject("TypeHierarchyDependent");
+		IJavaProject project= getJavaProject("TypeHierarchyDependent");
+		ICompilationUnit cu = getCompilationUnit("TypeHierarchyDependent", "", "", "Dependent.java");
+		IType type = cu.getType("Dependent");
+		h = type.newTypeHierarchy(project, null);
+		h.addTypeHierarchyChangedListener(this);
+	
+		// Sanity check
+		assertEquals("Superclass of Dependent is a.A", "a.A", h.getSuperclass(type).getFullyQualifiedName());
+	
+		// Delete a related project
+		IResource folder = getJavaProject("TypeHierarchyNotification").getUnderlyingResource();
+		folder.delete(false, null);
+		this.assertOneChange(h);
+		assertTrue("Should still exist", h.exists());
+		h.refresh(null);
+		IType superType = h.getSuperclass(type);
+		assertTrue("Superclass of Dependent should be null", superType == null);
+	
+		// Delete the project type lives in.
+		folder = getJavaProject("TypeHierarchyDependent").getUnderlyingResource();
+		folder.delete(false, null);
+		assertTrue("Should have been invalidated", ! h.exists());	
+	} finally {
+		this.deleteProject("TypeHierarchyDependent");
+		if (h != null) h.removeTypeHierarchyChangedListener(this);
+	}
+}
+

@@ -1,0 +1,85 @@
+/**
+ * When a CU is added, if the type hierarchy doesn't have a focus, it should change
+ * only if one of the types of the CU is part of the region.
+ */
+public void testAddCompilationUnitInRegion() throws JavaModelException, CoreException, IOException {
+	IJavaProject javaProject = getJavaProject("TypeHierarchyNotification");
+	IRegion region = JavaCore.newRegion();
+	region.add(javaProject);
+	ITypeHierarchy h = javaProject.newTypeHierarchy(region, null);
+	h.addTypeHierarchyChangedListener(this);
+
+	try {
+		setUpJavaProject("TypeHierarchyDependent");
+		// a cu with no types part of the region
+		IPackageFragment pkg = getPackageFragment("TypeHierarchyDependent", "", "");
+		ICompilationUnit newCU1 = pkg.createCompilationUnit(
+			"Z1.java", 
+			"\n" +
+			"public class Z1 {\n" +
+			"\n" +
+			"	public static main(String[] args) {\n" +
+			"		System.out.println(\"HelloWorld\");\n" +
+			"	}\n" +
+			"}\n", 
+			false, 
+			null);
+		try {
+			assertCreation(newCU1);
+			assertTrue("Should not receive change", !this.changeReceived);
+		} finally {
+			// cleanup	
+			deleteResource(newCU1.getUnderlyingResource());
+			this.reset();
+		}
+	
+		// a cu with a type which is part of the region and is a subtype of an existing type of the region
+		pkg = getPackageFragment("TypeHierarchyNotification", "src", "p");
+		ICompilationUnit newCU2 = pkg.createCompilationUnit(
+			"Z2.java", 
+			"package p;\n" +
+			"\n" +
+			"public class Z2 extends e.E {\n" +
+			"}\n",  
+			false, 
+			null);
+		try {
+			assertCreation(newCU2);
+			this.assertOneChange(h);
+			h.refresh(null);
+			IType eE = getCompilationUnit("TypeHierarchyNotification", "src", "e", "E.java").getType("E");
+			IType[] subtypes = h.getSubtypes(eE);
+			assertTrue("Should be one subtype of e.E", subtypes.length == 1);
+			assertEquals("Subtype of e.E should be p.Z2", newCU2.getType("Z2"), subtypes[0]);
+		} finally {
+			// cleanup	
+			deleteResource(newCU2.getUnderlyingResource());
+			this.reset();
+		}
+	
+		// a cu with a type which is part of the region and is not a sub type of an existing type of the region
+		ICompilationUnit newCU3 = pkg.createCompilationUnit(
+			"Z3.java", 
+			"package p;\n" +
+			"\n" +
+			"public class Z3 extends Throwable {\n" +
+			"}\n",  
+			false, 
+			null);
+		try {
+			assertCreation(newCU3);
+			this.assertOneChange(h);
+			h.refresh(null);
+			IType throwableClass = getClassFile("TypeHierarchyNotification", getExternalJCLPath(), "java.lang", "Throwable.class").getType();
+			assertEquals("Superclass of Z3 should be java.lang.Throwable", throwableClass, h.getSuperclass(newCU3.getType("Z3")));
+		} finally {
+			// cleanup	
+			deleteResource(newCU3.getUnderlyingResource());
+			this.reset();
+		}
+	} finally {
+		h.removeTypeHierarchyChangedListener(this);
+		this.deleteProject("TypeHierarchyDependent");
+	}
+}
+

@@ -1,0 +1,39 @@
+/**
+ * When editing > 1 source type in a hierarchy using a MultiOperation, 
+ * we should be notified of ONE change.
+ */
+public void testEditSourceTypes() throws JavaModelException, CoreException, IOException {
+	// TBD: Find a way to do 2 changes in 2 different CUs at once
+	
+	IJavaProject project= getJavaProject("TypeHierarchyNotification");
+	final ICompilationUnit cu = getCompilationUnit("TypeHierarchyNotification", "src", "p", "X.java");
+	final ICompilationUnit superCU = getCompilationUnit("TypeHierarchyNotification", "src", "b", "B.java");
+	IType type = cu.getType("X");
+	ITypeHierarchy h = type.newTypeHierarchy(project, null);
+	h.addTypeHierarchyChangedListener(this);
+
+	try {
+		// change the visibility of the super class and the 'extends' of the type we're looking at
+		// in a batch operation
+		JavaCore.run(
+			new IWorkspaceRunnable() {
+				public void run(IProgressMonitor monitor) throws CoreException {
+					try {
+						changeVisibility(superCU, "public", "private");
+						changeSuper(cu, "X", "a.A");
+					} catch (JavaModelException e) {
+						assertTrue("No exception", false);
+					}
+				}
+			},
+			null
+		);
+
+		assertTrue("Should receive change", this.changeReceived);
+		assertTrue("Change should be for this hierarchy", this.hierarchy == h);
+		assertTrue("Should be one notification", this.notifications == 1);
+	} finally {
+		h.removeTypeHierarchyChangedListener(this);
+	}
+}
+
