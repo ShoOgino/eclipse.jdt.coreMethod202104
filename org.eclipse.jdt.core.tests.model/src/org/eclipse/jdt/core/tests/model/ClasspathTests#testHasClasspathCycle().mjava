@@ -1,0 +1,50 @@
+/**
+ * Test IJavaProject.hasClasspathCycle(IClasspathEntry[]).
+ */
+public void testHasClasspathCycle() throws JavaModelException, CoreException, IOException {
+	try {
+		IJavaProject p1 = this.createJavaProject("P1", new String[] {""}, "");
+		IJavaProject p2 = this.createJavaProject("P2", new String[] {""}, "");
+		IJavaProject p3 = this.createJavaProject("P3", new String[] {""}, new String[] {}, new String[] {"/P1"}, "");
+	
+		IClasspathEntry[] originalP1CP= p1.getRawClasspath();
+		IClasspathEntry[] originalP2CP= p2.getRawClasspath();
+	
+		// Ensure no cycle reported
+		assertTrue("P1 should not have a cycle", !p1.hasClasspathCycle(originalP1CP));
+
+		// Ensure that adding NervousTest as a prerequesite of P2 doesn't report a cycle
+		int length = originalP2CP.length;
+		IClasspathEntry[] newCP= new IClasspathEntry[length + 1];
+		System.arraycopy(originalP2CP, 0 , newCP, 0, length);
+		newCP[length]= JavaCore.newProjectEntry(p1.getProject().getFullPath(), false);
+		assertTrue("P2 should not have a cycle", !p2.hasClasspathCycle(newCP));
+		p2.setRawClasspath(newCP, null);
+
+		// Ensure that adding P3 as a prerequesite of P1 reports a cycle
+		length = originalP1CP.length;
+		newCP= new IClasspathEntry[length + 1];
+		System.arraycopy(originalP1CP, 0 , newCP, 0, length);
+		newCP[length]= JavaCore.newProjectEntry(p2.getProject().getFullPath(), false);
+		assertTrue("P3 should have a cycle", p2.hasClasspathCycle(newCP));
+
+		// Ensure a cycle is not reported through markers
+		IWorkspace workspace = getJavaModel().getWorkspace();
+		IMarker[] markers = workspace.getRoot().findMarkers(IJavaModelMarker.TRANSIENT_PROBLEM, true, 1);
+		boolean hasCycleMarker = false;
+		for (int i = 0; i < markers.length; i++){
+			if (markers[i].getAttribute(IJavaModelMarker.CYCLE_DETECTED) != null) {
+				hasCycleMarker = true;
+				break;
+			}
+		}
+	assertTrue("Should have no cycle markers", !hasCycleMarker);
+		
+	} finally {
+		// cleanup  
+		this.deleteProject("P1");
+		this.deleteProject("P2");
+		this.deleteProject("P3");
+	}
+}
+

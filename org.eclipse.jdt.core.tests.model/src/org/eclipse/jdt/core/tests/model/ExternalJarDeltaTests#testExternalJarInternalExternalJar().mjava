@@ -1,0 +1,53 @@
+/**
+ * - add an internal jar to claspath
+ * - remove internal jar and the same jar as external jar
+ * - refresh the JavaModel
+ */
+public void testExternalJarInternalExternalJar() throws CoreException {
+	File f = null;
+	try {
+		IJavaProject project = this.createJavaProject("P", new String[] {""}, "");
+		
+		String libPath = getLibraryPath();
+		String p1Path = libPath+"/p1.jar";
+		String p2Path = libPath+"/p2.jar";
+		File f1= new File(p1Path);
+		File f2 = new File(p2Path);
+		
+		String internalFooPath = "/P/foo.jar";
+		IFile fooIFile = this.createFile(internalFooPath, read(f1));
+		
+		setClasspath(project, new IClasspathEntry[]{JavaCore.newLibraryEntry(new Path(internalFooPath), null, null)});
+		this.getJavaModel().refreshExternalArchives(null,null);
+		this.startDeltas();
+		
+		IPath externalFooPath = fooIFile.getLocation();
+		setClasspath(project, new IClasspathEntry[]{JavaCore.newLibraryEntry(externalFooPath, null, null)});
+		
+		f = new File(externalFooPath.toString());
+		copy(f2, f);
+		
+		this.getJavaModel().refreshExternalArchives(null,null);
+		
+		String deltaPath = externalFooPath.toString();
+		deltaPath = Character.toUpperCase(deltaPath.charAt(0)) + deltaPath.substring(1);
+		assertEquals(
+			"Unexpected delta", 
+			"P[*]: {CHILDREN}\n"+
+			"	foo.jar[*]: {REMOVED FROM CLASSPATH}\n"+
+			"	"+deltaPath.replace('/', File.separatorChar)+"[*]: {ADDED TO CLASSPATH}\n"+
+			"	ResourceDelta(/P/.classpath)[*]\n"+
+			"\n"+
+			"P[*]: {CHILDREN}\n"+
+			"	"+deltaPath+"[*]: {CONTENT | ARCHIVE CONTENT CHANGED}", 
+			this.getDeltas());
+	} catch (IOException e) {
+	} finally {
+		if(f != null) {
+			deleteFile(f);
+		}
+		this.deleteProject("P");
+		this.stopDeltas();
+	}
+}
+

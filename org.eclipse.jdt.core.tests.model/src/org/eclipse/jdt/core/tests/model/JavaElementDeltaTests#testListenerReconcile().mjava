@@ -1,0 +1,94 @@
+/*
+ * Ensures that a delta listener that asks for POST_RECONCILE events gets those events 
+ * and no others.
+ */
+public void testListenerReconcile() throws CoreException {
+	DeltaListener listener = new DeltaListener(ElementChangedEvent.POST_RECONCILE);
+	ICompilationUnit wc = null;
+	try {
+		this.createJavaProject("P", new String[] {""}, "");
+		JavaCore.addElementChangedListener(listener, ElementChangedEvent.POST_RECONCILE);
+		
+		// cu creation
+		IPackageFragment pkg = this.getPackage("P");
+		ICompilationUnit cu = pkg.createCompilationUnit(
+			"X.java",
+			"public class X {\n" +
+			"}",
+			false,
+			null);
+		assertEquals(
+			"Unexpected delta after creating CU", 
+			"", 
+			listener.toString());
+		listener.flush();
+		
+		// type creation
+		cu.createType(
+			"class A {\n" +
+			"}",
+			cu.getType("X"),
+			false,
+			null);
+		assertEquals(
+			"Unexpected delta after creating type", 
+			"", 
+			listener.toString());
+		listener.flush();
+		
+		// non-java resource creation
+		this.createFile("P/readme.txt", "");
+		assertEquals(
+			"Unexpected delta after creating non-java resource",
+			"",
+			listener.toString());
+		listener.flush();
+		
+		// shared working copy creation
+		wc = (ICompilationUnit)cu.getSharedWorkingCopy(null, null, null);
+		assertEquals(
+			"Unexpected delta after creating shared working copy",
+			"",
+			listener.toString());
+		listener.flush();
+			
+		// reconcile
+		wc.getBuffer().setContents(
+			"public class X {\n" +
+			"  public void foo() {\n" +
+			"  }\n" +
+			"}");
+		wc.reconcile();
+		assertEquals(
+			"Unexpected delta after reconciling working copy",
+			"X[*]: {CHILDREN | FINE GRAINED}\n" +
+			"	foo[+]: {}\n" +
+			"A[-]: {}",
+			listener.toString());
+		listener.flush();
+		
+		// commit
+		wc.commit(false, null);
+		assertEquals(
+			"Unexpected delta after committing working copy",
+			"",
+			listener.toString());
+		listener.flush();
+		
+		// shared working copy destruction
+		wc.destroy();
+		assertEquals(
+			"Unexpected delta after destroying shared working copy",
+			"",
+			listener.toString());
+		listener.flush();
+		wc = null;
+		
+			
+	} finally {
+		if (wc != null) wc.destroy();
+		JavaCore.removeElementChangedListener(listener);
+		this.deleteProject("P");
+	}
+}
+

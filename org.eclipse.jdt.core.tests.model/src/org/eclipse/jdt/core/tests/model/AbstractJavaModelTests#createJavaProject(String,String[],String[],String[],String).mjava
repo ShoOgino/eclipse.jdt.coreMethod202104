@@ -1,0 +1,67 @@
+protected IJavaProject createJavaProject(final String projectName, final String[] sourceFolders, final String[] libraries, final String[] projects, final String output) throws CoreException {
+	final IJavaProject[] result = new IJavaProject[1];
+	IWorkspaceRunnable create = new IWorkspaceRunnable() {
+		public void run(IProgressMonitor monitor) throws CoreException {
+			// create project
+			createProject(projectName);
+			
+			// set java nature
+			addJavaNature(projectName);
+			
+			// create classpath entries 
+			IProject project = getWorkspaceRoot().getProject(projectName);
+			IPath projectPath = project.getFullPath();
+			int sourceLength = sourceFolders.length;
+			int libLength = libraries.length;
+			int projectLength = projects.length;
+			IClasspathEntry[] entries = new IClasspathEntry[sourceLength+libLength+projectLength];
+			for (int i= 0; i < sourceLength; i++) {
+				IPath sourcePath = new Path(sourceFolders[i]);
+				int segmentCount = sourcePath.segmentCount();
+				if (segmentCount > 0) {
+					// create folder and its parents
+					IContainer container = project;
+					for (int j = 0; j < segmentCount; j++) {
+						IFolder folder = container.getFolder(new Path(sourcePath.segment(j)));
+						folder.create(true, true, null);
+						container = folder;
+					}
+				}
+				entries[i] = JavaCore.newSourceEntry(projectPath.append(sourcePath));
+			}
+			for (int i= 0; i < libLength; i++) {
+				String lib = libraries[i];
+				if (JavaCore.getClasspathVariable(lib) != null) {
+					entries[sourceLength+i] = JavaCore.newVariableEntry(new Path(lib), null, null);
+				} else {
+					IPath libPath = new Path(lib);
+					if (!libPath.isAbsolute() && libPath.segmentCount() > 0 && libPath.getFileExtension() == null) {
+						project.getFolder(libPath).create(true, true, null);
+						libPath = projectPath.append(libPath);
+					}
+					entries[sourceLength+i] = JavaCore.newLibraryEntry(libPath, null, null);
+				}
+			}
+			for  (int i= 0; i < projectLength; i++) {
+				entries[sourceLength+libLength+i] = JavaCore.newProjectEntry(new Path(projects[i]));
+			}
+			
+			// create output folder
+			IPath outputPath = new Path(output);
+			if (outputPath.segmentCount() > 0) {
+				IFolder output = project.getFolder(outputPath);
+				if (!output.exists()) {
+					output.create(true, true, null);
+				}
+			}
+			
+			// set classpath and output location
+			IJavaProject javaProject = JavaCore.create(project);
+			javaProject.setRawClasspath(entries, projectPath.append(outputPath), null);
+			result[0] = javaProject;
+		}
+	};
+	getWorkspace().run(create, null);	
+	return result[0];
+}
+

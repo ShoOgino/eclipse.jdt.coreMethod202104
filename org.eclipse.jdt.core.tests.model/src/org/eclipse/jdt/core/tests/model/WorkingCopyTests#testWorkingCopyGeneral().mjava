@@ -1,0 +1,90 @@
+/**
+ * Tests the general functionality of a working copy:<ul>
+ * <li>ensures that the copy and original compilation unit are not equal</li>
+ * <li>ensures the correct retrieval of the original element</li>
+ * <li>closing the package of the compilation unit does not close the copy</li>
+ * <li>ensures that working copies are unique
+ * <li>ensures committing changes from working copies 
+ */
+public void testWorkingCopyGeneral() throws JavaModelException, CoreException, IOException {
+
+	assertTrue("copy and actual should not be equal", !this.copy.equals(this.cu));
+
+	IType copyType= this.copy.getType("A");
+
+	assertTrue("can't get original from original", this.cu.getOriginalElement() == null);
+
+	assertTrue("getting working copy from a copy should yield original copy", this.copy.getWorkingCopy() == this.copy);
+
+	boolean ex= false;
+	assertDeletion(copyType);
+
+	// closing the package should not close the copy
+	((IOpenable)this.cu.getParent()).close();
+	assertTrue("copy should still be open", this.copy.isOpen());
+	
+	// verify original still present
+	assertTrue("actual type should still be present", this.cu.getType("A").exists());
+
+	// getAnother working copy
+	ICompilationUnit copy2= (ICompilationUnit)this.cu.getWorkingCopy();
+	try {
+		assertTrue("working copies should be unique ", !(this.copy.equals(copy2)));
+	
+		// delete a method from the 2nd working copy.
+		IMethod method= copy2.getType("A").getMethod("foo", null);
+	
+		assertDeletion(method);
+		IMethod originalMethod= this.cu.getType("A").getMethod("foo", null);
+		assertTrue("method should still be present in original", originalMethod.exists());
+	
+		// commit the changes from the 2nd copy.
+		copy2.commit(false, null);
+	
+		assertTrue("copy always has unsaved changes", copy2.hasUnsavedChanges());
+		
+		// original method should now be gone
+		assertTrue("method should no longer be present in original after commit", !originalMethod.exists());
+	
+		// commit the changes from the 1st copy - should fail
+		try {
+			this.copy.commit(false, null);
+			assertTrue("commit should have failed", ex);
+		} catch (JavaModelException jme) {
+		}
+		
+	
+		// now force the update
+		try {
+			this.copy.commit(true, null);
+		} catch (JavaModelException jme) {
+			assertTrue("commit should work", false);
+		}
+	
+		// now the type should be gone.
+		assertTrue("original type should no longer be present", !this.cu.getType("A").exists());
+	
+	
+		this.copy.close();
+		ex= false;
+		try {
+			this.copy.open(null);
+		} catch (JavaModelException e) {
+			ex= true;
+		}
+		assertTrue("should be able to open working copy a 2nd time", !ex);
+	
+		// now destroy the handle
+		this.copy.destroy();
+		ex= false;
+		try {
+			this.copy.open(null);
+		} catch (JavaModelException e) {
+			ex= true;
+		}
+		assertTrue("should not be able to open working copy again", ex);
+	} finally {
+		copy2.destroy();
+	}
+}
+

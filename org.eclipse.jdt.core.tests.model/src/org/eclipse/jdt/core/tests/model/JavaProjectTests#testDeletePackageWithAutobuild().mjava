@@ -1,0 +1,42 @@
+/**
+ * Tests the fix for "1FWNMKD: ITPJCORE:ALL - Package Fragment Removal not reported correctly"
+ */
+public void testDeletePackageWithAutobuild() throws JavaModelException, CoreException, IOException {
+	// close all project except JavaProjectTests so as to avoid side effects while autobuilding
+	IProject[] projects = getWorkspaceRoot().getProjects();
+	for (int i = 0; i < projects.length; i++) {
+		IProject project = projects[i];
+		if (project.getName().equals("JavaProjectTests")) continue;
+		project.close(null);
+	}
+
+	// turn autobuilding on
+	IWorkspace workspace = getWorkspace();
+	boolean autoBuild = workspace.isAutoBuilding();
+	IWorkspaceDescription description = workspace.getDescription();
+	description.setAutoBuilding(true);
+	workspace.setDescription(description);
+
+	startDeltas();
+	IPackageFragment frag = getPackageFragment("JavaProjectTests", "", "x.y");
+	IFolder folder = (IFolder) frag.getUnderlyingResource();
+	try {
+		folder.delete(true, null);
+		assertTrue("should have been notified of package removal", getDeltaFor(frag) != null);
+	} finally {
+		stopDeltas();
+		
+		// turn autobuild off
+		description.setAutoBuilding(autoBuild);
+		workspace.setDescription(description);
+
+		// reopen projects
+		projects = getWorkspaceRoot().getProjects();
+		for (int i = 0; i < projects.length; i++) {
+			IProject project = projects[i];
+			if (project.getName().equals("JavaProjectTests")) continue;
+			project.open(null);
+		}
+	}
+}
+

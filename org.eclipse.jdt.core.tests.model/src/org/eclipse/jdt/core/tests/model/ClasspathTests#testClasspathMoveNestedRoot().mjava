@@ -1,0 +1,41 @@
+/**
+ * Move a root and ensure the classpath is not updated (i.e. entry not renamed).
+ */
+public void testClasspathMoveNestedRoot() throws JavaModelException, CoreException, IOException {
+	IJavaProject project = this.createJavaProject("P", new String[] {"nested/src"}, new String[] {getExternalJCLPath()}, "bin");
+	IPackageFragmentRoot root= getPackageFragmentRoot("P", "nested/src");
+	IClasspathEntry[] originalCP= project.getRawClasspath();
+
+	// delete the root
+	IFolder folder= (IFolder)root.getUnderlyingResource();
+	IPath originalPath= folder.getFullPath();
+	IPath newPath= originalPath.removeLastSegments(1);
+	newPath= newPath.append(new Path("newsrc"));
+
+	startDeltas(); 
+	
+	folder.move(newPath, true, null);
+
+	IClasspathEntry[] newCP= project.getRawClasspath();
+
+	IPackageFragmentRoot newRoot= project.getPackageFragmentRoot(project.getProject().getFolder("nested").getFolder("newsrc")); 
+
+	try {
+		// entry for the "src" folder wasn't replaced
+		assertTrue("classpath not automatically updated", newCP.length == 2 &&
+			newCP[1].equals(originalCP[1]) &&
+			newCP[0].equals(originalCP[0]));
+
+		IJavaElementDelta rootDelta = getDeltaFor(root, true);
+		IJavaElementDelta projectDelta = getDeltaFor(newRoot.getParent(), true);
+		assertTrue("should get delta for moved root", rootDelta != null &&
+				rootDelta.getKind() == IJavaElementDelta.REMOVED &&
+				rootDelta.getFlags() == 0);
+		assertTrue("should get delta indicating content changed for project", this.deltaContentChanged(projectDelta));
+	
+	} finally {
+		stopDeltas();
+		this.deleteProject("P");
+	}
+}
+
