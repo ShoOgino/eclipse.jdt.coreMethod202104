@@ -1,0 +1,52 @@
+	/**
+	 * Notifies this Java Model Manager that some resource changes have happened
+	 * on the platform, and that the Java Model should update any required
+	 * internal structures such that its elements remain consistent.
+	 * Translates <code>IResourceDeltas</code> into <code>IJavaElementDeltas</code>.
+	 *
+	 * @see IResourceDelta
+	 * @see IResource 
+	 */
+	public void resourceChanged(IResourceChangeEvent event) {
+
+		if (event.getSource() instanceof IWorkspace) {
+			IResource resource = event.getResource();
+			IResourceDelta delta = event.getDelta();
+			switch(event.getType()){
+				case IResourceChangeEvent.PRE_DELETE :
+					try {
+						if(resource.getType() == IResource.PROJECT 
+							&& ((IProject) resource).hasNature(JavaCore.NATURE_ID)) {
+							this.deleting((IProject)resource);
+						}
+					} catch(CoreException e){
+					}
+					break;
+				case IResourceChangeEvent.PRE_AUTO_BUILD :
+					if(delta != null) {
+						this.checkProjectBeingAdded(delta);
+						DeltaProcessor.checkProjectPropertyFileUpdate(delta, null); // will close project if affected by the property file change
+					}
+					break;
+				case IResourceChangeEvent.POST_CHANGE :
+					if (delta != null) {
+						try {
+							IJavaElementDelta[] translatedDeltas = fDeltaProcessor.processResourceDelta(delta);
+							if (translatedDeltas.length > 0) {
+								for (int i= 0; i < translatedDeltas.length; i++) {
+									registerResourceDelta(translatedDeltas[i]);
+								}
+							}
+							fire();
+						} finally {
+							// fix for 1FWIAEQ: ITPJCORE:ALL - CRITICAL - "projects being deleted" cache not cleaned up when solution deleted
+							if (!fProjectsBeingDeleted.isEmpty()) {
+								fProjectsBeingDeleted= new ArrayList(1);
+							}
+						}
+					}				
+					break;
+			}
+		}
+	}
+
