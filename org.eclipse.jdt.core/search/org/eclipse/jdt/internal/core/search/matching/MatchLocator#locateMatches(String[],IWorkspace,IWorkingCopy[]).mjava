@@ -15,7 +15,7 @@
 			}
 			System.out.println("]"); //$NON-NLS-1$
 			if (workingCopies != null) {
-				 System.out.println(" and working copies ["); //$NON-NLS-1$
+				 System.out.println("and working copies ["); //$NON-NLS-1$
 				for (int i = 0, length = workingCopies.length; i < length; i++) {
 					IWorkingCopy wc = workingCopies[i];
 					System.out.println("\t" + ((JavaElement)wc).toStringWithAncestors()); //$NON-NLS-1$
@@ -56,9 +56,9 @@
 			int length = filePaths.length;
 			if (progressMonitor != null) {
 				if (this.pattern.needsResolve) {
-					progressMonitor.beginTask("", length * 10); // 1 for file path, 3 for parsing, 6 for binding resolution //$NON-NLS-1$
+					progressMonitor.beginTask("", length * 10); // 1 for file path, 4 for parsing and binding creation, 5 for binding resolution //$NON-NLS-1$
 				} else {
-					progressMonitor.beginTask("", length * 4); // 1 for file path, 3 for parsing //$NON-NLS-1$
+					progressMonitor.beginTask("", length * 5); // 1 for file path, 4 for parsing and binding creation //$NON-NLS-1$
 				}
 			}
 	
@@ -66,10 +66,11 @@
 			Util.sort(filePaths); 
 			
 			// initialize pattern for polymorphic search (ie. method reference pattern)
-			this.matchingOpenables = new MatchingOpenableSet();
+			this.potentialMatches = new PotentialMatchSet();
 			this.pattern.initializePolymorphicSearch(this, progressMonitor);
 			
-			JavaProject previousJavaProject = null;
+			IType focusType = getFocusType();
+			JavaProject previousJavaProject = focusType == null ? null : (JavaProject)focusType.getJavaProject();
 			for (int i = 0; i < length; i++) {
 				if (progressMonitor != null && progressMonitor.isCanceled()) {
 					throw new OperationCanceledException();
@@ -102,7 +103,8 @@
 					if (resource == null) { // case of a file in an external jar
 						resource = javaProject.getProject();
 					}
-					if (!javaProject.equals(previousJavaProject)) {
+					if (focusType == null // when searching in hierarchy, all potential matches are resolved in the focus project context
+							&& !javaProject.equals(previousJavaProject)) {
 						// locate matches in previous project
 						if (previousJavaProject != null) {
 							try {
@@ -114,22 +116,9 @@
 									// problem with classpath in this project -> skip it
 								}
 							}
-							this.matchingOpenables = new MatchingOpenableSet();
+							this.potentialMatches = new PotentialMatchSet();
 						}
 	
-						// initialization for this project
-						if (length == 1) {
-							// if only one potential match, a file name environment costs too much,
-							// so use the existing searchable  environment wich will populate the java model
-							// only for this potential match and its required types.
-							if (this.nameEnvironment != null) { // cleanup
-								this.nameEnvironment.cleanup();
-							}
-							this.nameEnvironment = javaProject.getSearchableNameEnvironment();
-						} else {
-							this.initializeNameEnvironment(javaProject);
-						}
-						this.initialize(javaProject);
 						previousJavaProject = javaProject;
 					}
 				} catch (JavaModelException e) {
@@ -137,8 +126,8 @@
 					continue;
 				}
 	
-				// add matching openable
-				this.addMatchingOpenable(resource, openable, null/*no CompilationUnitDeclaration yet*/, null/*no Matchset yet*/);
+				// add potential match
+				this.addPotentialMatch(resource, openable);
 	
 				if (progressMonitor != null) {
 					progressMonitor.worked(1);
@@ -156,7 +145,7 @@
 						// problem with classpath in last project -> skip it
 					}
 				}
-				this.matchingOpenables = new MatchingOpenableSet();
+				this.potentialMatches = new PotentialMatchSet();
 			} 
 			
 			if (progressMonitor != null) {
@@ -166,7 +155,6 @@
 			if (this.nameEnvironment != null) {
 				this.nameEnvironment.cleanup();
 			}
-			this.parsedUnits = null;
 			manager.flushZipFiles();
 		}	
 	}

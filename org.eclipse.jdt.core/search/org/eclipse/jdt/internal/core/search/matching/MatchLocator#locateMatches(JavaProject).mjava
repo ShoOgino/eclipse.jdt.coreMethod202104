@@ -1,69 +1,19 @@
 	/**
-	 * Locate the matches amongst the matching openables.
+	 * Locate the matches amongst the potential matches.
 	 */
 	private void locateMatches(JavaProject javaProject) throws JavaModelException {
-		MatchingOpenable[] openables = this.matchingOpenables.getMatchingOpenables(javaProject.getPackageFragmentRoots());
-	
-		this.compilationAborted = false;
-
-		if (this.pattern.needsResolve) {
-			this.createAndResolveBindings(openables);
+		PotentialMatch[] potentialMatches = 
+			this.potentialMatches.getPotentialMatches(
+				getFocusType() == null ?
+				javaProject.getPackageFragmentRoots() :
+				javaProject.getAllPackageFragmentRoots()); // all potential matches are resolved in the focus' project context
+		
+		int length = potentialMatches.length;
+		int index = 0;
+		while (index < length) {
+			int max = Math.min(MAX_AT_ONCE, length-index);
+			locateMatches(javaProject, potentialMatches, index, max);
+			index += max;
 		}
-
-		// create hierarchy resolver if scope is a hierarchy scope
-		if (this.scope instanceof HierarchyScope) {
-			IType focusType = ((HierarchyScope)this.scope).focusType;
-			if (focusType != null) {
-				if (!focusType.isBinary()) {
-					// cache all types in the focus' compilation unit (even secondary types)
-					this.accept((ICompilationUnit)focusType.getCompilationUnit());
-				}
-				
-				char[] fullyQualifiedName = focusType.getFullyQualifiedName().toCharArray();
-				this.hierarchyResolver = new HierarchyResolver(this.lookupEnvironment, null/*hierarchy is not going to be computed*/);
-				if (this.hierarchyResolver.setFocusType(CharOperation.splitOn('.', fullyQualifiedName)) == null) {
-					// focus type is not visible from this project
-					return;
-				}
-			} else {
-				this.hierarchyResolver = null;
-			}
-		} else {
-			this.hierarchyResolver = null;
-		}
-
-		// matching openable resolution
-		for (int i = 0, length = openables.length; i < length; i++) { 
-			if (progressMonitor != null && progressMonitor.isCanceled()) {
-				throw new OperationCanceledException();
-			}
-			 
-			try {
-				this.currentMatchingOpenable = openables[i];
-				
-				if (!this.currentMatchingOpenable.hasAlreadyDefinedType()) {
-					this.currentMatchingOpenable.locateMatches();
-				} // else skip type has it is hidden so not visible
-			} catch (AbortCompilation e) {
-				// problem with class path: it could not find base classes
-				// continue and try next matching openable reporting innacurate matches (since bindings will be null)
-				compilationAborted = true;
-			} catch (CoreException e) {
-				if (e instanceof JavaModelException) {
-					// problem with class path: it could not find base classes
-					// continue and try next matching openable reporting innacurate matches (since bindings will be null)
-					compilationAborted = true;
-				} else {
-					// core exception thrown by client's code: let it through
-					throw new JavaModelException(e);
-				}
-			} finally {
-				this.currentMatchingOpenable.reset();
-			}
-			if (progressMonitor != null) {
-				progressMonitor.worked(3);
-			}
-		}
-		this.currentMatchingOpenable = null;
 	}
 
