@@ -1,0 +1,90 @@
+	public static final Constant getConstantFor(
+		FieldBinding binding,
+		boolean implicitReceiver,
+		Reference reference,
+		Scope referenceScope,
+		int indexInQualification) {
+
+		//propagation of the constant.
+
+		//ref can be a FieldReference, a SingleNameReference or a QualifiedNameReference
+		//indexInQualification may have a value greater than zero only for QualifiednameReference
+		//if ref==null then indexInQualification==0 AND implicitReceiver == false. This case is a 
+		//degenerated case where a fake reference field (null) 
+		//is associted to a real FieldBinding in order 
+		//to allow its constant computation using the regular path (i.e. find the fieldDeclaration
+		//and proceed to its type resolution). As implicitReceiver is false, no error reporting
+		//against ref will be used ==> no nullPointerException risk .... 
+
+		//special treatment for langage-built-in  field (their declaring class is null)
+		if (binding.declaringClass == null) {
+			//currently only one field "length" : the constant computation is never done
+			return NotAConstant;
+		}
+		if (!binding.isFinal()) {
+			return binding.constant = NotAConstant;
+		}
+		if (binding.constant != null) {
+			if (indexInQualification == 0) {
+				return binding.constant;
+			}
+			//see previous comment for the (sould-always-be) valid cast
+			QualifiedNameReference qualifiedReference = (QualifiedNameReference) reference;
+			if (indexInQualification == (qualifiedReference.indexOfFirstFieldBinding - 1)) {
+				return binding.constant;
+			}
+			return NotAConstant;
+		}
+
+		//The field has not been yet type checked.
+		//It also means that the field is not coming from a class that
+		//has already been compiled. It can only be from a class within
+		//compilation units to process. Thus the field is NOT from a BinaryTypeBinbing
+
+		SourceTypeBinding typeBinding = (SourceTypeBinding) binding.declaringClass;
+		TypeDeclaration typeDecl = typeBinding.scope.referenceContext;
+		FieldDeclaration fieldDecl = typeDecl.declarationOf(binding);
+
+		//what scope to use (depend on the staticness of the field binding)
+		MethodScope fieldScope =
+			binding.isStatic()
+				? typeDecl.staticInitializerScope
+				: typeDecl.initializerScope;
+
+		if (implicitReceiver) { //Determine if the ref is legal in the current class of the field
+			//i.e. not a forward reference .... (they are allowed when the receiver is explicit ! ... Please don't ask me why !...yet another java mystery...)
+			if (fieldScope.fieldDeclarationIndex == MethodScope.NotInFieldDecl) {
+				// no field is currently being analysed in typeDecl
+				fieldDecl.resolve(fieldScope); //side effect on binding :-) ... 
+				return binding.constant;
+			}
+			//We are re-entering the same class fields analysing
+			if ((reference != null)
+				&& (binding.declaringClass == referenceScope.enclosingSourceType()) // only complain for access inside same type
+				&& (binding.id > fieldScope.fieldDeclarationIndex)) {
+				//forward reference. The declaration remains unresolved.
+				referenceScope.problemReporter().forwardReference(reference, indexInQualification, typeBinding);
+				return NotAConstant;
+			}
+			fieldDecl.resolve(fieldScope); //side effect on binding :-) ... 
+			return binding.constant;
+		}
+		//the field reference is explicity. It has to be a "simple" like field reference to get the
+		//constant propagation. For example in Packahe.Type.field1.field2 , field1 may have its
+		//constant having a propagation where field2 is always not propagating its
+		if (indexInQualification == 0) {
+			fieldDecl.resolve(fieldScope); //side effect on binding :-) ... 
+			return binding.constant;
+		}
+		// Side-effect on the field binding may not be propagated out for the qualified reference
+		// unless it occurs in first place of the name sequence
+		fieldDecl.resolve(fieldScope); //side effect on binding :-) ... 
+		//see previous comment for the cast that should always be valid
+		QualifiedNameReference qualifiedReference = (QualifiedNameReference) reference;
+		if (indexInQualification == (qualifiedReference.indexOfFirstFieldBinding - 1)) {
+			return binding.constant;
+		} else {
+			return NotAConstant;
+		}
+	}
+
