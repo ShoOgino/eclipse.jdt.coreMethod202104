@@ -1,0 +1,60 @@
+/**
+ * Test reconcile force flag + cancel
+ */
+public void testMethodWithError4() throws JavaModelException, CoreException {
+
+	final IProgressMonitor myMonitor = new IProgressMonitor() {
+		boolean isCanceled = false;
+		public void beginTask(String name, int totalWork) {}
+		public void done() {}
+		public void internalWorked(double work) {}
+		public boolean isCanceled() {
+			return this.isCanceled;
+		}
+		public void setCanceled(boolean value) {
+			this.isCanceled = value;
+		}
+		public void setTaskName(String name) {}
+		public void subTask(String name) {}
+		public void worked(int work) {}
+	};
+
+	class CancelingProblemRequestor extends ProblemRequestor {
+		boolean isCanceling = false;
+		public void acceptProblem(IProblem problem) {
+			if (isCanceling) myMonitor.setCanceled(true); // auto-cancel on first problem
+			super.acceptProblem(problem);
+		}		
+	};
+	CancelingProblemRequestor myPbRequestor = new CancelingProblemRequestor();
+	
+	this.workingCopy.destroy();
+	ICompilationUnit cu = getCompilationUnit("Reconciler", "src", "p1", "X.java");
+	 this.problemRequestor = myPbRequestor;
+	this.workingCopy = (ICompilationUnit) cu.getWorkingCopy(null, null,this.problemRequestor);
+													
+	this.workingCopy.getBuffer().setContents(
+		"package p1;\n" +
+		"public class X {\n" +
+		"	Zork f;	\n"+
+		"	void foo(Zork z){\n"+
+		"	}\n"+
+		"}	\n");
+
+	this.workingCopy.reconcile();
+	this.problemRequestor.initialize();
+
+	// use force flag to refresh problems			
+	myPbRequestor.isCanceling = true;
+	this.workingCopy.reconcile(true, myMonitor);
+	assertProblems(
+		"Unexpected problems",
+		"----------\n" + 
+		"1. ERROR in X.java (at line 3)\n" + 
+		"	Zork f;	\n" + 
+		"	^^^^\n" + 
+		"Zork cannot be resolved (or is not a valid type) for the field X.f\n" + 
+		"----------\n"
+	);
+}
+
