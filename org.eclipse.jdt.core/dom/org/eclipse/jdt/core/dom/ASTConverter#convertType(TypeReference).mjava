@@ -113,15 +113,14 @@
 					case AST.JLS3 :
 						if (typeArguments != null) {
 							int numberOfEnclosingType = 0;
+                            int startingIndex = 0;
+                            int endingIndex = 0;
 							for (int i = 0, max = typeArguments.length; i < max; i++) {
 								if (typeArguments[i] != null) {
 									numberOfEnclosingType++;
-								}
-							}
-							int startingIndex = 0;
-							int endingIndex = 0;
-							while (typeArguments[endingIndex] == null) {
-								endingIndex++;
+								} else if (numberOfEnclosingType == 0) {
+                                    endingIndex++;
+                                }
 							}
 							Name name = null;
 							if (endingIndex - startingIndex == 0) {
@@ -130,14 +129,20 @@
 								int start = (int)(positions[startingIndex]>>>32);
 								int end = (int) positions[startingIndex];
 								name.setSourceRange(start, end - start + 1);
+								name.index = 1;
 							} else {
-								name = this.setQualifiedNameNameAndSourceRanges(tokens, positions, startingIndex, endingIndex, typeReference);
+								name = this.setQualifiedNameNameAndSourceRanges(tokens, positions, endingIndex, typeReference);
 							}
+							recordNodes(name, typeReference);
 							SimpleType simpleType = this.ast.newSimpleType(name);
 							int start = (int)(positions[startingIndex]>>>32);
 							int end = (int) positions[endingIndex];
 							simpleType.setSourceRange(start, end - start + 1);
 							ParameterizedType parameterizedType = this.ast.newParameterizedType(simpleType);
+                            if (this.resolveBindings) {
+                                recordNodes(simpleType, typeReference);
+                                recordNodes(parameterizedType, typeReference);
+                            }
 							start = simpleType.getStartPosition();
 							end = start + simpleType.getLength() - 1;
 							for (int i = 0, max = typeArguments[endingIndex].length; i < max; i++) {
@@ -145,6 +150,8 @@
 								parameterizedType.typeArguments().add(type2);
 								end = type2.getStartPosition() + type2.getLength() - 1;
 							}
+							int indexOfEnclosingType = 1;
+							parameterizedType.index = indexOfEnclosingType;
 							end = retrieveClosingAngleBracketPosition(end + 1);
 							length = end + 1;
 							parameterizedType.setSourceRange(start, end - start + 1);
@@ -152,16 +159,27 @@
 							Type currentType = parameterizedType;
 							while(startingIndex < typeArguments.length) {
 								SimpleName simpleName = this.ast.newSimpleName(new String(tokens[startingIndex]));
+								simpleName.index = startingIndex + 1;
 								start = (int)(positions[startingIndex]>>>32);
 								end = (int) positions[startingIndex];
 								simpleName.setSourceRange(start, end - start + 1);
 								recordPendingNameScopeResolution(simpleName);
-								QualifiedType qualifiedType = this.ast.newQualifiedType(currentType, simpleName);							
+								QualifiedType qualifiedType = this.ast.newQualifiedType(currentType, simpleName);
+                                if (this.resolveBindings) {
+                                    recordNodes(simpleName, typeReference);
+                                    recordNodes(qualifiedType, typeReference);
+                                }
 								start = currentType.getStartPosition();
 								end = simpleName.getStartPosition() + simpleName.getLength() - 1;
 								qualifiedType.setSourceRange(start, end - start + 1);
+								indexOfEnclosingType++;
 								if (typeArguments[startingIndex] != null) {
+	                               	qualifiedType.index = indexOfEnclosingType;
 									ParameterizedType parameterizedType2 = this.ast.newParameterizedType(qualifiedType);
+ 									parameterizedType2.index = indexOfEnclosingType;
+                                   if (this.resolveBindings) {
+                                        recordNodes(parameterizedType2, typeReference);
+                                    }
 									for (int i = 0, max = typeArguments[startingIndex].length; i < max; i++) {
 										final Type type2 = convertType(typeArguments[startingIndex][i]);
 										parameterizedType2.typeArguments().add(type2);
@@ -173,6 +191,7 @@
 									currentType = parameterizedType2;
 								} else {
 									currentType = qualifiedType;
+                               		qualifiedType.index = indexOfEnclosingType;
 								}
 								startingIndex++;
 							}
