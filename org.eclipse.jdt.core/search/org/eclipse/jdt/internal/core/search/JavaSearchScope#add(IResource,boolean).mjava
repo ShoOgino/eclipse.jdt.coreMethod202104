@@ -1,0 +1,43 @@
+/**
+ * Adds the given resource to this search scope.
+ * If asked and if the element is a project, also add its external jars,
+ * jars that are internal to the project and source folders.
+ */
+public void add(IResource element, boolean addJarsAndSourceFolders) {
+	super.add(element);
+
+	// clear indexer cache
+	fLastCheckedResource = null;
+
+	if (addJarsAndSourceFolders && element instanceof IProject) {
+		// remember the paths of its classpath entries
+		IJavaModel javaModel = JavaModelManager.getJavaModel(element.getWorkspace());
+		IJavaProject javaProject = javaModel.getJavaProject(element.getName());
+		try {
+			// add only external jars, internal jars (that are internal to the project)
+			// and source folders of the project
+			IClasspathEntry[] entries = javaProject.getResolvedClasspath(true);
+			for (int i = 0, length = entries.length; i < length; i++) {
+				IClasspathEntry entry = entries[i];
+				IPath path = entry.getPath();
+				switch (entry.getEntryKind()) {
+					case IClasspathEntry.CPE_LIBRARY:
+						if (element.getFullPath().isPrefixOf(path) // jar internal to project 
+								|| element.getWorkspace().getRoot().findMember(path) == null) { // jar external to workspace
+							this.add(path);
+						}
+						break;
+					case IClasspathEntry.CPE_SOURCE:
+						if (element.getFullPath().isPrefixOf(path)) { // source folder inside project
+							this.add(path);
+						}
+						break;
+				}
+			}
+		} catch (JavaModelException e) {
+		}
+	} else {
+		this.add(element.getFullPath());
+	}
+}
+
