@@ -4,6 +4,7 @@
 		Scope scope = this;
 		ReferenceBinding foundType = null;
 		boolean insideStaticContext = false;
+		boolean insideTypeAnnotation = false;
 		if ((mask & Binding.TYPE) == 0) {
 			Scope next = scope;
 			while ((next = scope.parent) != null)
@@ -19,6 +20,7 @@
 							if (typeVariable != null)	return typeVariable;
 						}
 						insideStaticContext |= methodScope.isStatic;
+						insideTypeAnnotation = methodScope.insideTypeAnnotation;
 					case BLOCK_SCOPE :
 						ReferenceBinding localType = ((BlockScope) scope).findLocalType(name); // looks in this scope only
 						if (localType != null) {
@@ -46,32 +48,35 @@
 							return typeVariable;
 						}
 						insideStaticContext |= (sourceType.modifiers & AccStatic) != 0; // not isStatic()
-						// 6.5.5.1 - member types have precedence over top-level type in same unit
-						ReferenceBinding memberType = findMemberType(name, sourceType);
-						if (memberType != null) { // skip it if we did not find anything
-							if (memberType.problemId() == Ambiguous) {
-								if (foundType == null || foundType.problemId() == NotVisible)
-									// supercedes any potential InheritedNameHidesEnclosingName problem
-									return memberType;
-								// make the user qualify the type, likely wants the first inherited type
-								return new ProblemReferenceBinding(name, InheritedNameHidesEnclosingName);
-							}
-							if (memberType.isValidBinding()) {
-								if (sourceType == memberType.enclosingType()
-										|| environment().options.complianceLevel >= ClassFileConstants.JDK1_4) {
-									// found a valid type in the 'immediate' scope (ie. not inherited)
-									// OR in 1.4 mode (inherited shadows enclosing)
-									if (foundType == null)
-										return memberType; 
-									// if a valid type was found, complain when another is found in an 'immediate' enclosing type (ie. not inherited)
-									if (foundType.isValidBinding() && foundType != memberType)
-										return new ProblemReferenceBinding(name, InheritedNameHidesEnclosingName);
+						if (!insideTypeAnnotation) {
+							// 6.5.5.1 - member types have precedence over top-level type in same unit
+							ReferenceBinding memberType = findMemberType(name, sourceType);
+							if (memberType != null) { // skip it if we did not find anything
+								if (memberType.problemId() == Ambiguous) {
+									if (foundType == null || foundType.problemId() == NotVisible)
+										// supercedes any potential InheritedNameHidesEnclosingName problem
+										return memberType;
+									// make the user qualify the type, likely wants the first inherited type
+									return new ProblemReferenceBinding(name, InheritedNameHidesEnclosingName);
 								}
+								if (memberType.isValidBinding()) {
+									if (sourceType == memberType.enclosingType()
+											|| environment().options.complianceLevel >= ClassFileConstants.JDK1_4) {
+										// found a valid type in the 'immediate' scope (ie. not inherited)
+										// OR in 1.4 mode (inherited shadows enclosing)
+										if (foundType == null)
+											return memberType; 
+										// if a valid type was found, complain when another is found in an 'immediate' enclosing type (ie. not inherited)
+										if (foundType.isValidBinding() && foundType != memberType)
+											return new ProblemReferenceBinding(name, InheritedNameHidesEnclosingName);
+									}
+								}
+								if (foundType == null || (foundType.problemId() == NotVisible && memberType.problemId() != NotVisible))
+									// only remember the memberType if its the first one found or the previous one was not visible & memberType is...
+									foundType = memberType;
 							}
-							if (foundType == null || (foundType.problemId() == NotVisible && memberType.problemId() != NotVisible))
-								// only remember the memberType if its the first one found or the previous one was not visible & memberType is...
-								foundType = memberType;
 						}
+						insideTypeAnnotation = false;
 						if (CharOperation.equals(sourceType.sourceName, name)) {
 							if (foundType != null && foundType != sourceType && foundType.problemId() != NotVisible)
 								return new ProblemReferenceBinding(name, InheritedNameHidesEnclosingName);
