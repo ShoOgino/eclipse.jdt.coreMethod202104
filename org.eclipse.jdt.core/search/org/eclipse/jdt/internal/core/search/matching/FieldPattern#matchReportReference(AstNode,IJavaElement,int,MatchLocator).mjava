@@ -1,0 +1,71 @@
+/**
+ * @see SearchPattern#matchReportReference
+ */
+protected void matchReportReference(AstNode reference, IJavaElement element, int accuracy, MatchLocator locator) throws CoreException {
+	if (this.findReferences && reference instanceof QualifiedNameReference) {
+		QualifiedNameReference qNameRef = (QualifiedNameReference) reference;
+		int length = qNameRef.tokens.length;
+		int[] accuracies = new int[length];
+		Binding binding = qNameRef.binding;
+		int indexOfFirstFieldBinding = qNameRef.indexOfFirstFieldBinding > 0 ? qNameRef.indexOfFirstFieldBinding-1 : 0;
+		for (int i = 0; i < indexOfFirstFieldBinding; i++)
+			accuracies[i] = -1;
+		// first token
+		if (matchesName(this.name, qNameRef.tokens[indexOfFirstFieldBinding]) && !(binding instanceof LocalVariableBinding)) {
+			FieldBinding fieldBinding = binding instanceof FieldBinding ? (FieldBinding) binding : null;
+			if (fieldBinding == null) {
+				accuracies[indexOfFirstFieldBinding] = accuracy;
+			} else {
+				switch (matchField(fieldBinding, false)) {
+					case ACCURATE_MATCH:
+						accuracies[indexOfFirstFieldBinding] = IJavaSearchResultCollector.EXACT_MATCH;
+						break;
+					case INACCURATE_MATCH:
+						accuracies[indexOfFirstFieldBinding] = IJavaSearchResultCollector.POTENTIAL_MATCH;
+						break;
+					default:
+						accuracies[indexOfFirstFieldBinding] = -1;
+				}
+			}
+		} else {
+			accuracies[indexOfFirstFieldBinding] = -1;
+		}
+		// other tokens
+		for (int i = indexOfFirstFieldBinding+1; i < length; i++) {
+			char[] token = qNameRef.tokens[i];
+			if (matchesName(this.name, token)) {
+				FieldBinding otherBinding = qNameRef.otherBindings == null ? null : qNameRef.otherBindings[i-(indexOfFirstFieldBinding+1)];
+				if (otherBinding == null) {
+					accuracies[i] = accuracy;
+				} else {
+					switch (matchField(otherBinding, false)) {
+						case ACCURATE_MATCH:
+							accuracies[i] = IJavaSearchResultCollector.EXACT_MATCH;
+							break;
+						case INACCURATE_MATCH:
+							accuracies[i] = IJavaSearchResultCollector.POTENTIAL_MATCH;
+							break;
+						default:
+							accuracies[i] = -1;
+					}
+				}
+			} else {
+				accuracies[i] = -1;
+			}
+		}
+		locator.reportAccurateReference(
+			reference.sourceStart, 
+			reference.sourceEnd, 
+			qNameRef.tokens, 
+			element, 
+			accuracies);
+	} else {
+		locator.reportAccurateReference(
+			reference.sourceStart, 
+			reference.sourceEnd, 
+			new char[][] {this.name}, 
+			element, 
+			accuracy);
+	}
+}
+

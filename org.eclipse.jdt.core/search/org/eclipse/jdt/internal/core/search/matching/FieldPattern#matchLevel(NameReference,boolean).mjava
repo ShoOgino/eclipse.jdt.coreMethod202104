@@ -1,0 +1,51 @@
+/**
+ * Returns whether this field reference pattern matches the given name reference.
+ * Look at resolved information only if specified.
+ */
+protected int matchLevel(NameReference nameRef, boolean resolve) {	
+	if (!resolve) {
+		if (this.name == null)
+			return this.mustResolve ? POTENTIAL_MATCH : ACCURATE_MATCH;
+		if (nameRef instanceof SingleNameReference) {
+			if (matchesName(this.name, ((SingleNameReference) nameRef).token)) return POTENTIAL_MATCH;
+		} else {
+			QualifiedNameReference qNameRef = (QualifiedNameReference) nameRef;
+			char[][] tokens = qNameRef.tokens;
+			if (this.writeAccess && !this.readAccess) {
+				// in the case of the assigment of a qualified name reference, the match must be on the last token
+				if (matchesName(this.name, tokens[tokens.length-1])) return POTENTIAL_MATCH;
+			} else {
+				for (int i = 0, max = tokens.length; i < max; i++)
+					if (matchesName(this.name, tokens[i])) return POTENTIAL_MATCH;
+			}
+		}
+		return IMPOSSIBLE_MATCH;
+	}				
+
+	if (nameRef instanceof SingleNameReference)
+		return matchLevel(nameRef.binding);
+
+	Binding binding = nameRef.binding;
+	QualifiedNameReference qNameRef = (QualifiedNameReference) nameRef;
+	FieldBinding fieldBinding = null;
+	if (binding instanceof FieldBinding) {
+		fieldBinding = (FieldBinding) binding;
+		char[] bindingName = fieldBinding.name;
+		int lastDot = CharOperation.lastIndexOf('.', bindingName);
+		if (lastDot > -1)
+			bindingName = CharOperation.subarray(bindingName, lastDot+1, bindingName.length);
+		if (matchesName(this.name, bindingName))
+			return matchField(fieldBinding, false);
+	} 
+	int otherMax = qNameRef.otherBindings == null ? 0 : qNameRef.otherBindings.length;
+	for (int i = 0; i < otherMax; i++) {
+		char[] token = qNameRef.tokens[i + qNameRef.indexOfFirstFieldBinding];
+		if (matchesName(this.name, token)) {
+			FieldBinding otherBinding = qNameRef.otherBindings[i];
+			int level = matchField(otherBinding, false);
+			if (level != IMPOSSIBLE_MATCH) return level;
+		}
+	}
+	return IMPOSSIBLE_MATCH;
+}
+
