@@ -1,57 +1,60 @@
 /**
  * Visit the given resolved parse tree and report the nodes that match the search pattern.
  */
-public void reportMatching(CompilationUnitDeclaration unit, boolean mustResolve) throws CoreException {
+protected void reportMatching(CompilationUnitDeclaration unit, boolean mustResolve) throws CoreException {
+	MatchingNodeSet nodeSet = this.currentPossibleMatch.nodeSet;
 	if (mustResolve) {
 		// move the possible matching nodes that exactly match the search pattern to the matching nodes set
-		Object[] nodes = this.possibleMatchingNodesSet.values;
+		Object[] nodes = nodeSet.possibleMatchingNodesSet.values;
 		for (int i = 0, l = nodes.length; i < l; i++) {
 			AstNode node = (AstNode) nodes[i];
 			if (node == null) continue;
 			if (node instanceof ImportReference) {
 				// special case for import refs: they don't know their binding
 				// import ref cannot be in the hirarchy of a type
-				if (this.locator.hierarchyResolver != null) continue;
+				if (this.hierarchyResolver != null) continue;
 
 				ImportReference importRef = (ImportReference) node;
 				Binding binding = importRef.onDemand
 					? unit.scope.getTypeOrPackage(CharOperation.subarray(importRef.tokens, 0, importRef.tokens.length))
 					: unit.scope.getTypeOrPackage(importRef.tokens);
-				this.locator.patternLocator.matchLevelAndReportImportRef(importRef, binding, this.locator);
+				this.patternLocator.matchLevelAndReportImportRef(importRef, binding, this);
 			} else {
-				addMatch(node, this.locator.patternLocator.resolveLevel(node));
+				nodeSet.addMatch(node, this.patternLocator.resolveLevel(node));
 			}
 		}
-		this.possibleMatchingNodesSet = new SimpleSet();
+		nodeSet.possibleMatchingNodesSet = new SimpleSet();
 	}
 
-	if (this.matchingNodes.elementSize == 0) return; // no matching nodes were found
+	if (nodeSet.matchingNodes.elementSize == 0) return; // no matching nodes were found
 
 	boolean searchInsideCompilationUnits = (this.matchContainer & PatternLocator.COMPILATION_UNIT_CONTAINER) != 0;
 	ImportReference pkg = unit.currentPackage;
-	if (pkg != null && this.matchingNodes.removeKey(pkg) != null)
-		if (searchInsideCompilationUnits)
-			this.locator.reportPackageDeclaration(pkg);
+	if (pkg != null && nodeSet.matchingNodes.removeKey(pkg) != null) {
+// Currently a no-op
+//		if (searchInsideCompilationUnits)
+//			reportPackageDeclaration(pkg);
+	}
 
 	ImportReference[] imports = unit.imports;
 	if (imports != null) {
 		for (int i = 0, l = imports.length; i < l; i++) {
 			ImportReference importRef = imports[i];
-			Integer level = (Integer) this.matchingNodes.removeKey(importRef);
+			Integer level = (Integer) nodeSet.matchingNodes.removeKey(importRef);
 			if (level != null && searchInsideCompilationUnits)
-				this.locator.reportImport(importRef, level.intValue());
+				this.patternLocator.matchReportImportRef(importRef, null, createImportHandle(importRef), level.intValue(), this);
 		}
 	}
 
 	TypeDeclaration[] types = unit.types;
 	if (types != null) {
 		for (int i = 0, l = types.length; i < l; i++) {
-			if (this.matchingNodes.elementSize == 0) return; // reported all the matching nodes
+			if (nodeSet.matchingNodes.elementSize == 0) return; // reported all the matching nodes
 			TypeDeclaration type = types[i];
-			Integer level = (Integer) this.matchingNodes.removeKey(type);
+			Integer level = (Integer) nodeSet.matchingNodes.removeKey(type);
 			if (level != null && searchInsideCompilationUnits)
-				this.locator.reportTypeDeclaration(type, null, level.intValue());
-			reportMatching(type, null);
+				reportTypeDeclaration(type, null, level.intValue());
+			reportMatching(type, null, nodeSet);
 		}
 	}
 }
