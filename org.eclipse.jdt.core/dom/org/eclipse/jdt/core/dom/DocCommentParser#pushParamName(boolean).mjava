@@ -2,14 +2,36 @@
 	 * @see org.eclipse.jdt.internal.compiler.parser.AbstractCommentParser#pushParamName(java.lang.Object)
 	 */
 	protected boolean pushParamName(boolean isTypeParam) {
-		SimpleName name = this.ast.newSimpleName(new String(this.identifierStack[0]));
-		int start = (int) (this.identifierPositionStack[0] >>> 32);
-		int end = (int) (this.identifierPositionStack[0] & 0x00000000FFFFFFFFL);
-		name.setSourceRange(start, end-start+1);
+		int idIndex = isTypeParam ? 1 : 0;
+		SimpleName name = this.ast.newSimpleName(new String(this.identifierStack[idIndex]));
+		int nameStart = (int) (this.identifierPositionStack[idIndex] >>> 32);
+		int nameEnd = (int) (this.identifierPositionStack[idIndex] & 0x00000000FFFFFFFFL);
+		name.setSourceRange(nameStart, nameEnd-nameStart+1);
 		TagElement paramTag = this.ast.newTagElement();
 		paramTag.setTagName(TagElement.TAG_PARAM);
-		paramTag.setSourceRange(this.tagSourceStart, end-this.tagSourceStart+1);
-		paramTag.fragments().add(name);
+		if (isTypeParam) { // specific storage for @param <E> (see bug 79809)
+			// '<' was stored in identifiers stack
+			TextElement text = this.ast.newTextElement();
+			text.setText(new String(this.identifierStack[0]));
+			int txtStart = (int) (this.identifierPositionStack[0] >>> 32);
+			int txtEnd = (int) (this.identifierPositionStack[0] & 0x00000000FFFFFFFFL);
+			text.setSourceRange(txtStart, txtEnd-txtStart+1);
+			paramTag.fragments().add(text);
+			// add simple name
+			paramTag.fragments().add(name);
+			// '>' was stored in identifiers stack
+			text = this.ast.newTextElement();
+			text.setText(new String(this.identifierStack[2]));
+			txtStart = (int) (this.identifierPositionStack[2] >>> 32);
+			txtEnd = (int) (this.identifierPositionStack[2] & 0x00000000FFFFFFFFL);
+			text.setSourceRange(txtStart, txtEnd-txtStart+1);
+			paramTag.fragments().add(text);
+			// set param tag source range
+			paramTag.setSourceRange(this.tagSourceStart, txtEnd-this.tagSourceStart+1);
+		} else {
+			paramTag.setSourceRange(this.tagSourceStart, nameEnd-this.tagSourceStart+1);
+			paramTag.fragments().add(name);
+		}
 		pushOnAstStack(paramTag, true);
 		return true;
 	}

@@ -20,32 +20,69 @@
 		while (elements.hasNext()) {
 			ASTNode fragment = (ASTNode) elements.next();
 			if (fragment.getNodeType() == ASTNode.TEXT_ELEMENT) {
-				if (previousFragment == null) {
-					if (tagName != null && (source[tagStart] == '\r' || source[tagStart] == '\n')) {
-						while (source[tagStart] == '*' || Character.isWhitespace(source[tagStart])) {
-							tagStart++; // purge non-stored characters
-						}
+				if (previousFragment == null && TagElement.TAG_PARAM.equals(tagName) && ((TextElement)fragment).getText().equals("<")) { // special case here for @param <E> syntax
+					int start = tagStart;
+					// verify '<'
+					while (source[start] == ' ' || Character.isWhitespace(source[start])) {
+						start++; // purge white characters
 					}
+					text = new String(source, start, fragment.getLength());
+					assumeEquals(this.prefix+"Misplaced text element at <"+fragment.getStartPosition()+">: ", text, ((TextElement) fragment).getText());
+					start += fragment.getLength();
+					// verify simple name
+					assumeTrue(this.prefix+"Unexpected fragment end for "+tagElement, elements.hasNext());
+					fragment = (ASTNode) elements.next();
+					while (source[start] == ' ' || Character.isWhitespace(source[start])) {
+						start++; // purge white characters
+					}
+					assumeEquals(this.prefix+"Unexpected node type for tag element "+tagElement, ASTNode.SIMPLE_NAME, fragment.getNodeType());
+					Name name = (Name) fragment;
+					verifyNamePositions(start, name, source);
+					start += fragment.getLength();
+					// verify simple name
+					assumeTrue(this.prefix+"Unexpected fragment end for "+tagElement, elements.hasNext());
+					fragment = (ASTNode) elements.next();
+					while (source[start] == ' ' || Character.isWhitespace(source[start])) {
+						start++; // purge white characters
+					}
+					text = new String(source, start, fragment.getLength());
+					assumeEquals(this.prefix+"Misplaced text element at <"+fragment.getStartPosition()+">: ", text, ((TextElement) fragment).getText());
+					start += fragment.getLength();
+					// reset fragment as simple name to avoid issue with next text element
+					fragment = name;
+					tagStart += (start- tagStart) - name.getLength();
 				} else {
-					if (previousFragment.getNodeType() == ASTNode.TEXT_ELEMENT) {
-						assumeTrue(this.prefix+"Wrong length at <"+previousFragment.getStartPosition()+"> for text element "+previousFragment, (source[tagStart] == '\r' && source[tagStart+1] == '\n' || source[tagStart] == '\n'));
-						while (source[tagStart] == '*' || Character.isWhitespace(source[tagStart])) {
-							tagStart++; // purge non-stored characters
-						}
-					} else {
-						int start = tagStart;
-						boolean newLine = false;
-						while (source[start] == '*' || Character.isWhitespace(source[start])) {
-							start++; // purge non-stored characters
-							if (source[tagStart] == '\r' || source[tagStart] == '\n') {
-								newLine = true;
+					if (previousFragment == null) {
+						if (tagName != null && (source[tagStart] == '\r' || source[tagStart] == '\n')) {
+							while (source[tagStart] == '*' || Character.isWhitespace(source[tagStart])) {
+								tagStart++; // purge non-stored characters
 							}
 						}
-						if (newLine) tagStart = start;
+					} else {
+						if (previousFragment.getNodeType() == ASTNode.TEXT_ELEMENT) {
+							assumeTrue(this.prefix+"Wrong length at <"+previousFragment.getStartPosition()+"> for text element "+previousFragment, (source[tagStart] == '\r' && source[tagStart+1] == '\n' || source[tagStart] == '\n'));
+							while (source[tagStart] == '*' || Character.isWhitespace(source[tagStart])) {
+								tagStart++; // purge non-stored characters
+							}
+						} else if (TagElement.TAG_PARAM.equals(tagName) && previousFragment.getNodeType() == ASTNode.SIMPLE_NAME && ((TextElement)fragment).getText().equals(">")) {
+							while (source[tagStart] == ' ' || Character.isWhitespace(source[tagStart])) {
+								tagStart++; // purge white characters
+							}
+						} else {
+							int start = tagStart;
+							boolean newLine = false;
+							while (source[start] == '*' || Character.isWhitespace(source[start])) {
+								start++; // purge non-stored characters
+								if (source[tagStart] == '\r' || source[tagStart] == '\n') {
+									newLine = true;
+								}
+							}
+							if (newLine) tagStart = start;
+						}
 					}
+					text = new String(source, tagStart, fragment.getLength());
+					assumeEquals(this.prefix+"Misplaced text element at <"+fragment.getStartPosition()+">: ", text, ((TextElement) fragment).getText());
 				}
-				text = new String(source, tagStart, fragment.getLength());
-				assumeEquals(this.prefix+"Misplaced text element at <"+fragment.getStartPosition()+">: ", text, ((TextElement) fragment).getText());
 			} else {
 				while (source[tagStart] == '*' || Character.isWhitespace(source[tagStart])) {
 					tagStart++; // purge non-stored characters
