@@ -6,7 +6,19 @@
 	public IJavaElementDelta[] processResourceDelta(IResourceDelta changes) {
 
 		try {
-			this.initializeRoots();
+			IJavaModel model = JavaModelManager.getJavaModel(ResourcesPlugin.getWorkspace());
+			if (!model.isOpen()) {
+				// force opening of java model so that java element delta are reported
+				try {
+					model.open(null);
+				} catch (JavaModelException e) {
+					if (VERBOSE) {
+						e.printStackTrace();
+					}
+					return NO_DELTA;
+				}
+			}
+			this.initializeRoots(model);
 			this.currentElement = null;
 			
 			// get the workspace delta, and start processing there.
@@ -15,18 +27,15 @@
 			for (int i = 0; i < deltas.length; i++) {
 				IResourceDelta delta = deltas[i];
 				IResource res = delta.getResource();
-				JavaModel model = JavaModelManager.getJavaModel(res.getWorkspace());
-				if (model != null) {
-					fCurrentDelta = new JavaElementDelta(model);
-					
-					// find out whether the delta is a package fragment root
-					IJavaProject projectOfRoot = (IJavaProject)this.roots.get(res.getFullPath());
-					boolean isPkgFragmentRoot = projectOfRoot != null;
-					int elementType = this.elementType(delta, IJavaElement.JAVA_MODEL, isPkgFragmentRoot);
-					
-					traverseDelta(delta, elementType, projectOfRoot); // traverse delta
-					translatedDeltas[i] = fCurrentDelta;
-				}
+				fCurrentDelta = new JavaElementDelta(model);
+				
+				// find out whether the delta is a package fragment root
+				IJavaProject projectOfRoot = (IJavaProject)this.roots.get(res.getFullPath());
+				boolean isPkgFragmentRoot = projectOfRoot != null;
+				int elementType = this.elementType(delta, IJavaElement.JAVA_MODEL, isPkgFragmentRoot);
+				
+				traverseDelta(delta, elementType, projectOfRoot); // traverse delta
+				translatedDeltas[i] = fCurrentDelta;
 			}
 			
 			// update package fragment roots of projects that were affected
