@@ -9,32 +9,32 @@ protected IJavaElement createHandle(AbstractMethodDeclaration method, IJavaEleme
 	int argCount = arguments == null ? 0 : arguments.length;
 	if (type.isBinary()) {
 		// don't cache the methods of the binary type
+		// fall thru if its a constructor with a synthetic argument... find it the slower way
 		ClassFileReader reader = classFileReader(type);
-		if (reader == null) return null;
-
-		IBinaryMethod[] methods = reader.getMethods();
-		if (methods != null) {
-			nextMethod : for (int i = 0, methodsLength = methods.length; i < methodsLength; i++) {
-				IBinaryMethod binaryMethod = methods[i];
-				char[] selector = binaryMethod.isConstructor() ? type.getElementName().toCharArray() : binaryMethod.getSelector();
-				if (CharOperation.equals(selector, method.selector)) {
-					char[][] parameterTypes = Signature.getParameterTypes(binaryMethod.getMethodDescriptor());
-					if (argCount != parameterTypes.length) continue nextMethod;
-					for (int j = 0; j < argCount; j++) {
-						TypeReference typeRef = arguments[j].type;
-						char[] typeName = CharOperation.concatWith(typeRef.getTypeName(), '.');
-						for (int k = 0, dim = typeRef.dimensions(); k < dim; k++)
-							typeName = CharOperation.concat(typeName, new char[] {'[', ']'});
-						char[] parameterTypeName = ClassFileMatchLocator.convertClassFileFormat(parameterTypes[j]);
-						if (!CharOperation.endsWith(Signature.toCharArray(parameterTypeName), typeName))
-							continue nextMethod;
-						parameterTypes[j] = parameterTypeName;
+		if (reader != null) {
+			IBinaryMethod[] methods = reader.getMethods();
+			if (methods != null) {
+				nextMethod : for (int i = 0, methodsLength = methods.length; i < methodsLength; i++) {
+					IBinaryMethod binaryMethod = methods[i];
+					char[] selector = binaryMethod.isConstructor() ? type.getElementName().toCharArray() : binaryMethod.getSelector();
+					if (CharOperation.equals(selector, method.selector)) {
+						char[][] parameterTypes = Signature.getParameterTypes(binaryMethod.getMethodDescriptor());
+						if (argCount != parameterTypes.length) continue nextMethod;
+						for (int j = 0; j < argCount; j++) {
+							TypeReference typeRef = arguments[j].type;
+							char[] typeName = CharOperation.concatWith(typeRef.getTypeName(), '.');
+							for (int k = 0, dim = typeRef.dimensions(); k < dim; k++)
+								typeName = CharOperation.concat(typeName, new char[] {'[', ']'});
+							char[] parameterTypeName = ClassFileMatchLocator.convertClassFileFormat(parameterTypes[j]);
+							if (!CharOperation.endsWith(Signature.toCharArray(parameterTypeName), typeName))
+								continue nextMethod;
+							parameterTypes[j] = parameterTypeName;
+						}
+						return type.getMethod(new String(selector), CharOperation.toStrings(parameterTypes));
 					}
-					return type.getMethod(new String(selector), CharOperation.toStrings(parameterTypes));
 				}
 			}
 		}
-		return null;
 	}
 
 	String[] parameterTypeSignatures = new String[argCount];
@@ -45,6 +45,8 @@ protected IJavaElement createHandle(AbstractMethodDeclaration method, IJavaEleme
 			typeName = CharOperation.concat(typeName, new char[] {'[', ']'});
 		parameterTypeSignatures[i] = Signature.createTypeSignature(typeName, false);
 	}
-	return type.getMethod(new String(method.selector), parameterTypeSignatures);
+	IMethod handle = type.getMethod(new String(method.selector), parameterTypeSignatures);
+	if (type.isBinary() && !handle.exists()) return null; // element doesn't exist in the .class file
+	return handle;
 }
 
