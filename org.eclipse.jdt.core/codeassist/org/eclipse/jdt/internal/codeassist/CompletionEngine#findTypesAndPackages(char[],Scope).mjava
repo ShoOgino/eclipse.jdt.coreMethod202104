@@ -32,7 +32,7 @@
 				relevance += computeRelevanceForCaseMatching(token, sourceType.sourceName);
 				relevance += computeRelevanceForExpectingType(sourceType);
 				relevance += computeRelevanceForQualification(false);
-				relevance += computeRelevanceForRestrictions(false); // no access restriction for type in the current unit
+				relevance += computeRelevanceForRestrictions(IAccessRule.K_ACCESSIBLE); // no access restriction for type in the current unit
 
 				if (sourceType.isAnnotationType()) {
 					relevance += computeRelevanceForAnnotation();
@@ -69,8 +69,22 @@
 					if(this.expectedTypes[i] instanceof ReferenceBinding) {
 						ReferenceBinding refBinding = (ReferenceBinding)this.expectedTypes[i];
 						
-						boolean hasRestrictedAccess = refBinding.hasRestrictedAccess();
-						if(this.options.checkRestrictions && hasRestrictedAccess) continue next;
+						int accessibility = IAccessRule.K_ACCESSIBLE;
+						if(refBinding.hasRestrictedAccess()) {
+							AccessRestriction accessRestriction = lookupEnvironment.getAccessRestriction(refBinding);
+							if(accessRestriction != null) {
+								switch (accessRestriction.getProblemId()) {
+									case IProblem.ForbiddenReference:
+										if(this.options.checkForbiddenReference) return;
+										accessibility = IAccessRule.K_NON_ACCESSIBLE;
+										break;
+									case IProblem.DiscouragedReference:
+										if(this.options.checkDiscouragedReference) return;
+										accessibility = IAccessRule.K_DISCOURAGED;
+										break;
+								}
+							}
+						}
 						
 						boolean inSameUnit = this.unitScope.isDefinedInSameUnit(refBinding);
 						
@@ -96,7 +110,7 @@
 							relevance += computeRelevanceForCaseMatching(token, typeName);
 							relevance += computeRelevanceForExpectingType(refBinding);
 							relevance += computeRelevanceForQualification(isQualified);
-							relevance += computeRelevanceForRestrictions(hasRestrictedAccess);
+							relevance += computeRelevanceForRestrictions(accessibility);
 							
 							if(refBinding.isClass()) {
 								relevance += computeRelevanceForClass();
@@ -112,6 +126,7 @@
 									proposal.setFlags(refBinding.modifiers);
 									proposal.setReplaceRange(this.startPosition - this.offset, this.endPosition - this.offset);
 									proposal.setRelevance(relevance);
+									proposal.setAccessibility(accessibility);
 									this.requestor.accept(proposal);
 									if(DEBUG) {
 										this.printDebug(proposal);
@@ -131,6 +146,7 @@
 									proposal.setFlags(refBinding.modifiers | Flags.AccInterface);
 									proposal.setReplaceRange(this.startPosition - this.offset, this.endPosition - this.offset);
 									proposal.setRelevance(relevance);
+									proposal.setAccessibility(accessibility);
 									this.requestor.accept(proposal);
 									if(DEBUG) {
 										this.printDebug(proposal);
