@@ -1,0 +1,45 @@
+/*
+ * Process a compilation unit already parsed and build.
+ */
+protected void process(PotentialMatch potentialMatch, boolean bindingsWereCreated) throws CoreException {
+	this.currentPotentialMatch = potentialMatch;
+	CompilationUnitDeclaration unit = potentialMatch.parsedUnit;
+	MatchingNodeSet matchingNodeSet = null;
+	try {
+		if (unit.isEmpty()) {
+			if (this.currentPotentialMatch.openable instanceof ClassFile)
+				this.currentPotentialMatch.locateMatchesInClassFile();
+			return;
+		}
+		if (hasAlreadyDefinedType(unit)) return; // skip type has it is hidden so not visible
+
+		matchingNodeSet = this.currentPotentialMatch.matchingNodeSet;
+		getMethodBodies(unit, matchingNodeSet);
+
+		if (bindingsWereCreated && this.pattern.mustResolve && unit.types != null) {
+			if (SearchEngine.VERBOSE)
+				System.out.println("Resolving " + this.currentPotentialMatch.openable.toStringWithAncestors()); //$NON-NLS-1$
+
+			matchingNodeSet.reduceParseTree(unit);
+
+			if (unit.scope != null)
+				unit.scope.faultInTypes(); // fault in fields & methods
+			unit.resolve();
+
+			matchingNodeSet.reportMatching(unit, true);
+		} else {
+			matchingNodeSet.reportMatching(unit, this.pattern.mustResolve);
+		}
+	} catch (AbortCompilation e) {
+		// could not resolve: report innacurate matches
+		if (matchingNodeSet != null)
+			matchingNodeSet.reportMatching(unit, true); // was partially resolved
+		if (!(e instanceof AbortCompilationUnit)) {
+			// problem with class path
+			throw e;
+		}
+	} finally {
+		this.currentPotentialMatch = null;
+	}
+}
+

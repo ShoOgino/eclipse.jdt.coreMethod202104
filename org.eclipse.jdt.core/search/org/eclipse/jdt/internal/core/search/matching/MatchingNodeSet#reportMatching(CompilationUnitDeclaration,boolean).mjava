@@ -1,0 +1,61 @@
+/**
+ * Visit the given resolved parse tree and report the nodes that match the search pattern.
+ */
+public void reportMatching(CompilationUnitDeclaration unit, boolean mustResolve) throws CoreException {
+	if (mustResolve) {
+		// move the potential matching nodes that exactly match the search pattern to the matching nodes set
+		Object[] nodes = this.potentialMatchingNodesSet.values;
+		for (int i = 0, l = nodes.length; i < l; i++) {
+			AstNode node = (AstNode) nodes[i];
+			if (node == null) continue;
+			if (node instanceof ImportReference) {
+				// special case for import refs: they don't know their binding
+				// import ref cannot be in the hirarchy of a type
+				if (this.locator.hierarchyResolver != null) continue;
+
+				ImportReference importRef = (ImportReference) node;
+				Binding binding = importRef.onDemand
+					? unit.scope.getTypeOrPackage(CharOperation.subarray(importRef.tokens, 0, importRef.tokens.length))
+					: unit.scope.getTypeOrPackage(importRef.tokens);
+				this.locator.pattern.matchLevelAndReportImportRef(importRef, binding, this.locator);
+			} else {
+				int level = this.locator.pattern.matchLevel(node, true);
+				if (level == SearchPattern.ACCURATE_MATCH)
+					this.matchingNodes.put(node, EXACT_MATCH);
+				else if (level == SearchPattern.INACCURATE_MATCH)
+					this.matchingNodes.put(node, POTENTIAL_MATCH);
+			}
+		}
+		this.potentialMatchingNodesSet = new SimpleSet();
+	}
+
+	if (this.matchingNodes.elementSize == 0) return; // no matching nodes were found
+
+	ImportReference pkg = unit.currentPackage;
+	if (pkg != null && this.matchingNodes.removeKey(pkg) != null)
+		if ((this.matchContainer & SearchPattern.COMPILATION_UNIT) != 0)
+			this.locator.reportPackageDeclaration(pkg);
+
+	ImportReference[] imports = unit.imports;
+	if (imports != null) {
+		for (int i = 0, l = imports.length; i < l; i++) {
+			ImportReference importRef = imports[i];
+			Integer level = (Integer) this.matchingNodes.removeKey(importRef);
+			if (level != null && (this.matchContainer & SearchPattern.COMPILATION_UNIT) != 0)
+				this.locator.reportImport(importRef, level.intValue());
+		}
+	}
+
+	TypeDeclaration[] types = unit.types;
+	if (types != null) {
+		for (int i = 0, l = types.length; i < l; i++) {
+			if (this.matchingNodes.elementSize == 0) return; // reported all the matching nodes
+			TypeDeclaration type = types[i];
+			Integer level = (Integer) this.matchingNodes.removeKey(type);
+			if (level != null && (this.matchContainer & SearchPattern.COMPILATION_UNIT) != 0)
+				this.locator.reportTypeDeclaration(type, null, level.intValue());
+			reportMatching(type, null);
+		}
+	}
+}
+

@@ -4,119 +4,79 @@
  * Note that the type declaration has already been checked.
  */
 public void reportMatching(TypeDeclaration type, IJavaElement parent) throws CoreException {
-	
-	// filter out element not in hierarchy scope
-	boolean typeInHierarchy = type.binding == null || this.locator.typeInHierarchy(type.binding);
-	
 	// create type handle
 	IJavaElement enclosingElement;
 	if (parent == null) {
 		enclosingElement = this.locator.createTypeHandle(type.name);
 	} else if (parent instanceof IType) {
-		enclosingElement = this.locator.createTypeHandle((IType)parent, type.name);
+		enclosingElement = this.locator.createTypeHandle((IType) parent, type.name);
 		if (enclosingElement == null) return;
 	} else {
 		enclosingElement = parent;
 	}
-	Integer level;
-	
-	// fields
-	FieldDeclaration[] fields = type.fields;
-	if (fields != null) {
-		for (int i = 0; i < fields.length; i++) {
-			FieldDeclaration field = fields[i];
-			if ((level = (Integer)this.matchingNodes.remove(field)) != null
-				&& typeInHierarchy
-				&& (this.matchContainer & SearchPattern.CLASS) != 0) {
-					this.locator.reportFieldDeclaration(
-						field, 
-						enclosingElement, 
-						level.intValue() == SearchPattern.ACCURATE_MATCH ?
-							IJavaSearchResultCollector.EXACT_MATCH :
-							IJavaSearchResultCollector.POTENTIAL_MATCH);
-			}
-			this.reportMatching(field, enclosingElement, type, typeInHierarchy);
-		}
-	}
-
-	// methods
-	AbstractMethodDeclaration[] methods = type.methods;
-	if (methods != null) {
-		for (int i = 0; i < methods.length; i++) {
-			AbstractMethodDeclaration method = methods[i];
-			if ((level = (Integer)this.matchingNodes.remove(method)) != null
-				&& typeInHierarchy
-				&& (this.matchContainer & SearchPattern.CLASS) != 0) {
-					this.locator.reportMethodDeclaration(
-						method, 
-						enclosingElement, 
-						level.intValue() == SearchPattern.ACCURATE_MATCH ?
-							IJavaSearchResultCollector.EXACT_MATCH :
-							IJavaSearchResultCollector.POTENTIAL_MATCH);
-			}
-			this.reportMatching(method, enclosingElement, typeInHierarchy);
-		}
-	}
-
-	// member types
-	MemberTypeDeclaration[] memberTypes = type.memberTypes;
-	if (memberTypes != null) {
-		for (int i = 0; i < memberTypes.length; i++) {
-			MemberTypeDeclaration memberType = memberTypes[i];
-			if ((level = (Integer)this.matchingNodes.remove(memberType)) != null
-				&& typeInHierarchy
-				&& (this.matchContainer & SearchPattern.CLASS) != 0) {
-					this.locator.reportTypeDeclaration(
-						memberType, 
-						enclosingElement, 
-						level.intValue() == SearchPattern.ACCURATE_MATCH ?
-							IJavaSearchResultCollector.EXACT_MATCH :
-							IJavaSearchResultCollector.POTENTIAL_MATCH);
-			}
-			this.reportMatching(memberType, enclosingElement);
-		}
-	}
 
 	// super types
 	if (type instanceof AnonymousLocalTypeDeclaration) {
-		TypeReference superType = ((AnonymousLocalTypeDeclaration)type).allocation.type;
-		if (superType != null && (level = (Integer)this.matchingNodes.remove(superType)) != null) {
-			if ((this.matchContainer & SearchPattern.CLASS) != 0) {
-				this.locator.reportSuperTypeReference(
-					superType, 
-					enclosingElement, 
-					level.intValue() == SearchPattern.ACCURATE_MATCH ?
-						IJavaSearchResultCollector.EXACT_MATCH :
-						IJavaSearchResultCollector.POTENTIAL_MATCH);
-			}
+		TypeReference superType = ((AnonymousLocalTypeDeclaration) type).allocation.type;
+		if (superType != null) {
+			Integer level = (Integer) this.matchingNodes.removeKey(superType);
+			if (level != null && (this.matchContainer & SearchPattern.CLASS) != 0)
+				this.locator.reportSuperTypeReference(superType, enclosingElement, level.intValue());
 		}
 	} else {
 		TypeReference superClass = type.superclass;
-		if (superClass != null && (level = (Integer)this.matchingNodes.remove(superClass)) != null) {
-			if ((this.matchContainer & SearchPattern.CLASS) != 0) {
-				this.locator.reportSuperTypeReference(
-					superClass, 
-					enclosingElement, 
-					level.intValue() == SearchPattern.ACCURATE_MATCH ?
-						IJavaSearchResultCollector.EXACT_MATCH :
-						IJavaSearchResultCollector.POTENTIAL_MATCH);
-			}
+		if (superClass != null) {
+			Integer level = (Integer) this.matchingNodes.removeKey(superClass);
+			if (level != null && (this.matchContainer & SearchPattern.CLASS) != 0)
+				this.locator.reportSuperTypeReference(superClass, enclosingElement, level.intValue());
 		}
 		TypeReference[] superInterfaces = type.superInterfaces;
 		if (superInterfaces != null) {
-			for (int i = 0; i < superInterfaces.length; i++) {
+			for (int i = 0, l = superInterfaces.length; i < l; i++) {
 				TypeReference superInterface = superInterfaces[i];
-				if ((level = (Integer)this.matchingNodes.get(superInterface)) != null) {
-					if ((this.matchContainer & SearchPattern.CLASS) != 0) {
-						this.locator.reportSuperTypeReference(
-							superInterface, 
-							enclosingElement, 
-							level.intValue() == SearchPattern.ACCURATE_MATCH ?
-								IJavaSearchResultCollector.EXACT_MATCH :
-								IJavaSearchResultCollector.POTENTIAL_MATCH);
-					}
-				}
+				Integer level = (Integer) this.matchingNodes.removeKey(superInterface);
+				if (level != null && (this.matchContainer & SearchPattern.CLASS) != 0)
+					this.locator.reportSuperTypeReference(superInterface, enclosingElement, level.intValue());
 			}
+		}
+	}
+
+	// filter out element not in hierarchy scope
+	boolean typeInHierarchy = type.binding == null || this.locator.typeInHierarchy(type.binding);
+
+	FieldDeclaration[] fields = type.fields;
+	if (fields != null) {
+		if (this.matchingNodes.elementSize == 0) return; // reported all the matching nodes
+		for (int i = 0, l = fields.length; i < l; i++) {
+			FieldDeclaration field = fields[i];
+			Integer level = (Integer) this.matchingNodes.removeKey(field);
+			if (level != null && typeInHierarchy && (this.matchContainer & SearchPattern.CLASS) != 0)
+				this.locator.reportFieldDeclaration(field, enclosingElement, level.intValue());
+			reportMatching(field, enclosingElement, type, typeInHierarchy);
+		}
+	}
+
+	AbstractMethodDeclaration[] methods = type.methods;
+	if (methods != null) {
+		if (this.matchingNodes.elementSize == 0) return; // reported all the matching nodes
+		for (int i = 0, l = methods.length; i < l; i++) {
+			AbstractMethodDeclaration method = methods[i];
+			Integer level = (Integer) this.matchingNodes.removeKey(method);
+			if (level != null && typeInHierarchy && (this.matchContainer & SearchPattern.CLASS) != 0)
+				this.locator.reportMethodDeclaration(method, enclosingElement, level.intValue());
+			reportMatching(method, enclosingElement, typeInHierarchy);
+		}
+	}
+
+	MemberTypeDeclaration[] memberTypes = type.memberTypes;
+	if (memberTypes != null) {
+		for (int i = 0, l = memberTypes.length; i < l; i++) {
+			if (this.matchingNodes.elementSize == 0) return; // reported all the matching nodes
+			MemberTypeDeclaration memberType = memberTypes[i];
+			Integer level = (Integer) this.matchingNodes.removeKey(memberType);
+			if (level != null && typeInHierarchy && (this.matchContainer & SearchPattern.CLASS) != 0)
+				this.locator.reportTypeDeclaration(memberType, enclosingElement, level.intValue());
+			reportMatching(memberType, enclosingElement);
 		}
 	}
 }

@@ -1,0 +1,37 @@
+public IBinaryType getBinaryInfo(ClassFile classFile, IResource resource) throws CoreException {
+	BinaryType binaryType = (BinaryType) classFile.getType();
+	if (classFile.isOpen())
+		return (IBinaryType) binaryType.getElementInfo(); // reuse the info from the java model cache
+
+	// create a temporary info
+	IBinaryType info;
+	try {
+		IJavaElement pkg = classFile.getParent();
+		PackageFragmentRoot root = (PackageFragmentRoot) pkg.getParent();
+		if (root.isArchive()) {
+			// class file in a jar
+			String pkgPath = pkg.getElementName().replace('.', '/');
+			String classFilePath = pkgPath.length() > 0
+				? pkgPath + "/" + classFile.getElementName() //$NON-NLS-1$
+				: classFile.getElementName();
+			ZipFile zipFile = null;
+			try {
+				zipFile = ((JarPackageFragmentRoot) root).getJar();
+				info = ClassFileReader.read(zipFile, classFilePath);
+			} finally {
+				JavaModelManager.getJavaModelManager().closeZipFile(zipFile);
+			}
+		} else {
+			// class file in a directory
+			String osPath = resource.getLocation().toOSString();
+			info = ClassFileReader.read(osPath);
+		}
+		return info;
+	} catch (ClassFormatException e) {
+		//e.printStackTrace();
+		return null;
+	} catch (java.io.IOException e) {
+		throw new JavaModelException(e, IJavaModelStatusConstants.IO_EXCEPTION);
+	}
+}
+

@@ -1,75 +1,57 @@
-	private void locateMatches(JavaProject javaProject, PotentialMatch[] potentialMatches, int start, int length) throws JavaModelException {
-		
-		// copy array because elements  from the original are removed below
-		PotentialMatch[] copy = new PotentialMatch[length];
-		System.arraycopy(potentialMatches, start, copy, 0, length);
-		this.initialize(javaProject, copy);
-		
-		this.compilationAborted = false;
-		
-		// create and resolve binding (equivalent to beginCompilation() in Compiler)
-		try {
-			this.createAndResolveBindings(potentialMatches, start, length);
-		} catch (AbortCompilation e) {
-			this.compilationAborted = true;
-		}
-		
+protected void locateMatches(JavaProject javaProject, PotentialMatch[] potentialMatches, int start, int length) throws JavaModelException {
+	initialize(javaProject, length);
+
+	// create and resolve binding (equivalent to beginCompilation() in Compiler)
+	boolean bindingsWereCreated = true;
+	try {
+		for (int i = start, maxUnits = start + length; i < maxUnits; i++)
+			buildBindings(potentialMatches[i]);
+		lookupEnvironment.completeTypeBindings();
+
 		// create hierarchy resolver if needed
-		try {
-			if (!this.compilationAborted && !this.createHierarchyResolver(copy)) {
-				// focus type is not visible, use the super type names instead of the bindings
-				computeSuperTypeNames();
-				if (this.allSuperTypeNames == null) return;
-			}
-		} catch (AbortCompilation e) {
-			this.compilationAborted = true;
+		IType focusType = getFocusType();
+		if (focusType == null) {
+			this.hierarchyResolver = null;
+		} else if (!createHierarchyResolver(focusType, potentialMatches)) {
+			// focus type is not visible, use the super type names instead of the bindings
+			if (computeSuperTypeNames(focusType) == null) return;
 		}
-		
-		// free memory
-		copy = null;
-		potentialMatches = null;
-		
-		// potential match resolution
+	} catch (AbortCompilation e) {
+		bindingsWereCreated = false;
+	}
+
+	// potential match resolution
+	for (int i = 0; i < this.numberOfMatches; i++) {
+		if (this.progressMonitor != null && this.progressMonitor.isCanceled())
+			throw new OperationCanceledException();
+		PotentialMatch potentialMatch = this.matchesToProcess[i];
+		this.matchesToProcess[i] = null; // release reference to processed potential match
 		try {
-			CompilationUnitDeclaration unit = null;
-			for (int i = 0; i < this.totalUnits; i++) {
-				if (this.progressMonitor != null && this.progressMonitor.isCanceled()) {
-					throw new OperationCanceledException();
-				}
-				unit = this.unitsToProcess[i];
-				try {
-					process(unit, i);
-				} catch (AbortCompilation e) {
-					// problem with class path: it could not find base classes
-					// continue and try next matching openable reporting innacurate matches (since bindings will be null)
-					this.compilationAborted = true;
-				} catch (CoreException e) {
-					if (e instanceof JavaModelException) {
-						// problem with class path: it could not find base classes
-						// continue and try next matching openable reporting innacurate matches (since bindings will be null)
-						this.compilationAborted = true;
-					} else {
-						// core exception thrown by client's code: let it through
-						throw new JavaModelException(e);
-					}
-				} finally {
-					// cleanup compilation unit result
-					unit.cleanUp();
-					if (this.options.verbose)
-						System.out.println(Util.bind("compilation.done", //$NON-NLS-1$
+			process(potentialMatch, bindingsWereCreated);
+		} catch (AbortCompilation e) {
+			// problem with class path: it could not find base classes
+			// continue and try next matching openable reporting innacurate matches (since bindings will be null)
+			bindingsWereCreated = false;
+		} catch (JavaModelException e) {
+			// problem with class path: it could not find base classes
+			// continue and try next matching openable reporting innacurate matches (since bindings will be null)
+			bindingsWereCreated = false;
+		} catch (CoreException e) {
+			// core exception thrown by client's code: let it through
+			throw new JavaModelException(e);
+		} finally {
+			if (this.options.verbose)
+				System.out.println(Util.bind("compilation.done", //$NON-NLS-1$
 					new String[] {
 						String.valueOf(i + 1),
-						String.valueOf(totalUnits),
-						new String(unitsToProcess[i].getFileName())}));
-				}
-				this.unitsToProcess[i] = null; // release reference to processed unit declaration
-				this.matchesToProcess[i] = null; // release reference to processed potential match
-				if (this.progressMonitor != null) {
-					this.progressMonitor.worked(5);
-				}
-			}
-		} catch (AbortCompilation e) {
-			this.compilationAborted = true;
-		}		
+						String.valueOf(numberOfMatches),
+						new String(potentialMatch.parsedUnit.getFileName())}));
+			// cleanup compilation unit result
+			potentialMatch.parsedUnit.cleanUp();
+			potentialMatch.parsedUnit = null;
+		}
+		if (this.progressMonitor != null)
+			this.progressMonitor.worked(5);
 	}
+}
 

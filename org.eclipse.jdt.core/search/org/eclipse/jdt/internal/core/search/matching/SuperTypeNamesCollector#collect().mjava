@@ -1,24 +1,21 @@
-protected char[][][] collect() throws JavaModelException {
-	
+public char[][][] collect() throws JavaModelException {
 	if (this.type != null) {
 		// Collect the paths of the cus that are in the hierarchy of the given type
 		this.result = new char[1][][];
 		this.resultIndex = 0;
-		JavaProject javaProject = (JavaProject)this.type.getJavaProject();
-		this.locator.initialize(javaProject);
+		JavaProject javaProject = (JavaProject) this.type.getJavaProject();
+		this.locator.initialize(javaProject, 0);
 		this.locator.nameLookup.setUnitsToLookInside(this.locator.workingCopies); // NB: this uses a PerThreadObject, so it is thread safe
 		try {
 			if (this.type.isBinary()) {
 				BinaryTypeBinding binding = this.locator.cacheBinaryType(this.type);
-				if (binding != null) {
+				if (binding != null)
 					this.collectSuperTypeNames(binding);
-				}
 			} else {
 				ICompilationUnit unit = this.type.getCompilationUnit();
 				CompilationUnitDeclaration parsedUnit = this.buildBindings(unit);
-				if (parsedUnit != null) {
+				if (parsedUnit != null)
 					parsedUnit.traverse(new TypeDeclarationVisitor(), parsedUnit.scope);
-				}
 			}
 		} catch (AbortCompilation e) {
 			// problem with classpath: report inacurrate matches
@@ -26,63 +23,58 @@ protected char[][][] collect() throws JavaModelException {
 		} finally {
 			this.locator.nameLookup.setUnitsToLookInside(null);
 		}
-		return this.result;
-	} else {	
-		// Collect the paths of the cus that declare a type which matches declaringQualification + declaringSimpleName
-		String[] paths = this.getPathsOfDeclaringType();
-		
-		// Create bindings from source types and binary types
-		// and collect super type names of the type declaration 
-		// that match the given declaring type
-		if (paths != null) {
-			Util.sort(paths); // sort by projects
-			JavaProject previousProject = null;
-			this.result = new char[1][][];
-			this.resultIndex = 0;
-			try {
-				for (int i = 0, length = paths.length; i < length; i++) {
-					try {
-						Openable openable = this.locator.handleFactory.createOpenable(paths[i], this.locator.scope);
-						if (openable == null)
-							continue; // outside classpath
-						IJavaProject project = openable.getJavaProject();
-						if (!project.equals(previousProject)) {
-							if (previousProject != null) {
-								this.locator.nameLookup.setUnitsToLookInside(null);
-							}
-							previousProject = (JavaProject)project;
-							this.locator.initialize(previousProject);
-							this.locator.nameLookup.setUnitsToLookInside(this.locator.workingCopies);
-						}
-						if (openable instanceof ICompilationUnit) {
-							ICompilationUnit unit = (ICompilationUnit)openable;
-							CompilationUnitDeclaration parsedUnit = this.buildBindings(unit);
-							if (parsedUnit != null) {
-								parsedUnit.traverse(new TypeDeclarationVisitor(), parsedUnit.scope);
-							}
-						} else if (openable instanceof IClassFile) {
-							IClassFile classFile = (IClassFile)openable;
-							BinaryTypeBinding binding = this.locator.cacheBinaryType(classFile.getType());
-							if (this.matches(binding)) {
-								this.collectSuperTypeNames(binding);
-							}
-						}
-					} catch (AbortCompilation e) {
-						// ignore: continue with next element
-					} catch (JavaModelException e) {
-						// ignore: continue with next element
-					}
-				}
-			} finally {
-				if (previousProject != null) {
-					this.locator.nameLookup.setUnitsToLookInside(null);
-				}
-			}
+		if (this.result.length > this.resultIndex)
 			System.arraycopy(this.result, 0, this.result = new char[this.resultIndex][][], 0, this.resultIndex);
-			return this.result;
-		} else {
-			return null;
-		}
+		return this.result;
 	}
+
+	// Collect the paths of the cus that declare a type which matches declaringQualification + declaringSimpleName
+	String[] paths = this.getPathsOfDeclaringType();
+	if (paths == null) return null;
+
+	// Create bindings from source types and binary types and collect super type names of the type declaration 
+	// that match the given declaring type
+	Util.sort(paths); // sort by projects
+	JavaProject previousProject = null;
+	this.result = new char[1][][];
+	this.resultIndex = 0;
+	try {
+		for (int i = 0, length = paths.length; i < length; i++) {
+			try {
+				Openable openable = this.locator.handleFactory.createOpenable(paths[i], this.locator.scope);
+				if (openable == null) continue; // outside classpath
+
+				IJavaProject project = openable.getJavaProject();
+				if (!project.equals(previousProject)) {
+					if (previousProject != null)
+						this.locator.nameLookup.setUnitsToLookInside(null);
+					previousProject = (JavaProject) project;
+					this.locator.initialize(previousProject, 0);
+					this.locator.nameLookup.setUnitsToLookInside(this.locator.workingCopies);
+				}
+				if (openable instanceof ICompilationUnit) {
+					ICompilationUnit unit = (ICompilationUnit) openable;
+					CompilationUnitDeclaration parsedUnit = this.buildBindings(unit);
+					if (parsedUnit != null)
+						parsedUnit.traverse(new TypeDeclarationVisitor(), parsedUnit.scope);
+				} else if (openable instanceof IClassFile) {
+					IClassFile classFile = (IClassFile) openable;
+					BinaryTypeBinding binding = this.locator.cacheBinaryType(classFile.getType());
+					if (this.matches(binding))
+						this.collectSuperTypeNames(binding);
+				}
+			} catch (AbortCompilation e) {
+				// ignore: continue with next element
+			} catch (JavaModelException e) {
+				// ignore: continue with next element
+			}
+		}
+	} finally {
+		if (previousProject != null)
+			this.locator.nameLookup.setUnitsToLookInside(null);
+	}
+	if (this.result.length > this.resultIndex)
+		System.arraycopy(this.result, 0, this.result = new char[this.resultIndex][][], 0, this.resultIndex);
+	return this.result;
 }
 

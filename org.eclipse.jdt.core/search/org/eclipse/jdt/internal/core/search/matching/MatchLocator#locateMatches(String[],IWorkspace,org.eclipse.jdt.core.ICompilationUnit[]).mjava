@@ -1,159 +1,121 @@
-	/**
-	 * Locate the matches in the given files and report them using the search requestor. 
-	 */
-	public void locateMatches(
-		String[] filePaths, 
-		IWorkspace workspace,
-		org.eclipse.jdt.core.ICompilationUnit[] copies)
-		throws JavaModelException {
-			
-		if (SearchEngine.VERBOSE) {
-			System.out.println("Locating matches in files ["); //$NON-NLS-1$
-			for (int i = 0, length = filePaths.length; i < length; i++) {
-				String path = filePaths[i];
-				System.out.println("\t" + path); //$NON-NLS-1$
-			}
+/**
+ * Locate the matches in the given files and report them using the search requestor. 
+ */
+public void locateMatches(String[] filePaths, IWorkspace workspace, org.eclipse.jdt.core.ICompilationUnit[] copies) throws JavaModelException {
+	if (SearchEngine.VERBOSE) {
+		System.out.println("Locating matches in files ["); //$NON-NLS-1$
+		for (int i = 0, length = filePaths.length; i < length; i++)
+			System.out.println("\t" + filePaths[i]); //$NON-NLS-1$
+		System.out.println("]"); //$NON-NLS-1$
+		if (copies != null) {
+			 System.out.println("and working copies ["); //$NON-NLS-1$
+			for (int i = 0, length = copies.length; i < length; i++)
+				System.out.println("\t" + ((JavaElement) copies[i]).toStringWithAncestors()); //$NON-NLS-1$
 			System.out.println("]"); //$NON-NLS-1$
-			if (copies != null) {
-				 System.out.println("and working copies ["); //$NON-NLS-1$
-				for (int i = 0, length = copies.length; i < length; i++) {
-					org.eclipse.jdt.core.ICompilationUnit wc = copies[i];
-					System.out.println("\t" + ((JavaElement)wc).toStringWithAncestors()); //$NON-NLS-1$
-				}
-				System.out.println("]"); //$NON-NLS-1$
-			}
 		}
+	}
+
+	JavaModelManager manager = JavaModelManager.getJavaModelManager();
+	try {
+		// optimize access to zip files during search operation
+		manager.cacheZipFiles();
+			
+		// initialize handle factory (used as a cache of handles so as to optimize space)
+		if (this.handleFactory == null)
+			this.handleFactory = new HandleFactory(workspace);
 		
-		JavaModelManager manager = JavaModelManager.getJavaModelManager();
-		try {
-			// optimize access to zip files during search operation
-			manager.cacheZipFiles();
-				
-			// initialize handle factory (used as a cache of handles so as to optimize space)
-			if (this.handleFactory == null) {
-				this.handleFactory = new HandleFactory(workspace);
-			}
-			
-			// initialize locator with working copies
-			this.workingCopies = copies;
-			
-			// substitute compilation units with working copies
-			HashMap wcPaths = new HashMap(); // a map from path to working copies
-			int wcLength;
-			if (copies != null && (wcLength = copies.length) > 0) {
+		// substitute compilation units with working copies
+		HashMap wcPaths = new HashMap(); // a map from path to working copies
+		if ((this.workingCopies = copies) != null) {
+			int wcLength = this.workingCopies.length;
+			if (wcLength > 0) {
 				String[] newPaths = new String[wcLength];
 				for (int i = 0; i < wcLength; i++) {
-					org.eclipse.jdt.core.ICompilationUnit workingCopy = copies[i];
+					org.eclipse.jdt.core.ICompilationUnit workingCopy = this.workingCopies[i];
 					String path = workingCopy.getPath().toString();
 					wcPaths.put(path, workingCopy);
 					newPaths[i] = path;
 				}
 				int filePathsLength = filePaths.length;
-				System.arraycopy(filePaths, 0, filePaths = new String[filePathsLength+wcLength], 0, filePathsLength);
+				System.arraycopy(filePaths, 0, filePaths = new String[filePathsLength + wcLength], 0, filePathsLength);
 				System.arraycopy(newPaths, 0, filePaths, filePathsLength, wcLength);
 			}
+		}
+
+		if (this.progressMonitor != null) {
+			// 1 for file path, 4 for parsing and binding creation, 5 for binding resolution? //$NON-NLS-1$
+			this.progressMonitor.beginTask("", filePaths.length * (this.pattern.mustResolve ? 10 : 5));
+		}
+
+		// initialize pattern for polymorphic search (ie. method reference pattern)
+		this.pattern.initializePolymorphicSearch(this, this.progressMonitor);
+
+		JavaProject previousJavaProject = null;
+		PotentialMatchSet matchSet = new PotentialMatchSet();
+		Util.sort(filePaths); 
+		for (int i = 0, l = filePaths.length; i < l; i++) {
+			if (this.progressMonitor != null && this.progressMonitor.isCanceled())
+				throw new OperationCanceledException();
+
+			// skip duplicate paths
+			String pathString = filePaths[i];
+			if (i > 0 && pathString.equals(filePaths[i - 1])) continue;
 			
-			int length = filePaths.length;
-			if (progressMonitor != null) {
-				if (this.pattern.mustResolve) {
-					progressMonitor.beginTask("", length * 10); // 1 for file path, 4 for parsing and binding creation, 5 for binding resolution //$NON-NLS-1$
-				} else {
-					progressMonitor.beginTask("", length * 5); // 1 for file path, 4 for parsing and binding creation //$NON-NLS-1$
-				}
+			Openable openable;
+			org.eclipse.jdt.core.ICompilationUnit workingCopy = (org.eclipse.jdt.core.ICompilationUnit) wcPaths.get(pathString);
+			if (workingCopy != null) {
+				openable = (Openable) workingCopy;
+			} else {
+				openable = this.handleFactory.createOpenable(pathString, this.scope);
+				if (openable == null) continue; // match is outside classpath
 			}
-	
-			// sort file paths projects
-			Util.sort(filePaths); 
-			
-			// initialize pattern for polymorphic search (ie. method reference pattern)
-			this.matchSet = new PotentialMatchSet();
-			this.pattern.initializePolymorphicSearch(this, progressMonitor);
-			
-			JavaProject previousJavaProject = null;
-			for (int i = 0; i < length; i++) {
-				if (progressMonitor != null && progressMonitor.isCanceled()) {
-					throw new OperationCanceledException();
-				}
-				String pathString = filePaths[i];
-				
-				// skip duplicate paths
-				if (i > 0 && pathString.equals(filePaths[i-1])) continue;
-				
-				Openable openable;
-				org.eclipse.jdt.core.ICompilationUnit workingCopy = (org.eclipse.jdt.core.ICompilationUnit)wcPaths.get(pathString);
-				if (workingCopy != null) {
-					openable = (Openable)workingCopy;
-				} else {
-					openable = this.handleFactory.createOpenable(pathString, this.scope);
-					if (openable == null)
-						continue; // match is outside classpath
-				}
-	
-				// create new parser and lookup environment if this is a new project
-				IResource resource = null;
-				JavaProject javaProject = null;
-				try {
-					javaProject = (JavaProject) openable.getJavaProject();
-					if (workingCopy != null) {
-						resource = workingCopy.getResource();
-					} else {
-						resource = openable.getResource();
-					}
-					if (resource == null) { // case of a file in an external jar
-						resource = javaProject.getProject();
-					}
-					if (!javaProject.equals(previousJavaProject)) {
-						// locate matches in previous project
-						if (previousJavaProject != null) {
-							try {
-								this.locateMatches(previousJavaProject);
-							} catch (JavaModelException e) {
-								if (e.getException() instanceof CoreException) {
-									throw e;
-								} else {
-									// problem with classpath in this project -> skip it
-								}
-							}
-							this.matchSet = new PotentialMatchSet();
+
+			// create new parser and lookup environment if this is a new project
+			IResource resource = null;
+			try {
+				JavaProject javaProject = (JavaProject) openable.getJavaProject();
+				resource = workingCopy != null ? workingCopy.getResource() : openable.getResource();
+				if (resource == null)
+					resource = javaProject.getProject(); // case of a file in an external jar
+				if (!javaProject.equals(previousJavaProject)) {
+					// locate matches in previous project
+					if (previousJavaProject != null) {
+						try {
+							locateMatches(previousJavaProject, matchSet);
+						} catch (JavaModelException e) {
+							if (e.getException() instanceof CoreException) throw e;
+							// problem with classpath in this project -> skip it
 						}
-	
-						previousJavaProject = javaProject;
+						matchSet.reset();
 					}
-				} catch (JavaModelException e) {
-					// file doesn't exist -> skip it
-					continue;
+					previousJavaProject = javaProject;
 				}
-	
-				// add potential match
-				this.addPotentialMatch(resource, openable);
-	
-				if (progressMonitor != null) {
-					progressMonitor.worked(1);
-				}
+			} catch (JavaModelException e) {
+				// file doesn't exist -> skip it
+				continue;
 			}
-			
-			// last project
-			if (previousJavaProject != null) {
-				try {
-					this.locateMatches(previousJavaProject);
-				} catch (JavaModelException e) {
-					if (e.getException() instanceof CoreException) {
-						throw e;
-					} else {
-						// problem with classpath in last project -> skip it
-					}
-				}
-				this.matchSet = new PotentialMatchSet();
-			} 
-			
-			if (progressMonitor != null) {
-				progressMonitor.done();
+			matchSet.add(new PotentialMatch(this, resource, openable));
+
+			if (this.progressMonitor != null)
+				this.progressMonitor.worked(1);
+		}
+		
+		// last project
+		if (previousJavaProject != null) {
+			try {
+				locateMatches(previousJavaProject, matchSet);
+			} catch (JavaModelException e) {
+				if (e.getException() instanceof CoreException) throw e;
+				// problem with classpath in last project -> skip it
 			}
-		} finally {
-			if (this.nameEnvironment != null) {
-				this.nameEnvironment.cleanup();
-			}
-			manager.flushZipFiles();
-		}	
-	}
+		} 
+
+		if (this.progressMonitor != null)
+			this.progressMonitor.done();
+	} finally {
+		if (this.nameEnvironment != null)
+			this.nameEnvironment.cleanup();
+		manager.flushZipFiles();
+	}	
+}
 

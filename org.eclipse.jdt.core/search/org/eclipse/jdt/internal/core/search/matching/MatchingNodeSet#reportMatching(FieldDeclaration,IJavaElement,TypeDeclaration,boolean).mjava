@@ -4,36 +4,30 @@
  * Note that the field declaration has already been checked.
  */
 private void reportMatching(FieldDeclaration field, IJavaElement parent, TypeDeclaration type, boolean typeInHierarchy) throws CoreException {
-	if (typeInHierarchy) {
-		AstNode[] nodes = this.matchingNodes(field.declarationSourceStart, field.declarationSourceEnd);
-		for (int i = 0; i < nodes.length; i++) {
-			AstNode node = nodes[i];
-			Integer level = (Integer)this.matchingNodes.get(node);
-			if ((this.matchContainer & SearchPattern.FIELD) != 0) {
-				this.locator.reportReference(
-					node, 
-					type, 
-					field, 
-					parent, 
-					level.intValue() == SearchPattern.ACCURATE_MATCH ?
-						IJavaSearchResultCollector.EXACT_MATCH :
-						IJavaSearchResultCollector.POTENTIAL_MATCH);
-				this.matchingNodes.remove(node);
-			}
-		}
-	}
+	// handle the nodes for the local type first
 	if ((field.bits & AstNode.HasLocalTypeMASK) != 0) {
-		LocalDeclarationVisitor localDeclarationVisitor = new LocalDeclarationVisitor();
-		localDeclarationVisitor.enclosingElement = 
-			(parent instanceof IType) ?
-				(field.isField() ?
-					(IJavaElement)this.locator.createFieldHandle(field, (IType)parent) :
-					(IJavaElement)this.locator.createInitializerHandle(type, field, (IType)parent)) :
-				parent;
+		LocalDeclarationVisitor localDeclarationVisitor = new LocalDeclarationVisitor(
+			(parent instanceof IType)
+				? (field.isField()
+					? (IJavaElement) this.locator.createFieldHandle(field, (IType) parent)
+					: (IJavaElement) this.locator.createInitializerHandle(type, field, (IType) parent))
+				: parent);
 		try {
 			field.traverse(localDeclarationVisitor, null);
 		} catch (WrappedCoreException e) {
 			throw e.coreException;
+		}
+	}
+
+	if (typeInHierarchy) {
+		AstNode[] nodes = matchingNodes(field.declarationSourceStart, field.declarationSourceEnd);
+		if (nodes != null) {
+			for (int i = 0, l = nodes.length; i < l; i++) {
+				AstNode node = nodes[i];
+				Integer level = (Integer) this.matchingNodes.removeKey(node);
+				if ((this.matchContainer & SearchPattern.FIELD) != 0)
+					this.locator.reportReference(node, type, field, parent, level.intValue());
+			}
 		}
 	}
 }
