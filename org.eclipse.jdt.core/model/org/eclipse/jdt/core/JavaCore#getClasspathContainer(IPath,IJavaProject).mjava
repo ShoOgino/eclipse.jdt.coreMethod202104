@@ -1,7 +1,7 @@
 	/** 
 	 * Answers the set of classpath entries corresponding to a given container for a specific project.
 	 * Indeed, classpath containers can have a different meaning in different project, according to the behavior
-	 * of the <code>ClasspathContainerResolver</code> which got involved for resolving this container.
+	 * of the <code>ClasspathContainerInitializer</code> which got involved for resolving this container.
 	 * In case this container path could not be resolved, then will answer <code>null</code>.
 	 * <p>
 	 * Both the container path and the project context are supposed to be non-null.
@@ -23,33 +23,35 @@
 	 * 
 	 * @since 2.0
 	 */
-	public static IClasspathEntry[] getResolvedClasspathContainer(IPath containerPath, IJavaProject project) throws JavaModelException {
+	public static IClasspathContainer getClasspathContainer(IPath containerPath, IJavaProject project) throws JavaModelException {
 
 		Map projectContainers = (Map)JavaModelManager.Containers.get(project);
 		if (projectContainers == null){
 			projectContainers = new HashMap(1);
 			JavaModelManager.Containers.put(project, projectContainers);
 		}
-		IClasspathEntry[] entries = (IClasspathEntry[])projectContainers.get(containerPath);
+		IClasspathContainer container = (IClasspathContainer)projectContainers.get(containerPath);
 
-		if (entries == JavaModelManager.ContainerInitializationInProgress) return null; // break cycle
-		if (entries == null){
-			ClasspathContainerResolver resolver = JavaModelManager.getClasspathContainerResolver(containerPath);
-			if (resolver != null){
+		if (container == JavaModelManager.ContainerInitializationInProgress) return null; // break cycle
+		if (container == null){
+			ClasspathContainerInitializer initializer = JavaModelManager.getClasspathContainerInitializer(containerPath.segment(0));
+			if (initializer != null){
 				projectContainers.put(containerPath, JavaModelManager.ContainerInitializationInProgress); // avoid initialization cycles
 				boolean ok = false;
 				try {
-					entries = resolver.resolve(containerPath, project);
-					
-					// validation - no nested classpath container
-					if (entries != null){
-						for (int i = 0; i < entries.length; i++){
-							IClasspathEntry entry = entries[i];
-							if (entry == null || entry.getEntryKind() == IClasspathEntry.CPE_CONTAINER){
-								throw new JavaModelException(
-									new JavaModelStatus(
-										IJavaModelStatusConstants.INVALID_CP_CONTAINER_ENTRY,
-										containerPath.toString()));
+					initializer.initialize(containerPath.segment(0), containerPath.segment(1), project);
+					if (container != null){
+						IClasspathEntry[] entries = container.getClasspathEntries();
+						// validation - no nested classpath container
+						if (entries != null){
+							for (int i = 0; i < entries.length; i++){
+								IClasspathEntry entry = entries[i];
+								if (entry == null || entry.getEntryKind() == IClasspathEntry.CPE_CONTAINER){
+									throw new JavaModelException(
+										new JavaModelStatus(
+											IJavaModelStatusConstants.INVALID_CP_CONTAINER_ENTRY,
+											containerPath.toString()));
+								}
 							}
 						}
 					}
@@ -59,21 +61,27 @@
 				} finally {
 					if (!ok) JavaModelManager.Containers.put(project, null); // flush cache
 				}
-				if (entries != null){
-					projectContainers.put(containerPath, entries);
+				if (container != null){
+					projectContainers.put(containerPath, container);
 				}
 				if (JavaModelManager.CP_RESOLVE_VERBOSE){
-					System.out.print("CPContainer INIT - after resolution: " + containerPath + " --> {"); //$NON-NLS-2$//$NON-NLS-1$
-					if (entries != null){
-						for (int i = 0; i < entries.length; i++){
-							if (i > 0) System.out.println(", ");//$NON-NLS-1$
-							System.out.println(entries[i]);
+					System.out.print("CPContainer INIT - after resolution: " + containerPath + " --> "); //$NON-NLS-2$//$NON-NLS-1$
+					if (container != null){
+						System.out.print("container: "+container.getDescription()+" {"); //$NON-NLS-2$//$NON-NLS-1$
+						IClasspathEntry[] entries = container.getClasspathEntries();
+						if (entries != null){
+							for (int i = 0; i < entries.length; i++){
+								if (i > 0) System.out.println(", ");//$NON-NLS-1$
+								System.out.println(entries[i]);
+							}
 						}
+						System.out.println("}");//$NON-NLS-1$
+					} else {
+						System.out.println("{unbound}");//$NON-NLS-1$
 					}
-					System.out.println("}");//$NON-NLS-1$
 				}
 			}
 		}
-		return entries;			
+		return container;			
 	}
 
