@@ -1,25 +1,32 @@
-	public static void containerPut(IJavaProject project, IPath containerPath, IClasspathContainer container){
+	public synchronized void containerPut(IJavaProject project, IPath containerPath, IClasspathContainer container){
 
-		Map projectContainers = (Map)Containers.get(project);
-		if (projectContainers == null){
-			projectContainers = new HashMap(1);
-			Containers.put(project, projectContainers);
-		}
-
-		if (container == null) {
-			projectContainers.remove(containerPath);
-			Map previousContainers = (Map)PreviousSessionContainers.get(project);
-			if (previousContainers != null){
-				previousContainers.remove(containerPath);
-			}
-		} else {
-			projectContainers.put(containerPath, container);
-		}
-
-		// do not write out intermediate initialization value
-		if (container == JavaModelManager.ContainerInitializationInProgress) {
+		// set/unset the initialization in progress
+		HashSet projectInitializations = containerInitializationInProgress(project);
+		if (container == CONTAINER_INITIALIZATION_IN_PROGRESS) {
+			projectInitializations.add(containerPath);
+			
+			// do not write out intermediate initialization value
 			return;
+		} else {
+			projectInitializations.remove(containerPath);
+
+			Map projectContainers = (Map)this.containers.get(project);
+			if (projectContainers == null){
+				projectContainers = new HashMap(1);
+				this.containers.put(project, projectContainers);
+			}
+	
+			if (container == null) {
+				projectContainers.remove(containerPath);
+				Map previousContainers = (Map)this.previousSessionContainers.get(project);
+				if (previousContainers != null){
+					previousContainers.remove(containerPath);
+				}
+			} else {
+				projectContainers.put(containerPath, container);
+			}
 		}
+		
 		Preferences preferences = JavaCore.getPlugin().getPluginPreferences();
 		String containerKey = CP_CONTAINER_PREFERENCES_PREFIX+project.getElementName() +"|"+containerPath;//$NON-NLS-1$
 		String containerString = CP_ENTRY_IGNORE;
