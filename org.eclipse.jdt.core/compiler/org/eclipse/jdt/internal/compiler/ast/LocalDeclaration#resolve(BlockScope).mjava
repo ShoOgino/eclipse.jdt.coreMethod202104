@@ -1,62 +1,66 @@
-public void resolve(BlockScope scope) {
-	// create a binding and add it to the scope
-	TypeBinding tb = type.resolveType(scope);
+	public void resolve(BlockScope scope) {
 
-	checkModifiers();		
+		// create a binding and add it to the scope
+		TypeBinding tb = type.resolveType(scope);
 
-	if (tb != null) {
-		if (tb == VoidBinding) {
-			scope.problemReporter().variableTypeCannotBeVoid(this);
-			return;
-		}
-		if (tb.isArrayType() && ((ArrayBinding) tb).leafComponentType == VoidBinding) {
-			scope.problemReporter().variableTypeCannotBeVoidArray(this);
-			return;
-		}
-	}
+		checkModifiers();
 
-	// duplicate checks
-	if ((binding = scope.duplicateName(name)) != null) {
-		// the name already exists... may carry on with the first binding...
-		scope.problemReporter().redefineLocal(this);
-	} else {
-		binding = new LocalVariableBinding(this, tb, modifiers);
-		scope.addLocalVariable(binding);
-		binding.constant = NotAConstant;
-		// allow to recursivelly target the binding....
-		// the correct constant is harmed if correctly computed at the end of this method
-	}
-
-	if (tb == null) {
-		if (initialization != null)
-			initialization.resolveType(scope); // want to report all possible errors
-		return;
-	}
-	
-	// store the constant for final locals 	
-	if (initialization != null) {
-		if (initialization instanceof ArrayInitializer) {
-			TypeBinding initTb = initialization.resolveTypeExpecting(scope, tb);
-			if (initTb != null) {
-				((ArrayInitializer) initialization).binding = (ArrayBinding) initTb;
-				initialization.implicitWidening(tb, initTb);
+		if (tb != null) {
+			if (tb == VoidBinding) {
+				scope.problemReporter().variableTypeCannotBeVoid(this);
+				return;
 			}
+			if (tb.isArrayType() && ((ArrayBinding) tb).leafComponentType == VoidBinding) {
+				scope.problemReporter().variableTypeCannotBeVoidArray(this);
+				return;
+			}
+		}
+
+		// duplicate checks
+		if ((binding = scope.duplicateName(name)) != null) {
+			// the name already exists... may carry on with the first binding...
+			scope.problemReporter().redefineLocal(this);
 		} else {
-			TypeBinding initTb = initialization.resolveType(scope);
-			if (initTb != null) {
-				if (initialization.isConstantValueOfTypeAssignableToType(initTb, tb)
-					|| (tb.isBaseType() && BaseTypeBinding.isWidening(tb.id, initTb.id))
-					|| scope.areTypesCompatible(initTb, tb))
-						initialization.implicitWidening(tb, initTb);
-				else
-					scope.problemReporter().typeMismatchError(initTb, tb, this);
-			}
+			binding = new LocalVariableBinding(this, tb, modifiers);
+			scope.addLocalVariable(binding);
+			binding.constant = NotAConstant;
+			// allow to recursivelly target the binding....
+			// the correct constant is harmed if correctly computed at the end of this method
 		}
 
-		// change the constant in the binding when it is final
-		// (the optimization of the constant propagation will be done later on)
-		// cast from constant actual type to variable type
-		binding.constant = binding.isFinal() ? initialization.constant.castTo((tb.id << 4) + initialization.constant.typeID()) : NotAConstant;
+		if (tb == null) {
+			if (initialization != null)
+				initialization.resolveType(scope); // want to report all possible errors
+			return;
+		}
+
+		// store the constant for final locals 	
+		if (initialization != null) {
+			if (initialization instanceof ArrayInitializer) {
+				TypeBinding initTb = initialization.resolveTypeExpecting(scope, tb);
+				if (initTb != null) {
+					((ArrayInitializer) initialization).binding = (ArrayBinding) initTb;
+					initialization.implicitWidening(tb, initTb);
+				}
+			} else {
+				TypeBinding initTb = initialization.resolveType(scope);
+				if (initTb != null) {
+					if (initialization.isConstantValueOfTypeAssignableToType(initTb, tb)
+						|| (tb.isBaseType() && BaseTypeBinding.isWidening(tb.id, initTb.id))
+						|| scope.areTypesCompatible(initTb, tb))
+						initialization.implicitWidening(tb, initTb);
+					else
+						scope.problemReporter().typeMismatchError(initTb, tb, this);
+				}
+			}
+
+			// change the constant in the binding when it is final
+			// (the optimization of the constant propagation will be done later on)
+			// cast from constant actual type to variable type
+			binding.constant =
+				binding.isFinal()
+					? initialization.constant.castTo((tb.id << 4) + initialization.constant.typeID())
+					: NotAConstant;
+		}
 	}
-}
 

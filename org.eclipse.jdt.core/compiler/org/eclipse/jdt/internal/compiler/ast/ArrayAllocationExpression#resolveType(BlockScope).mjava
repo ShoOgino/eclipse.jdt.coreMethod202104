@@ -1,57 +1,61 @@
-public TypeBinding resolveType(BlockScope scope) {
-	// Build an array type reference using the current dimensions
-	// The parser does not check for the fact that dimension may be null
-	// only at the -end- like new int [4][][]. The parser allows new int[][4][]
-	// so this must be checked here......(this comes from a reduction to LL1 grammar)
+	public TypeBinding resolveType(BlockScope scope) {
 
-	TypeBinding referenceTb = type.resolveType(scope); // will check for null after dimensions are checked
-	constant = Constant.NotAConstant;
-	if (referenceTb == VoidBinding) {
-		scope.problemReporter().cannotAllocateVoidArray(this);
-		referenceTb = null; // will return below
-	}
+		// Build an array type reference using the current dimensions
+		// The parser does not check for the fact that dimension may be null
+		// only at the -end- like new int [4][][]. The parser allows new int[][4][]
+		// so this must be checked here......(this comes from a reduction to LL1 grammar)
 
-	// check the validity of the dimension syntax (and test for all null dimensions)
-	int lengthDim = -1;
-	for (int i = dimensions.length; --i >= 0;) {
-		if (dimensions[i] != null) {
-			if (lengthDim == -1)
-				lengthDim = i;
-		} else if (lengthDim != -1) { // should not have an empty dimension before an non-empty one
-			scope.problemReporter().incorrectLocationForEmptyDimension(this, i);
+		TypeBinding referenceTb = type.resolveType(scope);
+		// will check for null after dimensions are checked
+		constant = Constant.NotAConstant;
+		if (referenceTb == VoidBinding) {
+			scope.problemReporter().cannotAllocateVoidArray(this);
+			referenceTb = null; // will return below
+		}
+
+		// check the validity of the dimension syntax (and test for all null dimensions)
+		int lengthDim = -1;
+		for (int i = dimensions.length; --i >= 0;) {
+			if (dimensions[i] != null) {
+				if (lengthDim == -1)
+					lengthDim = i;
+			} else if (
+				lengthDim != -1) {
+				// should not have an empty dimension before an non-empty one
+				scope.problemReporter().incorrectLocationForEmptyDimension(this, i);
+				return null;
+			}
+		}
+		if (referenceTb == null)
+			return null;
+
+		// lengthDim == -1 says if all dimensions are nulled
+		// when an initializer is given, no dimension must be specified
+		if (initializer == null) {
+			if (lengthDim == -1) {
+				scope.problemReporter().mustDefineDimensionsOrInitializer(this);
+				return null;
+			}
+		} else if (lengthDim != -1) {
+			scope.problemReporter().cannotDefineDimensionsAndInitializer(this);
 			return null;
 		}
-	}
-	if (referenceTb == null)
-		return null;
 
-	// lengthDim == -1 says if all dimensions are nulled
-	// when an initializer is given, no dimension must be specified
-	if (initializer == null) {
-		if (lengthDim == -1) {
-			scope.problemReporter().mustDefineDimensionsOrInitializer(this);
-			return null;
+		// dimensions resolution 
+		for (int i = 0; i <= lengthDim; i++) {
+			TypeBinding dimTb = dimensions[i].resolveTypeExpecting(scope, IntBinding);
+			if (dimTb == null)
+				return null;
+			dimensions[i].implicitWidening(IntBinding, dimTb);
 		}
-	} else if (lengthDim != -1) {
-		scope.problemReporter().cannotDefineDimensionsAndInitializer(this);
-		return null;
+
+		// building the array binding
+		arrayTb = scope.createArray(referenceTb, dimensions.length);
+
+		// check the initializer
+		if (initializer != null)
+			if ((initializer.resolveTypeExpecting(scope, arrayTb)) != null)
+				initializer.binding = arrayTb;
+		return arrayTb;
 	}
-
-	// dimensions resolution 
-	for (int i = 0; i <= lengthDim; i++) {
-		TypeBinding dimTb = dimensions[i].resolveTypeExpecting(scope, IntBinding);
-		if (dimTb == null)
-			return null;
-		dimensions[i].implicitWidening(IntBinding, dimTb);
-	}
-
-	// building the array binding
-	arrayTb = scope.createArray(referenceTb, dimensions.length);
-
-	// check the initializer
-	if (initializer != null)
-		if ((initializer.resolveTypeExpecting(scope, arrayTb)) != null)
-			initializer.binding = arrayTb;
-	return arrayTb;
-}
 

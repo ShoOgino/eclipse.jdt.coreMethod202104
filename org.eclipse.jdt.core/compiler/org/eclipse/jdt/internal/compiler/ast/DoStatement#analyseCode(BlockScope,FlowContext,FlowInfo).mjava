@@ -1,54 +1,77 @@
-public FlowInfo analyseCode(BlockScope currentScope, FlowContext flowContext, FlowInfo flowInfo) {
-	breakLabel = new Label();
-	continueLabel = new Label();
-	LoopingFlowContext loopingContext = new LoopingFlowContext(flowContext, this, breakLabel, continueLabel, currentScope);
+	public FlowInfo analyseCode(
+		BlockScope currentScope,
+		FlowContext flowContext,
+		FlowInfo flowInfo) {
 
-	Constant conditionConstant = condition.constant;
-	Constant conditionalConstant = condition.conditionalConstant();	
-	boolean isFalseCondition = 
-		((conditionConstant != NotAConstant) && (conditionConstant.booleanValue() == false))
-			|| ((conditionalConstant != NotAConstant) && (conditionalConstant.booleanValue() == false));
-	
-	if ((action != null) && !action.isEmptyBlock()) {
-		//if (!flowInfo.complainIfUnreachable(this, currentScope)){ // probably useless since would be tested outside the do
-		flowInfo = action.analyseCode(currentScope, loopingContext, flowInfo.copy());
-		// unnecessary to check here}
+		breakLabel = new Label();
+		continueLabel = new Label();
+		LoopingFlowContext loopingContext =
+			new LoopingFlowContext(
+				flowContext,
+				this,
+				breakLabel,
+				continueLabel,
+				currentScope);
 
-		// code generation can be optimized when no need to continue in the loop
-		if ((flowInfo == FlowInfo.DeadEnd) || flowInfo.isFakeReachable()){
-			if ((loopingContext.initsOnContinue == FlowInfo.DeadEnd) || loopingContext.initsOnContinue.isFakeReachable()){
-				continueLabel = null;
+		Constant conditionConstant = condition.constant;
+		Constant conditionalConstant = condition.conditionalConstant();
+		boolean isFalseCondition =
+			((conditionConstant != NotAConstant)
+				&& (conditionConstant.booleanValue() == false))
+				|| ((conditionalConstant != NotAConstant)
+					&& (conditionalConstant.booleanValue() == false));
+
+		if ((action != null) && !action.isEmptyBlock()) {
+			flowInfo = action.analyseCode(currentScope, loopingContext, flowInfo.copy());
+
+			// code generation can be optimized when no need to continue in the loop
+			if ((flowInfo == FlowInfo.DeadEnd) || flowInfo.isFakeReachable()) {
+				if ((loopingContext.initsOnContinue == FlowInfo.DeadEnd)
+					|| loopingContext.initsOnContinue.isFakeReachable()) {
+					continueLabel = null;
+				} else {
+					flowInfo = loopingContext.initsOnContinue; // for condition
+					if (isFalseCondition) {
+						//	continueLabel = null; - cannot nil the label since may be targeted already by 'continue' statements
+					} else {
+						loopingContext.complainOnFinalAssignmentsInLoop(currentScope, flowInfo);
+					}
+				}
 			} else {
-				flowInfo = loopingContext.initsOnContinue; // for condition
-				if (isFalseCondition){
+				if (isFalseCondition) {
 					//	continueLabel = null; - cannot nil the label since may be targeted already by 'continue' statements
 				} else {
 					loopingContext.complainOnFinalAssignmentsInLoop(currentScope, flowInfo);
 				}
 			}
-		} else {
-			if (isFalseCondition){
-				//	continueLabel = null; - cannot nil the label since may be targeted already by 'continue' statements
-			} else {
-				loopingContext.complainOnFinalAssignmentsInLoop(currentScope, flowInfo);
-			}
 		}
-	}
-	LoopingFlowContext condLoopContext;
-	flowInfo = condition.analyseCode(currentScope, (condLoopContext = new LoopingFlowContext(flowContext, this, null, null, currentScope)), (action == null ? flowInfo : (flowInfo.mergedWith(loopingContext.initsOnContinue))));
-	condLoopContext.complainOnFinalAssignmentsInLoop(currentScope, flowInfo);
+		LoopingFlowContext condLoopContext;
+		flowInfo =
+			condition.analyseCode(
+				currentScope,
+				(condLoopContext =
+					new LoopingFlowContext(flowContext, this, null, null, currentScope)),
+				(action == null
+					? flowInfo
+					: (flowInfo.mergedWith(loopingContext.initsOnContinue))));
+		condLoopContext.complainOnFinalAssignmentsInLoop(currentScope, flowInfo);
 
-	// infinite loop
-	FlowInfo mergedInfo;
-	if ((condition.constant != NotAConstant) && (condition.constant.booleanValue() == true)) {
-		mergedInfo = loopingContext.initsOnBreak;
-		mergedInitStateIndex = currentScope.methodScope().recordInitializationStates(mergedInfo);
+		// infinite loop
+		FlowInfo mergedInfo;
+		if ((condition.constant != NotAConstant)
+			&& (condition.constant.booleanValue() == true)) {
+			mergedInfo = loopingContext.initsOnBreak;
+			mergedInitStateIndex =
+				currentScope.methodScope().recordInitializationStates(mergedInfo);
+			return mergedInfo;
+		}
+
+		// end of loop: either condition false or break
+		mergedInfo =
+			flowInfo.initsWhenFalse().unconditionalInits().mergedWith(
+				loopingContext.initsOnBreak);
+		mergedInitStateIndex =
+			currentScope.methodScope().recordInitializationStates(mergedInfo);
 		return mergedInfo;
 	}
-
-	// end of loop: either condition false or break
-	mergedInfo = flowInfo.initsWhenFalse().unconditionalInits().mergedWith(loopingContext.initsOnBreak);
-	mergedInitStateIndex = currentScope.methodScope().recordInitializationStates(mergedInfo);
-	return mergedInfo;
-}
 

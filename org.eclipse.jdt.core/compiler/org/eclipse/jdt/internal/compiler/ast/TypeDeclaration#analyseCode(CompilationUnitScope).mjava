@@ -1,77 +1,88 @@
-/**
- *	Flow analysis for a package member type
- *
- */
-public void analyseCode(CompilationUnitScope unitScope) {
-	if (ignoreFurtherInvestigation)
-		return;
-	try {
-		FlowInfo flowInfo = FlowInfo.initial(maxFieldCount); // start fresh init info
-		InitializationFlowContext initializerContext = new InitializationFlowContext(null, this, initializerScope);
-		InitializationFlowContext staticInitializerContext = new InitializationFlowContext(null, this, staticInitializerScope);
-		FlowInfo nonStaticFieldInfo = flowInfo.copy(), staticFieldInfo = flowInfo.copy();
-		if (fields != null) {
-			for (int i = 0, count = fields.length; i < count; i++) {
-				if (fields[i].isStatic()) {
-					staticFieldInfo = fields[i].analyseCode(staticInitializerScope, staticInitializerContext, staticFieldInfo);
-					// in case the initializer is not reachable, use a reinitialized flowInfo and enter a fake reachable
-					// branch, since the previous initializer already got the blame.
-					if (staticFieldInfo == FlowInfo.DeadEnd) {
-						staticInitializerScope.problemReporter().initializerMustCompleteNormally(fields[i]);
-						staticFieldInfo = FlowInfo.initial(maxFieldCount).markAsFakeReachable(true);
+	/**
+	 *	Flow analysis for a package member type
+	 *
+	 */
+	public void analyseCode(CompilationUnitScope unitScope) {
+
+		if (ignoreFurtherInvestigation)
+			return;
+		try {
+			FlowInfo flowInfo = FlowInfo.initial(maxFieldCount); // start fresh init info
+			InitializationFlowContext initializerContext =
+				new InitializationFlowContext(null, this, initializerScope);
+			InitializationFlowContext staticInitializerContext =
+				new InitializationFlowContext(null, this, staticInitializerScope);
+			FlowInfo nonStaticFieldInfo = flowInfo.copy(),
+				staticFieldInfo = flowInfo.copy();
+			if (fields != null) {
+				for (int i = 0, count = fields.length; i < count; i++) {
+					if (fields[i].isStatic()) {
+						staticFieldInfo =
+							fields[i].analyseCode(
+								staticInitializerScope,
+								staticInitializerContext,
+								staticFieldInfo);
+						// in case the initializer is not reachable, use a reinitialized flowInfo and enter a fake reachable
+						// branch, since the previous initializer already got the blame.
+						if (staticFieldInfo == FlowInfo.DeadEnd) {
+							staticInitializerScope.problemReporter().initializerMustCompleteNormally(
+								fields[i]);
+							staticFieldInfo = FlowInfo.initial(maxFieldCount).markAsFakeReachable(true);
+						}
+					} else {
+						nonStaticFieldInfo =
+							fields[i].analyseCode(initializerScope, initializerContext, nonStaticFieldInfo);
+						// in case the initializer is not reachable, use a reinitialized flowInfo and enter a fake reachable
+						// branch, since the previous initializer already got the blame.
+						if (nonStaticFieldInfo == FlowInfo.DeadEnd) {
+							initializerScope.problemReporter().initializerMustCompleteNormally(fields[i]);
+							nonStaticFieldInfo = FlowInfo.initial(maxFieldCount).markAsFakeReachable(true);
+						}
 					}
-				} else {
-					nonStaticFieldInfo = fields[i].analyseCode(initializerScope, initializerContext, nonStaticFieldInfo);
-					// in case the initializer is not reachable, use a reinitialized flowInfo and enter a fake reachable
-					// branch, since the previous initializer already got the blame.
-					if (nonStaticFieldInfo == FlowInfo.DeadEnd) {
-						initializerScope.problemReporter().initializerMustCompleteNormally(fields[i]);
-						nonStaticFieldInfo = FlowInfo.initial(maxFieldCount).markAsFakeReachable(true);
-					}					
 				}
 			}
-		}
-		if (memberTypes != null) {
-			for (int i = 0, count = memberTypes.length; i < count; i++) {
-				memberTypes[i].analyseCode(scope);
+			if (memberTypes != null) {
+				for (int i = 0, count = memberTypes.length; i < count; i++) {
+					memberTypes[i].analyseCode(scope);
+				}
 			}
-		}
-		if (methods != null) {
-			int recursionBalance = 0; // check constructor recursions			
-			for (int i = 0, count = methods.length; i < count; i++) {
-				AbstractMethodDeclaration method = methods[i];
-				if (method.ignoreFurtherInvestigation)
-					continue;
-				if (method.isInitializationMethod()) {
-					if (method.isStatic()) { // <clinit>
-					 	((Clinit) method).analyseCode(scope, staticInitializerContext, staticFieldInfo);
-					} else {// constructor
-						ConstructorDeclaration constructor = (ConstructorDeclaration) method;
-					 	constructor.analyseCode(scope, initializerContext, nonStaticFieldInfo.copy());						
-						// compute the recursive invocation balance:
-						//   how many thisReferences vs. superReferences to constructors
-						int refCount; 
-						if ((refCount = constructor.referenceCount) > 0){
-							if ((constructor.constructorCall == null) 
-								|| constructor.constructorCall.isSuperAccess()
-								|| !constructor.constructorCall.binding.isValidBinding()){
-								recursionBalance -= refCount;
-								constructor.referenceCount = -1; // for error reporting propagation
-							} else {
-								recursionBalance += refCount;
+			if (methods != null) {
+				int recursionBalance = 0; // check constructor recursions			
+				for (int i = 0, count = methods.length; i < count; i++) {
+					AbstractMethodDeclaration method = methods[i];
+					if (method.ignoreFurtherInvestigation)
+						continue;
+					if (method.isInitializationMethod()) {
+						if (method.isStatic()) { // <clinit>
+							((Clinit) method).analyseCode(scope, staticInitializerContext, staticFieldInfo);
+						} else { // constructor
+							ConstructorDeclaration constructor = (ConstructorDeclaration) method;
+							constructor.analyseCode(scope, initializerContext, nonStaticFieldInfo.copy());
+							// compute the recursive invocation balance:
+							//   how many thisReferences vs. superReferences to constructors
+							int refCount;
+							if ((refCount = constructor.referenceCount) > 0) {
+								if ((constructor.constructorCall == null)
+									|| constructor.constructorCall.isSuperAccess()
+									|| !constructor.constructorCall.binding.isValidBinding()) {
+									recursionBalance -= refCount;
+									constructor.referenceCount = -1; // for error reporting propagation
+								} else {
+									recursionBalance += refCount;
+								}
 							}
-						}						
+						}
+					} else { // regular method
+						method.analyseCode(scope, null, FlowInfo.initial(maxFieldCount));
 					}
-				} else { // regular method
-					method.analyseCode(scope, null, FlowInfo.initial(maxFieldCount));
+				}
+				if (recursionBalance > 0) {
+					// there is one or more cycle(s) amongst constructor invocations
+					scope.problemReporter().recursiveConstructorInvocation(this);
 				}
 			}
-			if (recursionBalance > 0){// there is one or more cycle(s) amongst constructor invocations
-				scope.problemReporter().recursiveConstructorInvocation(this);
-			}			
-		}
-	} catch (AbortType e) {
-		this.ignoreFurtherInvestigation = true;		
-	};
-}
+		} catch (AbortType e) {
+			this.ignoreFurtherInvestigation = true;
+		};
+	}
 
