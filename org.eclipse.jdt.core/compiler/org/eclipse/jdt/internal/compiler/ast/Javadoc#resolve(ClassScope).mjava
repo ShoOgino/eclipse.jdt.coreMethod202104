@@ -39,7 +39,24 @@
 		// @see tags
 		int seeTagsLength = this.references == null ? 0 : this.references.length;
 		for (int i = 0; i < seeTagsLength; i++) {
+			
+			// Resolve reference
 			this.references[i].resolveType(classScope);
+
+			// Some unbound field reference might be changed to message send
+			// see bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=51911
+			if (this.references[i] instanceof JavadocFieldReference) {
+				JavadocFieldReference fieldRef = (JavadocFieldReference) this.references[i];
+				if (fieldRef.receiverType != null && fieldRef.binding == null) { // binding was reset in case of valid method reference
+					JavadocMessageSend msgSend = new JavadocMessageSend(fieldRef.token, fieldRef.nameSourcePosition);
+					msgSend.receiver = fieldRef.receiver;
+					msgSend.receiverType = fieldRef.receiverType;
+					msgSend.qualifyingType = fieldRef.receiverType;
+					msgSend.superAccess = classScope.enclosingSourceType().isCompatibleWith(msgSend.receiverType);
+					msgSend.binding = classScope.findMethod((ReferenceBinding)msgSend.receiverType, msgSend.selector, new TypeBinding[0], msgSend);
+					this.references[i] = msgSend;
+				}
+			}
 		}
 	}
 
