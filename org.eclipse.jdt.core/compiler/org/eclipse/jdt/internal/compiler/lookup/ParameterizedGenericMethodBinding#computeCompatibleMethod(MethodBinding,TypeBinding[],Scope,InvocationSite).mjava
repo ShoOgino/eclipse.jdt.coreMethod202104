@@ -47,36 +47,45 @@
 				for (int i = 0; i < paramLength; i++)
 					parameters[i].collectSubstitutes(arguments[i], collectedSubstitutes);
 			}
-			substitutes = new TypeBinding[varLength];
 			boolean needReturnTypeInference = false;
-			for (int i = 0; i < varLength; i++) {
-				TypeBinding[] variableSubstitutes = (TypeBinding[]) collectedSubstitutes.get(typeVariables[i]);
-				TypeBinding mostSpecificSubstitute = scope.lowerUpperBound(variableSubstitutes);
-				//TypeBinding mostSpecificSubstitute = scope.mostSpecificCommonType(variableSubstitutes);
-				if (mostSpecificSubstitute == null)
-					return null; // incompatible
-				if (mostSpecificSubstitute == VoidBinding) {
-					needReturnTypeInference = true;
-				    mostSpecificSubstitute = typeVariables[i];
+			if (collectedSubstitutes.isEmpty()) {
+				// raw generic method inferred
+				methodSubstitute = new ParameterizedGenericMethodBinding(originalMethod, (RawTypeBinding)null, scope.environment());
+			} else {
+				substitutes = new TypeBinding[varLength];
+				for (int i = 0; i < varLength; i++) {
+					TypeBinding[] variableSubstitutes = (TypeBinding[]) collectedSubstitutes.get(typeVariables[i]);
+					TypeBinding mostSpecificSubstitute = scope.lowerUpperBound(variableSubstitutes);
+					if (mostSpecificSubstitute == null)
+						return null; // incompatible
+					if (mostSpecificSubstitute == VoidBinding) {
+						needReturnTypeInference = true;
+					    mostSpecificSubstitute = typeVariables[i];
+					}				
+					substitutes[i] = mostSpecificSubstitute;
 				}
-				substitutes[i] = mostSpecificSubstitute;
+				// apply inferred variable substitutions
+				methodSubstitute = new ParameterizedGenericMethodBinding(originalMethod, substitutes, scope.environment());
 			}
-			// apply inferred variable substitutions
-			methodSubstitute = new ParameterizedGenericMethodBinding(originalMethod, substitutes, scope.environment());
 	
 			if (needReturnTypeInference && invocationSite instanceof MessageSend) {
 				MessageSend message = (MessageSend) invocationSite;
 				TypeBinding expectedType = message.expectedType;
-				if (expectedType != null)
-					methodSubstitute.inferFromExpectedType(message.expectedType, scope);
+				methodSubstitute.inferFromExpectedType(
+						// 15.12.2.8 - if no expected type, then assume Object
+						expectedType == null ? scope.getJavaLangObject() : expectedType, 
+						scope);
 			}
 		}
 		// check bounds
-		for (int i = 0, length = typeVariables.length; i < length; i++) {
-		    TypeVariableBinding typeVariable = typeVariables[i];
-		    if (!typeVariable.boundCheck(methodSubstitute, substitutes[i]))
-		        // incompatible due to bound check
-		        return new ProblemMethodBinding(methodSubstitute, originalMethod.selector, new TypeBinding[]{substitutes[i], typeVariables[i] }, ParameterBoundMismatch);
+		if (!methodSubstitute.isRaw) {
+			for (int i = 0, length = typeVariables.length; i < length; i++) {
+			    TypeVariableBinding typeVariable = typeVariables[i];
+			    TypeBinding substitute = substitutes[i];
+			    if (!typeVariable.boundCheck(methodSubstitute, substitute))
+			        // incompatible due to bound check
+			        return new ProblemMethodBinding(methodSubstitute, originalMethod.selector, new TypeBinding[]{substitutes[i], typeVariables[i] }, ParameterBoundMismatch);
+			}
 		}
 
 		return methodSubstitute;

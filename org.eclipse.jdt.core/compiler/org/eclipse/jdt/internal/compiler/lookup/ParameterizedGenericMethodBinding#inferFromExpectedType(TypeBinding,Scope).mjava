@@ -1,32 +1,43 @@
 	public void inferFromExpectedType(TypeBinding expectedType, Scope scope) {
 	    if (this.returnType == expectedType) 
 	        return;
-        if ((this.returnType.tagBits & TagBits.HasTypeVariable) == 0) 
-            return;
-        Map substitutes = new HashMap(1);
-        int length = this.typeArguments.length;
-        TypeVariableBinding[] originalVariables = this.original().typeVariables;
-        boolean hasUnboundParameters = false;
-        for (int i = 0; i < length; i++) {
-            if (this.typeArguments[i] == originalVariables[i]) {
-                hasUnboundParameters = true;
+	    if ((this.returnType.tagBits & TagBits.HasTypeVariable) == 0) 
+	        return;
+	    Map substitutes = new HashMap(1);
+	    int length = this.typeArguments.length;
+	    TypeVariableBinding[] originalVariables = this.original().typeVariables;
+	    boolean hasUnboundParameters = false;
+	    for (int i = 0; i < length; i++) {
+	        if (this.typeArguments[i] == originalVariables[i]) {
+	            hasUnboundParameters = true;
 	        	substitutes.put(originalVariables[i], new TypeBinding[1]);
-            } else {
+	        } else {
 	        	substitutes.put(originalVariables[i], new TypeBinding[] { this.typeArguments[i] });
-            }
-        }
-        if (!hasUnboundParameters)
-            return;
-        returnType.collectSubstitutes(expectedType, substitutes);
-		for (int i = 0; i < length; i++) {
-			TypeBinding[] variableSubstitutes = (TypeBinding[]) substitutes.get(originalVariables[i]);
-			TypeBinding mostSpecificSubstitute = scope.lowerUpperBound(variableSubstitutes);
-			if (mostSpecificSubstitute == null) {
-			    return; // TODO (philippe) should report no way to infer type
-			}
-			if (mostSpecificSubstitute != VoidBinding) 
+	        }
+	    }
+	    if (!hasUnboundParameters)
+	        return;
+	    returnType.collectSubstitutes(expectedType, substitutes);
+	    if (substitutes.isEmpty()) {
+	    	// raw generic method inferred
+	    	this.isRaw = true;
+	    	for (int i = 0; i < length; i++) {
+	    		this.typeArguments[i] = originalVariables[i].erasure();
+	    	}
+	    } else {
+			for (int i = 0; i < length; i++) {
+				TypeBinding[] variableSubstitutes = (TypeBinding[]) substitutes.get(originalVariables[i]);
+				TypeBinding mostSpecificSubstitute = scope.lowerUpperBound(variableSubstitutes);
+				if (mostSpecificSubstitute == null) {
+				    return; // TODO (philippe) should report no way to infer type
+				}
+				if (mostSpecificSubstitute == VoidBinding) {
+					// 15.12.2.8 - any remaining variable is assumed to be Object
+					mostSpecificSubstitute = scope.getJavaLangObject();
+				}				
 				this.typeArguments[i] = mostSpecificSubstitute;
-		}
+			}
+	    }
 		TypeBinding oldReturnType = this.returnType;
 		this.returnType = this.substitute(this.returnType);
 		this.inferredReturnType = this.returnType != oldReturnType;
