@@ -3,136 +3,37 @@
 	 */
 	ITypeBinding resolveType(Type type) {
 		// retrieve the old ast node
-		int index = 0;
 		AstNode node = (AstNode) this.newAstToOldAst.get(type);
-		if (node == null) {
-			Type arrayType = null;
-			ASTNode parentType = type.getParent();
-			if (parentType instanceof ArrayCreation) {
-				node = (AstNode) this.newAstToOldAst.get(parentType);
-			} else {
-				// we try to retrieve the type as an element type of an array type
-				while ((parentType instanceof Type) && ((Type) parentType).isArrayType()) {
-					arrayType = (Type) parentType;
-					parentType = parentType.getParent();
-					index++;
-				}
-				if (index != 0) {
-					node = (AstNode) this.newAstToOldAst.get(arrayType);
-				}
-			}
-		}
+		org.eclipse.jdt.internal.compiler.lookup.TypeBinding binding = null;
 		if (node != null) {
 			if (node instanceof TypeReference) {
 				TypeReference typeReference = (TypeReference) node;
-				if (typeReference.binding == null || !typeReference.binding.isValidBinding()) {
-					return null;
-				}
-				ITypeBinding typeBinding = this.getTypeBinding(typeReference.binding);
-				if (typeBinding == null) {
-					return null;
-				}
-				if (index != 0) {
-					if (typeBinding.isArray()) {
-						ArrayBinding arrayBinding = (ArrayBinding)typeReference.binding;
-						if (index == arrayBinding.dimensions) {
-							return this.getTypeBinding(arrayBinding.leafComponentType);
-						} else {
-							for (int i = 0; i < index; i++) {
-								arrayBinding = (ArrayBinding) arrayBinding.elementsType(this.scope);
-							}
-							return this.getTypeBinding(arrayBinding);
-						}
-					} else {
-						return null;
-					}
-				} else {
-					if (type.isArrayType()) {
-						ArrayType array = (ArrayType) type;
-						if (typeBinding.getDimensions() != array.getDimensions()) {
-							ArrayBinding arrayBinding = (ArrayBinding)typeReference.binding;
-							for (int i = 0, max = typeBinding.getDimensions() - array.getDimensions(); i < max; i++) {
-								arrayBinding = (ArrayBinding) arrayBinding.elementsType(this.scope);
-							}
-							return this.getTypeBinding(arrayBinding);
-						}
-					} else if (typeBinding.isArray() && type.isSimpleType()) {
-						return this.getTypeBinding(((ArrayBinding)typeReference.binding).leafComponentType());
-					}
-					return typeBinding;
-				}
-			} else if (node instanceof SingleNameReference) {
-				SingleNameReference singleNameReference = (SingleNameReference) node;
-				if (singleNameReference.binding == null || !singleNameReference.binding.isValidBinding()) {
-					return null;
-				}
-				if (singleNameReference.isTypeReference()) {
-					ITypeBinding typeBinding = this.getTypeBinding((ReferenceBinding)singleNameReference.binding);
-					if (typeBinding == null) {
-						return null;
-					}
-					if (index != 0) {
-						if (typeBinding.isArray()) {
-							ArrayBinding arrayBinding = (ArrayBinding)singleNameReference.binding;
-							if (index == arrayBinding.dimensions) {
-								return this.getTypeBinding(arrayBinding.leafComponentType);
-							} else {
-								for (int i = 0; i < index; i++) {
-									arrayBinding = (ArrayBinding) arrayBinding.elementsType(this.scope);
-								}
-								return this.getTypeBinding(arrayBinding);
-							}
-						} else {
-							return null;
-						}
-					} else {
-						return typeBinding;
-					}
-				} else {
-					// it should be a type reference
-					return null;
-				}
-			} else if (node instanceof QualifiedNameReference) {
-				QualifiedNameReference qualifiedNameReference = (QualifiedNameReference) node;
-				if (qualifiedNameReference.isTypeReference()) {
-					if (qualifiedNameReference.binding == null || !qualifiedNameReference.binding.isValidBinding()) {
-						return null;
-					}
-					ITypeBinding typeBinding = this.getTypeBinding((ReferenceBinding)qualifiedNameReference.binding);
-					if (typeBinding == null) {
-						return null;
-					} 
-					if (index != 0) {
-						if (typeBinding.isArray()) {
-							ArrayBinding arrayBinding = (ArrayBinding)qualifiedNameReference.binding;
-							if (index == arrayBinding.dimensions) {
-								return this.getTypeBinding(arrayBinding.leafComponentType);
-							} else {
-								for (int i = 0; i < index; i++) {
-									arrayBinding = (ArrayBinding) arrayBinding.elementsType(this.scope);
-								}
-							}
-							return this.getTypeBinding(arrayBinding);
-						} else {
-							return null;
-						}
-					} else {
-						return typeBinding;
-					}
-				} else {
-					// it should be a type reference
-					return null;
-				}
+				binding = typeReference.binding;
+			} else if (node instanceof SingleNameReference && ((SingleNameReference)node).isTypeReference()) {
+				binding = (org.eclipse.jdt.internal.compiler.lookup.TypeBinding) (((SingleNameReference)node).binding);
+			} else if (node instanceof QualifiedNameReference && ((QualifiedNameReference)node).isTypeReference()) {
+				binding = (org.eclipse.jdt.internal.compiler.lookup.TypeBinding) (((QualifiedNameReference)node).binding);
 			} else if (node instanceof ArrayAllocationExpression) {
-				ArrayAllocationExpression arrayAllocationExpression = (ArrayAllocationExpression) node;
-				ArrayBinding arrayBinding = arrayAllocationExpression.arrayTb;
-				if (arrayBinding == null || !arrayBinding.isValidBinding()) {
-					return null;
+				binding = ((ArrayAllocationExpression) node).arrayTb;
+			}
+			if (binding == null || !binding.isValidBinding()) {
+				return null;
+			}
+			if (type.isArrayType()) {
+				ArrayType arrayType = (ArrayType) type;
+				if (binding.isArrayType()) {
+					ArrayBinding arrayBinding = (ArrayBinding) binding;
+					return getTypeBinding(this.scope.createArray(arrayBinding.leafComponentType, arrayType.getDimensions()));
+				} else {
+					return getTypeBinding(this.scope.createArray(binding, arrayType.getDimensions()));
 				}
-				if (index != 0) {
-					return this.getTypeBinding(this.scope.createArray(arrayBinding.leafComponentType, arrayBinding.dimensions - index));
-				} 
-				return this.getTypeBinding(arrayBinding);
+			} else {
+				if (binding.isArrayType()) {
+					ArrayBinding arrayBinding = (ArrayBinding) binding;
+					return getTypeBinding(arrayBinding.leafComponentType);
+				} else {
+					return getTypeBinding(binding);
+				}
 			}
 		}
 		return null;
