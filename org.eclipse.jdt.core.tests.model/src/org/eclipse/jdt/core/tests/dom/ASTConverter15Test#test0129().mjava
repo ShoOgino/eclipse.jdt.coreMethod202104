@@ -1,0 +1,41 @@
+   // https://bugs.eclipse.org/bugs/show_bug.cgi?id=84064
+    public void test0129() throws CoreException {
+        this.workingCopy = getWorkingCopy("/Converter15/src/X.java", true/*resolve*/);
+        final String contents = 
+        	"class X {\n" +
+        	"	static X x;\n" +
+        	"	static class G extends E {\n" +
+        	"		public <T> G() {\n" +
+        	"			x.<String> this();\n" +
+        	"		}\n" +
+        	"	}\n" +
+        	"	static class E {\n" +
+        	"		public <T> E() {\n" +
+        	"		}\n" +
+        	"	}\n" +
+        	"}";
+        final char[] source = contents.toCharArray();
+        ASTNode node = buildAST(
+            contents,
+            this.workingCopy,
+            false);
+        assertNotNull("No node", node);
+        assertEquals("Not a compilation unit", ASTNode.COMPILATION_UNIT, node.getNodeType());
+        CompilationUnit compilationUnit = (CompilationUnit) node;
+        String expectedProblem = "Illegal enclosing instance specification for type X.G";
+        assertProblemsSize(compilationUnit, 1, expectedProblem);
+        node = getASTNode(compilationUnit, 0, 1, 0);
+        assertEquals("Not a method declaration", ASTNode.METHOD_DECLARATION, node.getNodeType());
+        MethodDeclaration methodDeclaration = (MethodDeclaration) node;
+        assertTrue("Not a constructor", methodDeclaration.isConstructor());
+        Block body = methodDeclaration.getBody();
+        assertNotNull("No body", body);
+        List statements = body.statements();
+        assertEquals("Wrong size", 1, statements.size());
+        Statement statement = (Statement) statements.get(0);
+        assertEquals("Not a constructor invocation", ASTNode.CONSTRUCTOR_INVOCATION, statement.getNodeType());
+        ConstructorInvocation constructorInvocation = (ConstructorInvocation) statement;
+        checkSourceRange(constructorInvocation, "x.<String> this();", source);
+        assertTrue("Node is not malformed", isMalformed(constructorInvocation));
+    }
+
