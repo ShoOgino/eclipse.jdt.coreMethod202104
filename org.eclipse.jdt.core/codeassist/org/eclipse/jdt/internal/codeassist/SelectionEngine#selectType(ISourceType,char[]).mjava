@@ -1,101 +1,108 @@
-/**
- * Asks the engine to compute the selection of the given type
- * from the source type.
- *
- *  @return void
- *      the selection result is answered through a requestor.
- *
- *  @param sourceType com.ibm.compiler.java.api.env.ISourceType
- *      a source form of the current type in which code assist is invoked.
- *
- *  @param typeName char[]
- *      a type name which is to be resolved in the context of a compilation unit.
- *		NOTE: the type name is supposed to be correctly reduced (no whitespaces, no unicodes left)
- */
+	/**
+	 * Asks the engine to compute the selection of the given type
+	 * from the source type.
+	 *
+	 *  @return void
+	 *      the selection result is answered through a requestor.
+	 *
+	 *  @param sourceType com.ibm.compiler.java.api.env.ISourceType
+	 *      a source form of the current type in which code assist is invoked.
+	 *
+	 *  @param typeName char[]
+	 *      a type name which is to be resolved in the context of a compilation unit.
+	 *		NOTE: the type name is supposed to be correctly reduced (no whitespaces, no unicodes left)
+	 */
+	public void selectType(ISourceType sourceType, char[] typeName) {
+		try {
+			acceptedAnswer = false;
 
-public void selectType(ISourceType sourceType, char[] typeName) {
-	try{
-		acceptedAnswer = false;
+			// find the outer most type
+			ISourceType outerType = sourceType;
+			ISourceType parent = sourceType.getEnclosingType();
+			while (parent != null) {
+				outerType = parent;
+				parent = parent.getEnclosingType();
+			}
+			// compute parse tree for this most outer type
+			CompilationResult result = new CompilationResult(outerType.getFileName(), 1, 1);
+			CompilationUnitDeclaration parsedUnit =
+				SourceTypeConverter
+					.buildCompilationUnit(
+						new ISourceType[] { outerType },
+						false,
+			// don't need field and methods
+			true, // by default get member types
+			this.parser.problemReporter(), result);
 
-		// find the outer most type
-		ISourceType outerType = sourceType;
-		ISourceType parent = sourceType.getEnclosingType();
-		while (parent != null) {
-			outerType = parent;
-			parent = parent.getEnclosingType();
-		}
+			if (parsedUnit != null && parsedUnit.types != null) {
+				// find the type declaration that corresponds to the original source type
+				char[] packageName = sourceType.getPackageName();
+				char[] sourceTypeName = sourceType.getQualifiedName();
+				// the fully qualified name without the package name
+				if (packageName != null) {
+					// remove the package name if necessary
+					sourceTypeName =
+						CharOperation.subarray(
+							sourceType.getQualifiedName(),
+							packageName.length + 1,
+							sourceTypeName.length);
+				};
+				TypeDeclaration typeDecl =
+					parsedUnit.declarationOfType(CharOperation.splitOn('.', sourceTypeName));
+				if (typeDecl != null) {
 
-		// compute parse tree for this most outer type
-		CompilationResult result = new CompilationResult(outerType.getFileName(), 1, 1);
-		CompilationUnitDeclaration parsedUnit = 
-			SourceTypeConverter.buildCompilationUnit(  
-				new ISourceType[]{outerType}, 
-				false, // don't need field and methods
-				true, // by default get member types
-				this.parser.problemReporter(),
-				result); 
+					// add fake field with the type we're looking for
+					// note: since we didn't ask for fields above, there is no field defined yet
+					FieldDeclaration field = new FieldDeclaration();
+					int dot;
+					if ((dot = CharOperation.lastIndexOf('.', typeName)) == -1) {
+						this.selectedIdentifier = typeName;
+						field.type = new SelectionOnSingleTypeReference(typeName, -1);
+						// position not used
+					} else {
+						char[][] previousIdentifiers = CharOperation.splitOn('.', typeName, 0, dot - 1);
+						char[] selectionIdentifier =
+							CharOperation.subarray(typeName, dot + 1, typeName.length);
+						this.selectedIdentifier = selectionIdentifier;
+						field.type =
+							new SelectionOnQualifiedTypeReference(
+								previousIdentifiers,
+								selectionIdentifier,
+								new long[previousIdentifiers.length + 1]);
+					}
+					field.name = "<fakeField>".toCharArray(); //$NON-NLS-1$
+					typeDecl.fields = new FieldDeclaration[] { field };
 
-		if (parsedUnit != null && parsedUnit.types != null) {
-			// find the type declaration that corresponds to the original source type
-			char[] packageName = sourceType.getPackageName();
-			char[] sourceTypeName = sourceType.getQualifiedName(); // the fully qualified name without the package name
-			if (packageName != null) {
-				// remove the package name if necessary
-				sourceTypeName = CharOperation.subarray(sourceType.getQualifiedName(), packageName.length + 1, sourceTypeName.length);
-			};
-			TypeDeclaration typeDecl = parsedUnit.declarationOfType(CharOperation.splitOn('.', sourceTypeName));
-			if (typeDecl != null) {
-				
-				// add fake field with the type we're looking for
-				// note: since we didn't ask for fields above, there is no field defined yet
-				FieldDeclaration field = new FieldDeclaration();
-				int dot;
-				if ((dot = CharOperation.lastIndexOf('.', typeName)) == -1) {
-					this.selectedIdentifier = typeName;
-					field.type = new SelectionOnSingleTypeReference(typeName, -1); // position not used
-				} else {
-					char[][] previousIdentifiers = CharOperation.splitOn('.', typeName, 0, dot - 1);
-					char[] selectionIdentifier = CharOperation.subarray(typeName, dot + 1, typeName.length);
-					this.selectedIdentifier = selectionIdentifier;
-					field.type = 
-						new SelectionOnQualifiedTypeReference(
-							previousIdentifiers, 
-							selectionIdentifier,
-							new long[previousIdentifiers.length + 1]);
-				}
-				field.name = "<fakeField>".toCharArray(); //$NON-NLS-1$
-				typeDecl.fields = new FieldDeclaration[] {field};
+					// build bindings
+					lookupEnvironment.buildTypeBindings(parsedUnit);
+					if ((this.unitScope = parsedUnit.scope) != null) {
+						try {
+							// build fields
+							// note: this builds fields only in the parsed unit (the buildFieldsAndMethods flag is not passed along)
+							this.lookupEnvironment.completeTypeBindings(parsedUnit, true);
 
-				// build bindings
-				lookupEnvironment.buildTypeBindings(parsedUnit);
-				if ((this.unitScope = parsedUnit.scope) != null) {
-					try {
-						// build fields
-						// note: this builds fields only in the parsed unit (the buildFieldsAndMethods flag is not passed along)
-						this.lookupEnvironment.completeTypeBindings(parsedUnit, true);
-
-						// resolve
-						parsedUnit.scope.faultInTypes();
-						parsedUnit.resolve();
-					} catch (SelectionNodeFound e) {
-						if (e.binding != null) { // if null then we found a problem in the selection node
-							selectFrom(e.binding);
+							// resolve
+							parsedUnit.scope.faultInTypes();
+							parsedUnit.resolve();
+						} catch (SelectionNodeFound e) {
+							if (e.binding != null) {
+								// if null then we found a problem in the selection node
+								selectFrom(e.binding);
+							}
 						}
 					}
 				}
 			}
-		}
-	
-		// only reaches here if no selection could be derived from the parsed tree
-		// thus use the selected source and perform a textual type search
-		if (!acceptedAnswer) {
-			if (this.selectedIdentifier != null) {
-				nameEnvironment.findTypes(typeName, this);
+			// only reaches here if no selection could be derived from the parsed tree
+			// thus use the selected source and perform a textual type search
+			if (!acceptedAnswer) {
+				if (this.selectedIdentifier != null) {
+					nameEnvironment.findTypes(typeName, this);
+				}
 			}
+		} catch (AbortCompilation e) { // ignore this exception for now since it typically means we cannot find java.lang.Object
+		} finally {
+			reset();
 		}
-	} catch (AbortCompilation e) { // ignore this exception for now since it typically means we cannot find java.lang.Object
-	} finally {
-		reset();
-	}	
-}
+	}
 
