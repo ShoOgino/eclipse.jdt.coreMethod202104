@@ -1,0 +1,131 @@
+	/**
+	 * INTERNAL USE-ONLY
+	 * That method generates the attributes of a code attribute.
+	 * They could be:
+	 * - an exception attribute for each try/catch found inside the method
+	 * - a deprecated attribute
+	 * - a synthetic attribute for synthetic access methods
+	 *
+	 * It returns the number of attributes created for the code attribute.
+	 *
+	 * @param methodBinding org.eclipse.jdt.internal.compiler.lookup.MethodBinding
+	 * @return <CODE>int</CODE>
+	 */
+	public int generateMethodInfoAttribute(MethodBinding methodBinding, boolean createProblemMethod) {
+		// leave two bytes for the attribute_number
+		contentsOffset += 2;
+		// now we can handle all the attribute for that method info:
+		// it could be:
+		// - a CodeAttribute
+		// - a ExceptionAttribute
+		// - a DeprecatedAttribute
+		// - a SyntheticAttribute
+
+		// Exception attribute
+		ReferenceBinding[] thrownsExceptions;
+		int attributeNumber = 0;
+		if ((thrownsExceptions = methodBinding.thrownExceptions) != NoExceptions) {
+			// The method has a throw clause. So we need to add an exception attribute
+			// check that there is enough space to write all the bytes for the exception attribute
+			int length = thrownsExceptions.length;
+			int exSize = 8 + length * 2;
+			if (exSize + contentsOffset >= this.contents.length) {
+				resizeContents(exSize);
+			}
+			int exceptionNameIndex =
+				constantPool.literalIndex(AttributeNamesConstants.ExceptionsName);
+			contents[contentsOffset++] = (byte) (exceptionNameIndex >> 8);
+			contents[contentsOffset++] = (byte) exceptionNameIndex;
+			// The attribute length = length * 2 + 2 in case of a exception attribute
+			int attributeLength = length * 2 + 2;
+			contents[contentsOffset++] = (byte) (attributeLength >> 24);
+			contents[contentsOffset++] = (byte) (attributeLength >> 16);
+			contents[contentsOffset++] = (byte) (attributeLength >> 8);
+			contents[contentsOffset++] = (byte) attributeLength;
+			contents[contentsOffset++] = (byte) (length >> 8);
+			contents[contentsOffset++] = (byte) length;
+			for (int i = 0; i < length; i++) {
+				int exceptionIndex = constantPool.literalIndexForType(thrownsExceptions[i].constantPoolName());
+				contents[contentsOffset++] = (byte) (exceptionIndex >> 8);
+				contents[contentsOffset++] = (byte) exceptionIndex;
+			}
+			attributeNumber++;
+		}
+		if (methodBinding.isDeprecated()) {
+			// Deprecated attribute
+			// Check that there is enough space to write the deprecated attribute
+			if (contentsOffset + 6 >= this.contents.length) {
+				resizeContents(6);
+			}
+			int deprecatedAttributeNameIndex =
+				constantPool.literalIndex(AttributeNamesConstants.DeprecatedName);
+			contents[contentsOffset++] = (byte) (deprecatedAttributeNameIndex >> 8);
+			contents[contentsOffset++] = (byte) deprecatedAttributeNameIndex;
+			// the length of a deprecated attribute is equals to 0
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+
+			attributeNumber++;
+		}
+		if (this.targetJDK < ClassFileConstants.JDK1_5 && methodBinding.isSynthetic()) {
+			// Synthetic attribute
+			// Check that there is enough space to write the deprecated attribute
+			if (contentsOffset + 6 >= this.contents.length) {
+				resizeContents(6);
+			}
+			int syntheticAttributeNameIndex =
+				constantPool.literalIndex(AttributeNamesConstants.SyntheticName);
+			contents[contentsOffset++] = (byte) (syntheticAttributeNameIndex >> 8);
+			contents[contentsOffset++] = (byte) syntheticAttributeNameIndex;
+			// the length of a synthetic attribute is equals to 0
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+
+			attributeNumber++;
+		}
+		// add signature attribute
+		char[] genericSignature = methodBinding.genericSignature();
+		if (genericSignature != null) {
+			// check that there is enough space to write all the bytes for the field info corresponding
+			// to the @fieldBinding
+			if (contentsOffset + 8 >= this.contents.length) {
+				resizeContents(8);
+			}
+			int signatureAttributeNameIndex =
+				constantPool.literalIndex(AttributeNamesConstants.SignatureName);
+			contents[contentsOffset++] = (byte) (signatureAttributeNameIndex >> 8);
+			contents[contentsOffset++] = (byte) signatureAttributeNameIndex;
+			// the length of a signature attribute is equals to 2
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 2;
+			int signatureIndex =
+				constantPool.literalIndex(genericSignature);
+			contents[contentsOffset++] = (byte) (signatureIndex >> 8);
+			contents[contentsOffset++] = (byte) signatureIndex;
+			attributeNumber++;
+		}
+		if (this.targetJDK >= ClassFileConstants.JDK1_5 && !this.creatingProblemType && !createProblemMethod) {
+			AbstractMethodDeclaration methodDeclaration = methodBinding.sourceMethod();
+			if (methodDeclaration != null) {
+				Annotation[] annotations = methodDeclaration.annotations;
+				if (annotations != null) {
+					attributeNumber += generateRuntimeAnnotations(annotations);
+				}
+				/*
+				 * TODO (olivier) enable when ready to generate attribute for parameters
+				 */
+	/*			Argument[] arguments = methodDeclaration.arguments;
+				if (arguments != null) {
+					attributeNumber += generateRuntimeAnnotationsForParameters(arguments);
+				}*/
+			}
+		}
+		return attributeNumber;
+	}
+
