@@ -1,96 +1,105 @@
-/**
- * Check whether the updated file is affecting some of the properties of a given project (like
- * its classpath persisted as a file).
- *
- */
-public static void checkProjectPropertyFileUpdate(IResourceDelta delta, IJavaElement parent){
-	
-	IResource resource = delta.getResource();
-	IJavaElement element = JavaCore.create(resource);
+	/**
+	 * Check whether the updated file is affecting some of the properties of a given project (like
+	 * its classpath persisted as a file).
+	 *
+	 */
+	public static void checkProjectPropertyFileUpdate(
+		IResourceDelta delta,
+		IJavaElement parent) {
 
-	boolean processChildren = false;
+		IResource resource = delta.getResource();
+		IJavaElement element = JavaCore.create(resource);
 
-	switch (resource.getType()) {
+		boolean processChildren = false;
 
-		case IResource.ROOT :
-			processChildren = true;
-			break;
-		case IResource.PROJECT :
-			try {
-				if (((IProject) resource).hasNature(JavaCore.NATURE_ID)) {
-					processChildren = true;
+		switch (resource.getType()) {
+
+			case IResource.ROOT :
+				processChildren = true;
+				break;
+			case IResource.PROJECT :
+				try {
+					if (((IProject) resource).hasNature(JavaCore.NATURE_ID)) {
+						processChildren = true;
+					}
+				} catch (CoreException e) {
 				}
-			} catch(CoreException e) {
-			}
-			break;
-		case IResource.FILE :
-			if (parent.getElementType() == IJavaElement.JAVA_PROJECT) {
-				IFile file = (IFile)resource;
-				JavaProject project = (JavaProject)parent;
-				
-				/* check classpath property file change */
-				QualifiedName classpathProp;
-				if (file.getName().equals(project.computeSharedPropertyFileName(classpathProp = project.getClasspathPropertyName()))){
-					switch(delta.getKind()){
-						case IResourceDelta.REMOVED : 	// recreate one based on in-memory path
-							try {
-								project.saveClasspath();
-							} catch(JavaModelException e){
-							}
-							break;
-						case IResourceDelta.CHANGED :	
-							if ((delta.getFlags() & IResourceDelta.CONTENT) == 0) break; // only consider content change
-						case IResourceDelta.ADDED :	
-							// check if any actual difference
-							IPath oldOutputLocation = null;
-							try {
-								oldOutputLocation = project.getOutputLocation();
-								// force to (re)read the property file
-								String fileClasspathString = project.getSharedProperty(classpathProp);
-								if (fileClasspathString == null) break; // did not find the file
-								IClasspathEntry[] fileEntries = project.readPaths(fileClasspathString);
-								if (fileEntries == null) break; // could not read, ignore 
-								if (project.isClasspathEqualsTo(fileEntries)) break;
+				break;
+			case IResource.FILE :
+				if (parent.getElementType() == IJavaElement.JAVA_PROJECT) {
+					IFile file = (IFile) resource;
+					JavaProject project = (JavaProject) parent;
 
-								// will force an update of the classpath/output location based on the file information
-								// extract out the output location
-								IPath outputLocation= null;								
-								if (fileEntries != null && fileEntries.length > 0) {
-									IClasspathEntry entry = fileEntries[fileEntries.length - 1];
-									if (entry.getContentKind() == ClasspathEntry.K_OUTPUT) {
-										outputLocation = entry.getPath();
-										IClasspathEntry[] copy= new IClasspathEntry[fileEntries.length - 1];
-										System.arraycopy(fileEntries, 0, copy, 0, copy.length);
-										fileEntries = copy;
-									}
-								}
-								// restore output location				
-								if (outputLocation != null) {
-									project.setOutputLocation0(outputLocation);
-								}
+					/* check classpath property file change */
+					QualifiedName classpathProp;
+					if (file.getName().equals(
+							project.computeSharedPropertyFileName(
+								classpathProp = project.getClasspathPropertyName()))) {
+
+						switch (delta.getKind()) {
+							case IResourceDelta.REMOVED : // recreate one based on in-memory path
 								try {
-									project.setRawClasspath(fileEntries, null, false);
-								} catch(JavaModelException e){ // undo output location change
-									project.setOutputLocation0(oldOutputLocation);
-								}	
-							} catch(IOException e){
+									project.saveClasspath();
+								} catch (JavaModelException e) {
+								}
 								break;
-							} catch(RuntimeException e){
-								break;
-							} catch(CoreException e){
-								break;
-							}
-						
+							case IResourceDelta.CHANGED :
+								if ((delta.getFlags() & IResourceDelta.CONTENT) == 0)
+									break; // only consider content change
+							case IResourceDelta.ADDED :
+								// check if any actual difference
+								IPath oldOutputLocation = null;
+								try {
+									oldOutputLocation = project.getOutputLocation();
+									// force to (re)read the property file
+									String fileClasspathString = project.getSharedProperty(classpathProp);
+									if (fileClasspathString == null)
+										break; // did not find the file
+									IClasspathEntry[] fileEntries = project.readPaths(fileClasspathString);
+									if (fileEntries == null)
+										break; // could not read, ignore 
+									if (project.isClasspathEqualsTo(fileEntries))
+										break;
+
+									// will force an update of the classpath/output location based on the file information
+									// extract out the output location
+									IPath outputLocation = null;
+									if (fileEntries != null && fileEntries.length > 0) {
+										IClasspathEntry entry = fileEntries[fileEntries.length - 1];
+										if (entry.getContentKind() == ClasspathEntry.K_OUTPUT) {
+											outputLocation = entry.getPath();
+											IClasspathEntry[] copy = new IClasspathEntry[fileEntries.length - 1];
+											System.arraycopy(fileEntries, 0, copy, 0, copy.length);
+											fileEntries = copy;
+										}
+									}
+									// restore output location				
+									if (outputLocation != null) {
+										project.setOutputLocation0(outputLocation);
+									}
+									try {
+										project.setRawClasspath(fileEntries, null, false);
+									} catch (JavaModelException e) { // undo output location change
+										project.setOutputLocation0(oldOutputLocation);
+									}
+								} catch (IOException e) {
+									break;
+								} catch (RuntimeException e) {
+									break;
+								} catch (CoreException e) {
+									break;
+								}
+
+						}
 					}
 				}
+				break;
+		}
+		if (processChildren) {
+			IResourceDelta[] children = delta.getAffectedChildren();
+			for (int i = 0; i < children.length; i++) {
+				checkProjectPropertyFileUpdate(children[i], element);
 			}
-			break;
-	}
-	if (processChildren){
-		IResourceDelta[] children = delta.getAffectedChildren();
-		for (int i = 0; i < children.length; i++) {
-			checkProjectPropertyFileUpdate(children[i], element);
 		}
 	}
-}
 
