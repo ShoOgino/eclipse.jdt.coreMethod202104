@@ -1,0 +1,81 @@
+	private void findImportsOfStaticMethdods(char[] methodName, ReferenceBinding ref) {
+		MethodBinding[] methods = ref.methods();
+		
+		int methodLength = methodName.length;
+		next : for (int m = methods.length; --m >= 0;) {
+			MethodBinding method = methods[m];
+
+			if (method.isSynthetic()) continue next;
+
+			if (method.isDefaultAbstract())	continue next;
+
+			if (method.isConstructor()) continue next;
+
+			if (!method.isStatic()) continue next;
+
+			if (this.options.checkVisibility
+				&& !method.canBeSeenBy(this.unitScope.fPackage)) continue next;
+			
+			if (methodLength > method.selector.length)
+				continue next;
+
+			if (!CharOperation.prefixEquals(methodName, method.selector, false
+				/* ignore case */
+				))
+				continue next;
+			
+			boolean hasRestrictedAccess = false;
+//				boolean hasRestrictedAccess = method.declaringClass.hasRestrictedAccess();
+//				if (this.options.checkRestrictions && hasRestrictedAccess) continue next;
+			
+			int length = method.parameters.length;
+			char[][] parameterPackageNames = new char[length][];
+			char[][] parameterTypeNames = new char[length][];
+
+			for (int i = 0; i < length; i++) {
+				TypeBinding type = method.original().parameters[i];
+				parameterPackageNames[i] = type.qualifiedPackageName();
+				parameterTypeNames[i] = type.qualifiedSourceName();
+			}
+			char[][] parameterNames = findMethodParameterNames(method,parameterTypeNames);
+
+			
+			char[] completionName = CharOperation.concat(
+					method.declaringClass.qualifiedPackageName(),
+					'.',
+					method.declaringClass.qualifiedSourceName(),
+					'.',
+					method.selector);
+			
+			completionName = CharOperation.concat(completionName, SEMICOLON);
+			
+			int relevance = computeBaseRelevance();
+			relevance += computeRelevanceForInterestingProposal();
+			relevance += computeRelevanceForCaseMatching(methodName, method.selector);
+			relevance += computeRelevanceForRestrictions(hasRestrictedAccess);
+
+			this.noProposal = false;
+			if(!this.requestor.isIgnored(CompletionProposal.METHOD_NAME_REFERENCE)) {
+				CompletionProposal proposal = this.createProposal(CompletionProposal.METHOD_NAME_REFERENCE, this.actualCompletionPosition);
+				proposal.setDeclarationSignature(getSignature(method.declaringClass));
+				proposal.setSignature(getSignature(method));
+				proposal.setDeclarationPackageName(method.declaringClass.qualifiedPackageName());
+				proposal.setDeclarationTypeName(method.declaringClass.qualifiedSourceName());
+				proposal.setParameterPackageNames(parameterPackageNames);
+				proposal.setParameterTypeNames(parameterTypeNames);
+				proposal.setPackageName(method.returnType.qualifiedPackageName());
+				proposal.setTypeName(method.returnType.qualifiedSourceName());
+				proposal.setName(method.selector);
+				proposal.setCompletion(completionName);
+				proposal.setFlags(method.modifiers);
+				proposal.setReplaceRange(this.startPosition - this.offset, this.endPosition - this.offset);
+				proposal.setRelevance(relevance);
+				if(parameterNames != null) proposal.setParameterNames(parameterNames);
+				this.requestor.accept(proposal);
+				if(DEBUG) {
+					this.printDebug(proposal);
+				}
+			}
+		}
+	}
+
