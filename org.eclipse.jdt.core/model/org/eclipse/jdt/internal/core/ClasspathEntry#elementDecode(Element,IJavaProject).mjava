@@ -1,0 +1,97 @@
+	public static IClasspathEntry elementDecode(Element element, IJavaProject project) {
+	
+		IPath projectPath = project.getProject().getFullPath();
+		String kindAttr = element.getAttribute("kind"); //$NON-NLS-1$
+		String pathAttr = element.getAttribute("path"); //$NON-NLS-1$
+
+		// ensure path is absolute
+		IPath path = new Path(pathAttr); 		
+		int kind = kindFromString(kindAttr);
+		if (kind != IClasspathEntry.CPE_VARIABLE && kind != IClasspathEntry.CPE_CONTAINER && !path.isAbsolute()) {
+			path = projectPath.append(path);
+		}
+		// source attachment info (optional)
+		String sourceAttachmentPathStr = element.getAttribute("sourcepath");	//$NON-NLS-1$
+		IPath sourceAttachmentPath =
+			sourceAttachmentPathStr.equals("") ? null : new Path(sourceAttachmentPathStr); //$NON-NLS-1$
+		String sourceAttachmentRootPathStr = element.getAttribute("rootpath"); //$NON-NLS-1$
+		IPath sourceAttachmentRootPath =
+			sourceAttachmentRootPathStr.equals("") //$NON-NLS-1$
+				? null
+				: new Path(sourceAttachmentRootPathStr);
+		
+		// exported flag (optional)
+		boolean isExported = element.getAttribute("exported").equals("true"); //$NON-NLS-1$ //$NON-NLS-2$
+
+		// exclusion patterns (optional)
+		String exclusion = element.getAttribute("excluding"); //$NON-NLS-1$ 
+		IPath[] exclusionPatterns = ClasspathEntry.NO_EXCLUSION_PATTERNS;
+		if (!exclusion.equals("")) { //$NON-NLS-1$ 
+			char[][] patterns = CharOperation.splitOn('|', exclusion.toCharArray());
+			int patternCount;
+			if ((patternCount  = patterns.length) > 0) {
+				exclusionPatterns = new IPath[patternCount];
+				for (int j = 0; j < patterns.length; j++){
+					exclusionPatterns[j] = new Path(new String(patterns[j]));
+				}
+			}
+		}
+
+		// custom output location
+		String outputLocationStr = element.getAttribute("output"); //$NON-NLS-1$ 
+		IPath outputLocation = outputLocationStr.equals("") ? null : new Path(outputLocationStr); //$NON-NLS-1$
+		
+		// cleaning flag (optional)
+		boolean isCleaning = !element.getAttribute("cleaning").equals("false"); //$NON-NLS-1$ //$NON-NLS-2$
+
+		// recreate the CP entry
+		switch (kind) {
+
+			case IClasspathEntry.CPE_PROJECT :
+				return JavaCore.newProjectEntry(path, isExported);
+				
+			case IClasspathEntry.CPE_LIBRARY :
+				return JavaCore.newLibraryEntry(
+												path,
+												sourceAttachmentPath,
+												sourceAttachmentRootPath,
+												isExported);
+				
+			case IClasspathEntry.CPE_SOURCE :
+				// must be an entry in this project or specify another project
+				String projSegment = path.segment(0);
+				if (projSegment != null && projSegment.equals(project.getElementName())) { // this project
+					return JavaCore.newSourceEntry(path, exclusionPatterns, outputLocation, outputLocation != null && isCleaning);
+				} else { // another project
+					return JavaCore.newProjectEntry(path, isExported);
+				}
+
+			case IClasspathEntry.CPE_VARIABLE :
+				return JavaCore.newVariableEntry(
+						path,
+						sourceAttachmentPath,
+						sourceAttachmentRootPath, 
+						isExported);
+				
+			case IClasspathEntry.CPE_CONTAINER :
+				return JavaCore.newContainerEntry(
+						path,
+						isExported);
+
+			case ClasspathEntry.K_OUTPUT :
+				if (!path.isAbsolute()) return null;
+				return new ClasspathEntry(
+						ClasspathEntry.K_OUTPUT,
+						IClasspathEntry.CPE_LIBRARY,
+						path,
+						ClasspathEntry.NO_EXCLUSION_PATTERNS, 
+						null, // source attachment
+						null, // source attachment root
+						null, // custom output location
+						isCleaning, // clean
+						false);
+			default :
+				throw new Assert.AssertionFailedException(Util.bind("classpath.unknownKind", kindAttr)); //$NON-NLS-1$
+		}
+	}
+
