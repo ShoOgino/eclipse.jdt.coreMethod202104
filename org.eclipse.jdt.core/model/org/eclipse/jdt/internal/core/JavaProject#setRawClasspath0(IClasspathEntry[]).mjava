@@ -21,37 +21,29 @@
 			IndexManager indexManager =
 				((JavaModelManager) JavaModelManager.getJavaModelManager()).getIndexManager();
 
-			// map of all immediate (resolved) entries			
-			IClasspathEntry[] resolvedEntries = getResolvedClasspath(true);
-			Hashtable immediateEntries = new Hashtable(resolvedEntries.length);
-			for (int i = 0; i < resolvedEntries.length; i++) {
-				immediateEntries.put(resolvedEntries[i], this);
-			}
 
 			// compute the new roots, and trigger indexing of referenced JARs
-			IClasspathEntry[] expandedEntries = getExpandedClasspath(true);
-			for (int i = 0; i < expandedEntries.length; i++) {
-				IClasspathEntry entry = expandedEntries[i];
-				IPackageFragmentRoot[] roots = getPackageFragmentRoots(entry);
-				for (int j = 0; j < roots.length; j++) {
-					PackageFragmentRoot root = (PackageFragmentRoot) roots[j];
-					if (root.exists0()) {
-						// only trigger indexing of immediate libraries
-						if (immediateEntries.get(entry) != null){
-							if (root.getKind() == IPackageFragmentRoot.K_BINARY && indexManager != null) {
-								if (root.isArchive()) {
-									indexManager.indexJarFile(root.getPath(), getUnderlyingResource().getName());
-								} else {
-									indexManager.indexBinaryFolder(
-										(IFolder) root.getUnderlyingResource(),
-										(IProject) this.getUnderlyingResource());
-								}
-							}
-						}
-						info.addChild(root);
+			ObjectVector accumulatedRoots = new ObjectVector();
+			computePackageFragmentRoots(accumulatedRoots, new ObjectSet(5), true, true, false);
+			IJavaElement[] rootArray = new IJavaElement[accumulatedRoots.size()];
+			accumulatedRoots.copyInto(rootArray);
+			info.setChildren(rootArray);					
+			
+			// only trigger indexing of immediate libraries
+			IPackageFragmentRoot[] immediateRoots = getPackageFragmentRoots();						
+			for(int i = 0, length = immediateRoots.length; i < length; i++){
+				PackageFragmentRoot root = (PackageFragmentRoot)immediateRoots[i];
+				if (root.getKind() == IPackageFragmentRoot.K_BINARY && indexManager != null) {
+					if (root.isArchive()) {
+						indexManager.indexJarFile(root.getPath(), getUnderlyingResource().getName());
+					} else {
+						indexManager.indexBinaryFolder(
+							(IFolder) root.getUnderlyingResource(),
+							(IProject) this.getUnderlyingResource());
 					}
 				}
 			}
+			
 			// flush namelookup (holds onto caches)
 			info.setNameLookup(null);
 			// See PR 1G8BFWS: ITPJUI:WINNT - internal jar appearing twice in packages view

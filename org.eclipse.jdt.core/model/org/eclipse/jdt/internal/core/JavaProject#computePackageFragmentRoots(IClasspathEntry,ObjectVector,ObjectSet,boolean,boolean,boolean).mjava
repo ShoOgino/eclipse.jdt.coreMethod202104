@@ -1,0 +1,96 @@
+	/**
+	 * Returns the package fragment roots identified by the given entry.
+	 */
+	public void computePackageFragmentRoots(
+		IClasspathEntry entry,
+		ObjectVector accumulatedRoots, 
+		ObjectSet visitedProjects, 
+		boolean insideOriginalProject,
+		boolean checkExistency,
+		boolean computeBuilderRoots) {
+			
+		IWorkspaceRoot workspaceRoot = getWorkspace().getRoot();
+		IPath projectPath = getProject().getFullPath();
+		IPath entryPath = entry.getPath();
+
+		// existency check
+		Object target = JavaModel.getTarget(workspaceRoot, entryPath, checkExistency);
+		if (target == null) return;
+		
+		switch(entry.getEntryKind()){
+			
+			// source folder
+			case IClasspathEntry.CPE_SOURCE :
+
+				if (computeBuilderRoots) return;
+				
+				if (projectPath.isPrefixOf(entryPath)){
+					if (target instanceof IFolder || target instanceof IProject){
+						accumulatedRoots.add(
+							new PackageFragmentRoot((IResource)target, this));
+					}
+				}
+				break;
+
+			// internal/external JAR or folder
+			case IClasspathEntry.CPE_LIBRARY :
+			
+				if (!insideOriginalProject && !entry.isExported()) return;
+
+				String extension = entryPath.getFileExtension();
+				if (target instanceof IResource){
+					
+					// internal target
+					IResource resource = (IResource) target;
+					switch (resource.getType()){
+						case IResource.FOLDER :
+							accumulatedRoots.add(
+								new PackageFragmentRoot(resource, this));
+							break;
+						case IResource.FILE :
+							if ("jar".equalsIgnoreCase(extension) //$NON-NLS-1$
+								|| "zip".equalsIgnoreCase(extension)) { //$NON-NLS-1$
+								accumulatedRoots.add(
+									new JarPackageFragmentRoot(resource, this));
+								}
+							break;
+					}
+				} else {
+					// external target - only JARs allowed
+					if ("jar".equalsIgnoreCase(extension) //$NON-NLS-1$
+						|| "zip".equalsIgnoreCase(extension)) { //$NON-NLS-1$
+						accumulatedRoots.add(
+							new JarPackageFragmentRoot(entryPath.toOSString(), this));
+					}
+				}
+				break;
+
+			// recurse into required project
+			case IClasspathEntry.CPE_PROJECT :
+
+				if (!insideOriginalProject && !entry.isExported()) return;
+
+				JavaProject requiredProject = (JavaProject)getJavaModel().getJavaProject(entryPath.segment(0));
+
+				if (requiredProject.getProject().isOpen()){ // special builder binary output
+					if (computeBuilderRoots){
+						try {
+							IResource output = workspaceRoot.findMember(requiredProject.getOutputLocation());
+							if (output != null && output.exists()){
+								PackageFragmentRoot binaryOutputRoot =
+									(PackageFragmentRoot) requiredProject.getPackageFragmentRoot(output);
+								binaryOutputRoot.setOccurrenceCount(binaryOutputRoot.getOccurrenceCount() + 1);
+								((PackageFragmentRootInfo) binaryOutputRoot.getElementInfo()).setRootKind(
+									IPackageFragmentRoot.K_BINARY);
+								binaryOutputRoot.refreshChildren();
+								accumulatedRoots.add(binaryOutputRoot);
+							}
+						} catch (JavaModelException e){
+						}
+					}
+					requiredProject.computePackageFragmentRoots(accumulatedRoots, visitedProjects, false, checkExistency, computeBuilderRoots);
+				}
+				break;
+			}
+	}
+
