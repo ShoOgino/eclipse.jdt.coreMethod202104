@@ -1,0 +1,48 @@
+	/**
+	 * Processing for an element that has been added:<ul>
+	 * <li>If the element is a project, do nothing, and do not process
+	 * children, as when a project is created it does not yet have any
+	 * natures - specifically a java nature.
+	 * <li>If the elemet is not a project, process it as added (see
+	 * <code>basicElementAdded</code>.
+	 * </ul>
+	 */
+	protected void elementAdded(Openable element) {
+
+		int elementType = element.getElementType();
+		if (elementType == IJavaElement.JAVA_PROJECT) {
+			// project add is handled by JavaProject.configure() because
+			// when a project is created, it does not yet have a java nature
+			addToParentInfo(element);
+			this.projectsToUpdate.add(element);
+		} else {
+			addToParentInfo(element);
+
+			// Force the element to be closed as it might have been opened 
+			// before the resource modification came in and it might have a new child
+			// For example, in an IWorkspaceRunnable:
+			// 1. create a package fragment p using a java model operation
+			// 2. open package p
+			// 3. add file X.java in folder p
+			// When the resource delta comes in, only the addition of p is notified, 
+			// but the package p is already opened, thus its children are not recomputed
+			// and it appears empty.
+			close(element);
+		}
+
+		switch (elementType) {
+			case IJavaElement.PACKAGE_FRAGMENT_ROOT :
+				// when a root is added, and is on the classpath, the project must be updated
+				this.projectsToUpdate.add(element.getJavaProject());
+				break;
+			case IJavaElement.PACKAGE_FRAGMENT :
+				// get rid of namelookup since it holds onto obsolete cached info 
+				JavaProject project = (JavaProject) element.getJavaProject();
+				try {
+					project.getJavaProjectElementInfo().setNameLookup(null);
+				} catch (JavaModelException e) {
+				}
+				break;
+		}
+	}
+
