@@ -20,9 +20,7 @@
 	 */
 	/* (non-Javadoc) 
 	 * SEARCH_15
-	 * 	Modified to handle generics.
-	 * 	Note that no change are done for declaration patterns as the search works well for generics
-	 * 	without any additional information.
+	 * 	Modified to handle generics:
 	 * 		1) Field defined on parameterized types
 	 * 			In this case, we need to split the erasure name and type argument names.
 	 * 			Erasure name is used as type simple name and type argument names
@@ -30,6 +28,8 @@
 	 * 		2) Generic types declaration
 	 * 			In this case, type arguments names are got from IType and stored
 	 * 			in instanciated type reference pattern.
+	 * 	Note that no change was done for declaration patterns as the search works well for generics
+	 * 	without any additional information.
 	 */
 	public static SearchPattern createPattern(IJavaElement element, int limitTo) {
 		SearchPattern searchPattern = null;
@@ -47,28 +47,51 @@
 				char[] typeSimpleName;
 				char[] typeQualification;
 				char[][] typeNames = null;
+				int[] wildcards = null;
 				try {
 					char[] typeSignature = field.getTypeSignature().toCharArray();
-					// SEARCH_15 (start)
 					char[] typeErasure = null;
 					if (CharOperation.indexOf(Signature.C_GENERIC_START, typeSignature) == -1) {
 						typeErasure = Signature.toCharArray(typeSignature);
 					} else {
 						typeErasure = Signature.toCharArray(Signature.getTypeErasure(typeSignature));
 						CharOperation.replace(typeErasure, '$', '.');
-						if ((typeNames = Signature.getTypeArguments(typeSignature)) != null) {
+						try {
+							typeNames = Signature.getTypeArguments(typeSignature);
+						}
+						catch (IllegalArgumentException iae) {
+							// do nothing
+						}
+						if (typeNames != null) {
 							int length = typeNames.length;
+							wildcards = new int[length];
 							for (int i=0; i<length; i++) {
-								typeNames[i] = Signature.toCharArray(typeNames[i]);
+								char[] typeName = typeNames[i];
+								switch (typeName[0]) {
+									case Signature.C_STAR:
+										wildcards[i] = Wildcard.UNBOUND;
+										break;
+									case Signature.C_EXTENDS:
+										wildcards[i] = Wildcard.EXTENDS;
+										typeNames[i] = Signature.toCharArray(CharOperation.subarray(typeName, 1, typeName.length));
+										break;
+									case Signature.C_SUPER:
+										wildcards[i] = Wildcard.SUPER;
+										typeNames[i] = Signature.toCharArray(CharOperation.subarray(typeName, 1, typeName.length));
+										break;
+									default:
+										wildcards[i] = -1;
+										typeNames[i] = Signature.toCharArray(typeName);
+										break;
+								}
 							}
 						}
 					}
-					// end
 					if ((lastDot = CharOperation.lastIndexOf('.', typeErasure)) == -1) {
 						typeSimpleName = typeErasure;
 						typeQualification = null;
 					} else {
-						typeSimpleName = CharOperation.subarray(typeErasure, 0, lastDot + 1);
+						typeSimpleName = CharOperation.subarray(typeErasure, lastDot + 1, typeErasure.length);
 						typeQualification = CharOperation.subarray(typeErasure, 0, lastDot);
 						if (!field.isBinary()) {
 							// prefix with a '*' as the full qualification could be bigger (because of an import)
@@ -91,6 +114,7 @@
 								typeQualification, 
 								typeSimpleName,
 								typeNames,
+								wildcards,
 								R_EXACT_MATCH | R_CASE_SENSITIVE);
 						break;
 					case IJavaSearchConstants.REFERENCES :
@@ -105,6 +129,7 @@
 								typeQualification, 
 								typeSimpleName,
 								typeNames,
+								wildcards,
 								R_EXACT_MATCH | R_CASE_SENSITIVE);
 						break;
 					case IJavaSearchConstants.READ_ACCESSES :
@@ -119,6 +144,7 @@
 								typeQualification, 
 								typeSimpleName,
 								typeNames,
+								wildcards,
 								R_EXACT_MATCH | R_CASE_SENSITIVE);
 						break;
 					case IJavaSearchConstants.WRITE_ACCESSES :
@@ -133,6 +159,7 @@
 								typeQualification, 
 								typeSimpleName,
 								typeNames,
+								wildcards,
 								R_EXACT_MATCH | R_CASE_SENSITIVE);
 						break;
 					case IJavaSearchConstants.ALL_OCCURRENCES :
@@ -147,6 +174,7 @@
 								typeQualification, 
 								typeSimpleName,
 								typeNames,
+								wildcards,
 								R_EXACT_MATCH | R_CASE_SENSITIVE);
 						break;
 				}
@@ -164,10 +192,8 @@
 							elementName.substring(lastDot+1).toCharArray(),
 							elementName.substring(0, lastDot).toCharArray(),
 							null,
-							// SEARCH_15 (start)
 							null,
 							false,
-							// end
 							limitTo);
 				}
 				break;
@@ -360,10 +386,8 @@
 							type.getElementName().toCharArray(), 
 							type.getPackageFragment().getElementName().toCharArray(),
 							enclosingTypeNames(type),
-							// SEARCH_15 (start)
 							typeParameterNames(type),
 							true, /* generic type */
-							// end
 							limitTo);
 				break;
 			case IJavaElement.PACKAGE_DECLARATION :
