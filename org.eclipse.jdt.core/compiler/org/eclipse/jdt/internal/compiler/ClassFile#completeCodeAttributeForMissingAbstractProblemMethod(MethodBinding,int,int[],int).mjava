@@ -1,59 +1,38 @@
 	/**
-	 * INTERNAL USE-ONLY
-	 * That method completes the creation of the code attribute by setting
-	 * - the attribute_length
-	 * - max_stack
-	 * - max_locals
-	 * - code_length
-	 * - exception table
-	 * - and debug attributes if necessary.
-	 *
-	 * @param codeAttributeOffset <CODE>int</CODE>
-	 * @param startLineIndexes int[]
+	 * 
 	 */
-	public void completeCodeAttributeForClinit(
+	public void completeCodeAttributeForMissingAbstractProblemMethod(
+		MethodBinding binding,
 		int codeAttributeOffset,
-		int[] startLineIndexes) {
-		// reinitialize the contents with the byte modified by the code stream
+		int[] startLineIndexes,
+		int problemLine) {
+		// reinitialize the localContents with the byte modified by the code stream
 		this.contents = codeStream.bCodeStream;
 		int localContentsOffset = codeStream.classFileOffset;
-		// codeAttributeOffset is the position inside contents byte array before we started to write
-		// any information about the codeAttribute
-		// That means that to write the attribute_length you need to offset by 2 the value of codeAttributeOffset
-		// to get the right position, 6 for the max_stack etc...
-		int code_length = codeStream.position;
-		if (code_length > 65535) {
-			codeStream.methodDeclaration.scope.problemReporter().bytecodeExceeds64KLimit(
-				codeStream.methodDeclaration.scope.referenceType());
-		}
-		if (localContentsOffset + 20 >= this.contents.length) {
-			resizeContents(20);
-		}
+		// codeAttributeOffset is the position inside localContents byte array before we started to write// any information about the codeAttribute// That means that to write the attribute_length you need to offset by 2 the value of codeAttributeOffset// to get the right position, 6 for the max_stack etc...
 		int max_stack = codeStream.stackMax;
 		this.contents[codeAttributeOffset + 6] = (byte) (max_stack >> 8);
 		this.contents[codeAttributeOffset + 7] = (byte) max_stack;
 		int max_locals = codeStream.maxLocals;
 		this.contents[codeAttributeOffset + 8] = (byte) (max_locals >> 8);
 		this.contents[codeAttributeOffset + 9] = (byte) max_locals;
+		int code_length = codeStream.position;
 		this.contents[codeAttributeOffset + 10] = (byte) (code_length >> 24);
 		this.contents[codeAttributeOffset + 11] = (byte) (code_length >> 16);
 		this.contents[codeAttributeOffset + 12] = (byte) (code_length >> 8);
 		this.contents[codeAttributeOffset + 13] = (byte) code_length;
-
 		// write the exception table
+		if (localContentsOffset + 50 >= this.contents.length) {
+			resizeContents(50);
+		}
 		this.contents[localContentsOffset++] = 0;
 		this.contents[localContentsOffset++] = 0;
-
 		// debug attributes
 		int codeAttributeAttributeOffset = localContentsOffset;
 		int attributeNumber = 0; // leave two bytes for the attribute_length
 		localContentsOffset += 2; // first we handle the linenumber attribute
 
-		// first we handle the linenumber attribute
 		if (codeStream.generateLineNumberAttributes) {
-			if (localContentsOffset + 20 >= this.contents.length) {
-				resizeContents(20);
-			}			
 			/* Create and add the line number attribute (used for debugging) 
 			    * Build the pairs of:
 			    * (bytecodePC lineNumber)
@@ -70,6 +49,9 @@
 			this.contents[localContentsOffset++] = 6;
 			this.contents[localContentsOffset++] = 0;
 			this.contents[localContentsOffset++] = 1;
+			if (problemLine == 0) {
+				problemLine = searchLineNumber(startLineIndexes, binding.sourceStart());
+			}
 			// first entry at pc = 0
 			this.contents[localContentsOffset++] = 0;
 			this.contents[localContentsOffset++] = 0;
@@ -78,25 +60,9 @@
 			// now we change the size of the line number attribute
 			attributeNumber++;
 		}
+		
 		// then we do the local variable attribute
-		if (codeStream.generateLocalVariableTableAttributes) {
-			int localVariableNameIndex =
-				constantPool.literalIndex(AttributeNamesConstants.LocalVariableTableName);
-			if (localContentsOffset + 8 >= this.contents.length) {
-				resizeContents(8);
-			}
-			this.contents[localContentsOffset++] = (byte) (localVariableNameIndex >> 8);
-			this.contents[localContentsOffset++] = (byte) localVariableNameIndex;
-			this.contents[localContentsOffset++] = 0;
-			this.contents[localContentsOffset++] = 0;
-			this.contents[localContentsOffset++] = 0;
-			this.contents[localContentsOffset++] = 2;
-			this.contents[localContentsOffset++] = 0;
-			this.contents[localContentsOffset++] = 0;
-			attributeNumber++;
-		}
-		// update the number of attributes
-		// ensure first that there is enough space available inside the contents array
+		// update the number of attributes// ensure first that there is enough space available inside the localContents array
 		if (codeAttributeAttributeOffset + 2 >= this.contents.length) {
 			resizeContents(2);
 		}
