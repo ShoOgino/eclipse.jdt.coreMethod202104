@@ -4,7 +4,7 @@
 	 * @param projectOutputLocation IPath
 	 * @param ignoreUnresolvedEntry boolean
 	 * @param generateMarkerOnError boolean
-	 * @param reverseMap Map
+	 * @param rawReverseMap Map
 	 * @return IClasspathEntry[] 
 	 * @throws JavaModelException
 	 */
@@ -13,7 +13,7 @@
 		IPath projectOutputLocation, // only set if needing full classpath validation (and markers)
 		boolean ignoreUnresolvedEntry, // if unresolved entries are met, should it trigger initializations
 		boolean generateMarkerOnError,
-		Map reverseMap) // can be null if not interested in reverse mapping
+		Map rawReverseMap) // can be null if not interested in reverse mapping
 		throws JavaModelException {
 
 		IJavaModelStatus status;
@@ -53,7 +53,9 @@
 					if (resolvedEntry == null) {
 						if (!ignoreUnresolvedEntry) throw new JavaModelException(status);
 					} else {
-						if (reverseMap != null && reverseMap.get(resolvedPath = resolvedEntry.getPath()) == null) reverseMap.put(resolvedPath , rawEntry);
+						if (rawReverseMap != null) {
+							if (rawReverseMap.get(resolvedPath = resolvedEntry.getPath()) == null) rawReverseMap.put(resolvedPath , rawEntry);
+						}
 						resolvedEntries.add(resolvedEntry);
 					}
 					break; 
@@ -71,27 +73,25 @@
 
 					// container was bound
 					for (int j = 0, containerLength = containerEntries.length; j < containerLength; j++){
-						IClasspathEntry cEntry = containerEntries[j];
+						ClasspathEntry cEntry = (ClasspathEntry)containerEntries[j];
 						if (generateMarkerOnError) {
 							IJavaModelStatus containerStatus = ClasspathEntry.validateClasspathEntry(this, cEntry, false, true /*recurse*/);
 							if (!containerStatus.isOK()) createClasspathProblemMarker(containerStatus);
 						}
-						// if container is exported, then its nested entries must in turn be exported  (21749)
-						if (rawEntry.isExported()){
-							cEntry = new ClasspathEntry(cEntry.getContentKind(),
-								cEntry.getEntryKind(), cEntry.getPath(),
-								cEntry.getInclusionPatterns(), cEntry.getExclusionPatterns(), 
-								cEntry.getSourceAttachmentPath(), cEntry.getSourceAttachmentRootPath(), 
-								cEntry.getOutputLocation(), true); // duplicate container entry for tagging it as exported
+						// if container is exported or restricted, then its nested entries must in turn be exported  (21749) and/or propagate restrictions
+						cEntry = cEntry.combineWith(rawEntry);
+						if (rawReverseMap != null) {
+							if (rawReverseMap.get(resolvedPath = cEntry.getPath()) == null) rawReverseMap.put(resolvedPath , rawEntry);
 						}
-						if (reverseMap != null && reverseMap.get(resolvedPath = cEntry.getPath()) == null) reverseMap.put(resolvedPath, rawEntry);
 						resolvedEntries.add(cEntry);
 					}
 					break;
 										
 				default :
 
-					if (reverseMap != null && reverseMap.get(resolvedPath = rawEntry.getPath()) == null) reverseMap.put(resolvedPath, rawEntry);
+					if (rawReverseMap != null) {
+						if (rawReverseMap.get(resolvedPath = rawEntry.getPath()) == null) rawReverseMap.put(resolvedPath , rawEntry);
+					}
 					resolvedEntries.add(rawEntry);
 				
 			}					

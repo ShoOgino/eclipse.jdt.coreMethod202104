@@ -27,32 +27,13 @@
 		boolean isExported = element.getAttribute(TAG_EXPORTED).equals("true"); //$NON-NLS-1$
 
 		// inclusion patterns (optional)
-		String inclusion = element.getAttribute(TAG_INCLUDING);
-		IPath[] inclusionPatterns = INCLUDE_ALL;
-		if (!inclusion.equals("")) { //$NON-NLS-1$ 
-			char[][] patterns = CharOperation.splitOn('|', inclusion.toCharArray());
-			int patternCount;
-			if ((patternCount  = patterns.length) > 0) {
-				inclusionPatterns = new IPath[patternCount];
-				for (int j = 0; j < patterns.length; j++){
-					inclusionPatterns[j] = new Path(new String(patterns[j]));
-				}
-			}
-		}
-
+		IPath[] inclusionPatterns = decodePatterns(element, TAG_INCLUDING);
+		if (inclusionPatterns == null) inclusionPatterns = INCLUDE_ALL;
+		
 		// exclusion patterns (optional)
-		String exclusion = element.getAttribute(TAG_EXCLUDING);
-		IPath[] exclusionPatterns = EXCLUDE_NONE;
-		if (!exclusion.equals("")) { //$NON-NLS-1$ 
-			char[][] patterns = CharOperation.splitOn('|', exclusion.toCharArray());
-			int patternCount;
-			if ((patternCount  = patterns.length) > 0) {
-				exclusionPatterns = new IPath[patternCount];
-				for (int j = 0; j < patterns.length; j++){
-					exclusionPatterns[j] = new Path(new String(patterns[j]));
-				}
-			}
-		}
+		IPath[] exclusionPatterns = decodePatterns(element, TAG_EXCLUDING);
+		if (exclusionPatterns == null) exclusionPatterns = EXCLUDE_NONE;
+		
 		// custom output location
 		IPath outputLocation = element.hasAttribute(TAG_OUTPUT) ? projectPath.append(element.getAttribute(TAG_OUTPUT)) : null;
 		
@@ -60,13 +41,19 @@
 		switch (kind) {
 
 			case IClasspathEntry.CPE_PROJECT :
-				return JavaCore.newProjectEntry(path, isExported);
+				return JavaCore.newProjectEntry(
+												path, 
+												inclusionPatterns,
+												exclusionPatterns,
+												isExported);
 				
 			case IClasspathEntry.CPE_LIBRARY :
 				return JavaCore.newLibraryEntry(
 												path,
 												sourceAttachmentPath,
 												sourceAttachmentRootPath,
+												inclusionPatterns,
+												exclusionPatterns,
 												isExported);
 				
 			case IClasspathEntry.CPE_SOURCE :
@@ -77,7 +64,11 @@
 				} else { 
 					if (path.segmentCount() == 1) {
 						// another project
-						return JavaCore.newProjectEntry(path, isExported);
+						return JavaCore.newProjectEntry(
+												path, 
+												inclusionPatterns,
+												exclusionPatterns,
+												isExported);
 					} else {
 						// an invalid source folder
 						return JavaCore.newSourceEntry(path, inclusionPatterns, exclusionPatterns, outputLocation);
@@ -89,11 +80,15 @@
 						path,
 						sourceAttachmentPath,
 						sourceAttachmentRootPath, 
+						inclusionPatterns,
+						exclusionPatterns,
 						isExported);
 				
 			case IClasspathEntry.CPE_CONTAINER :
 				return JavaCore.newContainerEntry(
 						path,
+						inclusionPatterns,
+						exclusionPatterns,
 						isExported);
 
 			case ClasspathEntry.K_OUTPUT :
@@ -102,8 +97,8 @@
 						ClasspathEntry.K_OUTPUT,
 						IClasspathEntry.CPE_LIBRARY,
 						path,
-						ClasspathEntry.INCLUDE_ALL, 
-						ClasspathEntry.EXCLUDE_NONE, 
+						INCLUDE_ALL, 
+						EXCLUDE_NONE, 
 						null, // source attachment
 						null, // source attachment root
 						null, // custom output location

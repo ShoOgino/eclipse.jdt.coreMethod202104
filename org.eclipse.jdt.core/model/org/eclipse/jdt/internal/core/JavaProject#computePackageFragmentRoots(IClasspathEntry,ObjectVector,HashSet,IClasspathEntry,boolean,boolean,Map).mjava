@@ -5,7 +5,7 @@
 	 * @param resolvedEntry IClasspathEntry
 	 * @param accumulatedRoots ObjectVector
 	 * @param rootIDs HashSet
-	 * @param insideOriginalProject boolean
+	 * @param referringEntry the CP entry (project) referring to this entry, or null if initial project
 	 * @param checkExistency boolean
 	 * @param retrieveExportedRoots boolean
 	 * @throws JavaModelException
@@ -14,9 +14,10 @@
 		IClasspathEntry resolvedEntry,
 		ObjectVector accumulatedRoots, 
 		HashSet rootIDs, 
-		boolean insideOriginalProject,
+		IClasspathEntry referringEntry,
 		boolean checkExistency,
-		boolean retrieveExportedRoots) throws JavaModelException {
+		boolean retrieveExportedRoots,
+		Map rootToResolvedEntries) throws JavaModelException {
 			
 		String rootID = ((ClasspathEntry)resolvedEntry).rootID();
 		if (rootIDs.contains(rootID)) return;
@@ -24,6 +25,7 @@
 		IPath projectPath = this.project.getFullPath();
 		IPath entryPath = resolvedEntry.getPath();
 		IWorkspaceRoot workspaceRoot = ResourcesPlugin.getWorkspace().getRoot();
+		IPackageFragmentRoot root = null;
 		
 		switch(resolvedEntry.getEntryKind()){
 			
@@ -36,16 +38,10 @@
 						if (target == null) return;
 	
 						if (target instanceof IFolder || target instanceof IProject){
-							accumulatedRoots.add(
-								getPackageFragmentRoot((IResource)target));
-							rootIDs.add(rootID);
+							root = getPackageFragmentRoot((IResource)target);
 						}
 					} else {
-						IPackageFragmentRoot root = getFolderPackageFragmentRoot(entryPath);
-						if (root != null) {
-							accumulatedRoots.add(root);
-							rootIDs.add(rootID);
-						}
+						root = getFolderPackageFragmentRoot(entryPath);
 					}
 				}
 				break;
@@ -53,7 +49,7 @@
 			// internal/external JAR or folder
 			case IClasspathEntry.CPE_LIBRARY :
 			
-				if (!insideOriginalProject && !resolvedEntry.isExported()) return;
+				if (referringEntry != null  && !resolvedEntry.isExported()) return;
 				
 				if (checkExistency) {
 					Object target = JavaModel.getTarget(workspaceRoot, entryPath, checkExistency);
@@ -61,26 +57,15 @@
 	
 					if (target instanceof IResource){
 						// internal target
-						IResource resource = (IResource) target;
-						IPackageFragmentRoot root = getPackageFragmentRoot(resource);
-						if (root != null) {
-							accumulatedRoots.add(root);
-							rootIDs.add(rootID);
-						}
+						root = getPackageFragmentRoot((IResource) target);
 					} else {
 						// external target - only JARs allowed
 						if (((java.io.File)target).isFile() && (org.eclipse.jdt.internal.compiler.util.Util.isArchiveFileName(entryPath.lastSegment()))) {
-							accumulatedRoots.add(
-								new JarPackageFragmentRoot(entryPath, this));
-							rootIDs.add(rootID);
+							root = new JarPackageFragmentRoot(entryPath, this);
 						}
 					}
 				} else {
-					IPackageFragmentRoot root = getPackageFragmentRoot(entryPath);
-					if (root != null) {
-						accumulatedRoots.add(root);
-						rootIDs.add(rootID);
-					}
+					root = getPackageFragmentRoot(entryPath);
 				}
 				break;
 
@@ -88,7 +73,7 @@
 			case IClasspathEntry.CPE_PROJECT :
 
 				if (!retrieveExportedRoots) return;
-				if (!insideOriginalProject && !resolvedEntry.isExported()) return;
+				if (referringEntry != null && !resolvedEntry.isExported()) return;
 
 				IResource member = workspaceRoot.findMember(entryPath);
 				if (member != null && member.getType() == IResource.PROJECT){// double check if bound to project (23977)
@@ -100,12 +85,18 @@
 							requiredProject.getResolvedClasspath(true/*ignoreUnresolvedEntry*/, false/*don't generateMarkerOnError*/, false/*don't returnResolutionInProgress*/), 
 							accumulatedRoots, 
 							rootIDs, 
-							false, 
+							rootToResolvedEntries == null ? resolvedEntry : ((ClasspathEntry)resolvedEntry).combineWith(referringEntry), // only combine if need to build the reverse map 
 							checkExistency, 
-							retrieveExportedRoots);
+							retrieveExportedRoots,
+							rootToResolvedEntries);
 					}
 				break;
 			}
+		}
+		if (root != null) {
+			accumulatedRoots.add(root);
+			rootIDs.add(rootID);
+			if (rootToResolvedEntries != null) rootToResolvedEntries.put(root, ((ClasspathEntry)resolvedEntry).combineWith(referringEntry));
 		}
 	}
 

@@ -1,9 +1,9 @@
 	/**
 	 * Internal computation of an expanded classpath. It will eliminate duplicates, and produce copies
-	 * of exported classpath entries to avoid possible side-effects ever after.
+	 * of exported or restricted classpath entries to avoid possible side-effects ever after.
 	 */			
 	private void computeExpandedClasspath(
-		JavaProject initialProject, 
+		ClasspathEntry referringEntry,
 		boolean ignoreUnresolvedVariable,
 		boolean generateMarkerOnError,
 		HashSet rootIDs,
@@ -21,11 +21,11 @@
 		IPath preferredOutput = preferredOutputs != null ? (IPath)preferredOutputs.get(this) : null;
 		IClasspathEntry[] immediateClasspath = 
 			preferredClasspath != null 
-				? getResolvedClasspath(preferredClasspath, preferredOutput, ignoreUnresolvedVariable, generateMarkerOnError, null)
+				? getResolvedClasspath(preferredClasspath, preferredOutput, ignoreUnresolvedVariable, generateMarkerOnError, null /*no reverse map*/)
 				: getResolvedClasspath(ignoreUnresolvedVariable, generateMarkerOnError, false/*don't returnResolutionInProgress*/);
 			
 		IWorkspaceRoot workspaceRoot = ResourcesPlugin.getWorkspace().getRoot();
-		boolean isInitialProject = this.equals(initialProject);
+		boolean isInitialProject = referringEntry == null;
 		for (int i = 0, length = immediateClasspath.length; i < length; i++){
 			ClasspathEntry entry = (ClasspathEntry) immediateClasspath[i];
 			if (isInitialProject || entry.isExported()){
@@ -33,18 +33,19 @@
 				if (rootIDs.contains(rootID)) {
 					continue;
 				}
-				
-				accumulatedEntries.add(entry);
+				// combine restrictions along the project chain
+				ClasspathEntry combinedEntry = entry.combineWith(referringEntry);
+				accumulatedEntries.add(combinedEntry);
 				
 				// recurse in project to get all its indirect exports (only consider exported entries from there on)				
 				if (entry.getEntryKind() == IClasspathEntry.CPE_PROJECT) {
 					IResource member = workspaceRoot.findMember(entry.getPath()); 
 					if (member != null && member.getType() == IResource.PROJECT){ // double check if bound to project (23977)
 						IProject projRsc = (IProject) member;
-						if (JavaProject.hasJavaNature(projRsc)) {				
+						if (JavaProject.hasJavaNature(projRsc)) {
 							JavaProject javaProject = (JavaProject) JavaCore.create(projRsc);
 							javaProject.computeExpandedClasspath(
-								initialProject, 
+								combinedEntry, 
 								ignoreUnresolvedVariable, 
 								false /* no marker when recursing in prereq*/,
 								rootIDs,
