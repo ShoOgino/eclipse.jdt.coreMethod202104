@@ -1,0 +1,112 @@
+//
+//	   This function takes as parameter an integer STACK_TOP that
+//	   points to a STACK element containing the state on which a
+//	   primary recovery will be made; the terminal candidate on which
+//	   to recover; and an integer: buffer_position, which points to
+//	   the position of the next input token in the BUFFER.  The
+//	   parser is simulated until a shift (or shift-reduce) action
+//	   is computed on the candidate.  Then we proceed to compute the
+//	   the name index of the highest level nonterminal that can
+//	   directly or indirectly produce the candidate.
+//
+	private int getTermIndex(int stck[], int stack_top, int tok, int buffer_position) {
+		//
+		// Initialize stack index of temp_stack and initialize maximum
+		// position of state stack that is still useful.
+		//
+		int act = stck[stack_top],
+			max_pos = stack_top,
+			highest_symbol = tok;
+
+		tempStackTop = stack_top - 1;
+
+		//
+		// Compute all reduce and associated actions induced by the
+		// candidate until a SHIFT or SHIFT-REDUCE is computed. ERROR
+		// and ACCEPT actions cannot be computed on the candidate in
+		// this context, since we know that it is suitable for recovery.
+		//
+		lexStream.reset(buffer[buffer_position]);
+		act = Parser.tAction(act, tok);
+		while(act <= NUM_RULES) {
+			//
+			// Process all goto-reduce actions following reduction,
+			// until a goto action is computed ...
+			//
+			do {
+				tempStackTop -= (Parser.rhs[act]-1);
+				int lhs_symbol = Parser.lhs[act];
+				act = (tempStackTop > max_pos
+									  ? tempStack[tempStackTop]
+									  : stck[tempStackTop]);
+				act = Parser.ntAction(act, lhs_symbol);
+			} while(act <= NUM_RULES);
+
+			//
+			// Compute new maximum useful position of (STATE_)stack,
+			// push goto state into the stack, and compute next
+			// action on candidate ...
+			//
+			max_pos = max_pos < tempStackTop ? max_pos : tempStackTop;
+			tempStack[tempStackTop + 1] = act;
+			act = Parser.tAction(act, tok);
+		}
+
+		//
+		// At this stage, we have simulated all actions induced by the
+		// candidate and we are ready to shift or shift-reduce it. First,
+		// set tok and next_ptr appropriately and identify the candidate
+		// as the initial highest_symbol. If a shift action was computed
+		// on the candidate, update the stack and compute the next
+		// action. Next, simulate all actions possible on the next input
+		// token until we either have to shift it or are about to reduce
+		// below the initial starting point in the stack (indicated by
+		// max_pos as computed in the previous loop).  At that point,
+		// return the highest_symbol computed.
+		//
+		tempStackTop++; // adjust top of stack to reflect last goto
+						  // next move is shift or shift-reduce.
+		int threshold = tempStackTop;
+
+		tok = lexStream.kind(buffer[buffer_position]);
+		lexStream.reset(buffer[buffer_position + 1]);
+
+		if (act > ERROR_ACTION) {  // shift-reduce on candidate?
+			act -= ERROR_ACTION;
+		} else {
+			tempStack[tempStackTop + 1] = act;
+			act = Parser.tAction(act, tok);
+		}
+
+		while(act <= NUM_RULES) {
+			//
+			// Process all goto-reduce actions following reduction,
+			// until a goto action is computed ...
+			//
+			do {
+				tempStackTop -= (Parser.rhs[act]-1);
+
+				if (tempStackTop < threshold) {
+					return (highest_symbol > NT_OFFSET
+						 ? Parser.non_terminal_index[highest_symbol - NT_OFFSET]
+						 : Parser.terminal_index[highest_symbol]);
+				}
+
+				int lhs_symbol = Parser.lhs[act];
+				if (tempStackTop == threshold)
+					highest_symbol = lhs_symbol + NT_OFFSET;
+				act = (tempStackTop > max_pos
+									  ? tempStack[tempStackTop]
+									  : stck[tempStackTop]);
+				act = Parser.ntAction(act, lhs_symbol);
+			} while(act <= NUM_RULES);
+
+			tempStack[tempStackTop + 1] = act;
+			act = Parser.tAction(act, tok);
+		}
+
+		return (highest_symbol > NT_OFFSET
+							 ? Parser.non_terminal_index[highest_symbol - NT_OFFSET]
+							 : Parser.terminal_index[highest_symbol]);
+	}
+

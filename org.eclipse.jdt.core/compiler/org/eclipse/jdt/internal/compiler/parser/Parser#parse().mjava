@@ -5,7 +5,10 @@ called in order to remember (when needed) the consumed token */
 // (int)asr[asi(act)]
 // name[symbol_index[currentKind]]
 protected void parse() {
-
+	boolean isDietParse = diet;
+	int oldFirstToken = getFirstToken();
+	hasError = false;
+	
 	hasReportedError = false;
 	int act = START_STATE;
 	stateStackTop = -1;
@@ -26,38 +29,28 @@ protected void parse() {
 		if (act == ERROR_ACTION || restartRecovery) {
 			int errorPos = scanner.currentPosition;
 			if (!hasReportedError){
-				this.reportSyntaxError(ERROR_ACTION, currentToken, stateStackTop);
-				hasReportedError = true;
+				if(!fineErrorDiagnose) {
+					if(reportSyntaxErrorIsRequired) {
+						this.reportSyntaxError(ERROR_ACTION, currentToken, stateStackTop);
+					}
+					hasReportedError = true;
+				}
+				hasError = true;
 			}
 			if (resumeOnSyntaxError()) {
 				if (act == ERROR_ACTION) lastErrorEndPosition = errorPos;
-				act = START_STATE;
-				stateStackTop = -1;
-				currentToken = getFirstToken();
-				continue ProcessTerminals;
-			} else {
-				act = ERROR_ACTION;
-			}	break ProcessTerminals;
-		}
-		if (act <= NUM_RULES)
-			stateStackTop--;
-		else
-			if (act > ERROR_ACTION) { /* shift-reduce */
-				consumeToken(currentToken);
-				if (currentElement != null) this.recoveryTokenCheck();
-				try{
-					currentToken = scanner.getNextToken();
-				} catch(InvalidInputException e){
-					if (!hasReportedError){
-						this.problemReporter().scannerError(this, e.getMessage());
-						hasReportedError = true;
-					}
-					lastCheckPoint = scanner.currentPosition;
-					restartRecovery = true;
-				}					
-				act -= ERROR_ACTION;
-			} else
-				if (act < ACCEPT_ACTION) { /* shift */
+					act = START_STATE;
+					stateStackTop = -1;
+					currentToken = getFirstToken();
+					continue ProcessTerminals;
+				} else {
+					act = ERROR_ACTION;
+				}	break ProcessTerminals;
+			}
+			if (act <= NUM_RULES)
+				stateStackTop--;
+			else
+				if (act > ERROR_ACTION) { /* shift-reduce */
 					consumeToken(currentToken);
 					if (currentElement != null) this.recoveryTokenCheck();
 					try{
@@ -70,10 +63,25 @@ protected void parse() {
 						lastCheckPoint = scanner.currentPosition;
 						restartRecovery = true;
 					}					
-					continue ProcessTerminals;
+					act -= ERROR_ACTION;
 				} else
-					break ProcessTerminals;
-
+					if (act < ACCEPT_ACTION) { /* shift */
+						consumeToken(currentToken);
+						if (currentElement != null) this.recoveryTokenCheck();
+						try{
+							currentToken = scanner.getNextToken();
+						} catch(InvalidInputException e){
+							if (!hasReportedError){
+								this.problemReporter().scannerError(this, e.getMessage());
+								hasReportedError = true;
+							}
+							lastCheckPoint = scanner.currentPosition;
+							restartRecovery = true;
+						}					
+						continue ProcessTerminals;
+					} else
+						break ProcessTerminals;
+			
 		ProcessNonTerminals : do { /* reduce */
 			consumeRule(act);
 			stateStackTop -= (rhs[act] - 1);
@@ -81,6 +89,9 @@ protected void parse() {
 		} while (act <= NUM_RULES);
 	}
 	endParse(act);
+	
+	if(reportSyntaxErrorIsRequired && fineErrorDiagnose && hasError) {
+		reportSyntaxErrors(isDietParse, oldFirstToken);
+	}
 }
-// A P I
 

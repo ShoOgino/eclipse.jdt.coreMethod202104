@@ -1,0 +1,215 @@
+//
+//	   This procedure takes as arguments a parsing configuration
+//	   consisting of a state stack (stack and stack_top) and a fixed
+//	   number of input tokens (starting at buffer_position) in the
+//	   input BUFFER; and some reference arguments: repair_code,
+//	   distance, misspell_index, candidate, and stack_position
+//	   which it sets based on the best possible recovery that it
+//	   finds in the given configuration.  The effectiveness of a
+//	   a repair is judged based on two criteria:
+//
+//		 1) the number of tokens that can be parsed after the repair
+//			is applied: distance.
+//		 2) how close to perfection is the candidate that is chosen:
+//			misspell_index.
+//	   When this procedure is entered, distance, misspell_index and
+//	   repair_code are assumed to be initialized.
+//
+	private PrimaryRepairInfo checkPrimaryDistance(int stck[], int stack_top, PrimaryRepairInfo repair) {
+		int i, j, k, next_state, max_pos, act, root, symbol, tok;
+
+		//
+	    //  First, try scope and manual recovery.
+	    //
+	    PrimaryRepairInfo scope_repair = scopeTrial(stck, stack_top, repair.copy());
+	    if (scope_repair.distance > repair.distance)
+	        repair = scope_repair;
+	        
+		//
+		//  Next, try merging the error token with its successor.
+		//
+		symbol = mergeCandidate(stck[stack_top], repair.bufferPosition);
+		if (symbol != 0) {
+			j = parseCheck(stck, stack_top, symbol, repair.bufferPosition+2);
+			if ((j > repair.distance) || (j == repair.distance && repair.misspellIndex < 10)) {
+				repair.misspellIndex = 10;
+				repair.symbol = symbol;
+				repair.distance = j;
+				repair.code = MERGE_CODE;
+			}
+		}
+
+		//
+		// Next, try deletion of the error token.
+		//
+		j = parseCheck(
+				stck,
+				stack_top,
+				lexStream.kind(buffer[repair.bufferPosition + 1]),
+				repair.bufferPosition + 2);
+		if (lexStream.kind(buffer[repair.bufferPosition]) == EOLT_SYMBOL &&
+			lexStream.afterEol(buffer[repair.bufferPosition+1])) {
+			 k = 10;
+		} else {
+			k = 0;
+		}
+		if (j > repair.distance || (j == repair.distance && k > repair.misspellIndex)) {
+			repair.misspellIndex = k;
+			repair.code = DELETION_CODE;
+			repair.distance = j;
+		}
+
+		//
+		// Update the error configuration by simulating all reduce and
+		// goto actions induced by the error token. Then assign the top
+		// most state of the new configuration to next_state.
+		//
+		next_state = stck[stack_top];
+		max_pos = stack_top;
+		tempStackTop = stack_top - 1;
+
+		tok = lexStream.kind(buffer[repair.bufferPosition]);
+		lexStream.reset(buffer[repair.bufferPosition + 1]);
+		act = Parser.tAction(next_state, tok);
+		while(act <= NUM_RULES) {
+			do {
+				tempStackTop -= (Parser.rhs[act]-1);
+				symbol = Parser.lhs[act];
+				act = (tempStackTop > max_pos
+									  ? tempStack[tempStackTop]
+									  : stck[tempStackTop]);
+				act = Parser.ntAction(act, symbol);
+			} while(act <= NUM_RULES);
+			max_pos = max_pos < tempStackTop ? max_pos : tempStackTop;
+			tempStack[tempStackTop + 1] = act;
+			next_state = act;
+			act = Parser.tAction(next_state, tok);
+		}
+
+		//
+		//  Next, place the list of candidates in proper order.
+		//
+		root = 0;
+		for (i = Parser.asi(next_state); Parser.asr[i] != 0; i++) {
+			symbol = Parser.asr[i];
+			if (symbol != EOFT_SYMBOL && symbol != ERROR_SYMBOL) {
+				if (root == 0) {
+					list[symbol] = symbol;
+				} else {
+					list[symbol] = list[root];
+					list[root] = symbol;
+				}
+				root = symbol;
+			}
+		}
+
+		if (stck[stack_top] != next_state) {
+			for (i = Parser.asi(stck[stack_top]); Parser.asr[i] != 0; i++) {
+				symbol = Parser.asr[i];
+				if (symbol != EOFT_SYMBOL && symbol != ERROR_SYMBOL && list[symbol] == 0) {
+					if (root == 0) {
+						list[symbol] = symbol;
+					} else {
+						list[symbol] = list[root];
+						list[root] = symbol;
+					}
+					root = symbol;
+				}
+			}
+		}
+
+		i = list[root];
+		list[root] = 0;
+		root = i;
+
+		//
+		//  Next, try insertion for each possible candidate available in
+		// the current state, except EOFT and ERROR_SYMBOL.
+		//
+		symbol = root;
+		while(symbol != 0) {
+			if (symbol == EOLT_SYMBOL && lexStream.afterEol(buffer[repair.bufferPosition])) {
+				k = 10;
+			} else {
+				k = 0;
+			}
+			j = parseCheck(stck, stack_top, symbol, repair.bufferPosition);
+			if (j > repair.distance) {
+				repair.misspellIndex = k;
+				repair.distance = j;
+				repair.symbol = symbol;
+				repair.code = INSERTION_CODE;
+			} else if (j == repair.distance && k > repair.misspellIndex) {
+				repair.misspellIndex = k;
+				repair.distance = j;
+				repair.symbol = symbol;
+				repair.code = INSERTION_CODE;
+			} else if (j == repair.distance && k == repair.misspellIndex && isBetterSymbol(symbol, repair.symbol)) {
+				repair.misspellIndex = k;
+				repair.distance = j;
+				repair.symbol = symbol;
+				repair.code = INSERTION_CODE;
+			}
+
+			symbol = list[symbol];
+		}
+
+		//
+		//  Next, Try substitution for each possible candidate available
+		// in the current state, except EOFT and ERROR_SYMBOL.
+		//
+		symbol = root;
+		while(symbol != 0) {
+			if (symbol == EOLT_SYMBOL && lexStream.afterEol(buffer[repair.bufferPosition+1])) {
+				k = 10;
+			} else {
+				k = misspell(symbol, buffer[repair.bufferPosition]);
+			}
+			j = parseCheck(stck, stack_top, symbol, repair.bufferPosition+1);
+			if (j > repair.distance) {
+				repair.misspellIndex = k;
+				repair.distance = j;
+				repair.symbol = symbol;
+				repair.code = SUBSTITUTION_CODE;
+			} else if (j == repair.distance && k > repair.misspellIndex) {
+				repair.misspellIndex = k;
+				repair.symbol = symbol;
+				repair.code = SUBSTITUTION_CODE;
+			} else if (j == repair.distance && k > repair.misspellIndex && isBetterSymbol(symbol, repair.symbol)) {
+				repair.misspellIndex = k;
+				repair.symbol = symbol;
+				repair.code = SUBSTITUTION_CODE;
+			}
+			i = symbol;
+			symbol = list[symbol];
+			list[i] = 0;                             // reset element
+		}
+
+
+		//
+		// Next, we try to insert a nonterminal candidate in front of the
+		// error token, or substituting a nonterminal candidate for the
+		// error token. Precedence is given to insertion.
+		//
+		 for (i = Parser.nasi(stck[stack_top]); Parser.nasr[i] != 0; i++) {
+			 symbol = Parser.nasr[i] + NT_OFFSET;
+			 j = parseCheck(stck, stack_top, symbol, repair.bufferPosition+1);
+			 if (j > repair.distance) {
+				 repair.misspellIndex = 0;
+				 repair.distance = j;
+				 repair.symbol = symbol;
+				 repair.code = INVALID_CODE;
+			 }
+
+			 j = parseCheck(stck, stack_top, symbol, repair.bufferPosition);
+			 if ((j > repair.distance) || (j == repair.distance && repair.code == INVALID_CODE)) {
+				 repair.misspellIndex = 0;
+				 repair.distance = j;
+				 repair.symbol = symbol;
+				 repair.code = INSERTION_CODE;
+			 }
+		 }
+
+		return repair;
+	}
+

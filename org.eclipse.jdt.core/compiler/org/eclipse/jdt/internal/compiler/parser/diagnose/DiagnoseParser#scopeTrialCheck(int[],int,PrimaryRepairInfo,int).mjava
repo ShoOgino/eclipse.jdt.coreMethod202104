@@ -1,0 +1,155 @@
+	private void scopeTrialCheck(int stck[], int stack_top, PrimaryRepairInfo repair, int indx) {
+		int act = stck[stack_top];
+	
+	    for (int i = stateSeen[stack_top]; i != NIL; i = statePool[i].next) {
+	        if (statePool[i].state == act) return;
+	    }
+
+	    int old_state_pool_top = statePoolTop++;
+	    if(statePoolTop >= statePool.length) {
+	    	System.arraycopy(statePool, 0, statePool = new StateInfo[statePoolTop * 2], 0, statePoolTop);
+	    }
+	    
+	    statePool[old_state_pool_top] = new StateInfo(act, stateSeen[stack_top]);
+	    stateSeen[stack_top] = old_state_pool_top;
+	
+	    for (int i = 0; i < SCOPE_SIZE; i++) {
+	        //
+	        // Use the scope lookahead symbol to force all reductions
+	        // inducible by that symbol.
+	        //
+	        act = stck[stack_top];
+	        tempStackTop = stack_top - 1;
+	        int max_pos = stack_top;
+	        int tok = Parser.scope_la[i];
+	        lexStream.reset(buffer[repair.bufferPosition]);
+	        act = Parser.tAction(act, tok);
+	        while(act <= NUM_RULES) {
+	            //
+	            // ... Process all goto-reduce actions following
+	            // reduction, until a goto action is computed ...
+	            //
+	            do  {
+	                tempStackTop -= (Parser.rhs[act]-1);
+	                int lhs_symbol = Parser.lhs[act];
+	                act =  (tempStackTop > max_pos
+	                            ?  tempStack[tempStackTop]
+	                            :  stck[tempStackTop]);
+	                act = Parser.ntAction(act, lhs_symbol);
+	            }  while(act <= NUM_RULES);
+	            if (tempStackTop + 1 >= stackLength)
+	                return;
+	            max_pos = max_pos < tempStackTop ? max_pos : tempStackTop;
+	            tempStack[tempStackTop + 1] = act;
+	            act = Parser.tAction(act, tok);
+	        }
+	
+	        //
+	        // If the lookahead symbol is parsable, then we check
+	        // whether or not we have a match between the scope
+	        // prefix and the transition symbols corresponding to
+	        // the states on top of the stack.
+	        //
+	        if (act != ERROR_ACTION) {
+	        	int j, k;
+	            k = Parser.scope_prefix[i];
+	            for (j = tempStackTop + 1;
+	                 j >= (max_pos + 1) &&
+	                 Parser.in_symbol(tempStack[j]) == Parser.scope_rhs[k]; j--) {
+	                 k++;
+	            }
+	            if (j == max_pos) {
+	                for (j = max_pos;
+	                     j >= 1 && Parser.in_symbol(stck[j]) == Parser.scope_rhs[k];
+	                     j--) {
+	                    k++;
+	                }
+	            }
+	            //
+	            // If the prefix matches, check whether the state
+	            // newly exposed on top of the stack, (after the
+	            // corresponding prefix states are popped from the
+	            // stack), is in the set of "source states" for the
+	            // scope in question and that it is at a position
+	            // below the threshold indicated by MARKED_POS.
+	            //
+	            int marked_pos = (max_pos < stack_top ? max_pos + 1 : stack_top);
+	            if (Parser.scope_rhs[k] == 0 && j < marked_pos) { // match?
+	                int stack_position = j;
+	                for (j = Parser.scope_state_set[i];
+	                     stck[stack_position] != Parser.scope_state[j] &&
+	                     Parser.scope_state[j] != 0;
+	                     j++);
+	                //
+	                // If the top state is valid for scope recovery,
+	                // the left-hand side of the scope is used as
+	                // starting symbol and we calculate how far the
+	                // parser can advance within the forward context
+	                // after parsing the left-hand symbol.
+	                //
+	                if (Parser.scope_state[j] != 0) {     // state was found
+	                    int previous_distance = repair.distance;
+	                    int distance = parseCheck(stck,
+	                                          stack_position,
+	                                          Parser.scope_lhs[i]+NT_OFFSET,
+	                                          repair.bufferPosition);
+	                    //
+	                    // if the recovery is not successful, we
+	                    // update the stack with all actions induced
+	                    // by the left-hand symbol, and recursively
+	                    // call SCOPE_TRIAL_CHECK to try again.
+	                    // Otherwise, the recovery is successful. If
+	                    // the new distance is greater than the
+	                    // initial SCOPE_DISTANCE, we update
+	                    // SCOPE_DISTANCE and set scope_stack_top to INDX
+	                    // to indicate the number of scopes that are
+	                    // to be applied for a succesful  recovery.
+	                    // NOTE that this procedure cannot get into
+	                    // an infinite loop, since each prefix match
+	                    // is guaranteed to take us to a lower point
+	                    // within the stack.
+	                    //
+	                    if ((distance - repair.bufferPosition + 1) < MIN_DISTANCE) {
+	                        int top = stack_position;
+	                        act = Parser.ntAction(stck[top], Parser.scope_lhs[i]);
+	                        while(act <= NUM_RULES) {
+	                            top -= (Parser.rhs[act]-1);
+	                            act = Parser.ntAction(stck[top], Parser.lhs[act]);
+	                        }
+	                        top++;
+	
+	                        j = act;
+	                        act = stck[top];  // save
+	                        stck[top] = j;    // swap
+	                        scopeTrialCheck(stck, top, repair, indx+1);
+	                        stck[top] = act; // restore
+	                    } else if (distance > repair.distance) {
+	                        scopeStackTop = indx;
+	                        repair.distance = distance;
+	                    }
+	
+	                    if (lexStream.kind(buffer[repair.bufferPosition]) == EOFT_SYMBOL &&
+	                        repair.distance == previous_distance) {
+	                        scopeStackTop = indx;
+	                        repair.distance = MAX_DISTANCE;
+	                    }
+	
+	                    //
+	                    // If this scope recovery has beaten the
+	                    // previous distance, then we have found a
+	                    // better recovery (or this recovery is one
+	                    // of a list of scope recoveries). Record
+	                    // its information at the proper location
+	                    // (INDX) in SCOPE_INDEX and SCOPE_STACK.
+	                    //
+	                    if (repair.distance > previous_distance) {
+	                        scopeIndex[indx] = i;
+	                        scopePosition[indx] = stack_position;
+	                        return;
+	                    }
+	                }
+	            }
+	        }
+	    }
+	}
+

@@ -1,0 +1,238 @@
+//
+//	   Secondary_phase is a boolean function that checks whether or
+//	   not some form of secondary recovery is applicable to one of
+//	   the error configurations. First, if "next_stack" is available,
+//	   misplacement and secondary recoveries are attempted on it.
+//	   Then, in any case, these recoveries are attempted on "stack".
+//	   If a successful recovery is found, a diagnosis is issued, the
+//	   configuration is updated and the function returns "true".
+//	   Otherwise, the function returns false.
+//
+	private RepairCandidate secondaryPhase(int error_token) {
+		SecondaryRepairInfo repair = new SecondaryRepairInfo();
+		SecondaryRepairInfo misplaced = new SecondaryRepairInfo();
+
+		RepairCandidate candidate = new RepairCandidate();
+
+		int i, j, k, top;
+		int	next_last_index = 0;
+		int	last_index;
+
+		candidate.symbol = 0;
+
+		repair.code = 0;
+		repair.distance = 0;
+		repair.recoveryOnNextStack = false;
+
+		misplaced.distance = 0;
+		misplaced.recoveryOnNextStack = false;
+
+		//
+		// If the next_stack is available, try misplaced and secondary
+		// recovery on it first.
+		//
+		if (nextStackTop >= 0) {
+			int  save_location;
+
+			buffer[2] = error_token;
+			buffer[1] = lexStream.previous(buffer[2]);
+			buffer[0] = lexStream.previous(buffer[1]);
+
+			for (k = 3; k < BUFF_UBOUND; k++)
+				buffer[k] = lexStream.next(buffer[k - 1]);
+
+			buffer[BUFF_UBOUND] = lexStream.badtoken();// elmt not available
+
+			//
+			// If we are at the end of the input stream, compute the
+			// index position of the first EOFT symbol (last useful
+			// index).
+			//
+			for (next_last_index = MAX_DISTANCE - 1;
+				 next_last_index >= 1 &&
+				 lexStream.kind(buffer[next_last_index]) == EOFT_SYMBOL;
+				 next_last_index--);
+			next_last_index = next_last_index + 1;
+
+			save_location = locationStack[nextStackTop];
+			int save_location_start = locationStartStack[nextStackTop];
+			locationStack[nextStackTop] = buffer[2];
+			locationStartStack[nextStackTop] = lexStream.start(buffer[2]);
+			misplaced.numDeletions = nextStackTop;
+			misplaced = misplacementRecovery(nextStack, nextStackTop,
+											 next_last_index,
+											 misplaced, true);
+			if (misplaced.recoveryOnNextStack)
+				misplaced.distance++;
+
+			repair.numDeletions = nextStackTop + BUFF_UBOUND;
+			repair = secondaryRecovery(nextStack, nextStackTop,
+									   next_last_index,
+									   repair, true);
+			if (repair.recoveryOnNextStack)
+				repair.distance++;
+
+			locationStack[nextStackTop] = save_location;
+			locationStartStack[nextStackTop] = save_location_start;
+		} else {            // next_stack not available, initialize ...
+			misplaced.numDeletions = stateStackTop;
+			repair.numDeletions = stateStackTop + BUFF_UBOUND;
+		}
+
+		//
+		// Try secondary recovery on the "stack" configuration.
+		//
+		buffer[3] = error_token;
+
+		buffer[2] = lexStream.previous(buffer[3]);
+		buffer[1] = lexStream.previous(buffer[2]);
+		buffer[0] = lexStream.previous(buffer[1]);
+
+		for (k = 4; k < BUFF_SIZE; k++)
+			buffer[k] = lexStream.next(buffer[k - 1]);
+
+		for (last_index = MAX_DISTANCE - 1;
+			 last_index >= 1 && lexStream.kind(buffer[last_index]) == EOFT_SYMBOL;
+			 last_index--);
+		last_index++;
+
+		misplaced = misplacementRecovery(stack, stateStackTop,
+										 last_index,
+										 misplaced, false);
+
+		repair = secondaryRecovery(stack, stateStackTop,
+								   last_index, repair, false);
+
+		//
+		// If a successful misplaced recovery was found, compare it with
+		// the most successful secondary recovery.  If the misplaced
+		// recovery either deletes fewer symbols or parse-checks further
+		// then it is chosen.
+		//
+		if (misplaced.distance > MIN_DISTANCE) {
+			if (misplaced.numDeletions <= repair.numDeletions ||
+			   (misplaced.distance - misplaced.numDeletions) >=
+			   (repair.distance - repair.numDeletions)) {
+				repair.code = MISPLACED_CODE;
+				repair.stackPosition = misplaced.stackPosition;
+				repair.bufferPosition = 2;
+				repair.numDeletions = misplaced.numDeletions;
+				repair.distance = misplaced.distance;
+				repair.recoveryOnNextStack = misplaced.recoveryOnNextStack;
+			}
+		}
+
+		//
+		// If the successful recovery was on next_stack, update: stack,
+		// buffer, location_stack and last_index.
+		//
+		if (repair.recoveryOnNextStack) {
+			stateStackTop = nextStackTop;
+			for (i = 0; i <= stateStackTop; i++)
+				stack[i] = nextStack[i];
+
+			buffer[2] = error_token;
+			buffer[1] = lexStream.previous(buffer[2]);
+			buffer[0] = lexStream.previous(buffer[1]);
+
+			for (k = 3; k < BUFF_UBOUND; k++)
+				buffer[k] = lexStream.next(buffer[k - 1]);
+
+			buffer[BUFF_UBOUND] = lexStream.badtoken();// elmt not available
+
+			locationStack[nextStackTop] = buffer[2];
+			locationStartStack[nextStackTop] = lexStream.start(buffer[2]);
+			last_index = next_last_index;
+		}
+
+	    //
+	    // Next, try scope recoveries after deletion of one, two, three,
+	    // four ... buffer_position tokens from the input stream.
+	    //
+	    if (repair.code == SECONDARY_CODE || repair.code == DELETION_CODE) {
+	        PrimaryRepairInfo scope_repair = new PrimaryRepairInfo();
+	
+	        scope_repair.distance = 0;
+	        for (scope_repair.bufferPosition = 2;
+	             scope_repair.bufferPosition <= repair.bufferPosition &&
+	             repair.code != SCOPE_CODE; scope_repair.bufferPosition++) {
+	            scope_repair = scopeTrial(stack, stateStackTop, scope_repair);
+	            j = (scope_repair.distance == MAX_DISTANCE
+	                                        ? last_index
+	                                        : scope_repair.distance);
+	            k = scope_repair.bufferPosition - 1;
+	            if ((j - k) > MIN_DISTANCE && (j - k) > (repair.distance - repair.numDeletions)) {
+	                repair.code = SCOPE_CODE;
+	                i = scopeIndex[scopeStackTop];       // upper bound
+	                repair.symbol = Parser.scope_lhs[i] + NT_OFFSET;
+	                repair.stackPosition = stateStackTop;
+	                repair.bufferPosition = scope_repair.bufferPosition;
+	            }
+	        }
+	    }
+	
+	    //
+	    // If no successful recovery is found and we have reached the
+	    // end of the file, check whether or not scope recovery is
+	    // applicable at the end of the file after discarding some
+	    // states.
+	    //
+	    if (repair.code == 0 && lexStream.kind(buffer[last_index]) == EOFT_SYMBOL) {
+	        PrimaryRepairInfo scope_repair = new PrimaryRepairInfo();
+	
+	        scope_repair.bufferPosition = last_index;
+	        scope_repair.distance = 0;
+	        for (top = stateStackTop;
+	             top >= 0 && repair.code == 0; top--)
+	        {
+	            scope_repair = scopeTrial(stack, top, scope_repair);
+	            if (scope_repair.distance > 0)
+	            {
+	                repair.code = SCOPE_CODE;
+	                i = scopeIndex[scopeStackTop];    // upper bound
+	                repair.symbol = Parser.scope_lhs[i] + NT_OFFSET;
+	                repair.stackPosition = top;
+	                repair.bufferPosition = scope_repair.bufferPosition;
+	            }
+	        }
+	    }
+
+		//
+		// If a successful repair was not found, quit!  Otherwise, issue
+		// diagnosis and adjust configuration...
+		//
+		if (repair.code == 0)
+			return candidate;
+
+		secondaryDiagnosis(repair);
+
+		//
+		// Update buffer based on number of elements that are deleted.
+		//
+		switch(repair.code) {
+			case MISPLACED_CODE:
+				 candidate.location = buffer[2];
+				 candidate.symbol = lexStream.kind(buffer[2]);
+				 lexStream.reset(lexStream.next(buffer[2]));
+
+				 break;
+
+			case DELETION_CODE:
+				 candidate.location = buffer[repair.bufferPosition];
+				 candidate.symbol =
+						   lexStream.kind(buffer[repair.bufferPosition]);
+				 lexStream.reset(lexStream.next(buffer[repair.bufferPosition]));
+
+				 break;
+
+		default: // SCOPE_CODE || SECONDARY_CODE
+				 candidate.symbol = repair.symbol;
+				 candidate.location = buffer[repair.bufferPosition];
+				 lexStream.reset(buffer[repair.bufferPosition]);
+
+				 break;
+		}
+
+		return candidate;
+	}
+

@@ -1,0 +1,136 @@
+//
+//	   This function tries primary and scope recovery on each
+//	   available configuration.  If a successful recovery is found
+//	   and no secondary phase recovery can do better, a diagnosis is
+//	   issued, the configuration is updated and the function returns
+//	   "true".  Otherwise, it returns "false".
+//
+	private RepairCandidate primaryPhase(int error_token) {
+		PrimaryRepairInfo repair = new PrimaryRepairInfo();
+		RepairCandidate candidate = new RepairCandidate();
+
+		//
+		// Initialize the buffer.
+		//
+		int i = (nextStackTop >= 0 ? 3 : 2);
+		buffer[i] = error_token;
+
+		for (int j = i; j > 0; j--)
+			buffer[j - 1] = lexStream.previous(buffer[j]);
+
+		for (int k = i + 1; k < BUFF_SIZE; k++)
+			buffer[k] = lexStream.next(buffer[k - 1]);
+
+		//
+		// If NEXT_STACK_TOP > 0 then the parse was successful on CURTOK
+		// and the error was detected on the successor of CURTOK. In
+		// that case, first check whether or not primary recovery is
+		// possible on next_stack ...
+		//
+		if (nextStackTop >= 0) {
+			repair.bufferPosition = 3;
+			repair = checkPrimaryDistance(nextStack, nextStackTop, repair);
+		}
+
+		//
+		// ... Next, try primary recovery on the current token...
+		//
+		PrimaryRepairInfo new_repair = repair.copy();
+
+		new_repair.bufferPosition = 2;
+		new_repair = checkPrimaryDistance(stack, stateStackTop, new_repair);
+		if (new_repair.distance > repair.distance || new_repair.misspellIndex > repair.misspellIndex) {
+			repair = new_repair;
+		}
+
+		//
+		// Finally, if prev_stack_top >= 0 then try primary recovery on
+		// the prev_stack configuration.
+		//
+		
+		if (prevStackTop >= 0) {
+			new_repair = repair.copy();
+			new_repair.bufferPosition = 1;
+			new_repair = checkPrimaryDistance(prevStack,prevStackTop, new_repair);
+			if (new_repair.distance > repair.distance || new_repair.misspellIndex > repair.misspellIndex) {
+				repair = new_repair;
+			}
+		}
+
+		//
+		// Before accepting the best primary phase recovery obtained,
+		// ensure that we cannot do better with a similar secondary
+		// phase recovery.
+		//
+		if (nextStackTop >= 0) {// next_stack available
+			if (secondaryCheck(nextStack,nextStackTop,3,repair.distance)) {
+				return candidate;
+			}
+		}
+		else if (secondaryCheck(stack, stateStackTop, 2, repair.distance)) {
+			return candidate;
+		}
+
+		//
+		// First, adjust distance if the recovery is on the error token;
+		// it is important that the adjustment be made here and not at
+		// each primary trial to prevent the distance tests from being
+		// biased in favor of deferred recoveries which have access to
+		// more input tokens...
+		//
+		repair.distance = repair.distance - repair.bufferPosition + 1;
+
+		//
+		// ...Next, adjust the distance if the recovery is a deletion or
+		// (some form of) substitution...
+		//
+		if (repair.code == INVALID_CODE      ||
+			repair.code == DELETION_CODE     ||
+			repair.code == SUBSTITUTION_CODE ||
+			repair.code == MERGE_CODE) {
+			 repair.distance--;
+		}
+
+		//
+		// ... After adjustment, check if the most successful primary
+		// recovery can be applied.  If not, continue with more radical
+		// recoveries...
+		//
+		if (repair.distance < MIN_DISTANCE) {
+			return candidate;
+		}
+
+		//
+		// When processing an insertion error, if the token preceeding
+		// the error token is not available, we change the repair code
+		// into a BEFORE_CODE to instruct the reporting routine that it
+		// indicates that the repair symbol should be inserted before
+		// the error token.
+		//
+		if (repair.code == INSERTION_CODE) {
+			if (buffer[repair.bufferPosition - 1] == 0) {
+				repair.code = BEFORE_CODE;
+			}
+		}
+
+		//
+		// Select the proper sequence of states on which to recover,
+		// update stack accordingly and call diagnostic routine.
+		//
+		if (repair.bufferPosition == 1) {
+			stateStackTop = prevStackTop;
+			for (int j = 0; j <= stateStackTop; j++) {
+				stack[j] = prevStack[j];
+			}
+		} else if (nextStackTop >= 0 && repair.bufferPosition >= 3) {
+			stateStackTop = nextStackTop;
+			for (int j = 0; j <= stateStackTop; j++) {
+				stack[j] = nextStack[j];
+			}
+			locationStack[stateStackTop] = buffer[3];
+			locationStartStack[stateStackTop] = lexStream.start(buffer[3]);
+		}
+
+		return primaryDiagnosis(repair);
+	}
+
