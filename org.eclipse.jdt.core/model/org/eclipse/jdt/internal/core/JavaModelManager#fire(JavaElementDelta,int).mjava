@@ -1,0 +1,79 @@
+	/**
+	 * Fire Java Model delta, flushing them after the fact after post_change notification.
+	 * If the firing mode has been turned off, this has no effect. 
+	 */
+	public void fire(JavaElementDelta customDelta, int originalEventType) {
+
+		if (fFire) {
+
+			int eventType;
+			
+			/* DEFAULT event type is used when operation doesn't know actual event type and needed to fire immediately:
+			 * e.g. non-resource modifying operation, create/destroy shared working copies
+			 *
+			 * this is mapped to a POST-change + PRE-build change for all interested listeners
+			 */
+			if (originalEventType == DEFAULT_CHANGE_EVENT){
+				eventType = ElementChangedEvent.POST_CHANGE;
+			} else {
+				eventType = originalEventType;
+			}
+			
+			JavaElementDelta deltaToNotify;
+			if (customDelta == null){
+				this.mergeDeltas();
+				if (fJavaModelDeltas.size() > 0){ 
+
+					// cannot be more than 1 after merge
+					deltaToNotify = (JavaElementDelta)fJavaModelDeltas.get(0);
+
+					// empty the queue only after having fired final volley of deltas and no custom deltas was superposed
+					if (eventType == ElementChangedEvent.POST_CHANGE){
+						// flush now so as to keep listener reactions to post their own deltas for subsequent iteration
+						this.flush();
+					}
+				} else {
+					return;
+				}
+			} else {
+				deltaToNotify = customDelta;
+			}
+			if (DeltaProcessor.VERBOSE){
+				System.out.println("FIRING Delta ["+Thread.currentThread()+"]:\n" + deltaToNotify);//$NON-NLS-1$//$NON-NLS-2$
+			}
+				
+			// Refresh internal scopes
+			Iterator scopes = this.scopes.keySet().iterator();
+			while (scopes.hasNext()) {
+				AbstractSearchScope scope = (AbstractSearchScope)scopes.next();
+				scope.processDelta(deltaToNotify);
+			}
+				
+			// Notification
+
+			// Important: if any listener reacts to notification by updating the listeners list or mask, these lists will
+			// be duplicated, so it is necessary to remember original lists in a variable (since field values may change under us)
+			IElementChangedListener[] listeners = this.elementChangedListeners;
+			int[] listenerMask = this.elementChangedListenerMasks;
+			int listenerCount = this.elementChangedListenerCount;
+
+			// in case using a DEFAULT change event, will notify also all listeners also interested in PRE-build events
+			if (originalEventType == DEFAULT_CHANGE_EVENT){
+				ElementChangedEvent extraEvent = new ElementChangedEvent(deltaToNotify, ElementChangedEvent.PRE_AUTO_BUILD);
+				for (int i= 0; i < listenerCount; i++) {
+					if ((listenerMask[i] & ElementChangedEvent.PRE_AUTO_BUILD) != 0){
+						listeners[i].elementChanged(extraEvent);
+					}
+				}
+			}
+
+			// regular notification
+			ElementChangedEvent event = new ElementChangedEvent(deltaToNotify, eventType);
+			for (int i= 0; i < listenerCount; i++) {
+				if ((listenerMask[i] & eventType) != 0){
+					listeners[i].elementChanged(event);
+				}
+			}
+		}
+	}
+

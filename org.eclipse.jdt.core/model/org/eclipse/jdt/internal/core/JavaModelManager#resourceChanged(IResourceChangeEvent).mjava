@@ -12,6 +12,8 @@
 		if (event.getSource() instanceof IWorkspace) {
 			IResource resource = event.getResource();
 			IResourceDelta delta = event.getDelta();
+			int javaEventType;
+			
 			switch(event.getType()){
 				case IResourceChangeEvent.PRE_DELETE :
 					try {
@@ -21,32 +23,39 @@
 						}
 					} catch(CoreException e){
 					}
-					break;
+					return;
+					
 				case IResourceChangeEvent.PRE_AUTO_BUILD :
 					if(delta != null) {
 						this.checkProjectBeingAdded(delta);
 						DeltaProcessor.performPreBuildCheck(delta, null); // will close project if affected by the property file change
 					}
+					javaEventType = ElementChangedEvent.PRE_AUTO_BUILD;
 					break;
+					
 				case IResourceChangeEvent.POST_CHANGE :
-					if (delta != null) {
-						try {
-							IJavaElementDelta[] translatedDeltas = fDeltaProcessor.processResourceDelta(delta);
-							if (translatedDeltas.length > 0) {
-								for (int i= 0; i < translatedDeltas.length; i++) {
-									registerJavaModelDelta(translatedDeltas[i]);
-								}
-							}
-							fire();
-						} finally {
-							// fix for 1FWIAEQ: ITPJCORE:ALL - CRITICAL - "projects being deleted" cache not cleaned up when solution deleted
-							if (!fProjectsBeingDeleted.isEmpty()) {
-								fProjectsBeingDeleted= new ArrayList(1);
-							}
-						}
-					}				
+					javaEventType = ElementChangedEvent.POST_CHANGE;
 					break;
+					
+				default : // unhandled event
+					return;
 			}
+			if (delta != null) {
+				try {
+					IJavaElementDelta[] translatedDeltas = fDeltaProcessor.processResourceDelta(delta);
+					if (translatedDeltas.length > 0) {
+						for (int i= 0; i < translatedDeltas.length; i++) {
+							registerJavaModelDelta(translatedDeltas[i]);
+						}
+					}
+					fire(null, javaEventType);
+				} finally {
+					// fix for 1FWIAEQ: ITPJCORE:ALL - CRITICAL - "projects being deleted" cache not cleaned up when solution deleted
+					if (javaEventType == ElementChangedEvent.POST_CHANGE && !fProjectsBeingDeleted.isEmpty()) {
+						fProjectsBeingDeleted= new ArrayList(1);
+					}
+				}			
+			}		
 		}
 	}
 
