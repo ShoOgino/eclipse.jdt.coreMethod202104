@@ -1,0 +1,83 @@
+private MethodBinding resolveTypesFor(MethodBinding method) {
+	if ((method.modifiers & AccUnresolved) == 0)
+		return method;
+
+	AbstractMethodDeclaration methodDecl = method.sourceMethod();
+	TypeReference[] exceptionTypes = methodDecl.thrownExceptions;
+	if (exceptionTypes != null) {
+		int size = exceptionTypes.length;
+		method.thrownExceptions = new ReferenceBinding[size];
+		ReferenceBinding throwable = scope.getJavaLangThrowable();
+		int count = 0;
+		ReferenceBinding resolvedExceptionType;
+		for (int i = 0; i < size; i++) {
+			resolvedExceptionType = (ReferenceBinding) exceptionTypes[i].getTypeBinding(scope);
+			if (!resolvedExceptionType.isValidBinding()) {
+				methodDecl.scope.problemReporter().exceptionTypeProblem(this, methodDecl, exceptionTypes[i], resolvedExceptionType);
+				//methodDecl.scope.problemReporter().invalidType(exceptionTypes[i], resolvedExceptionType);
+				continue;
+			}
+			if (throwable != resolvedExceptionType && !throwable.isSuperclassOf(resolvedExceptionType)) {
+				methodDecl.scope.problemReporter().cannotThrowType(this, methodDecl, exceptionTypes[i], resolvedExceptionType);
+				continue;
+			}
+			method.thrownExceptions[count++] = resolvedExceptionType;
+		}
+		if (count < size)
+			System.arraycopy(method.thrownExceptions, 0, method.thrownExceptions = new ReferenceBinding[count], 0, count);
+	}
+
+	boolean foundArgProblem = false;
+	Argument[] arguments = methodDecl.arguments;
+	if (arguments != null) {
+		int size = arguments.length;
+		method.parameters = new TypeBinding[size];
+		for (int i = 0; i < size; i++) {
+			Argument arg = arguments[i];
+			method.parameters[i] = arg.type.getTypeBinding(scope);
+			if (!method.parameters[i].isValidBinding()) {
+				methodDecl.scope.problemReporter().argumentTypeProblem(this, methodDecl, arg, method.parameters[i]);
+				//methodDecl.scope.problemReporter().invalidType(arg, method.parameters[i]);
+				foundArgProblem = true;
+			} else if (method.parameters[i] == VoidBinding) {
+				methodDecl.scope.problemReporter().argumentTypeCannotBeVoid(this, methodDecl, arg);
+				foundArgProblem = true;
+			} else if (method.parameters[i].isArrayType() && ((ArrayBinding) method.parameters[i]).leafComponentType == VoidBinding) {
+				methodDecl.scope.problemReporter().argumentTypeCannotBeVoidArray(this, methodDecl, arg);
+				foundArgProblem = true;
+			}
+		}
+	}
+
+	boolean foundReturnTypeProblem = false;
+	if (!method.isConstructor()) {
+		TypeReference returnType = ((MethodDeclaration) methodDecl).returnType;
+		if (returnType == null) {
+			methodDecl.scope.problemReporter().missingReturnType(methodDecl);
+			method.returnType = null;
+			foundReturnTypeProblem = true;
+		} else {
+			method.returnType = returnType.getTypeBinding(scope);
+			if (!method.returnType.isValidBinding()) {
+				methodDecl.scope.problemReporter().returnTypeProblem(this, (MethodDeclaration) methodDecl, method.returnType);
+				//methodDecl.scope.problemReporter().invalidType(returnType, method.returnType);
+				method.returnType = null;
+				foundReturnTypeProblem = true;
+			} else if (method.returnType.isArrayType() && ((ArrayBinding) method.returnType).leafComponentType == VoidBinding) {
+				methodDecl.scope.problemReporter().returnTypeCannotBeVoidArray(this, (MethodDeclaration) methodDecl);
+				method.returnType = null;
+				foundReturnTypeProblem = true;
+			}
+		}
+	}
+	if (foundArgProblem) {
+		methodDecl.binding = null;
+		return null;
+	}
+	if (foundReturnTypeProblem)
+		return method; // but its still unresolved with a null return type & is still connected to its method declaration
+
+	method.modifiers ^= AccUnresolved;
+	return method;
+}
+

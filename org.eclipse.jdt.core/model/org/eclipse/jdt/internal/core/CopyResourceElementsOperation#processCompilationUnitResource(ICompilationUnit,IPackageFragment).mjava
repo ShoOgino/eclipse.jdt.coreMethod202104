@@ -1,0 +1,118 @@
+	/**
+	 * Copies/moves a compilation unit with the name <code>newCUName</code>
+	 * to the destination package.<br>
+	 * The package statement in the compilation unit is updated if necessary.
+	 * The main type of the compilation unit is renamed if necessary.
+	 *
+	 * @exception JavaModelException if the operation is unable to
+	 * complete
+	 */
+	private void processCompilationUnitResource(ICompilationUnit source, IPackageFragment dest) throws JavaModelException {
+		String newCUName = getNewNameFor(source);
+		String destName = (newCUName != null) ? newCUName : source.getElementName();
+		String newContent = updatedContent(source, dest, newCUName); // null if unchanged
+	
+		// copy resource
+		IFile sourceResource = (IFile)source.getResource();
+		IContainer destFolder = (IContainer)dest.getResource(); // can be an IFolder or an IProject
+		IFile destFile = destFolder.getFile(new Path(destName));
+		if (!destFile.equals(sourceResource)) {
+			try {
+				if (destFile.exists()) {
+					if (force) {
+						// we can remove it
+						deleteResource(destFile, IResource.KEEP_HISTORY);
+					} else {
+						// abort
+						throw new JavaModelException(new JavaModelStatus(
+							IJavaModelStatusConstants.NAME_COLLISION, 
+							Util.bind("status.nameCollision", destFile.getFullPath().toString()))); //$NON-NLS-1$
+					}
+				}
+				int flags = force ? IResource.FORCE : IResource.NONE;
+				if (this.isMove()) {
+					flags |= IResource.KEEP_HISTORY;
+					sourceResource.move(destFile.getFullPath(), flags, getSubProgressMonitor(1));
+				} else {
+					if (newContent != null) flags |= IResource.KEEP_HISTORY;
+					sourceResource.copy(destFile.getFullPath(), flags, getSubProgressMonitor(1));
+				}
+				this.setAttribute(HAS_MODIFIED_RESOURCE_ATTR, TRUE); 
+			} catch (JavaModelException e) {
+				throw e;
+			} catch (CoreException e) {
+				throw new JavaModelException(e);
+			}
+	
+			// update new resource content
+			if (newContent != null){
+				boolean wasReadOnly = destFile.isReadOnly();
+				try {
+					String encoding = null;
+					try {
+						encoding = destFile.getCharset();
+					}
+					catch (CoreException ce) {
+						// use no encoding
+					}
+					
+					// when the file was copied, its read-only flag was preserved -> temporary set it to false
+					// note this doesn't interfer with repository providers as this is a new resource that cannot be under
+					// version control yet
+					destFile.setReadOnly(false);
+					
+					destFile.setContents(
+						new ByteArrayInputStream(encoding == null ? newContent.getBytes() : newContent.getBytes(encoding)), 
+						force ? IResource.FORCE | IResource.KEEP_HISTORY : IResource.KEEP_HISTORY,
+						getSubProgressMonitor(1));
+				} catch(IOException e) {
+					throw new JavaModelException(e, IJavaModelStatusConstants.IO_EXCEPTION);
+				} catch (CoreException e) {
+					throw new JavaModelException(e);
+				} finally {
+					destFile.setReadOnly(wasReadOnly);
+				}
+			}
+		
+			// register the correct change deltas
+			ICompilationUnit destCU = dest.getCompilationUnit(destName);
+			prepareDeltas(source, destCU, isMove());
+			if (newCUName != null) {
+				//the main type has been renamed
+				String oldName = source.getElementName();
+				oldName = oldName.substring(0, oldName.length() - 5);
+				String newName = newCUName;
+				newName = newName.substring(0, newName.length() - 5);
+				prepareDeltas(source.getType(oldName), destCU.getType(newName), isMove());
+			}
+		} else {
+			if (!force) {
+				throw new JavaModelException(new JavaModelStatus(
+					IJavaModelStatusConstants.NAME_COLLISION, 
+					Util.bind("status.nameCollision", destFile.getFullPath().toString()))); //$NON-NLS-1$
+			}
+			// update new resource content
+			// in case we do a saveas on the same resource we have to simply update the contents
+			// see http://dev.eclipse.org/bugs/show_bug.cgi?id=9351
+			try {
+				if (newContent != null){
+					String encoding = null;
+					try {
+						encoding = destFile.getCharset();
+					}
+					catch (CoreException ce) {
+						// use no encoding
+					}
+					destFile.setContents(
+						new ByteArrayInputStream(encoding == null ? newContent.getBytes() : newContent.getBytes(encoding)), 
+						force ? IResource.FORCE | IResource.KEEP_HISTORY : IResource.KEEP_HISTORY, 
+						getSubProgressMonitor(1));
+				}
+			} catch(IOException e) {
+				throw new JavaModelException(e, IJavaModelStatusConstants.IO_EXCEPTION);
+			} catch (CoreException e) {
+				throw new JavaModelException(e);
+			}
+		}
+	}
+

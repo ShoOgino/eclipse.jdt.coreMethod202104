@@ -1,0 +1,164 @@
+	/**
+	 * Copies/moves a package fragment with the name <code>newName</code>
+	 * to the destination package.<br>
+	 *
+	 * @exception JavaModelException if the operation is unable to
+	 * complete
+	 */
+	private void processPackageFragmentResource(IPackageFragment source, IPackageFragmentRoot root, String newName) throws JavaModelException {
+		try {
+			String newFragName = (newName == null) ? source.getElementName() : newName;
+			IPackageFragment newFrag = root.getPackageFragment(newFragName);
+			IResource[] resources = collectResourcesOfInterest(source);
+			
+			// if isMove() can we move the folder itself ? (see http://bugs.eclipse.org/bugs/show_bug.cgi?id=22458)
+			boolean shouldMoveFolder = isMove() && !newFrag.getResource().exists(); // if new pkg fragment exists, it is an override
+			IFolder srcFolder = (IFolder)source.getResource();
+			IPath destPath = newFrag.getPath();
+			if (shouldMoveFolder) {
+				// check if destination is not included in source
+				if (srcFolder.getFullPath().isPrefixOf(destPath)) {
+					shouldMoveFolder = false;
+				} else {
+					// check if there are no sub-packages
+					IResource[] members = srcFolder.members();
+					for (int i = 0; i < members.length; i++) {
+						if ( members[i] instanceof IFolder) {
+							shouldMoveFolder = false;
+							break;
+						}
+					}
+				}	
+			}
+			boolean containsReadOnlySubPackageFragments = createNeededPackageFragments((IContainer) source.getParent().getResource(), root, newFragName, shouldMoveFolder);
+			boolean sourceIsReadOnly = srcFolder.isReadOnly();
+	
+			// Process resources
+			if (shouldMoveFolder) {
+				// move underlying resource
+				// TODO Revisit once bug 43044 is fixed
+				if (sourceIsReadOnly) {
+					srcFolder.setReadOnly(false);
+				}
+				srcFolder.move(destPath, force, true /* keep history */, getSubProgressMonitor(1));
+				if (sourceIsReadOnly) {
+					srcFolder.setReadOnly(true);
+				}
+				this.setAttribute(HAS_MODIFIED_RESOURCE_ATTR, TRUE); 
+			} else {
+				// process the leaf resources
+				if (resources.length > 0) {
+					if (isRename()) {
+						if (! destPath.equals(source.getPath())) {
+							moveResources(resources, destPath);
+						}
+					} else if (isMove()) {
+						// we need to delete this resource if this operation wants to override existing resources
+						for (int i = 0, max = resources.length; i < max; i++) {
+							IResource destinationResource = ResourcesPlugin.getWorkspace().getRoot().findMember(destPath.append(resources[i].getName()));
+							if (destinationResource != null) {
+								if (force) {
+									deleteResource(destinationResource, IResource.KEEP_HISTORY);
+								} else {
+									throw new JavaModelException(new JavaModelStatus(
+										IJavaModelStatusConstants.NAME_COLLISION, 
+										Util.bind("status.nameCollision", destinationResource.getFullPath().toString()))); //$NON-NLS-1$
+								}
+							}
+						}
+						moveResources(resources, destPath);
+					} else {
+						// we need to delete this resource if this operation wants to override existing resources
+						for (int i = 0, max = resources.length; i < max; i++) {
+							IResource destinationResource = ResourcesPlugin.getWorkspace().getRoot().findMember(destPath.append(resources[i].getName()));
+							if (destinationResource != null) {
+								if (force) {
+									// we need to delete this resource if this operation wants to override existing resources
+									deleteResource(destinationResource, IResource.KEEP_HISTORY);
+								} else {
+									throw new JavaModelException(new JavaModelStatus(
+										IJavaModelStatusConstants.NAME_COLLISION, 
+										Util.bind("status.nameCollision", destinationResource.getFullPath().toString()))); //$NON-NLS-1$
+								}
+							}
+						}
+						copyResources(resources, destPath);
+					}
+				}
+			}
+	
+			// Update package statement in compilation unit if needed
+			if (!newFrag.getElementName().equals(source.getElementName())) { // if package has been renamed, update the compilation units
+				for (int i = 0; i < resources.length; i++) {
+					if (resources[i].getName().endsWith(SUFFIX_STRING_java)) {
+						// we only consider potential compilation units
+						ICompilationUnit cu = newFrag.getCompilationUnit(resources[i].getName());
+						IDOMCompilationUnit domCU = fFactory.createCompilationUnit(cu.getSource(), cu.getElementName());
+						if (domCU != null) {
+							updatePackageStatement(domCU, newFragName);
+							IBuffer buffer = cu.getBuffer();
+							if (buffer == null) continue;
+							String bufferContents = buffer.getContents();
+							if (bufferContents == null) continue;
+							String domCUContents = domCU.getContents();
+							String cuContents = null;
+							if (domCUContents != null) {
+								cuContents = Util.normalizeCRs(domCU.getContents(), bufferContents);
+							} else {
+								// See PR http://dev.eclipse.org/bugs/show_bug.cgi?id=11285
+								cuContents = bufferContents;//$NON-NLS-1$
+							}
+							buffer.setContents(cuContents);
+							cu.save(null, false);
+						}
+					}
+				}
+			}
+			
+			// Discard empty old package (if still empty after the rename)
+			boolean isEmpty = true;
+			if (isMove()) {
+				// delete remaining files in this package (.class file in the case where Proj=src=bin)
+				// in case of a copy
+				updateReadOnlyPackageFragmentsForMove((IContainer) source.getParent().getResource(), root, newFragName, sourceIsReadOnly);
+				if (srcFolder.exists()) {
+					IResource[] remaining = srcFolder.members();
+					for (int i = 0, length = remaining.length; i < length; i++) {
+						IResource file = remaining[i];
+						if (file instanceof IFile) {
+							if (file.isReadOnly()) {
+								file.setReadOnly(false);
+							}
+							this.deleteResource(file, IResource.FORCE | IResource.KEEP_HISTORY);
+						} else {
+							isEmpty = false;
+						}
+					}
+				}
+				if (isEmpty) {
+					IResource rootResource;
+					// check if source is included in destination
+					if (destPath.isPrefixOf(srcFolder.getFullPath())) {
+						rootResource = newFrag.getResource();
+					} else {
+						rootResource =  source.getParent().getResource();
+					}
+					
+					// delete recursively empty folders
+					deleteEmptyPackageFragment(source, false, rootResource);
+				}
+			} else if (containsReadOnlySubPackageFragments) {
+				// in case of a copy
+				updateReadOnlyPackageFragmentsForCopy((IContainer) source.getParent().getResource(), root, newFragName);
+			}
+			//register the correct change deltas
+			prepareDeltas(source, newFrag, isMove() && isEmpty);
+		} catch (DOMException dom) {
+			throw new JavaModelException(dom, IJavaModelStatusConstants.DOM_EXCEPTION);
+		} catch (JavaModelException e) {
+			throw e;
+		} catch (CoreException ce) {
+			throw new JavaModelException(ce);
+		}
+	}
+

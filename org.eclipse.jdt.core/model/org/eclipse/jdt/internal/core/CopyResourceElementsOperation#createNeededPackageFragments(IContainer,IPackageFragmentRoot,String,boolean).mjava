@@ -1,0 +1,43 @@
+	/**
+	 * Creates any destination package fragment(s) which do not exists yet.
+	 * Return true if a read-only package fragment has been found among package fragments, false otherwise
+	 */
+	private boolean createNeededPackageFragments(IContainer sourceFolder, IPackageFragmentRoot root, String newFragName, boolean moveFolder) throws JavaModelException {
+		boolean containsReadOnlyPackageFragment = false;
+		IContainer parentFolder = (IContainer) root.getResource();
+		JavaElementDelta projectDelta = null;
+		String[] names = Util.getTrimmedSimpleNames(newFragName);
+		StringBuffer sideEffectPackageName = new StringBuffer();
+		char[][] inclusionPatterns = ((PackageFragmentRoot)root).fullInclusionPatternChars();
+		char[][] exclusionPatterns = ((PackageFragmentRoot)root).fullExclusionPatternChars();
+		for (int i = 0; i < names.length; i++) {
+			String subFolderName = names[i];
+			sideEffectPackageName.append(subFolderName);
+			IResource subFolder = parentFolder.findMember(subFolderName);
+			if (subFolder == null) {
+				// create deepest folder only if not a move (folder will be moved in processPackageFragmentResource)
+				if (!(moveFolder && i == names.length-1)) {
+					createFolder(parentFolder, subFolderName, force);
+				}
+				parentFolder = parentFolder.getFolder(new Path(subFolderName));
+				sourceFolder = sourceFolder.getFolder(new Path(subFolderName));
+				if (sourceFolder.isReadOnly()) {
+					containsReadOnlyPackageFragment = true;
+				}
+				IPackageFragment sideEffectPackage = root.getPackageFragment(sideEffectPackageName.toString());
+				if (i < names.length - 1 // all but the last one are side effect packages
+						&& !Util.isExcluded(parentFolder, inclusionPatterns, exclusionPatterns)) { 
+					if (projectDelta == null) {
+						projectDelta = getDeltaFor(root.getJavaProject());
+					}
+					projectDelta.added(sideEffectPackage);
+				}
+				createdElements.add(sideEffectPackage);
+			} else {
+				parentFolder = (IContainer) subFolder;
+			}
+			sideEffectPackageName.append('.');
+		}
+		return containsReadOnlyPackageFragment;
+	}
+
