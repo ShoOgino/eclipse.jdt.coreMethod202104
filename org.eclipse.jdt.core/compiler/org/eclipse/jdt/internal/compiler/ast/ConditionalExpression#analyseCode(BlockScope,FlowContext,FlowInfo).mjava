@@ -1,56 +1,75 @@
-public FlowInfo analyseCode(BlockScope currentScope, FlowContext flowContext, FlowInfo flowInfo) {
-	Constant inlinedCondition = condition.constant;
-	if (inlinedCondition == NotAConstant) inlinedCondition = condition.conditionalConstant();
-	if (inlinedCondition != NotAConstant) {
-		if (inlinedCondition.booleanValue() == true) {
-			FlowInfo resultInfo = valueIfTrue.analyseCode(currentScope, flowContext, flowInfo);
-			// analyse valueIfFalse, but do not take into account any of its infos
-			valueIfFalse.analyseCode(currentScope, flowContext, flowInfo.copy().markAsFakeReachable(true));
-			mergedInitStateIndex = currentScope.methodScope().recordInitializationStates(resultInfo);
-			return resultInfo;
-		} else {
-			// analyse valueIfTrue, but do not take into account any of its infos			
-			valueIfTrue.analyseCode(currentScope, flowContext, flowInfo.copy().markAsFakeReachable(true));
-			FlowInfo mergeInfo = valueIfFalse.analyseCode(currentScope, flowContext, flowInfo);
-			mergedInitStateIndex = currentScope.methodScope().recordInitializationStates(mergeInfo);
-			return mergeInfo;
+	public FlowInfo analyseCode(
+		BlockScope currentScope,
+		FlowContext flowContext,
+		FlowInfo flowInfo) {
+		Constant conditionConstant = condition.conditionalConstant();
+		if (conditionConstant != NotAConstant) {
+			if (conditionConstant.booleanValue() == true) {
+				// TRUE ? left : right
+				FlowInfo resultInfo =
+					valueIfTrue.analyseCode(currentScope, flowContext, flowInfo);
+				// analyse valueIfFalse, but do not take into account any of its infos
+				valueIfFalse.analyseCode(
+					currentScope,
+					flowContext,
+					flowInfo.copy().markAsFakeReachable(true));
+				mergedInitStateIndex =
+					currentScope.methodScope().recordInitializationStates(resultInfo);
+				return resultInfo;
+			} else {
+				// FALSE ? left : right
+				// analyse valueIfTrue, but do not take into account any of its infos			
+				valueIfTrue.analyseCode(
+					currentScope,
+					flowContext,
+					flowInfo.copy().markAsFakeReachable(true));
+				FlowInfo mergeInfo =
+					valueIfFalse.analyseCode(currentScope, flowContext, flowInfo);
+				mergedInitStateIndex =
+					currentScope.methodScope().recordInitializationStates(mergeInfo);
+				return mergeInfo;
+			}
 		}
-	}
-	// notice that the receiver investigation is not performed in the previous case, since there is
-	// not a chance it is worth trying to check anything on a constant expression.
-	flowInfo = condition.analyseCode(currentScope, flowContext, flowInfo);
+		// notice that the receiver investigation is not performed in the previous case, since there is
+		// not a chance it is worth trying to check anything on a constant expression.
+		flowInfo = condition.analyseCode(currentScope, flowContext, flowInfo);
 
-	// store a copy of the merged info, so as to compute the local variable attributes afterwards
-	FlowInfo trueInfo = flowInfo.initsWhenTrue();
-	thenInitStateIndex = currentScope.methodScope().recordInitializationStates(trueInfo);
-	FlowInfo falseInfo = flowInfo.initsWhenFalse();
-	elseInitStateIndex = currentScope.methodScope().recordInitializationStates(falseInfo);
-	
-	// propagate analysis
-	trueInfo = valueIfTrue.analyseCode(currentScope, flowContext, trueInfo.copy());
-	falseInfo = valueIfFalse.analyseCode(currentScope, flowContext, falseInfo.copy());
-	
-	// merge back using a conditional info -  1GK2BLM
-	// if ((t && (v = t)) ? t : t && (v = f)) r = v;  -- ok
-	FlowInfo mergedInfo = FlowInfo.conditional(
-		trueInfo.initsWhenTrue().unconditionalInits().mergedWith(
-			falseInfo.initsWhenTrue().unconditionalInits()),
-		falseInfo.initsWhenFalse().unconditionalInits().mergedWith(
-			falseInfo.initsWhenFalse().unconditionalInits()));
-/*			
-	FlowInfo mergedInfo = valueIfTrue.analyseCode(
-		currentScope,
-		flowContext,
-		flowInfo.initsWhenTrue().copy()).
-			unconditionalInits().
-				mergedWith(
-					valueIfFalse.analyseCode(
-						currentScope,
-						flowContext,
-						flowInfo.initsWhenFalse().copy()).
-							unconditionalInits());
-*/							
-	mergedInitStateIndex = currentScope.methodScope().recordInitializationStates(mergedInfo);
-	return mergedInfo;
-}
+		// store a copy of the merged info, so as to compute the local variable attributes afterwards
+		FlowInfo trueInfo = flowInfo.initsWhenTrue();
+		thenInitStateIndex =
+			currentScope.methodScope().recordInitializationStates(trueInfo);
+		FlowInfo falseInfo = flowInfo.initsWhenFalse();
+		elseInitStateIndex =
+			currentScope.methodScope().recordInitializationStates(falseInfo);
+
+		// propagate analysis
+		trueInfo = valueIfTrue.analyseCode(currentScope, flowContext, trueInfo.copy());
+		falseInfo =
+			valueIfFalse.analyseCode(currentScope, flowContext, falseInfo.copy());
+
+		// merge back using a conditional info -  1GK2BLM
+		// if ((t && (v = t)) ? t : t && (v = f)) r = v;  -- ok
+		FlowInfo mergedInfo =
+			FlowInfo.conditional(
+				trueInfo.initsWhenTrue().copy().unconditionalInits().mergedWith( // must copy, since could be shared with trueInfo.initsWhenFalse()...
+					falseInfo.initsWhenTrue().copy().unconditionalInits()),
+				trueInfo.initsWhenFalse().unconditionalInits().mergedWith(
+					falseInfo.initsWhenFalse().unconditionalInits()));
+		/*			
+			FlowInfo mergedInfo = valueIfTrue.analyseCode(
+				currentScope,
+				flowContext,
+				flowInfo.initsWhenTrue().copy()).
+					unconditionalInits().
+						mergedWith(
+							valueIfFalse.analyseCode(
+								currentScope,
+								flowContext,
+								flowInfo.initsWhenFalse().copy()).
+									unconditionalInits());
+		*/
+		mergedInitStateIndex =
+			currentScope.methodScope().recordInitializationStates(mergedInfo);
+		return mergedInfo;
+	}
 

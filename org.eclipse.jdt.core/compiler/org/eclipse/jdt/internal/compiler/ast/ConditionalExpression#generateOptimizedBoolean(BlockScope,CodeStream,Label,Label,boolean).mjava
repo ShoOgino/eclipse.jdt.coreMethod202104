@@ -1,23 +1,19 @@
 	/**
-	 * Code generation for the conditional operator ?:
-	 *
-	 * @param currentScope org.eclipse.jdt.internal.compiler.lookup.BlockScope
-	 * @param codeStream org.eclipse.jdt.internal.compiler.codegen.CodeStream
-	 * @param valueRequired boolean
+	 * Optimized boolean code generation for the conditional operator ?:
 	*/
-	public void generateCode(
+	public void generateOptimizedBoolean(
 		BlockScope currentScope,
 		CodeStream codeStream,
+		Label trueLabel,
+		Label falseLabel,
 		boolean valueRequired) {
 
-		int pc = codeStream.position;
-		Label endifLabel, falseLabel;
-		if (constant != NotAConstant) {
-			if (valueRequired)
-				codeStream.generateConstant(constant, implicitConversion);
-			codeStream.recordPositionsFrom(pc, this);
+		if ((constant != Constant.NotAConstant) && (constant.typeID() == T_boolean) // constant
+			|| (valueIfTrue.implicitConversion >> 4) != T_boolean) { // non boolean values
+			super.generateOptimizedBoolean(currentScope, codeStream, trueLabel, falseLabel, valueRequired);
 			return;
 		}
+		int pc = codeStream.position;
 		Constant cst = condition.constant;
 		Constant condCst = condition.conditionalConstant();
 		boolean needTruePart =
@@ -26,16 +22,17 @@
 		boolean needFalsePart =
 			!(((cst != NotAConstant) && (cst.booleanValue() == true))
 				|| ((condCst != NotAConstant) && (condCst.booleanValue() == true)));
-		endifLabel = new Label(codeStream);
+
+		Label internalFalseLabel, endifLabel = new Label(codeStream);
 
 		// Generate code for the condition
 		boolean needConditionValue = (cst == NotAConstant) && (condCst == NotAConstant);
 		condition.generateOptimizedBoolean(
-			currentScope,
-			codeStream,
-			null,
-			(falseLabel = new Label(codeStream)),
-			needConditionValue);
+				currentScope,
+				codeStream,
+				null,
+				internalFalseLabel = new Label(codeStream),
+				needConditionValue);
 
 		if (thenInitStateIndex != -1) {
 			codeStream.removeNotDefinitelyAssignedVariables(
@@ -45,27 +42,29 @@
 		}
 		// Then code generation
 		if (needTruePart) {
-			valueIfTrue.generateCode(currentScope, codeStream, valueRequired);
+			valueIfTrue.generateOptimizedBoolean(currentScope, codeStream, trueLabel, falseLabel, valueRequired);
+			
 			if (needFalsePart) {
 				// Jump over the else part
 				int position = codeStream.position;
 				codeStream.goto_(endifLabel);
 				codeStream.updateLastRecordedEndPC(position);
 				// Tune codestream stack size
-				if (valueRequired) {
-					codeStream.decrStackSize(returnTypeSlotSize);
-				}
+				//if (valueRequired) {
+				//	codeStream.decrStackSize(returnTypeSlotSize);
+				//}
 			}
 		}
 		if (needFalsePart) {
-			falseLabel.place();
+			internalFalseLabel.place();
 			if (elseInitStateIndex != -1) {
 				codeStream.removeNotDefinitelyAssignedVariables(
 					currentScope,
 					elseInitStateIndex);
 				codeStream.addDefinitelyAssignedVariables(currentScope, elseInitStateIndex);
 			}
-			valueIfFalse.generateCode(currentScope, codeStream, valueRequired);
+			valueIfFalse.generateOptimizedBoolean(currentScope, codeStream, trueLabel, falseLabel, valueRequired);
+
 			// End of if statement
 			endifLabel.place();
 		}
@@ -75,9 +74,7 @@
 				currentScope,
 				mergedInitStateIndex);
 		}
-		// implicit conversion
-		if (valueRequired)
-			codeStream.generateImplicitConversion(implicitConversion);
+		// no implicit conversion for boolean values
 		codeStream.recordPositionsFrom(pc, this);
 	}
 
