@@ -1,0 +1,66 @@
+void matchReportReference(MessageSend messageSend, IJavaElement element, int accuracy, MatchLocator locator, MethodBinding methodBinding) throws CoreException {
+
+	// Look if there's a need to special report for parameterized type
+	int rule = SearchPattern.R_EXACT_MATCH;
+	int refinedAccuracy = accuracy;
+	if (methodBinding instanceof ParameterizedGenericMethodBinding) { // parameterized generic method
+		ParameterizedGenericMethodBinding parameterizedMethodBinding = (ParameterizedGenericMethodBinding) methodBinding;
+		refinedAccuracy = refineAccuracy(accuracy, parameterizedMethodBinding.typeArguments, locator, this.pattern.methodArguments, this.pattern.hasMethodParameters());
+		
+		if (methodBinding.declaringClass.isParameterizedType() || methodBinding.declaringClass.isRawType()) {
+			ParameterizedTypeBinding parameterizedBinding = (ParameterizedTypeBinding)methodBinding.declaringClass;
+			if (!this.pattern.hasTypeArguments() && this.pattern.hasMethodArguments()) {
+				// special case for pattern which defines method arguments but no type ones
+				// in this case, we only use refined accuracy for constructor
+			} else {
+				refinedAccuracy = refineAccuracy(refinedAccuracy, parameterizedBinding, this.pattern.getTypeArguments(), this.pattern.hasTypeParameters(), 0, locator);
+			}
+			if (refinedAccuracy == -1) return;
+		} else if (this.pattern.hasTypeArguments()) {
+			rule = SearchPattern.R_ERASURE_MATCH;
+		}
+	} else if (methodBinding instanceof ParameterizedMethodBinding) {
+		if (methodBinding.declaringClass.isParameterizedType() || methodBinding.declaringClass.isRawType()) {
+			ParameterizedTypeBinding parameterizedBinding = (ParameterizedTypeBinding)methodBinding.declaringClass;
+			refinedAccuracy = refineAccuracy(refinedAccuracy, parameterizedBinding, this.pattern.getTypeArguments(), this.pattern.hasTypeParameters(), 0, locator);
+			if (refinedAccuracy == -1) return;
+		} else if (this.pattern.hasTypeArguments()) {
+			rule = SearchPattern.R_ERASURE_MATCH;
+		}
+	} else if (this.pattern.hasMethodArguments()) { // binding has no type params, compatible erasure if pattern does
+		rule = SearchPattern.R_ERASURE_MATCH;
+	}
+
+	// See whether it is necessary to report or not
+	boolean report = refinedAccuracy != -1; // impossible match
+	if (report && (refinedAccuracy & SearchPattern.R_ERASURE_MATCH) != 0) { // erasure match
+		if ((refinedAccuracy & SearchPattern.R_EQUIVALENT_MATCH) != 0) { // raw match
+			report = this.isEquivalentMatch || this.isErasureMatch; // report only if pattern is equivalent or erasure
+		} else {
+			report = this.isErasureMatch; // report only if pattern is erasure
+		}
+	}
+	else if (report && (refinedAccuracy & SearchPattern.R_EQUIVALENT_MATCH) != 0) { // equivalent match
+		report  = this.isEquivalentMatch || this.isErasureMatch; // report only if pattern is equivalent or erasure
+	}
+	if (!report) return;
+
+	// Set rule
+	if (rule != SearchPattern.R_ERASURE_MATCH) {
+		rule |= refinedAccuracy & RULE_MASK;
+	}
+	refinedAccuracy = refinedAccuracy & (~RULE_MASK);
+
+	// Report match
+	int offset = (int) (messageSend.nameSourcePosition >>> 32);
+	SearchMatch match = locator.newMethodReferenceMatch(element,
+			accuracy,
+			offset,
+			messageSend.sourceEnd - offset + 1,
+			false, // not constructor
+			false, // not synthetic
+			messageSend);
+	match.setMatchRule(rule);
+	locator.report(match);
+}
+

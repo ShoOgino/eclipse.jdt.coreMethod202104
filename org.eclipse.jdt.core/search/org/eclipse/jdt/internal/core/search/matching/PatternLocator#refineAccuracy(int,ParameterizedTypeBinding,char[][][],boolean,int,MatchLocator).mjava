@@ -1,185 +1,20 @@
-int refineAccuracy(int accuracy, ParameterizedTypeBinding parameterizedBinding, char[][][] patternTypeArguments, boolean isPatternSourceType, int depth, MatchLocator locator) {
+protected int refineAccuracy(int accuracy, ParameterizedTypeBinding parameterizedBinding, char[][][] patternTypeArguments, boolean patternHasTypeParameters, int depth, MatchLocator locator) {
+	// We can only refine if locator has an unit scope.
+	if (locator.unitScope == null) return accuracy;
 
-	// First compare lengthes
-	int patternTypeArgsLength = (patternTypeArguments==null || depth>=patternTypeArguments.length || patternTypeArguments[depth] == null) ? 0 : patternTypeArguments[depth].length;
-	TypeBinding[] argumentsBinding = parameterizedBinding.arguments;
-	int typeArgumentsLength = argumentsBinding == null ? 0 : argumentsBinding.length;
-	int refinedAccuracy =  accuracy;
-	if (patternTypeArgsLength == typeArgumentsLength) {
-		if (patternTypeArgsLength == 0) {
-			if (isPatternSourceType) { // raw source type pattern is always compatible erasure...
-				if (refinedAccuracy <= SearchMatch.A_INACCURATE) // ...except if accuracy has been already refined
-					refinedAccuracy |= RAW_MASK;
-			}
-		} else {
-			if (isPatternSourceType) {
-				// parameterized source type pattern is always an incompatible erasure match
-				refinedAccuracy |= SearchPattern.R_ERASURE_MATCH;
-				refinedAccuracy &= ~SearchPattern.R_EQUIVALENT_MATCH;
-			}
-		}
-	} else {
-		if (patternTypeArgsLength==0) { // raw pattern
-			if (patternTypeArguments == null || depth < patternTypeArguments.length) {
-				// if valid type arguments, then it is always compatible erasure except if accuracy has been already refined
-				if (refinedAccuracy <= SearchMatch.A_INACCURATE)
-					refinedAccuracy |= RAW_MASK;
-			}
-			return refinedAccuracy;
-		} else  if (typeArgumentsLength==0) { // raw binding
-			// then it is always compatible erasure except if accuracy has been already refined
-			if (refinedAccuracy <= SearchMatch.A_INACCURATE)
-				refinedAccuracy |= RAW_MASK;
-			return refinedAccuracy;
-		}
-		return -1;
-	}
-
-	// Compare binding for each type argument only if pattern is not erasure only and at first level
-//	int refinedAccuracy = SearchMatch.A_ACCURATE;
-	if (!isPatternSourceType) {
-		for (int i=0; i<typeArgumentsLength; i++) {
-			// Get parameterized type argument binding
-			TypeBinding argumentBinding = argumentsBinding[i];
-
-			// Get binding for pattern argument
-			char[] patternTypeArgument = patternTypeArguments[depth][i];
-			char patternWildcard = patternTypeArgument[0];
-			char[] patternTypeName = patternTypeArgument;
-			int patternWildcardKind = -1;
-			switch (patternWildcard) {
-				case Signature.C_STAR:
-					if (argumentBinding.isWildcard()) {
-						WildcardBinding wildcardBinding = (WildcardBinding) argumentBinding;
-						if (wildcardBinding.kind == Wildcard.UNBOUND) continue;
-					}
-					if (refinedAccuracy < SearchPattern.R_ERASURE_MATCH) refinedAccuracy |= SearchPattern.R_EQUIVALENT_MATCH;
-					continue; // unbound parameter always match
-				case Signature.C_EXTENDS :
-					patternWildcardKind = Wildcard.EXTENDS;
-					patternTypeName = CharOperation.subarray(patternTypeArgument, 1, patternTypeArgument.length);
-					break;
-				case Signature.C_SUPER :
-					patternWildcardKind = Wildcard.SUPER;
-					patternTypeName = CharOperation.subarray(patternTypeArgument, 1, patternTypeArgument.length);
-				default :
-					break;
-			}
-			patternTypeName = Signature.toCharArray(patternTypeName);
-			TypeBinding patternBinding = locator.getType(patternTypeArgument, patternTypeName);
-			
-			// If have no binding for pattern arg, then we won't be able to refine accuracy
-			if (patternBinding == null) {
-				if (argumentBinding.isWildcard()) {
-					WildcardBinding wildcardBinding = (WildcardBinding) argumentBinding;
-					if (wildcardBinding.kind == Wildcard.UNBOUND) {
-						if (refinedAccuracy < SearchPattern.R_ERASURE_MATCH) refinedAccuracy |= SearchPattern.R_EQUIVALENT_MATCH;
-					} else {
-						refinedAccuracy |= SearchPattern.R_ERASURE_MATCH;
-					}
-				}
-				continue;
-			}
-				
-			// Verify tha pattern binding is compatible with match type argument binding
-			switch (patternWildcard) {
-				case Signature.C_STAR : // UNBOUND pattern
-					// unbound always match => skip to next argument
-					if (refinedAccuracy < SearchPattern.R_ERASURE_MATCH) refinedAccuracy |= SearchPattern.R_EQUIVALENT_MATCH;
-					continue;
-				case Signature.C_EXTENDS : // EXTENDS pattern
-					if (argumentBinding.isWildcard()) { // argument is a wildcard
-						WildcardBinding wildcardBinding = (WildcardBinding) argumentBinding;
-						// It's ok if wildcards are identical
-						if (wildcardBinding.kind == patternWildcardKind && wildcardBinding.bound == patternBinding) {
-							continue;
-						}
-						// Look for wildcard compatibility
-						switch (wildcardBinding.kind) {
-							case Wildcard.EXTENDS:
-								if (wildcardBinding.bound== null || wildcardBinding.bound.isCompatibleWith(patternBinding)) {
-									// valid when arg extends a subclass of pattern
-									if (refinedAccuracy < SearchPattern.R_ERASURE_MATCH) refinedAccuracy |= SearchPattern.R_EQUIVALENT_MATCH;
-									continue;
-								}
-								break;
-							case Wildcard.SUPER:
-								break;
-							case Wildcard.UNBOUND:
-								if (refinedAccuracy < SearchPattern.R_ERASURE_MATCH) refinedAccuracy |= SearchPattern.R_EQUIVALENT_MATCH;
-								continue;
-						}
-					} else if (argumentBinding.isCompatibleWith(patternBinding)) {
-						// valid when arg is a subclass of pattern 
-						if (refinedAccuracy < SearchPattern.R_ERASURE_MATCH) refinedAccuracy |= SearchPattern.R_EQUIVALENT_MATCH;
-						continue;
-					}
-					break;
-				case Signature.C_SUPER : // SUPER pattern
-					if (argumentBinding.isWildcard()) { // argument is a wildcard
-						WildcardBinding wildcardBinding = (WildcardBinding) argumentBinding;
-						// It's ok if wildcards are identical
-						if (wildcardBinding.kind == patternWildcardKind && wildcardBinding.bound == patternBinding) {
-							continue;
-						}
-						// Look for wildcard compatibility
-						switch (wildcardBinding.kind) {
-							case Wildcard.EXTENDS:
-								break;
-							case Wildcard.SUPER:
-								if (wildcardBinding.bound== null || patternBinding.isCompatibleWith(wildcardBinding.bound)) {
-									// valid only when arg super a superclass of pattern
-									if (refinedAccuracy < SearchPattern.R_ERASURE_MATCH) refinedAccuracy |= SearchPattern.R_EQUIVALENT_MATCH;
-									continue;
-								}
-								break;
-							case Wildcard.UNBOUND:
-								if (refinedAccuracy < SearchPattern.R_ERASURE_MATCH) refinedAccuracy |= SearchPattern.R_EQUIVALENT_MATCH;
-								continue;
-						}
-					} else if (patternBinding.isCompatibleWith(argumentBinding)) {
-						// valid only when arg is a superclass of pattern
-						if (refinedAccuracy < SearchPattern.R_ERASURE_MATCH) refinedAccuracy |= SearchPattern.R_EQUIVALENT_MATCH;
-						continue;
-					}
-					break;
-				default:
-					if (argumentBinding.isWildcard()) {
-						WildcardBinding wildcardBinding = (WildcardBinding) argumentBinding;
-						switch (wildcardBinding.kind) {
-							case Wildcard.EXTENDS:
-								if (wildcardBinding.bound== null || patternBinding.isCompatibleWith(wildcardBinding.bound)) {
-									// valid only when arg extends a superclass of pattern
-									if (refinedAccuracy < SearchPattern.R_ERASURE_MATCH) refinedAccuracy |= SearchPattern.R_EQUIVALENT_MATCH;
-									continue;
-								}
-								break;
-							case Wildcard.SUPER:
-								if (wildcardBinding.bound== null || wildcardBinding.bound.isCompatibleWith(patternBinding)) {
-									// valid only when arg super a subclass of pattern
-									if (refinedAccuracy < SearchPattern.R_ERASURE_MATCH) refinedAccuracy |= SearchPattern.R_EQUIVALENT_MATCH;
-									continue;
-								}
-								break;
-							case Wildcard.UNBOUND:
-								if (refinedAccuracy < SearchPattern.R_ERASURE_MATCH) refinedAccuracy |= SearchPattern.R_EQUIVALENT_MATCH;
-								continue;
-						}
-					} else if (argumentBinding == patternBinding)
-						// valid only when arg is equals to pattern
-						continue;
-					break;
-			}
-			
-			// Argument does not match => erasure match will be the only possible one
-			return SearchPattern.R_ERASURE_MATCH;
-		}
+	// Refine accuracy using binding and pattern arguments
+	char[][] patternArguments = (patternTypeArguments==null) ? null : patternTypeArguments[depth];
+	int refinedAccuracy = refineAccuracy(accuracy, parameterizedBinding.arguments, locator, patternArguments, patternHasTypeParameters);
+	if (refinedAccuracy == SearchPattern.R_ERASURE_MATCH) {
+		return SearchPattern.R_ERASURE_MATCH;
 	}
 
 	// Recurse refining on enclosing types if any
 	TypeBinding enclosingType = parameterizedBinding.enclosingType();
 	if (enclosingType != null && (enclosingType.isParameterizedType() || enclosingType.isRawType())) {
-		return refineAccuracy(refinedAccuracy, (ParameterizedTypeBinding)enclosingType, patternTypeArguments, isPatternSourceType, depth+1, locator);
+		if (patternTypeArguments == null || (depth+1)<patternTypeArguments.length) {
+			return refineAccuracy(refinedAccuracy, (ParameterizedTypeBinding)enclosingType, patternTypeArguments, patternHasTypeParameters, depth+1, locator);
+		}
 	}
 	
 	// Refine the accuracy to accurate

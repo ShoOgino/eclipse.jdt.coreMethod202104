@@ -43,9 +43,6 @@
 					typeSignature = field.getTypeSignature();
 					char[] signature = typeSignature.toCharArray();
 					char[] typeErasure = Signature.toCharArray(Signature.getTypeErasure(signature));
-					if (CharOperation.indexOf(Signature.C_GENERIC_START, signature) < 0) {
-						typeSignature = null;
-					}
 					CharOperation.replace(typeErasure, '$', '.');
 					if ((lastDot = CharOperation.lastIndexOf('.', typeErasure)) == -1) {
 						typeSimpleName = typeErasure;
@@ -61,78 +58,42 @@
 				} catch (JavaModelException e) {
 					return null;
 				}
+				// Create field pattern
+				boolean findDeclarations = false;
+				boolean readAccess = false;
+				boolean writeAccess = false;
 				switch (limitTo) {
 					case IJavaSearchConstants.DECLARATIONS :
-						searchPattern = 
-							new FieldPattern(
-								true,
-								false,
-								false,
-								name, 
-								declaringQualification, 
-								declaringSimpleName, 
-								typeQualification, 
-								typeSimpleName,
-								typeSignature,
-								matchRule);
+						findDeclarations = true;
 						break;
 					case IJavaSearchConstants.REFERENCES :
-						searchPattern = 
-							new FieldPattern(
-								false,
-								true, // read access
-								true, // write access
-								name, 
-								declaringQualification, 
-								declaringSimpleName, 
-								typeQualification, 
-								typeSimpleName,
-								typeSignature,
-								matchRule);
+						readAccess = true;
+						writeAccess = true;
 						break;
 					case IJavaSearchConstants.READ_ACCESSES :
-						searchPattern = 
-							new FieldPattern(
-								false,
-								true, // read access only
-								false,
-								name, 
-								declaringQualification, 
-								declaringSimpleName, 
-								typeQualification, 
-								typeSimpleName,
-								typeSignature,
-								matchRule);
+						readAccess = true;
 						break;
 					case IJavaSearchConstants.WRITE_ACCESSES :
-						searchPattern = 
-							new FieldPattern(
-								false,
-								false,
-								true, // write access only
-								name, 
-								declaringQualification, 
-								declaringSimpleName, 
-								typeQualification, 
-								typeSimpleName,
-								typeSignature,
-								matchRule);
+						writeAccess = true;
 						break;
 					case IJavaSearchConstants.ALL_OCCURRENCES :
-						searchPattern =
-							new FieldPattern(
-								true,
-								true, // read access
-								true, // write access
-								name, 
-								declaringQualification, 
-								declaringSimpleName, 
-								typeQualification, 
-								typeSimpleName,
-								typeSignature,
-								matchRule);
+						findDeclarations = true;
+						readAccess = true;
+						writeAccess = true;
 						break;
 				}
+				searchPattern = 
+					new FieldPattern(
+						findDeclarations,
+						readAccess,
+						writeAccess,
+						name, 
+						declaringQualification, 
+						declaringSimpleName, 
+						typeQualification, 
+						typeSimpleName,
+						typeSignature,
+						matchRule);
 				break;
 			case IJavaElement.IMPORT_DECLARATION :
 				String elementName = element.getElementName();
@@ -147,7 +108,7 @@
 							elementName.substring(lastDot+1).toCharArray(),
 							elementName.substring(0, lastDot).toCharArray(),
 							null,
-							false, // does not need signature
+							null,
 							null,
 							limitTo,
 							matchRule);
@@ -221,17 +182,22 @@
 				char[] returnSimpleName;
 				char[] returnQualification;
 				boolean varargs = false;
+				String returnSignature;
 				try {
-					String returnType = Signature.toString(method.getReturnType()).replace('$', '.');
-					if ((lastDot = returnType.lastIndexOf('.')) == -1) {
-						returnSimpleName = returnType.toCharArray();
+					returnSignature = method.getReturnType();
+					char[] signature = returnSignature.toCharArray();
+					char[] returnErasure = Signature.toCharArray(Signature.getTypeErasure(signature));
+					CharOperation.replace(returnErasure, '$', '.');
+					if ((lastDot = CharOperation.lastIndexOf('.', returnErasure)) == -1) {
+						returnSimpleName = returnErasure;
 						returnQualification = null;
 					} else {
-						returnSimpleName = returnType.substring(lastDot + 1).toCharArray();
-						returnQualification = method.isBinary()
-							? returnType.substring(0, lastDot).toCharArray()
+						returnSimpleName = CharOperation.subarray(returnErasure, lastDot + 1, returnErasure.length);
+						returnQualification = CharOperation.subarray(returnErasure, 0, lastDot);
+						if (!method.isBinary()) {
 							// prefix with a '*' as the full qualification could be bigger (because of an import)
-							: CharOperation.concat(IIndexConstants.ONE_STAR, returnType.substring(0, lastDot).toCharArray());
+							CharOperation.concat(IIndexConstants.ONE_STAR, returnQualification);
+						}
 					}
 					varargs = Flags.isVarargs(method.getFlags());
 				} catch (JavaModelException e) {
@@ -241,127 +207,80 @@
 				int paramCount = parameterTypes.length;
 				char[][] parameterSimpleNames = new char[paramCount][];
 				char[][] parameterQualifications = new char[paramCount][];
+				String[] parameterSignatures = new String[paramCount];
 				for (int i = 0; i < paramCount; i++) {
-					String signature = Signature.toString(parameterTypes[i]).replace('$', '.');
-					if ((lastDot = signature.lastIndexOf('.')) == -1) {
-						parameterSimpleNames[i] = signature.toCharArray();
+					parameterSignatures[i] = parameterTypes[i];
+					char[] signature = parameterSignatures[i].toCharArray();
+					char[] paramErasure = Signature.toCharArray(Signature.getTypeErasure(signature));
+					CharOperation.replace(paramErasure, '$', '.');
+					if ((lastDot = CharOperation.lastIndexOf('.', paramErasure)) == -1) {
+						parameterSimpleNames[i] = paramErasure;
 						parameterQualifications[i] = null;
 					} else {
-						parameterSimpleNames[i] = signature.substring(lastDot + 1).toCharArray();
-						parameterQualifications[i] = method.isBinary()
-							? signature.substring(0, lastDot).toCharArray()
+						parameterSimpleNames[i] = CharOperation.subarray(paramErasure, lastDot + 1, paramErasure.length);
+						parameterQualifications[i] = CharOperation.subarray(paramErasure, 0, lastDot);
+						if (!method.isBinary()) {
 							// prefix with a '*' as the full qualification could be bigger (because of an import)
-							: CharOperation.concat(IIndexConstants.ONE_STAR, signature.substring(0, lastDot).toCharArray());
+							CharOperation.concat(IIndexConstants.ONE_STAR, parameterQualifications[i]);
+						}
 					}
 				}
+
+				// Create method/constructor pattern
+				boolean findMethodDeclarations = true;
+				boolean findMethodReferences = true;
 				switch (limitTo) {
 					case IJavaSearchConstants.DECLARATIONS :
-						if (isConstructor) {
-							searchPattern = 
-								new ConstructorPattern(
-									true,
-									false,
-									declaringSimpleName, 
-									declaringQualification, 
-									parameterQualifications, 
-									parameterSimpleNames,
-									varargs,
-									matchRule);
-						} else {
-							searchPattern = 
-								new MethodPattern(
-									true,
-									false,
-									selector, 
-									declaringQualification, 
-									declaringSimpleName, 
-									returnQualification, 
-									returnSimpleName, 
-									parameterQualifications, 
-									parameterSimpleNames,
-									varargs,
-									null,
-									matchRule);
-						}
+						findMethodReferences = false;
 						break;
 					case IJavaSearchConstants.REFERENCES :
-						if (isConstructor) {
-							searchPattern = 
-								new ConstructorPattern(
-									false,
-									true,
-									declaringSimpleName, 
-									declaringQualification, 
-									parameterQualifications, 
-									parameterSimpleNames,
-									varargs,
-									matchRule);
-						} else {
-							searchPattern = 
-								new MethodPattern(
-									false,
-									true,
-									selector, 
-									declaringQualification, 
-									declaringSimpleName, 
-									returnQualification, 
-									returnSimpleName, 
-									parameterQualifications, 
-									parameterSimpleNames,
-									varargs,
-									method.getDeclaringType(),
-									matchRule);
-						}
+						findMethodDeclarations = false;
 						break;
 					case IJavaSearchConstants.ALL_OCCURRENCES :
-						if (isConstructor) {
-							searchPattern =
-								new ConstructorPattern(
-									true,
-									true,
-									declaringSimpleName, 
-									declaringQualification, 
-									parameterQualifications, 
-									parameterSimpleNames,
-									varargs,
-									matchRule);
-						} else {
-							searchPattern =
-								new MethodPattern(
-									true,
-									true,
-									selector, 
-									declaringQualification, 
-									declaringSimpleName, 
-									returnQualification, 
-									returnSimpleName, 
-									parameterQualifications, 
-									parameterSimpleNames,
-									varargs,
-									method.getDeclaringType(),
-									matchRule);
-						}
 						break;
+				}
+				if (isConstructor) {
+					searchPattern =
+						new ConstructorPattern(
+							findMethodDeclarations,
+							findMethodReferences,
+							declaringSimpleName, 
+							declaringQualification, 
+							parameterQualifications, 
+							parameterSimpleNames,
+							parameterSignatures,
+							method,
+							varargs,
+							matchRule);
+				} else {
+					searchPattern =
+						new MethodPattern(
+							findMethodDeclarations,
+							findMethodReferences,
+							selector, 
+							declaringQualification, 
+							declaringSimpleName, 
+							returnQualification, 
+							returnSimpleName, 
+							returnSignature,
+							parameterQualifications, 
+							parameterSimpleNames,
+							parameterSignatures,
+							varargs,
+							method,
+							matchRule);
 				}
 				break;
 			case IJavaElement.TYPE :
 				IType type = (IType)element;
-				String signature = type instanceof ParameterizedSourceType ? ((ParameterizedSourceType) type).uniqueKey : null;
 				searchPattern = 	createTypePattern(
 							type.getElementName().toCharArray(), 
 							type.getPackageFragment().getElementName().toCharArray(),
 							enclosingTypeNames(type),
-							true, // need signature
-							signature,
+							null,
+							type,
 							limitTo,
 							matchRule);
-				if (searchPattern == null) { // TODO (frederic) remove when new API IType.getParameterizedName() will be available
-					searchPattern = new TypeReferencePattern(
-						CharOperation.concatWith(type.getPackageFragment().getElementName().toCharArray(), enclosingTypeNames(type), '.'), 
-						type.getElementName().toCharArray(),
-						type,
-						matchRule);
-				}
 				break;
 			case IJavaElement.PACKAGE_DECLARATION :
 			case IJavaElement.PACKAGE_FRAGMENT :

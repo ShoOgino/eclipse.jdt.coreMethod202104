@@ -1,18 +1,15 @@
 	/**
-	 * Type pattern are formed by [qualification.]type.
+	 * Type pattern are formed by [qualification '.']type [typeArguments].
 	 * e.g. java.lang.Object
 	 *		Runnable
+	 *		List<String>
 	 *
 	 * @since 3.1
 	 *		Type arguments can be specified to search references to parameterized types.
-	 * 	Then patterns will look as follow:
-	 * 		[qualification.] type [ '<' [ [ '?' {'extends'|'super'} ] type ( ',' [ '?' {'extends'|'super'} ] type )* ] '>' ]
+	 * 	and look as follow: '<' { [ '?' {'extends'|'super'} ] type ( ',' [ '?' {'extends'|'super'} ] type )* | '?' } '>'
 	 * 	Please note that:
 	 * 		- '*' is not valid inside type arguments definition <>
 	 * 		- '?' is treated as a wildcard when it is inside <> (ie. it must be put on first position of the type argument)
-	 * 		- nested <> are not allowed; List<List<Object>> will be treated as pattern List<List>
-	 * 		- only one type arguments definition is allowed; Gen<Exception>.Member<Object>
-	 *				will be treated as pattern Gen<Exception>.Member
 	 */
 	private static SearchPattern createTypePattern(String patternString, int limitTo, int matchRule) {
 		
@@ -25,27 +22,34 @@
 		} catch (InvalidInputException e) {
 			return null;
 		}
-		int paramCount = 0;
+		int argCount = 0;
 		while (token != TerminalTokens.TokenNameEOF) {
-			switch (token) {
-				case TerminalTokens.TokenNameWHITESPACE:
-					if (paramCount == 0) break;
-					// fall through default case if we're inside a type argument...
-				default: // all other tokens are considered identifiers (see bug 21763 Problem in Java search [search])
-					switch (token) {
-						case TerminalTokens.TokenNameGREATER:
-						case TerminalTokens.TokenNameRIGHT_SHIFT:
-						case TerminalTokens.TokenNameUNSIGNED_RIGHT_SHIFT:
-							paramCount--;
-							break;
-						case TerminalTokens.TokenNameLESS:
-							paramCount++;
-							break;
-					}
-					if (type == null)
-						type = new String(scanner.getCurrentTokenSource());
-					else
-						type += new String(scanner.getCurrentTokenSource());
+			if (argCount == 0) {
+				switch (token) {
+					case TerminalTokens.TokenNameWHITESPACE:
+						break;
+					case TerminalTokens.TokenNameLESS:
+						argCount++;
+						// fall through default case to add token to type
+					default: // all other tokens are considered identifiers (see bug 21763 Problem in Java search [search])
+						if (type == null)
+							type = scanner.getCurrentTokenString();
+						else
+							type += scanner.getCurrentTokenString();
+				}
+			} else {
+				switch (token) {
+					case TerminalTokens.TokenNameGREATER:
+					case TerminalTokens.TokenNameRIGHT_SHIFT:
+					case TerminalTokens.TokenNameUNSIGNED_RIGHT_SHIFT:
+						argCount--;
+						break;
+					case TerminalTokens.TokenNameLESS:
+						argCount++;
+						break;
+				}
+				if (type == null) return null; // invalid syntax
+				type += scanner.getCurrentTokenString();
 			}
 			try {
 				token = scanner.getNextToken();
