@@ -1,0 +1,66 @@
+	/*
+	 * Initialize all container at the same time as the given container.
+	 * Return the container for the given path and project.
+	 */
+	private IClasspathContainer initializeAllContainers(IJavaProject javaProjectToInit, IPath containerToInit) throws JavaModelException {
+		if (CP_RESOLVE_VERBOSE) {
+			Util.verbose(
+				"CPContainer INIT - batching containers initialization\n" + //$NON-NLS-1$
+				"	project to init: " + javaProjectToInit.getElementName() + '\n' + //$NON-NLS-1$
+				"	container path to init: " + containerToInit); //$NON-NLS-1$
+		}
+
+		// collect all container paths
+		HashMap allContainerPaths = new HashMap();
+		IProject[] projects = ResourcesPlugin.getWorkspace().getRoot().getProjects();
+		for (int i = 0, length = projects.length; i < length; i++) {
+			IProject project = projects[i];
+			if (!JavaProject.hasJavaNature(project)) continue;
+			IJavaProject javaProject = new JavaProject(project, getJavaModel());
+			HashSet paths = null;
+			IClasspathEntry[] rawClasspath = javaProject.getRawClasspath();
+			for (int j = 0, length2 = rawClasspath.length; j < length2; j++) {
+				IClasspathEntry entry = rawClasspath[j];
+				IPath path = entry.getPath();
+				if (entry.getEntryKind() == IClasspathEntry.CPE_CONTAINER
+						&& containerGet(javaProject, path) == null) {
+					if (paths == null) {
+						paths = new HashSet();
+						allContainerPaths.put(javaProject, paths);
+					}
+					paths.add(path);
+				}
+			}
+			if (javaProject.equals(javaProjectToInit)) {
+				if (paths == null) {
+					paths = new HashSet();
+					allContainerPaths.put(javaProject, paths);
+				}
+				paths.add(containerToInit);
+			}
+		}
+		
+		// mark all containers as being initialized
+		this.containerInitializationInProgress.set(allContainerPaths);
+		
+		// initialize all containers
+		Set keys = allContainerPaths.keySet();
+		int length = keys.size();
+		IJavaProject[] javaProjects = new IJavaProject[length]; // clone as the following will have a side effect
+		keys.toArray(javaProjects);
+		for (int i = 0; i < length; i++) {
+			IJavaProject javaProject = javaProjects[i];
+			HashSet pathSet = (HashSet) allContainerPaths.get(javaProject);
+			if (pathSet == null) continue;
+			int length2 = pathSet.size();
+			IPath[] paths = new IPath[length2];
+			pathSet.toArray(paths); // clone as the following will have a side effect
+			for (int j = 0; j < length2; j++) {
+				IPath path = paths[j];
+				initializeContainer(javaProject, path);
+			}
+		}
+		
+		return containerGet(javaProjectToInit, containerToInit);
+	}
+

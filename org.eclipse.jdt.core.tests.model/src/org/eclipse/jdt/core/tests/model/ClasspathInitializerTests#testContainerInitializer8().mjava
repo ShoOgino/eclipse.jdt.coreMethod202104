@@ -1,0 +1,80 @@
+/*
+ * Ensure that the stack doesn't blow up if initializer is missbehaving
+ * (regression test for bug 61052 Flatten cp container initialization)
+ */
+public void testContainerInitializer8() throws CoreException {
+	final int projectLength = 10;
+	final String[] projects = new String[projectLength];
+	for (int i = 0; i < projectLength; i++) {
+		projects[i] = "P" + i;
+	}
+	try {
+		String[] projectRefs = new String[(projectLength-1) * 2];
+		for (int i = 0; i < projectLength-1; i++) {
+			projectRefs[i*2] = "P" + i;
+			projectRefs[(i*2)+1] = "/P" + i + "/test.jar";
+		}
+		ContainerInitializer.setInitializer(new DefaultContainerInitializer(projectRefs) {
+			void foo(int n) {
+				if (n > 0) {
+					foo(n-1);
+					return;
+				}
+				IWorkspaceRoot root = ResourcesPlugin.getWorkspace().getRoot();
+				for (int i = 0; i < projectLength-1; i++) {
+					try {
+						JavaCore.create(root.getProject(projects[i])).getResolvedClasspath(true);
+					} catch (JavaModelException e) {
+						// project doesn't exist: ignore
+					}
+				}
+			}
+			public void initialize(IPath containerPath, IJavaProject project) throws CoreException {
+				foo(500);
+				super.initialize(containerPath, project);
+			}
+		});
+		JavaCore.run(new IWorkspaceRunnable() {
+			public void run(IProgressMonitor monitor) throws CoreException {
+				for (int i = 0; i < projectLength; i++) {
+					createProject(projects[i]);
+					editFile(
+						"/" + projects[i] + "/.project",
+						"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + 
+						"<projectDescription>\n" + 
+						"	<name>" + projects[i] + "</name>\n" + 
+						"	<comment></comment>\n" + 
+						"	<projects>\n" + 
+						(i == 0 ? "" : "<project>" + projects[i-1] + "</project>\n") +
+						"	</projects>\n" + 
+						"	<buildSpec>\n" + 
+						"		<buildCommand>\n" + 
+						"			<name>org.eclipse.jdt.core.javabuilder</name>\n" + 
+						"			<arguments>\n" + 
+						"			</arguments>\n" + 
+						"		</buildCommand>\n" + 
+						"	</buildSpec>\n" + 
+						"	<natures>\n" + 
+						"		<nature>org.eclipse.jdt.core.javanature</nature>\n" + 
+						"	</natures>\n" + 
+						"</projectDescription>"
+					);
+					createFile(
+						"/" + projects[i] + "/.classpath",
+						"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+						"<classpath>\n" +
+						(i == 0 ? "" : "<classpathentry kind=\"src\" path=\"/" + projects[i-1] + "\"/>\n") +					 
+						"	<classpathentry kind=\"con\" path=\"org.eclipse.jdt.core.tests.model.TEST_CONTAINER\"/>\n" +
+						"	<classpathentry kind=\"output\" path=\"\"/>\n" +
+						"</classpath>"
+					);
+				}
+			}
+		}, null);
+		getJavaProject("P0").getResolvedClasspath(true);
+	} finally {
+		stopDeltas();
+		deleteProjects(projects);
+	}
+}
+
