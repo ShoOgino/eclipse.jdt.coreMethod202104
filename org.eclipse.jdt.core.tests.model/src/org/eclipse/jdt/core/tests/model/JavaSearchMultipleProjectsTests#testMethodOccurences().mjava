@@ -1,0 +1,50 @@
+/**
+ * Method occurences with 2 unrelated projects that contain the same source.
+ * (regression test for bug 33800 search: reporting too many method occurrences)
+ */
+public void testMethodOccurences() throws CoreException {
+	try {
+		// setup project P1
+		IJavaProject p1 = createJavaProject("P1");
+		createFolder("/P1/p");
+		createFile(
+			"/P1/p/I.java",
+			"package p;\n" +
+			"public interface I {\n" +
+			"    void method(Object o);\n" +
+			"}"
+		);
+		createFile(
+			"/P1/p/C.java",
+			"package p;\n" +
+			"public class C implements I {\n" +
+			"    void method(Object o) {\n" +
+			"    }\n" +
+			"}"
+		);
+		
+		// copy to project P2
+		p1.getProject().copy(new Path("/P2"), false, null);
+		IJavaProject p2 = getJavaProject("P2");
+		
+		IJavaSearchScope scope = SearchEngine.createJavaSearchScope(new IJavaElement[] {p1, p2});
+		JavaSearchResultCollector resultCollector = new JavaSearchResultCollector();
+		resultCollector.showProject = true;
+		IMethod method = getCompilationUnit("/P1/p/I.java").getType("I").getMethod("method", new String[] {"QObject;"});
+		new SearchEngine().search(
+			getWorkspace(), 
+			method,
+			ALL_OCCURRENCES, 
+			scope, 
+			resultCollector);
+		assertEquals(
+			"Unexpected occurences of method p.I.method(Object)",
+			"p/C.java [in P1] p.C.method(Object) -> void [method]\n" +
+			"p/I.java [in P1] p.I.method(Object) -> void [method]", 
+			resultCollector.toString());
+	} finally {
+		this.deleteProject("P1");
+		this.deleteProject("P2");
+	}
+}
+
