@@ -1,32 +1,41 @@
-	private void setUpFullSourceWorkspace() throws IOException, CoreException {
-		String fullSourceZipPath = getPluginDirectoryPath() + File.separator + "full-source-R3_0.zip";
+	/*
+	 * Set up full source workpsace from zip file.
+	 */
+	private static void setUpFullSourceWorkspace() throws IOException, CoreException {
 		IWorkspace workspace = ResourcesPlugin.getWorkspace();
 		final IWorkspaceRoot workspaceRoot = workspace.getRoot();
-		final String targetWorkspacePath = workspaceRoot.getLocation().toFile().getCanonicalPath();
+		if (workspaceRoot.getProjects().length == 0) {
+			String fullSourceZipPath = getPluginDirectoryPath() + File.separator + "full-source-R3_0.zip";
+			final String targetWorkspacePath = workspaceRoot.getLocation().toFile().getCanonicalPath();
+
+			if (DEBUG) System.out.print("Unzipping "+fullSourceZipPath+"...");
+			Util.unzip(fullSourceZipPath, targetWorkspacePath);
 		
-		Util.unzip(fullSourceZipPath, targetWorkspacePath);
-		
+			workspace.run(new IWorkspaceRunnable() {
+				public void run(IProgressMonitor monitor) throws CoreException {
+					File targetWorkspaceDir = new File(targetWorkspacePath);
+					String[] projectNames = targetWorkspaceDir.list();
+					for (int i = 0, length = projectNames.length; i < length; i++) {
+						String projectName = projectNames[i];
+						if (".metadata".equals(projectName)) continue;
+						IProject project = workspaceRoot.getProject(projectName);
+						project.create(monitor);
+						project.open(monitor);
+					}
+				}
+			}, null);
+			if (DEBUG) System.out.println("done!");
+		}
 		String jdkLib = Util.getJavaClassLibs()[0];
 		JavaCore.setClasspathVariable("JRE_LIB", new Path(jdkLib), null);
 		
-		workspace.run(new IWorkspaceRunnable() {
-			public void run(IProgressMonitor monitor) throws CoreException {
-				File targetWorkspaceDir = new File(targetWorkspacePath);
-				String[] projectNames = targetWorkspaceDir.list();
-				for (int i = 0, length = projectNames.length; i < length; i++) {
-					String projectName = projectNames[i];
-					if (".metadata".equals(projectName)) continue;
-					IProject project = workspaceRoot.getProject(projectName);
-					project.create(monitor);
-					project.open(monitor);
-				}
-			}
-		}, null);
-		
 		// workaround bug 73253 Project references not set on project open 
-		IJavaProject[] projects = JavaCore.create(workspaceRoot).getJavaProjects();
-		for (int i = 0, length = projects.length; i < length; i++) {
-			projects[i].setRawClasspath(projects[i].getRawClasspath(), null);
+		if (DEBUG) System.out.print("Set projects classpaths...");
+		ALL_PROJECTS = JavaCore.create(workspaceRoot).getJavaProjects();
+		int length = ALL_PROJECTS.length;
+		for (int i = 0; i < length; i++) {
+			ALL_PROJECTS[i].setRawClasspath(ALL_PROJECTS[i].getRawClasspath(), null);
 		}
+		if (DEBUG) System.out.println("done!");
 	}
 

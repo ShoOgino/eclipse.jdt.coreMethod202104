@@ -1,0 +1,63 @@
+	private void runAstCreation(int astLevel) throws JavaModelException {
+		tagAsSummary("AST Creation", Dimension.CPU_TIME);
+		int allExtendedStartPositions = 0;
+		int allExtendedEndPositions = 0;
+		int allNodesCount = 0;
+		startMeasuring();
+		if (DEBUG) System.out.println("Creating AST hierarchy for all units of projects:");
+		for (int i = 0; i < ALL_PROJECTS.length; i++) {
+			// Get project compilation units
+			if (DEBUG) System.out.print("\t- "+ALL_PROJECTS[i].getElementName());
+			List units = getProjectCompilationUnits(ALL_PROJECTS[i]);
+			int size = units.size();
+			if (size == 0) {
+				if (DEBUG) System.out.println(": empty!");
+				continue;
+			}
+			List unitsArrays = splitListInSmallArrays(units, 20);
+			int n = unitsArrays.size();
+			if (DEBUG)
+				if (n==1)
+					System.out.print(": "+size+" units to proceed ("+n+" step): ");
+				else
+					System.out.print(": "+size+" units to proceed ("+n+" steps): ");
+			while (unitsArrays.size() > 0) {
+				ICompilationUnit[] unitsArray = (ICompilationUnit[]) unitsArrays.remove(0);
+				if (DEBUG) System.out.print('.');
+				int length = unitsArray.length;
+				CompilationUnit[] compilationUnits = new CompilationUnit[length];
+				// Create AST tree
+				for (int ptr=0; ptr<length; ptr++) {
+					ICompilationUnit unit = unitsArray[ptr];
+					unitsArray[ptr] = null; // release memory handle
+					ASTParser parser = ASTParser.newParser(astLevel);
+					parser.setSource(unit);
+					parser.setResolveBindings(false);
+					ASTNode result = parser.createAST(null);
+					assertEquals("Wrong type for node"+result, result.getNodeType(), ASTNode.COMPILATION_UNIT);
+					compilationUnits[ptr] = (CompilationUnit) result;
+				}
+				for (int ptr=0; ptr<length; ptr++) {
+					CommentMapperASTVisitor visitor = new CommentMapperASTVisitor(compilationUnits[ptr]);
+					compilationUnits[ptr].accept(visitor);
+					allExtendedStartPositions += visitor.extendedStartPositions;
+					allExtendedEndPositions += visitor.extendedEndPositions;
+					allNodesCount += visitor.nodesCount;
+				}
+			}
+			if (DEBUG) System.out.println(" done!");
+		}
+		stopMeasuring();
+		commitMeasurements();
+		assertPerformance();
+
+		// Print statistics
+		System.out.println("-------------------------------------");
+		System.out.println("DOM/AST creation performance test statistics:");
+		NumberFormat intFormat = NumberFormat.getIntegerInstance();
+		System.out.println("  - "+intFormat.format(allNodesCount)+" nodes have been parsed.");
+		System.out.println("  - "+intFormat.format(allExtendedStartPositions)+" nodes have extended start position.");
+		System.out.println("  - "+intFormat.format(allExtendedEndPositions)+" nodes have extended end position.");
+		System.out.println("-------------------------------------\n");
+	}
+
