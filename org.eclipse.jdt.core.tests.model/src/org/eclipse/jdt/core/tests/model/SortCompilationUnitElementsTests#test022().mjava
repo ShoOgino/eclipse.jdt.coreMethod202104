@@ -1,0 +1,345 @@
+// https://bugs.eclipse.org/bugs/show_bug.cgi?id=80036
+public void test022() throws CoreException {
+	try {
+		this.createFile(
+			"/P/src/BuildUtilities.java",
+			"/**********************************************************************\n" +
+			" * Copyright (c) 2004 IBM Corporation and others. All rights reserved.   This\n" +
+			" * program and the accompanying materials are made available under the terms of\n" +
+			" * the Common Public License v1.0 which accompanies this distribution, and is\n" +
+			" * available at http://www.eclipse.org/legal/cpl-v10.html\n" +
+			" * \n" +
+			" * Contributors: \n" +
+			" * IBM - Initial API and implementation\n" +
+			" **********************************************************************/\n" +
+			"import java.util.HashSet;\n" +
+			"import org.eclipse.core.resources.ICommand;\n" +
+			"import org.eclipse.core.resources.IProject;\n" +
+			"import org.eclipse.core.resources.IProjectDescription;\n" +
+			"import org.eclipse.core.resources.IResource;\n" +
+			"import org.eclipse.core.resources.IncrementalProjectBuilder;\n" +
+			"import org.eclipse.core.resources.ResourcesPlugin;\n" +
+			"import org.eclipse.core.runtime.CoreException;\n" +
+			"import org.eclipse.core.runtime.IAdaptable;\n" +
+			"import org.eclipse.jface.viewers.ISelection;\n" +
+			"import org.eclipse.jface.viewers.IStructuredSelection;\n" +
+			"import org.eclipse.ui.IEditorInput;\n" +
+			"import org.eclipse.ui.IEditorPart;\n" +
+			"import org.eclipse.ui.IFileEditorInput;\n" +
+			"import org.eclipse.ui.IWorkbenchPart;\n" +
+			"import org.eclipse.ui.IWorkbenchWindow;\n" +
+			"\n" +
+			"/**\n" +
+			" * This class contains convenience methods used by the various build commands\n" +
+			" * to determine enablement.  These utilities cannot be factored into a common\n" +
+			" * class because some build actions are API and some are not.\n" +
+			" * \n" +
+			" * @since 3.1\n" +
+			" */\n" +
+			"public class BuildUtilities {\n" +
+			"	/**\n" +
+			"	 * Extracts the selected projects from a selection.\n" +
+			"	 * \n" +
+			"	 * @param selection The selection to analyze\n" +
+			"	 * @return The selected projects\n" +
+			"	 */\n" +
+			"	public static IProject[] extractProjects(Object[] selection) {\n" +
+			"		HashSet projects = new HashSet();\n" +
+			"		for (int i = 0; i < selection.length; i++) {\n" +
+			"			if (selection[i] instanceof IResource) {\n" +
+			"				projects.add(((IResource) selection[i]).getProject());\n" +
+			"			} else if (selection[i] instanceof IAdaptable) {\n" +
+			"				IAdaptable adaptable = (IAdaptable) selection[i];\n" +
+			"				IResource resource = (IResource) adaptable.getAdapter(IResource.class);\n" +
+			"				if (resource != null)\n" +
+			"					projects.add(resource.getProject());\n" +
+			"			}\n" +
+			"		}\n" +
+			"		return (IProject[]) projects.toArray(new IProject[projects.size()]);\n" +
+			"	}\n" +
+			"\n" +
+			"	/**\n" +
+			"	 * Finds and returns the selected projects in the given window\n" +
+			"	 * \n" +
+			"	 * @param window The window to find the selection in\n" +
+			"	 * @return The selected projects, or an empty array if no selection could be found.\n" +
+			"	 */\n" +
+			"	public static IProject[] findSelectedProjects(IWorkbenchWindow window) {\n" +
+			"		if (window == null)\n" +
+			"			return new IProject[0];\n" +
+			"		ISelection selection = window.getSelectionService().getSelection();\n" +
+			"		IProject[] selected = null;\n" +
+			"		if (selection != null && !selection.isEmpty() && selection instanceof IStructuredSelection) {\n" +
+			"			selected = extractProjects(((IStructuredSelection) selection).toArray());\n" +
+			"		} else {\n" +
+			"			//see if we can extract a selected project from the active editor\n" +
+			"			IWorkbenchPart part = window.getPartService().getActivePart();\n" +
+			"			if (part instanceof IEditorPart) {\n" +
+			"				IEditorInput input = ((IEditorPart) part).getEditorInput();\n" +
+			"				if (input instanceof IFileEditorInput)\n" +
+			"					selected = new IProject[] {((IFileEditorInput) input).getFile().getProject()};\n" +
+			"			}\n" +
+			"		}\n" +
+			"		if (selected == null)\n" +
+			"			selected = new IProject[0];\n" +
+			"		return selected;\n" +
+			"	}\n" +
+			"\n" +
+			"	/**\n" +
+			"	 * Returns whether the workspace has a builder installed that responds\n" +
+			"	 * to the given trigger.\n" +
+			"	 */\n" +
+			"	static boolean hasBuilder(int trigger) {\n" +
+			"		IProject[] projects = ResourcesPlugin.getWorkspace().getRoot().getProjects();\n" +
+			"		boolean builderFound = false;\n" +
+			"		for (int i = 0; i < projects.length; i++) {\n" +
+			"			if (!projects[i].isAccessible())\n" +
+			"				continue;\n" +
+			"			try {\n" +
+			"				IProjectDescription description = projects[i].getDescription();\n" +
+			"				ICommand[] buildSpec = description.getBuildSpec();\n" +
+			"				for (int j = 0; j < buildSpec.length; j++) {\n" +
+			"					builderFound = true;\n" +
+			"					if (!buildSpec[j].isBuilding(trigger))\n" +
+			"						return true;\n" +
+			"				}\n" +
+			"			} catch (CoreException e) {\n" +
+			"				//ignore projects that are not available\n" +
+			"			}\n" +
+			"		}\n" +
+			"		//enable building if there are any accessible projects with builders\n" +
+			"		return builderFound;\n" +
+			"\n" +
+			"	}\n" +
+			"\n" +
+			"	/**\n" +
+			"	 * Returns whether the selection of projects is being managed by autobuild.\n" +
+			"	 * \n" +
+			"	 * @param projects The projects to examine\n" +
+			"	 * @return <code>true</code> if the projects are being managed by\n" +
+			"	 * autobuild, and <code>false</code> otherwise.\n" +
+			"	 */\n" +
+			"	public static boolean isAutoBuilding(IProject[] projects) {\n" +
+			"		if (!ResourcesPlugin.getWorkspace().isAutoBuilding())\n" +
+			"			return false;\n" +
+			"		\n" +
+			"	/**\n" +
+			"	 * Returns whether one of the projects has a builder whose trigger setting\n" +
+			"	 * for the given trigger matches the given value.\n" +
+			"	 * \n" +
+			"	 * @param projects The projects to check\n" +
+			"	 * @param trigger The trigger to look for\n" +
+			"	 * @param value The trigger value to look for\n" +
+			"	 * @return <code>true</code> if one of the projects has a builder whose\n" +
+			"	 * trigger activation matches the provided value, and <code>false</code> otherwise.\n" +
+			"	 */\n" +
+			"	private static boolean matchingTrigger(IProject[] projects, int trigger, boolean value) {\n" +
+			"		for (int i = 0; i < projects.length; i++) {\n" +
+			"			if (!projects[i].isAccessible())\n" +
+			"				continue;\n" +
+			"			try {\n" +
+			"				IProjectDescription description = projects[i].getDescription();\n" +
+			"				ICommand[] buildSpec = description.getBuildSpec();\n" +
+			"				for (int j = 0; j < buildSpec.length; j++) {\n" +
+			"					if (buildSpec[j].isBuilding(trigger) == value)\n" +
+			"						return true;\n" +
+			"				}\n" +
+			"			} catch (CoreException e) {\n" +
+			"				//ignore projects that are not available\n" +
+			"			}\n" +
+			"		}\n" +
+			"		return false;\n" +
+			"	}\n" +
+			"\n" +
+			"	/**\n" +
+			"	 * Returns whether a build command with the given trigger should\n" +
+			"	 * be enabled for the given selection.\n" +
+			"	 * @param projects The projects to use to determine enablement\n" +
+			"	 * @param trigger The build trigger (<code>IncrementalProjectBuilder.*_BUILD</code> constants).\n" +
+			"	 * @return <code>true</code> if the action should be enabled, and\n" +
+			"	 * <code>false</code> otherwise.\n" +
+			"	 */\n" +
+			"	public static boolean isEnabled(IProject[] projects, int trigger) {\n" +
+			"		return true;\n" +
+			"	}\n" +
+			"\n" +
+			"	/**\n" +
+			"	 * Doesn\'t need to be instantiated\n" +
+			"	 */\n" +
+			"	private BuildUtilities() {\n" +
+			"	}\n" +
+			"}"
+		);
+		String expectedResult = 
+			"/**********************************************************************\n" +
+			" * Copyright (c) 2004 IBM Corporation and others. All rights reserved.   This\n" +
+			" * program and the accompanying materials are made available under the terms of\n" +
+			" * the Common Public License v1.0 which accompanies this distribution, and is\n" +
+			" * available at http://www.eclipse.org/legal/cpl-v10.html\n" +
+			" * \n" +
+			" * Contributors: \n" +
+			" * IBM - Initial API and implementation\n" +
+			" **********************************************************************/\n" +
+			"import java.util.HashSet;\n" +
+			"import org.eclipse.core.resources.ICommand;\n" +
+			"import org.eclipse.core.resources.IProject;\n" +
+			"import org.eclipse.core.resources.IProjectDescription;\n" +
+			"import org.eclipse.core.resources.IResource;\n" +
+			"import org.eclipse.core.resources.IncrementalProjectBuilder;\n" +
+			"import org.eclipse.core.resources.ResourcesPlugin;\n" +
+			"import org.eclipse.core.runtime.CoreException;\n" +
+			"import org.eclipse.core.runtime.IAdaptable;\n" +
+			"import org.eclipse.jface.viewers.ISelection;\n" +
+			"import org.eclipse.jface.viewers.IStructuredSelection;\n" +
+			"import org.eclipse.ui.IEditorInput;\n" +
+			"import org.eclipse.ui.IEditorPart;\n" +
+			"import org.eclipse.ui.IFileEditorInput;\n" +
+			"import org.eclipse.ui.IWorkbenchPart;\n" +
+			"import org.eclipse.ui.IWorkbenchWindow;\n" +
+			"\n" +
+			"/**\n" +
+			" * This class contains convenience methods used by the various build commands\n" +
+			" * to determine enablement.  These utilities cannot be factored into a common\n" +
+			" * class because some build actions are API and some are not.\n" +
+			" * \n" +
+			" * @since 3.1\n" +
+			" */\n" +
+			"public class BuildUtilities {\n" +
+			"	/**\n" +
+			"	 * Extracts the selected projects from a selection.\n" +
+			"	 * \n" +
+			"	 * @param selection The selection to analyze\n" +
+			"	 * @return The selected projects\n" +
+			"	 */\n" +
+			"	public static IProject[] extractProjects(Object[] selection) {\n" +
+			"		HashSet projects = new HashSet();\n" +
+			"		for (int i = 0; i < selection.length; i++) {\n" +
+			"			if (selection[i] instanceof IResource) {\n" +
+			"				projects.add(((IResource) selection[i]).getProject());\n" +
+			"			} else if (selection[i] instanceof IAdaptable) {\n" +
+			"				IAdaptable adaptable = (IAdaptable) selection[i];\n" +
+			"				IResource resource = (IResource) adaptable.getAdapter(IResource.class);\n" +
+			"				if (resource != null)\n" +
+			"					projects.add(resource.getProject());\n" +
+			"			}\n" +
+			"		}\n" +
+			"		return (IProject[]) projects.toArray(new IProject[projects.size()]);\n" +
+			"	}\n" +
+			"\n" +
+			"	/**\n" +
+			"	 * Finds and returns the selected projects in the given window\n" +
+			"	 * \n" +
+			"	 * @param window The window to find the selection in\n" +
+			"	 * @return The selected projects, or an empty array if no selection could be found.\n" +
+			"	 */\n" +
+			"	public static IProject[] findSelectedProjects(IWorkbenchWindow window) {\n" +
+			"		if (window == null)\n" +
+			"			return new IProject[0];\n" +
+			"		ISelection selection = window.getSelectionService().getSelection();\n" +
+			"		IProject[] selected = null;\n" +
+			"		if (selection != null && !selection.isEmpty() && selection instanceof IStructuredSelection) {\n" +
+			"			selected = extractProjects(((IStructuredSelection) selection).toArray());\n" +
+			"		} else {\n" +
+			"			//see if we can extract a selected project from the active editor\n" +
+			"			IWorkbenchPart part = window.getPartService().getActivePart();\n" +
+			"			if (part instanceof IEditorPart) {\n" +
+			"				IEditorInput input = ((IEditorPart) part).getEditorInput();\n" +
+			"				if (input instanceof IFileEditorInput)\n" +
+			"					selected = new IProject[] {((IFileEditorInput) input).getFile().getProject()};\n" +
+			"			}\n" +
+			"		}\n" +
+			"		if (selected == null)\n" +
+			"			selected = new IProject[0];\n" +
+			"		return selected;\n" +
+			"	}\n" +
+			"\n" +
+			"	/**\n" +
+			"	 * Returns whether the workspace has a builder installed that responds\n" +
+			"	 * to the given trigger.\n" +
+			"	 */\n" +
+			"	static boolean hasBuilder(int trigger) {\n" +
+			"		IProject[] projects = ResourcesPlugin.getWorkspace().getRoot().getProjects();\n" +
+			"		boolean builderFound = false;\n" +
+			"		for (int i = 0; i < projects.length; i++) {\n" +
+			"			if (!projects[i].isAccessible())\n" +
+			"				continue;\n" +
+			"			try {\n" +
+			"				IProjectDescription description = projects[i].getDescription();\n" +
+			"				ICommand[] buildSpec = description.getBuildSpec();\n" +
+			"				for (int j = 0; j < buildSpec.length; j++) {\n" +
+			"					builderFound = true;\n" +
+			"					if (!buildSpec[j].isBuilding(trigger))\n" +
+			"						return true;\n" +
+			"				}\n" +
+			"			} catch (CoreException e) {\n" +
+			"				//ignore projects that are not available\n" +
+			"			}\n" +
+			"		}\n" +
+			"		//enable building if there are any accessible projects with builders\n" +
+			"		return builderFound;\n" +
+			"\n" +
+			"	}\n" +
+			"\n" +
+			"	/**\n" +
+			"	 * Returns whether the selection of projects is being managed by autobuild.\n" +
+			"	 * \n" +
+			"	 * @param projects The projects to examine\n" +
+			"	 * @return <code>true</code> if the projects are being managed by\n" +
+			"	 * autobuild, and <code>false</code> otherwise.\n" +
+			"	 */\n" +
+			"	public static boolean isAutoBuilding(IProject[] projects) {\n" +
+			"		if (!ResourcesPlugin.getWorkspace().isAutoBuilding())\n" +
+			"			return false;\n" +
+			"		\n" +
+			"	/**\n" +
+			"	 * Returns whether a build command with the given trigger should\n" +
+			"	 * be enabled for the given selection.\n" +
+			"	 * @param projects The projects to use to determine enablement\n" +
+			"	 * @param trigger The build trigger (<code>IncrementalProjectBuilder.*_BUILD</code> constants).\n" +
+			"	 * @return <code>true</code> if the action should be enabled, and\n" +
+			"	 * <code>false</code> otherwise.\n" +
+			"	 */\n" +
+			"	public static boolean isEnabled(IProject[] projects, int trigger) {\n" +
+			"		return true;\n" +
+			"	}\n" +
+			"\n" +
+			"	/**\n" +
+			"	 * Returns whether one of the projects has a builder whose trigger setting\n" +
+			"	 * for the given trigger matches the given value.\n" +
+			"	 * \n" +
+			"	 * @param projects The projects to check\n" +
+			"	 * @param trigger The trigger to look for\n" +
+			"	 * @param value The trigger value to look for\n" +
+			"	 * @return <code>true</code> if one of the projects has a builder whose\n" +
+			"	 * trigger activation matches the provided value, and <code>false</code> otherwise.\n" +
+			"	 */\n" +
+			"	private static boolean matchingTrigger(IProject[] projects, int trigger, boolean value) {\n" +
+			"		for (int i = 0; i < projects.length; i++) {\n" +
+			"			if (!projects[i].isAccessible())\n" +
+			"				continue;\n" +
+			"			try {\n" +
+			"				IProjectDescription description = projects[i].getDescription();\n" +
+			"				ICommand[] buildSpec = description.getBuildSpec();\n" +
+			"				for (int j = 0; j < buildSpec.length; j++) {\n" +
+			"					if (buildSpec[j].isBuilding(trigger) == value)\n" +
+			"						return true;\n" +
+			"				}\n" +
+			"			} catch (CoreException e) {\n" +
+			"				//ignore projects that are not available\n" +
+			"			}\n" +
+			"		}\n" +
+			"		return false;\n" +
+			"	}\n" +
+			"\n" +
+			"	/**\n" +
+			"	 * Doesn\'t need to be instantiated\n" +
+			"	 */\n" +
+			"	private BuildUtilities() {\n" +
+			"	}\n" +
+			"}";
+		sortUnit(this.getCompilationUnit("/P/src/BuildUtilities.java"), expectedResult);
+	} finally {
+		this.deleteFile("/P/src/BuildUtilities.java");
+	}
+}
+

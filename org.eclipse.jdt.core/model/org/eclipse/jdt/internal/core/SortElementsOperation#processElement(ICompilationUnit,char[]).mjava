@@ -1,0 +1,121 @@
+	/**
+	 * Method processElement.
+	 * @param unit
+	 * @param source
+	 */
+	private String processElement(ICompilationUnit unit, char[] source) {
+		CompilerOptions options = new CompilerOptions(unit.getJavaProject().getOptions(true));
+		ASTParser parser = ASTParser.newParser(AST.JLS3);
+		parser.setCompilerOptions(options.getMap());
+		parser.setSource(source);
+		parser.setKind(ASTParser.K_COMPILATION_UNIT);
+		parser.setResolveBindings(false);
+		org.eclipse.jdt.core.dom.CompilationUnit domUnit = (org.eclipse.jdt.core.dom.CompilationUnit) parser.createAST(null);
+		final AST localAst = domUnit.getAST();
+		final ASTRewrite rewriter = ASTRewrite.create(localAst);
+		RangeMarker[] markers = null;
+		
+		final boolean needPositionsMapping = this.positions != null;
+		if (needPositionsMapping) {
+			markers = new RangeMarker[this.positions.length];
+			for (int i= 0; i < this.positions.length; i++) {
+				markers[i]= new RangeMarker(this.positions[i], 0);
+			}
+		}
+		String generatedSource = new String(source);
+		Document document = new Document(generatedSource);
+		domUnit.accept(new ASTVisitor() {
+			public boolean visit(org.eclipse.jdt.core.dom.CompilationUnit compilationUnit) {
+				ListRewrite listRewrite = rewriter.getListRewrite(compilationUnit, org.eclipse.jdt.core.dom.CompilationUnit.TYPES_PROPERTY);
+				List myCopy = new ArrayList();
+				List types = compilationUnit.types();
+				final int length = types.size();
+				myCopy.addAll(types);
+				Collections.sort(myCopy, SortElementsOperation.this.comparator);
+				for (int i = 0; i < length; i++) {
+					listRewrite.replace((ASTNode) types.get(i), rewriter.createMoveTarget((ASTNode) myCopy.get(i)), null);
+				}
+				return true;
+			}
+			public boolean visit(AnnotationTypeDeclaration annotationTypeDeclaration) {
+				ListRewrite listRewrite = rewriter.getListRewrite(annotationTypeDeclaration, AnnotationTypeDeclaration.BODY_DECLARATIONS_PROPERTY);
+				List myCopy = new ArrayList();
+				List bodyDeclarations = annotationTypeDeclaration.bodyDeclarations();
+				final int length = bodyDeclarations.size();
+				myCopy.addAll(bodyDeclarations);
+				Collections.sort(myCopy, SortElementsOperation.this.comparator);
+				for (int i = 0; i < length; i++) {
+					listRewrite.replace((ASTNode) bodyDeclarations.get(i), rewriter.createMoveTarget((ASTNode) myCopy.get(i)), null);
+				}
+				return true;
+			}
+
+			public boolean visit(AnonymousClassDeclaration anonymousClassDeclaration) {
+				ListRewrite listRewrite = rewriter.getListRewrite(anonymousClassDeclaration, AnonymousClassDeclaration.BODY_DECLARATIONS_PROPERTY);
+				List myCopy = new ArrayList();
+				List bodyDeclarations = anonymousClassDeclaration.bodyDeclarations();
+				final int length = bodyDeclarations.size();
+				myCopy.addAll(bodyDeclarations);
+				Collections.sort(myCopy, SortElementsOperation.this.comparator);
+				for (int i = 0; i < length; i++) {
+					listRewrite.replace((ASTNode) bodyDeclarations.get(i), rewriter.createMoveTarget((ASTNode) myCopy.get(i)), null);
+				}
+				return true;
+			}
+			
+			public boolean visit(TypeDeclaration typeDeclaration) {
+				ListRewrite listRewrite = rewriter.getListRewrite(typeDeclaration, TypeDeclaration.BODY_DECLARATIONS_PROPERTY);
+				List myCopy = new ArrayList();
+				List bodyDeclarations = typeDeclaration.bodyDeclarations();
+				final int length = bodyDeclarations.size();
+				myCopy.addAll(bodyDeclarations);
+				Collections.sort(myCopy, SortElementsOperation.this.comparator);
+				for (int i = 0; i < length; i++) {
+					listRewrite.replace((ASTNode) bodyDeclarations.get(i), rewriter.createMoveTarget((ASTNode) myCopy.get(i)), null);
+				}
+				return true;
+			}
+
+			public boolean visit(EnumDeclaration enumDeclaration) {
+				ListRewrite listRewrite = rewriter.getListRewrite(enumDeclaration, EnumDeclaration.BODY_DECLARATIONS_PROPERTY);
+				List myCopy = new ArrayList();
+				List bodyDeclarations = enumDeclaration.bodyDeclarations();
+				int length = bodyDeclarations.size();
+				myCopy.addAll(bodyDeclarations);
+				Collections.sort(myCopy, SortElementsOperation.this.comparator);
+				for (int i = 0; i < length; i++) {
+					listRewrite.replace((ASTNode) bodyDeclarations.get(i), rewriter.createMoveTarget((ASTNode) myCopy.get(i)), null);
+				}
+				
+				listRewrite = rewriter.getListRewrite(enumDeclaration, EnumDeclaration.ENUM_CONSTANTS_PROPERTY);
+				myCopy = new ArrayList();
+				List enumConstants = enumDeclaration.enumConstants();
+				length = enumConstants.size();
+				myCopy.addAll(enumConstants);
+				Collections.sort(myCopy, SortElementsOperation.this.comparator);
+				for (int i = 0; i < length; i++) {
+					listRewrite.replace((ASTNode) enumConstants.get(i), rewriter.createMoveTarget((ASTNode) myCopy.get(i)), null);
+				}
+				return true;
+			}
+		});			
+		TextEdit edits = rewriter.rewriteAST(document, null);
+		if (needPositionsMapping) {
+			for (int i = 0, max = markers.length; i < max; i++) {
+				insert(edits, markers[i]);
+			}
+		}
+		try {
+			edits.apply(document, TextEdit.UPDATE_REGIONS);
+			generatedSource = document.get();
+			if (needPositionsMapping) {
+				for (int i= 0, max = markers.length; i < max; i++) {
+					this.positions[i]= markers[i].getOffset();
+				}
+			}
+		} catch (BadLocationException e) {
+			// ignore
+		}
+		return generatedSource;
+	}
+
