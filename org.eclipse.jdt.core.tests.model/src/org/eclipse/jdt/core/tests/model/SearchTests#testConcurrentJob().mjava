@@ -2,7 +2,7 @@
  * Ensure that performing a concurrent job while indexing a jar doesn't use the old index.
  * (regression test for bug 35306 Index update request can be incorrectly handled)
  */
-public void testConcurrentJob() throws CoreException, InterruptedException, IOException {
+public void testConcurrentJob() throws CoreException, InterruptedException, IOException, TimeOutException {
 	IndexManager indexManager = JavaModelManager.getJavaModelManager().getIndexManager();
 	WaitingJob job = new WaitingJob();
 	try {
@@ -18,7 +18,7 @@ public void testConcurrentJob() throws CoreException, InterruptedException, IOEx
 		// add waiting job and wait for it to be executed
 		indexManager.request(job);
 		indexManager.enable();
-		job.waitForJobToStart(); // job is suspended here
+		job.startingSem.acquire(30000); // wait for job to start (wait 30s max)
 				
 		final IJavaProject project = getJavaProject("P1");
 			
@@ -55,13 +55,13 @@ public void testConcurrentJob() throws CoreException, InterruptedException, IOEx
 		thread.start();
 			
 		// wait for concurrent job to start
-		monitor.suspend();
+		monitor.sem.acquire(30000); // wait 30s max
 
 		// change jar contents
 		getFile("/P1/jclMin.jar").setContents(new FileInputStream(getExternalJCLPathString()), IResource.NONE, null);
 			
 		// resume waiting job
-		job.resume();
+		job.runningSem.release();
 		
 		// wait for concurrent job to finish
 		thread.join(10000); // 10s max
@@ -69,7 +69,7 @@ public void testConcurrentJob() throws CoreException, InterruptedException, IOEx
 		assertTrue("Failed to get all types", success[0]);
 				
 	} finally {
-		job.resume();
+		job.runningSem.release();
 		deleteProject("P1");
 		indexManager.enable();
 	}
