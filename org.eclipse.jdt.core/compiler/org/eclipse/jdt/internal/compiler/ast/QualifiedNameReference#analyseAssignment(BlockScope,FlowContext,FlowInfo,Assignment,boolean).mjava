@@ -7,28 +7,24 @@
 
 		// determine the rank until which we now we do not need any actual value for the field access
 		int otherBindingsCount = otherBindings == null ? 0 : otherBindings.length;
-		int indexOfFirstValueRequired = otherBindingsCount;
-		while (indexOfFirstValueRequired > 0) {
-			FieldBinding otherBinding = otherBindings[indexOfFirstValueRequired - 1];
-			if (otherBinding.isStatic())
-				break; // no longer need any value before this point
-			indexOfFirstValueRequired--;
-		}
-		FieldBinding lastFieldBinding = null;
-		if ((bits & FIELD) != 0) {
-			// reading from a field
-			// check if final blank field
-			if ((lastFieldBinding = (FieldBinding) binding).isBlankFinal()
-			    && this.otherBindings != null // the last field binding is only assigned
- 				&& currentScope.allowBlankFinalFieldAssignment(lastFieldBinding)) {
-				if (!flowInfo.isDefinitelyAssigned(lastFieldBinding)) {
-					currentScope.problemReporter().uninitializedBlankFinalField(
-						lastFieldBinding,
-						this);
+		boolean needValue = otherBindingsCount == 0 || !this.otherBindings[0].isStatic();
+		switch (bits & RestrictiveFlagMASK) {
+			case FIELD : // reading a field
+				lastFieldBinding = (FieldBinding) binding;
+				if (needValue) {
+					manageSyntheticReadAccessIfNecessary(currentScope, lastFieldBinding, this.actualReceiverType, 0);
+				}				// check if final blank field
+				if (lastFieldBinding.isBlankFinal()
+				    && this.otherBindings != null // the last field binding is only assigned
+	 				&& currentScope.allowBlankFinalFieldAssignment(lastFieldBinding)) {
+					if (!flowInfo.isDefinitelyAssigned(lastFieldBinding)) {
+						currentScope.problemReporter().uninitializedBlankFinalField(
+							lastFieldBinding,
+							this);
+					}
 				}
-			}
-		} else {
-			if ((bits & LOCAL) != 0) {
+				break;
+			case LOCAL :
 				// first binding is a local variable
 				LocalVariableBinding localBinding;
 				if (!flowInfo
@@ -40,37 +36,30 @@
 				} else if (localBinding.useFlag == LocalVariableBinding.UNUSED) {
 					localBinding.useFlag = LocalVariableBinding.FAKE_USED;
 				}
-			}
 		}
-		if (indexOfFirstValueRequired == 0) {
+		
+		if (needValue) {
 			manageEnclosingInstanceAccessIfNecessary(currentScope);
 			// only for first binding
 		}
 		// all intermediate field accesses are read accesses
 		if (otherBindings != null) {
-			int start = indexOfFirstValueRequired == 0 ? 0 : indexOfFirstValueRequired - 1;
-			for (int i = start; i < otherBindingsCount; i++) {
-				if (lastFieldBinding != null) { // could be null if first was a local variable
-					TypeBinding lastReceiverType;
-					switch(i){
-						case 0 :
-							lastReceiverType = this.actualReceiverType;
-							break;
-						case 1 :
-							lastReceiverType = ((VariableBinding)binding).type;
-							break;
-						default :
-							lastReceiverType = otherBindings[i-2].type;
-					}
+			for (int i = 0; i < otherBindingsCount-1; i++) {
+				lastFieldBinding = otherBindings[i];
+				needValue = !otherBindings[i+1].isStatic();
+				if (needValue) {
 					manageSyntheticReadAccessIfNecessary(
 						currentScope, 
 						lastFieldBinding, 
-						lastReceiverType,
-						i);
+						i == 0 
+							? ((VariableBinding)binding).type
+							: otherBindings[i-1].type,
+						i + 1);
 				}
-				lastFieldBinding = otherBindings[i];
 			}
+			lastFieldBinding = otherBindings[otherBindingsCount-1];
 		}
+
 		if (isCompound) {
 			if (binding == lastFieldBinding
 				&& lastFieldBinding.isBlankFinal()

@@ -6,21 +6,11 @@
 			
 		// determine the rank until which we now we do not need any actual value for the field access
 		int otherBindingsCount = otherBindings == null ? 0 : otherBindings.length;
-		int indexOfFirstValueRequired;
-		if (valueRequired) {
-			indexOfFirstValueRequired = otherBindingsCount;
-			while (indexOfFirstValueRequired > 0) {
-				FieldBinding otherBinding = otherBindings[indexOfFirstValueRequired - 1];
-				if (otherBinding.isStatic())
-					break; // no longer need any value before this point
-				indexOfFirstValueRequired--;
-			}
-		} else {
-			indexOfFirstValueRequired = otherBindingsCount + 1;
-		}
+
+		boolean needValue = otherBindingsCount == 0 ? valueRequired : !this.otherBindings[0].isStatic();
 		switch (bits & RestrictiveFlagMASK) {
 			case FIELD : // reading a field
-				if (indexOfFirstValueRequired == 0) {
+				if (needValue) {
 					manageSyntheticReadAccessIfNecessary(currentScope, (FieldBinding) binding, this.actualReceiverType, 0);
 				}
 				// check if reading a final blank field
@@ -45,20 +35,22 @@
 					localBinding.useFlag = LocalVariableBinding.FAKE_USED;
 				}
 		}
-		if (indexOfFirstValueRequired == 0) {
+		if (needValue) {
 			manageEnclosingInstanceAccessIfNecessary(currentScope);
 			// only for first binding
 		}
 		if (otherBindings != null) {
-			int start = indexOfFirstValueRequired == 0 ? 0 : indexOfFirstValueRequired - 1;
-			for (int i = start; i < otherBindingsCount; i++) {
-				manageSyntheticReadAccessIfNecessary(
-					currentScope, 
-					otherBindings[i], 
-					i == 0 
-						? ((VariableBinding)binding).type
-						: otherBindings[i-1].type,
-					i + 1);
+			for (int i = 0; i < otherBindingsCount; i++) {
+				needValue = i < otherBindingsCount-1 ? !otherBindings[i+1].isStatic() : valueRequired;
+				if (needValue) {
+					manageSyntheticReadAccessIfNecessary(
+						currentScope, 
+						otherBindings[i], 
+						i == 0 
+							? ((VariableBinding)binding).type
+							: otherBindings[i-1].type,
+						i + 1);
+				}
 			}
 		}
 		return flowInfo;
