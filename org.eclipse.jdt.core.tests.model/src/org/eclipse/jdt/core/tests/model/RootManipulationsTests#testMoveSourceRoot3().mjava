@@ -1,0 +1,55 @@
+/*
+ * Ensure that moving a source root to another project triggers the right delta
+ * and doesn't move a nested source folder.
+ */
+public void testMoveSourceRoot3() throws CoreException {
+	try {
+		IJavaProject p1 = this.createJavaProject("P1", new String[] {}, "bin");
+		p1.setRawClasspath(createClasspath(new String[] {"/P1/src1", "src2/**", "/P1/src1/src2", ""}), null);
+		this.createJavaProject("P2", new String[] {}, "bin");
+		this.createFolder("/P1/src1/p");
+		this.createFile(
+			"/P1/src1/p/X.java", 
+			"package p;\n" +
+			"public class X {\n" +
+			"}"
+		);
+		this.createFolder("/P1/src1/src2/q");
+		this.createFile(
+			"/P1/src1/src2/q/Y.java", 
+			"package q;\n" +
+			"public class Y {\n" +
+			"}"
+		);
+		IPackageFragmentRoot root = this.getPackageFragmentRoot("/P1/src1");
+		ICompilationUnit x = this.getCompilationUnit("/P1/src1/p/X.java");
+		ICompilationUnit y = this.getCompilationUnit("/P1/src1/src2/q/Y.java");
+		this.startDeltas();
+		root.move(new Path("/P2/src1"), IResource.NONE, true, null, null);
+		
+		assertDeltas(
+			"Unexpected delta",
+			"P2[*]: {CHILDREN}\n" + 
+			"	src1[+]: {}\n" + 
+			"	ResourceDelta(/P2/.classpath)[*]\n" + 
+			"P1[*]: {CHILDREN}\n" + 
+			"	src1[*]: {REMOVED FROM CLASSPATH}\n" + 
+			"	ResourceDelta(/P1/.classpath)[*]\n" + 
+			"	ResourceDelta(/P1/.project)[*]\n" + 
+			"	ResourceDelta(/P1/src1)[*]"
+		);
+		
+		assertTrue("Original X.java should not exist", !x.exists());
+		x = getCompilationUnit("/P2/src1/p/X.java");
+		assertTrue("Destination X.java should exist", x.exists());
+
+		assertTrue("Original nested Y.java should exist", y.exists());
+		y = getCompilationUnit("/P2/src1/src2/q/Y.java");
+		assertTrue("Destination nested Y.java should not exist", !y.exists());
+	} finally {
+		this.stopDeltas();
+		this.deleteProject("P1");
+		this.deleteProject("P2");
+	}
+}
+

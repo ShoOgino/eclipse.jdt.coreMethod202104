@@ -1,0 +1,50 @@
+	public IJavaModelStatus verify() {
+		IJavaModelStatus status = super.verify();
+		if (!status.isOK()) {
+			return status;
+		}
+		IPackageFragmentRoot root = (IPackageFragmentRoot)getElementToProcess();
+		if (root == null || !root.exists()) {
+			return new JavaModelStatus(IJavaModelStatusConstants.ELEMENT_DOES_NOT_EXIST, root);
+		}
+			
+		if (root.isExternal()) {
+			return new JavaModelStatus(IJavaModelStatusConstants.INVALID_RESOURCE_TYPE, root.getPath().toOSString());
+		}
+			
+		if (this.updateClasspath) {
+			String destProjectName = this.destination.segment(0);
+			IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(destProjectName);
+			if (!JavaProject.hasJavaNature(project)) {
+				return new JavaModelStatus(IJavaModelStatusConstants.INVALID_PROJECT, destProjectName);
+			}
+			
+			try {
+				IJavaProject destProject = JavaCore.create(project);
+				IClasspathEntry[] destClasspath = destProject.getRawClasspath();
+				boolean foundSibling = false;
+				boolean foundExistingEntry = false;
+				for (int i = 0, length = destClasspath.length; i < length; i++) {
+					IClasspathEntry entry = destClasspath[i];
+					if (entry.equals(this.sibling)) {
+						foundSibling = true;
+						break;
+					}
+					if (entry.getPath().equals(this.destination)) {
+						foundExistingEntry = true;
+					}
+				}
+				if (this.sibling != null && !foundSibling) {
+					return new JavaModelStatus(IJavaModelStatusConstants.INVALID_SIBLING, this.sibling == null ? "null" : this.sibling.toString()); //$NON-NLS-1$
+				}
+				if (foundExistingEntry) {
+					return new JavaModelStatus(IJavaModelStatusConstants.NAME_COLLISION, this.destination.toString());
+				}
+			} catch (JavaModelException e) {
+				return e.getJavaModelStatus();
+			}
+		}
+
+		return JavaModelStatus.VERIFIED_OK;
+	}
+
