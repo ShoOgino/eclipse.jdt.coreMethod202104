@@ -1,0 +1,33 @@
+protected boolean generateInfos(OpenableElementInfo info, IProgressMonitor pm, Map newElements, IResource underlyingResource) throws JavaModelException {
+
+	if (getParent() instanceof JarPackageFragment) {
+		// ignore .java files in jar
+		throw newNotPresentException();
+	} else {
+		// put the info now, because getting the contents requires it
+		JavaModelManager.getJavaModelManager().putInfo(this, info);
+		WorkingCopyElementInfo unitInfo = (WorkingCopyElementInfo) info;
+
+		// generate structure and compute syntax problems if needed
+		CompilationUnitStructureRequestor requestor = new CompilationUnitStructureRequestor(this, unitInfo, newElements);
+		IProblemFactory factory = this.computeProblems ?  CompilationUnitProblemFinder.getProblemFactory(getElementName().toCharArray(), unitInfo, pm) : new DefaultProblemFactory();
+		SourceElementParser parser = new SourceElementParser(requestor, factory, new CompilerOptions(getJavaProject().getOptions(true)));
+		requestor.parser = parser;
+		if (this.computeProblems){
+			unitInfo.problems = new ArrayList();
+		}
+		CompilationUnitDeclaration unit = parser.parseCompilationUnit(this, this.computeProblems /*full parse if compute problems*/);
+		
+		// update timestamp
+		CompilationUnit original = (CompilationUnit) getOriginalElement();
+		// might be IResource.NULL_STAMP if original does not exist
+		unitInfo.fTimestamp = ((IFile) original.getResource()).getModificationStamp();
+		
+		// compute other problems if needed
+		if (this.computeProblems){
+			CompilationUnitProblemFinder.process(unit, this, unitInfo, pm); 
+		}		
+		return unitInfo.isStructureKnown();
+	}
+}
+
