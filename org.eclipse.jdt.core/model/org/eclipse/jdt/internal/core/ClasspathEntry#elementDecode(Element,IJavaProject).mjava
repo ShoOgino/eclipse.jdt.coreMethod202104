@@ -34,16 +34,16 @@
 		IPath[] exclusionPatterns = decodePatterns(element, TAG_EXCLUDING);
 		if (exclusionPatterns == null) exclusionPatterns = EXCLUDE_NONE;
 		
-		// accessible files patterns (optional)
-		IPath[] accessibleFiles = decodePatterns(element, TAG_ACCESSIBLE);
-		if (accessibleFiles == null) accessibleFiles = inclusionPatterns; // backward compatible
+		// access rules (optional)
+		IAccessRule[] accessRules = decodeAccessRules(element);
 		
-		// non accessible files patterns (optional)
-		IPath[] nonAccessibleFiles = decodePatterns(element, TAG_NONACCESSIBLE);
-		if (nonAccessibleFiles == null) nonAccessibleFiles = exclusionPatterns; // backward compatible
-		
-		// combine access restrictions (optional)
-		boolean combineAccessRestrictions = !element.getAttribute(TAG_COMBINE_ACCESS_RESTRICTIONS).equals("false"); //$NON-NLS-1$
+		// backward compatibility
+		if (accessRules == null) {
+			accessRules = getAccessRules(inclusionPatterns, exclusionPatterns);
+		}
+
+		// combine access rules (optional)
+		boolean combineAccessRestrictions = !element.getAttribute(TAG_COMBINE_ACCESS_RULES).equals("false"); //$NON-NLS-1$
 		
 		// extra attributes (optional)
 		IClasspathAttribute[] extraAttributes = decodeExtraAttributes(element);
@@ -52,27 +52,26 @@
 		IPath outputLocation = element.hasAttribute(TAG_OUTPUT) ? projectPath.append(element.getAttribute(TAG_OUTPUT)) : null;
 		
 		// recreate the CP entry
+		IClasspathEntry entry = null;
 		switch (kind) {
 
 			case IClasspathEntry.CPE_PROJECT :
-				return JavaCore.newProjectEntry(
+				entry = JavaCore.newProjectEntry(
 												path, 
-												accessibleFiles,
-												nonAccessibleFiles,
+												accessRules,
 												combineAccessRestrictions,
 												extraAttributes,
 												isExported);
-				
+				break;				
 			case IClasspathEntry.CPE_LIBRARY :
-				return JavaCore.newLibraryEntry(
+				entry = JavaCore.newLibraryEntry(
 												path,
 												sourceAttachmentPath,
 												sourceAttachmentRootPath,
-												accessibleFiles,
-												nonAccessibleFiles,
+												accessRules,
 												extraAttributes,
 												isExported);
-				
+				break;
 			case IClasspathEntry.CPE_SOURCE :
 				// must be an entry in this project or specify another project
 				String projSegment = path.segment(0);
@@ -81,10 +80,9 @@
 				} else { 
 					if (path.segmentCount() == 1) {
 						// another project
-						return JavaCore.newProjectEntry(
+						entry = JavaCore.newProjectEntry(
 												path, 
-												accessibleFiles,
-												nonAccessibleFiles,
+												accessRules,
 												combineAccessRestrictions,
 												extraAttributes,
 												isExported);
@@ -93,25 +91,23 @@
 						return JavaCore.newSourceEntry(path, inclusionPatterns, exclusionPatterns, outputLocation, extraAttributes);
 					}
 				}
-
+				break;
 			case IClasspathEntry.CPE_VARIABLE :
-				return JavaCore.newVariableEntry(
+				entry = JavaCore.newVariableEntry(
 						path,
 						sourceAttachmentPath,
 						sourceAttachmentRootPath, 
-						accessibleFiles,
-						nonAccessibleFiles,
+						accessRules,
 						extraAttributes,
 						isExported);
-				
+				break;
 			case IClasspathEntry.CPE_CONTAINER :
-				return JavaCore.newContainerEntry(
+				entry = JavaCore.newContainerEntry(
 						path,
-						accessibleFiles,
-						nonAccessibleFiles,
+						accessRules,
 						extraAttributes,
 						isExported);
-
+				break;
 			case ClasspathEntry.K_OUTPUT :
 				if (!path.isAbsolute()) return null;
 				return new ClasspathEntry(
@@ -124,12 +120,12 @@
 						null, // source attachment root
 						null, // custom output location
 						false,
-						INCLUDE_ALL, 
-						EXCLUDE_NONE,
+						null,
 						false, // no accessible files to combine
 						NO_EXTRA_ATTRIBUTES);
 			default :
 				throw new Assert.AssertionFailedException(Util.bind("classpath.unknownKind", kindAttr)); //$NON-NLS-1$
 		}
+		return entry;
 	}
 
