@@ -1,67 +1,65 @@
-	/**
-	 * Returns true if there is a change to the list of source entries in this package, false
-	 * otherwise.  This is meant to be a fast optimization, to determine
-	 * whether the source entries for this package need to be recomputed.  This
-	 * method works solely against the source workspace delta.  When in doubt,
-	 * it is always okay to return true here.
-	 */
-	protected boolean hasSourceEntryChanges(IPackage pkgHandle) {
-		IPath[] oldFrags = fOldState.getPackageMap().getFragments(pkgHandle);
-		IPath[] newFrags = fNewState.getPackageMap().getFragments(pkgHandle);
-		if (!Util.equalArraysOrNull(oldFrags, newFrags)) {
-			/* The set of package fragments has changed.  Don't bother optimizing this case -- too complex. */
+/**
+ * Returns true if there is a change to the list of source entries in this package, false
+ * otherwise.  This is meant to be a fast optimization, to determine
+ * whether the source entries for this package need to be recomputed.  This
+ * method works solely against the source workspace delta.  When in doubt,
+ * it is always okay to return true here.
+ */
+protected boolean hasSourceEntryChanges(IPackage pkgHandle) {
+	IPath[] oldFrags = fOldState.getPackageMap().getFragments(pkgHandle);
+	IPath[] newFrags = fNewState.getPackageMap().getFragments(pkgHandle);
+	if (!Util.equalArraysOrNull(oldFrags, newFrags)) {
+		/* The set of package fragments has changed.  Don't bother optimizing this case -- too complex. */
+		return true;
+	}
+
+	/* do for each fragment of this package */
+	for (int i = 0; i < newFrags.length; i++) {
+		IPath fragPath = newFrags[i];
+
+		/* find the JCUs for this package */
+		IResourceDelta[] fileDeltas = null;
+		for (Enumeration e = fChangedPkgOrZips.elements(); e.hasMoreElements();) {
+			IResourceDelta pkgDelta = (IResourceDelta) e.nextElement();
+			if (pkgDelta.getFullPath().equals(fragPath)) {
+				/* A zip file is changing.  Don't bother optimizing this case -- too complex. */
+				if (fNewState.isZipElement(fragPath)) {
+					return true;
+				}
+				fileDeltas = pkgDelta.getAffectedChildren();
+				break;
+			}
+		}
+		if (fileDeltas == null) {
+			/**
+			 * It's a more complex interaction between zips, for example
+			 * the package may be added in one zip and removed from another.
+			 * Don't bother optimizing this case -- too complex.
+			 */
 			return true;
 		}
 
-		/* do for each fragment of this package */
-		for (int i = 0; i < newFrags.length; i++) {
-			IPath fragPath = newFrags[i];
+		/* do for each file in this fragment in the new workspace */
+		for (int j = 0; j < fileDeltas.length; j++) {
+			IPath path = fileDeltas[j].getFullPath();
 
-			/* find the JCUs for this package */
-			IResourceDelta[] fileDeltas = null;
-			for (Enumeration e = fChangedPkgOrZips.elements(); e.hasMoreElements();) {
-				IResourceDelta pkgDelta = (IResourceDelta) e.nextElement();
-				if (pkgDelta.getFullPath().equals(fragPath)) {
-					/* A zip file is changing.  Don't bother optimizing this case -- too complex. */
-					if (fNewState.isZipElement(fragPath)) {
+			/* skip java resources */
+			String extension = path.getFileExtension();
+			if (extension != null) {
+				if ((extension.equalsIgnoreCase("java"/*nonNLS*/) || extension.equalsIgnoreCase("class"/*nonNLS*/))) {
+					/* if there is an added or removed jcu or binary, the source entries have changed */
+					int status = fileDeltas[j].getKind();
+					if (status == IResourceDelta.ADDED || status == IResourceDelta.REMOVED) {
 						return true;
 					}
-					fileDeltas = pkgDelta.getAffectedChildren();
-					break;
-				}
-			}
-			if (fileDeltas == null) {
-				/**
-				 * It's a more complex interaction between zips, for example
-				 * the package may be added in one zip and removed from another.
-				 * Don't bother optimizing this case -- too complex.
-				 */
-				return true;
-			}
-
-			/* do for each file in this fragment in the new workspace */
-			for (int j = 0; j < fileDeltas.length; j++) {
-				IPath path = fileDeltas[j].getFullPath();
-
-				/* skip java resources */
-				String extension = path.getFileExtension();
-				if (extension != null) {
-					if ((extension.equalsIgnoreCase("java")
-						|| extension.equalsIgnoreCase("class"))) {
-						/* if there is an added or removed jcu or binary, the source entries have changed */
-						int status = fileDeltas[j].getKind();
-						if (status == IResourceDelta.ADDED || status == IResourceDelta.REMOVED) {
-							return true;
-						}
-						/* it's a change, but it may be changing local status */
-						if (fileDeltas[j].getResource().isLocal(IResource.DEPTH_ZERO)
-							!= fOldState.contains(new SourceEntry(path, null, null))) {
-							return true;
-						}
+					/* it's a change, but it may be changing local status */
+					if (fileDeltas[j].getResource().isLocal(IResource.DEPTH_ZERO) != fOldState.contains(new SourceEntry(path, null, null))) {
+						return true;
 					}
 				}
 			}
 		}
-		return false;
 	}
+	return false;
+}
 

@@ -1,0 +1,48 @@
+	/**
+	 * Internal variant which can create marker on project for invalid entries
+	 */
+	public IClasspathEntry[] getResolvedClasspath(boolean ignoreUnresolvedVariable, boolean generateMarkerOnError) throws JavaModelException {
+
+		IClasspathEntry[] classpath = getRawClasspath();
+		IClasspathEntry[] resolvedPath = classpath; // clone only if necessary
+		int length = classpath.length;
+		int index = 0;
+		
+		for (int i = 0; i < length; i++){
+			
+			IClasspathEntry entry = classpath[i];
+
+			/* validation if needed */
+			if (generateMarkerOnError){
+				IJavaModelStatus status = JavaConventions.validateClasspathEntry(this, entry, false);
+				if (!status.isOK()) createClasspathProblemMarker(entry, status.getMessage());
+			}
+
+			/* resolve variables if any, unresolved ones are ignored */
+			if (entry.getEntryKind() == IClasspathEntry.CPE_VARIABLE){
+
+				// clone original path
+				if (resolvedPath == classpath){
+					System.arraycopy(classpath, 0, resolvedPath = new IClasspathEntry[length], 0, i);
+				}
+				// resolve current variable (handling variable->variable->variable->entry
+				IPath variablePath = entry.getPath(); // for error reporting
+				entry = JavaCore.getResolvedClasspathEntry(entry);
+				if (entry == null){
+					if (!ignoreUnresolvedVariable){
+						throw new JavaModelException(new JavaModelStatus(IJavaModelStatusConstants.CP_VARIABLE_PATH_UNBOUND, variablePath.toString()));
+					}
+				}
+			}
+			if (entry != null){
+				resolvedPath[index++] = entry;
+			}
+		}
+
+		// resize resolved classpath in case some variable entries could not be resolved
+		if (index != length){
+			System.arraycopy(resolvedPath, 0, resolvedPath = new IClasspathEntry[index], 0, index);
+		}
+		return resolvedPath;
+	}
+

@@ -1,0 +1,76 @@
+/**
+ * Validate the given classpath and output location.
+ * - Source folders cannot be nested inside the binary output, and reciprocally. They can coincidate.
+ * - Source folders cannot be nested in each other.
+ * - Output location must be nested inside project.
+ 
+ * @param classpath a given classpath
+ * @param outputLocation a given output location
+ * @return a status object with code <code>IStatus.OK</code> if
+ *		the given classpath and output location are compatible, otherwise a status 
+ *		object indicating what is wrong with the classpath or output location
+ */
+public static IJavaModelStatus validateClasspath(IJavaProject javaProject, IClasspathEntry[] classpath, IPath outputLocation) {
+
+	IProject project = javaProject.getProject();
+	IPath projectPath= project.getFullPath();
+
+	/* validate output location */
+	if (outputLocation == null) {
+		return new JavaModelStatus(IJavaModelStatusConstants.NULL_PATH);
+	}
+	if (outputLocation.isAbsolute()) {
+		if (!projectPath.isPrefixOf(outputLocation)) {
+			return new JavaModelStatus(IJavaModelStatusConstants.PATH_OUTSIDE_PROJECT, javaProject, outputLocation.toString());
+		}
+	} else {
+		return new JavaModelStatus(IJavaModelStatusConstants.RELATIVE_PATH, outputLocation);
+	}
+
+		
+		
+	// check if any source entries coincidates with binary output - in which case nesting inside output is legal
+	boolean allowNestingInOutput = false;
+	boolean hasSource = false;
+	for (int i = 0 ; i < classpath.length; i++) {
+		if (classpath[i].getEntryKind() == IClasspathEntry.CPE_SOURCE) hasSource = true;
+		if (classpath[i].getPath().equals(outputLocation)){
+			allowNestingInOutput = true;
+			break;
+		}
+	}
+	if (!hasSource) allowNestingInOutput = true; // if no source, then allowed
+	
+	// check all entries
+	for (int i = 0 ; i < classpath.length; i++) {
+		IClasspathEntry entry = classpath[i];
+		IPath entryPath = entry.getPath();
+
+		// no further check if entry coincidates with project or output location
+		if (entryPath.equals(projectPath)) continue;
+		if (entryPath.equals(outputLocation)) continue;
+		
+		// prevent nesting source entries in each other
+		if (entry.getEntryKind() == IClasspathEntry.CPE_SOURCE){
+			for (int j = 0; j < classpath.length; j++){
+				IClasspathEntry otherEntry = classpath[j];
+				if (entry != otherEntry && otherEntry.getEntryKind() == IClasspathEntry.CPE_SOURCE){
+					if (entryPath.isPrefixOf(otherEntry.getPath())){
+						return new JavaModelStatus(IJavaModelStatusConstants.INVALID_CLASSPATH, Util.bind("classpath.cannotNestSourceFolderInSource"/*nonNLS*/,entryPath.toString(), otherEntry.getPath().toString()));
+					}
+				}
+			}
+		}
+		// prevent nesting output location inside entry
+		if (entryPath.isPrefixOf(outputLocation)) {
+			return new JavaModelStatus(IJavaModelStatusConstants.INVALID_CLASSPATH, Util.bind("classpath.cannotNestSourceFolderInOutput"/*nonNLS*/,entryPath.toString(), outputLocation.toString()));
+		}
+
+		// prevent nesting entry inside output location - when distinct from project or a source folder
+		if (!allowNestingInOutput && outputLocation.isPrefixOf(entryPath)) {
+			return new JavaModelStatus(IJavaModelStatusConstants.INVALID_CLASSPATH, Util.bind("classpath.cannotNestOuputInSourceFolder"/*nonNLS*/, outputLocation.toString(), entryPath.toString()));
+		}
+	}
+	return JavaModelStatus.VERIFIED_OK;	
+}
+

@@ -1,57 +1,52 @@
-	/** 
-	 * Read the dependency graph.
-	 * The state is needed to create CompilationUnit objects from SourceEntry objects.
-	 */
-	protected DependencyGraph readDependencyGraph(
-		StateSnapConstantPool pool,
-		DataInputStream in,
-		StateImpl state)
-		throws IOException {
-		checkSection(in, "DependencyGraph");
-		DependencyGraph graph = new DependencyGraph();
+/** 
+ * Read the dependency graph.
+ * The state is needed to create CompilationUnit objects from SourceEntry objects.
+ */
+protected DependencyGraph readDependencyGraph(StateSnapConstantPool pool, DataInputStream in, StateImpl state) throws IOException {
+	checkSection(in, "DependencyGraph");
+	DependencyGraph graph = new DependencyGraph();
+	
+	// Avoid creating package elements for each node and dependency.
+	PackageElement[] packageElements = new PackageElement[pool.size()];
+	while (in.readBoolean()) {
+		JCUNode jcu = null;
+		try {
+			int entryNum = in.readInt();
+			PackageElement unit = getPackageElement(entryNum, packageElements, pool, state);
+			jcu = (JCUNode)graph.getNodeFor(unit);
+			int numTypes = in.readByte() & 0xFF;
+			IType[] types = new IType[numTypes];
+			for (int j = 0; j < numTypes; ++j) {
+				types[j] = pool.getType(in.readInt());
+			}
+			jcu.setTypes(types);
+			}
+		catch (ClassCastException e) {  // the source entry should be a CU
+			badFormat();
+		}
 
-		// Avoid creating package elements for each node and dependency.
-		PackageElement[] packageElements = new PackageElement[pool.size()];
-		while (in.readBoolean()) {
-			JCUNode jcu = null;
-			try {
-				int entryNum = in.readInt();
+		// Read dependencies
+		int numDep = in.readShort() & 0xFFFF;
+		INode[] dependencies = new INode[numDep];
+		for (int j = 0; j < numDep; ++j) {
+			int entryNum = in.readInt();
+			Object obj = pool.getObject(entryNum);
+			if (obj instanceof SourceEntry) {
 				PackageElement unit = getPackageElement(entryNum, packageElements, pool, state);
-				jcu = (JCUNode) graph.getNodeFor(unit);
-				int numTypes = in.readByte() & 0xFF;
-				IType[] types = new IType[numTypes];
-				for (int j = 0; j < numTypes; ++j) {
-					types[j] = pool.getType(in.readInt());
-				}
-				jcu.setTypes(types);
-			} catch (ClassCastException e) { // the source entry should be a CU
+				dependencies[j] = graph.getNodeFor(unit);
+			} else if (obj instanceof IPackage) {
+				dependencies[j] = graph.getNodeFor((IPackage) obj);
+			} else if (obj instanceof IPath) {
+				dependencies[j] = graph.getNodeFor((IPath) obj);
+			} else {
+				// Unexpected referrent
 				badFormat();
 			}
-
-			// Read dependencies
-			int numDep = in.readShort() & 0xFFFF;
-			INode[] dependencies = new INode[numDep];
-			for (int j = 0; j < numDep; ++j) {
-				int entryNum = in.readInt();
-				Object obj = pool.getObject(entryNum);
-				if (obj instanceof SourceEntry) {
-					PackageElement unit = getPackageElement(entryNum, packageElements, pool, state);
-					dependencies[j] = graph.getNodeFor(unit);
-				} else
-					if (obj instanceof IPackage) {
-						dependencies[j] = graph.getNodeFor((IPackage) obj);
-					} else
-						if (obj instanceof IPath) {
-							dependencies[j] = graph.getNodeFor((IPath) obj);
-						} else {
-							// Unexpected referrent
-							badFormat();
-						}
-			}
-			jcu.setDependencies(dependencies);
 		}
-		skipAttributes(in);
-		graph.integrityCheck();
-		return graph;
+		jcu.setDependencies(dependencies);
 	}
+	skipAttributes(in);
+	graph.integrityCheck();
+	return graph;
+}
 

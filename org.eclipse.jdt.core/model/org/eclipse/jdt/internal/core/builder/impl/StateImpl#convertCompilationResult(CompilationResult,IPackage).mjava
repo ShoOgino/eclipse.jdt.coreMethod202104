@@ -5,94 +5,83 @@
 	 * this without having to parse the binary for principal structure
 	 * information.
 	 */
-	protected ConvertedCompilationResult convertCompilationResult(
-		CompilationResult result,
-		IPackage defaultPackage) {
-		String fileName = new String(result.getFileName());
-		SourceEntry sEntry = SourceEntry.fromPathWithZipEntryName(fileName);
-		PackageElement resultUnit = packageElementFromSourceEntry(sEntry);
+	protected ConvertedCompilationResult convertCompilationResult(CompilationResult result, IPackage defaultPackage) {
+		String fileName= new String(result.getFileName());
+		SourceEntry sEntry= SourceEntry.fromPathWithZipEntryName(fileName);
+		PackageElement resultUnit= packageElementFromSourceEntry(sEntry);
 
 		/**
 		 * Make sure the CU exists.  May be null if unit is unavailable 
 		 * (e.g. package is not included in package map due to class path omission).
 		 * If this is the case, we shouldn't have reached this point.
 		 */
-		IPackage resultPkg = resultUnit.getPackage();
-		IProblem[] compilerProblems = result.getProblems();
-		Vector vProblems =
-			new Vector(compilerProblems == null ? 0 : compilerProblems.length);
+		IPackage resultPkg= resultUnit.getPackage();
+		IProblem[] compilerProblems= result.getProblems();
+		Vector vProblems= new Vector(compilerProblems == null ? 0 : compilerProblems.length);
 
 		/* convert type names to type handles for the produced types */
-		ClassFile[] classFiles = result.getClassFiles();
-		Vector vTSEntries = new Vector(classFiles.length);
-		boolean reportedPackageConflict = false;
-		for (int i = 0; i < classFiles.length; ++i) {
-			ClassFile classFile = classFiles[i];
-			String className = Util.toString(classFile.getCompoundName());
+		ClassFile[] classFiles= result.getClassFiles();
+		Vector vTSEntries= new Vector(classFiles.length);
+		boolean reportedPackageConflict= false;
+		for (int i= 0; i < classFiles.length; ++i) {
+			ClassFile classFile= classFiles[i];
+			String className= Util.toString(classFile.getCompoundName());
 			if (classFile == null) {
 				// Could not discover principal structure
-				String msg = "Error parsing binary for " + className;
-				ProblemDetailImpl problem = new ProblemDetailImpl(msg, sEntry);
+				String msg= "Error parsing binary for " + className;
+				ProblemDetailImpl problem= new ProblemDetailImpl(msg, sEntry);
 				vProblems.addElement(problem);
 				// skip it
 				continue;
 			}
-			IType typeHandle = typeNameToHandle(resultPkg, className);
-			IPackage typePkg = typeHandle.getPackage();
+			IType typeHandle= typeNameToHandle(resultPkg, className);
+			IPackage typePkg= typeHandle.getPackage();
 			if (!resultPkg.equals(typePkg)) {
 				if (!reportedPackageConflict) {
 					// Fix for 1FW88LE: ITPJCORE:WIN2000 - What does the error mean (package declaration/package)
 					// and 1FW88DS: ITPJUI:WIN2000 - Go to file from task doesn't show line in editor
-					IPath path = sEntry.getPath().removeLastSegments(1);
+					IPath path= sEntry.getPath().removeLastSegments(1);
 					if (!resultPkg.isUnnamed()) {
-						path =
-							path.removeLastSegments(
-								new Path(resultPkg.getName().replace('.', IPath.SEPARATOR)).segmentCount());
+						path= path.removeLastSegments(new Path(resultPkg.getName().replace('.', IPath.SEPARATOR)).segmentCount());
 					}
 					if (!typePkg.isUnnamed()) {
-						path = path.append(typePkg.getName().replace('.', IPath.SEPARATOR));
+						path= path.append(typePkg.getName().replace('.', IPath.SEPARATOR));
 					}
-					String msg =
-						"Package declaration does not match folder.  Expected folder is " + path + ".";
-					ProblemDetailImpl problem =
-						new ProblemDetailImpl(msg, 0, IProblemDetail.S_ERROR, sEntry, 0, 0, 1);
+					String msg= "Package declaration does not match folder.  Expected folder is " + path + ".";
+					ProblemDetailImpl problem= new ProblemDetailImpl(msg, 0, IProblemDetail.S_ERROR, sEntry, 0, 0, 1);
 					vProblems.addElement(problem);
 					// Only report the conflict once (there may be several types, but there's only one package declaration).
-					reportedPackageConflict = true;
+					reportedPackageConflict= true;
 				}
 				// toss type result
 				continue;
 			}
-			TypeStructureEntry tsEntry = new TypeStructureEntry(sEntry, typeHandle);
+			TypeStructureEntry tsEntry= new TypeStructureEntry(sEntry, typeHandle);
 
 			/* squirrel the binary away */
-			byte[] binary = classFile.getBytes();
+			byte[] binary= classFile.getBytes();
 			// as a side effect, the following sets the crc32 for the type structure entry
 			getBinaryOutput().putBinary(tsEntry, binary);
 			vTSEntries.addElement(tsEntry);
 		}
-		TypeStructureEntry[] tsEntries = new TypeStructureEntry[vTSEntries.size()];
+		TypeStructureEntry[] tsEntries= new TypeStructureEntry[vTSEntries.size()];
 		vTSEntries.copyInto(tsEntries);
 
 		/* convert dependencies */
-		Vector dependencies = resolveDependencies(resultUnit, result);
+		Vector dependencies= resolveDependencies(resultUnit, result);
 
 		/* convert problems */
 		if (compilerProblems != null) {
-			for (int i = 0; i < compilerProblems.length; i++) {
+			for (int i= 0; i < compilerProblems.length; i++) {
 				// The problem factory created the compiler problems as ProblemDetailImpl objects
 				// without the source entry set.  Fill it in here.
-				ProblemDetailImpl problem = (ProblemDetailImpl) compilerProblems[i];
+				ProblemDetailImpl problem= (ProblemDetailImpl) compilerProblems[i];
 				problem.setSourceEntry(sEntry);
 				vProblems.addElement(problem);
 			}
 		}
-		IProblemDetail[] problems = new IProblemDetail[vProblems.size()];
+		IProblemDetail[] problems= new IProblemDetail[vProblems.size()];
 		vProblems.copyInto(problems);
-		return new ConvertedCompilationResult(
-			resultUnit,
-			dependencies,
-			problems,
-			tsEntries);
+		return new ConvertedCompilationResult(resultUnit, dependencies, problems, tsEntries);
 	}
 

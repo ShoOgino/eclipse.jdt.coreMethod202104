@@ -1,121 +1,116 @@
-	/**
-	 * Applies the deltas to the old state to build the new state.  
-	 * The old state and new state have been set.
-	 * The new state knows its workspace and build context.
-	 * This is the method that actually does the incremental build
-	 */
-	public void applySourceDelta(Hashtable deltas) {
-		fNotifier = new BuildNotifier(fDC, false);
-		fNotifier.begin();
-		fNotifier.subTask("Preparing for build");
-		fSourceDeltas = deltas;
-		fNewState = fOldState.copy(fNewProject, fImageContext);
+/**
+ * Applies the deltas to the old state to build the new state.  
+ * The old state and new state have been set.
+ * The new state knows its workspace and build context.
+ * This is the method that actually does the incremental build
+ */
+public void applySourceDelta(Hashtable deltas) {
+	fNotifier = new BuildNotifier(fDC, false);
+	fNotifier.begin();
+	fNotifier.subTask(Util.bind("build.preparingBuild"/*nonNLS*/));
+	fSourceDeltas = deltas;
+	fNewState = fOldState.copy(fNewProject, fImageContext);
 
-		// options might have changed since last builder run, thus refresh them
-		fCompilerOptions =
-			JavaModelManager.convertConfigurableOptions(JavaCore.getOptions());
-		fNewState.setCompilerOptions(fCompilerOptions);
+	// options might have changed since last builder run, thus refresh them
+	fCompilerOptions = JavaModelManager.convertConfigurableOptions(JavaCore.getOptions());
+	fNewState.setCompilerOptions(fCompilerOptions);
+	
+	try {
+		/* find out what has changed at the package level */
+		fNotifier.subTask(Util.bind("build.analyzingPackage"/*nonNLS*/));
+		computeAllPackages();
+		checkCancel();
 
-		try {
-			/* find out what has changed at the package level */
-			fNotifier.subTask("Analyzing packages");
-			computeAllPackages();
-			checkCancel();
+		/* update the package map */
+		updatePackageMap();
+		fNewState.canonicalizeBuildContext();
+		fNotifier.updateProgressDelta(0.05f);
+		checkCancel();
 
-			/* update the package map */
-			updatePackageMap();
-			fNewState.canonicalizeBuildContext();
-			fNotifier.updateProgressDelta(0.05f);
-			checkCancel();
-
-			/* Update the source element table and namespace table for the removed and changed packages.
-			 * The tables are simply deleted.  They will be rebuilt lazily for changed packages. */
-			for (Enumeration e = fRemovedPackageHandles.elements(); e.hasMoreElements();) {
-				IPackage pkgHandle = (IPackage) e.nextElement();
-				fNewState.getSourceElementTable().removePackage(pkgHandle);
-			}
-			recomputeSourceEntriesForChangedPackages();
-			checkCancel();
-			fWorkQueue = new WorkQueue();
-
-			/* rebuild the namespaces and issue indictments for changes */
-			computeNamespaceChanges();
-			// 1G220B5 - force compilation of all their dependents as well - only one level deeper
-			for (Enumeration e = fWorkQueue.getElementsToCompile().elements();
-				e.hasMoreElements();
-				) {
-				markDependentsAsNeedingCompile(e.nextElement());
-			}
-
-			/* find out what has changed at the package element level */
-			fNotifier.subTask("Analyzing sources");
-			computeAllClasses();
-			checkCancel();
-
-			/* All dependents of changed zips will need compiling */
-			markDependentsOfChangedZips();
-
-			/* remove old classes and get affected JCUs */
-			removeOldClasses();
-			checkCancel();
-
-			/* flag changed classes and get compilation units to compile */
-			updateChangedClasses();
-			checkCancel();
-
-			/* adding new classes might hide (equivalent to delete) old classes */
-			addNewClasses();
-			checkCancel();
-
-			float amountPerIteration = 0.60f;
-			// Approximation of n + (n/4) + (n/16) + ... = 0.85
-
-			/* keep compiling until there is nothing left to compile */
-			Vector vToCompile = fWorkQueue.getElementsToCompile();
-			while (vToCompile.size() != 0) {
-				fNotifier.setProgressPerCompilationUnit(amountPerIteration / vToCompile.size());
-				compile(vToCompile);
-				vToCompile = fWorkQueue.getElementsToCompile();
-				amountPerIteration *= 0.25f;
-			}
-
-			//		not using PrincipalStructureByPackageTable
-			//		propagatePrincipalStructureByPackageTable();
-
-			// Force all in build context
-			/*
-			Don't force -- we're not doing lazy builds.
-			
-			if (fAddedPackageHandles.size() > 0 || fChangedPackageHandles.size() > 0) {
-			for (int i = 0; i < fAddedPackageHandles.size(); ++i) {
-			IPackage pkg = (IPackage) fAddedPackageHandles.elementAt(i);
-			maybeForce(pkg);
-			}
-			for (int i = 0; i < fChangedPackageHandles.size(); ++i) {
-			IPackage pkg = (IPackage) fChangedPackageHandles.elementAt(i);
-			maybeForce(pkg);
-			}
-			}		
-			*/
-			/* Update resources in binary output */
-			IResourceDelta projectDelta = (IResourceDelta) deltas.get(fNewProject);
-			if (projectDelta != null) {
-				ProjectResourceCopier copier =
-					new ProjectResourceCopier(fNewState.getJavaProject(), fDC, fNotifier, 0.10f);
-				copier.updateAffectedResources(projectDelta);
-			}
-
-			/* Removals and recompilations can leave unused namespace nodes in the 
-			 * dependency graph.  Clean them up. */
-			cleanupUnusedNamespaceNodes();
-			checkCancel();
-
-			/* Copy resource to binary output */
-			//copyResources(projectDelta, 0.05f);
-
-			fNotifier.done();
-		} finally {
-			cleanUp();
+		/* Update the source element table and namespace table for the removed and changed packages.
+		 * The tables are simply deleted.  They will be rebuilt lazily for changed packages. */
+		for (Enumeration e = fRemovedPackageHandles.elements(); e.hasMoreElements();) {
+			IPackage pkgHandle = (IPackage) e.nextElement();
+			fNewState.getSourceElementTable().removePackage(pkgHandle);
 		}
+		recomputeSourceEntriesForChangedPackages();
+		checkCancel();
+		fWorkQueue = new WorkQueue();
+
+		/* rebuild the namespaces and issue indictments for changes */
+		computeNamespaceChanges();
+		// 1G220B5 - force compilation of all their dependents as well - only one level deeper
+		for (Enumeration e = fWorkQueue.getElementsToCompile().elements(); e.hasMoreElements();) {
+			markDependentsAsNeedingCompile(e.nextElement());
+		}
+		
+		/* find out what has changed at the package element level */
+		fNotifier.subTask(Util.bind("build.analyzingSources"/*nonNLS*/));
+		computeAllClasses();
+		checkCancel();
+
+		/* All dependents of changed zips will need compiling */
+		markDependentsOfChangedZips();
+
+		/* remove old classes and get affected JCUs */
+		removeOldClasses();
+		checkCancel();
+
+		/* flag changed classes and get compilation units to compile */
+		updateChangedClasses();
+		checkCancel();
+
+		/* adding new classes might hide (equivalent to delete) old classes */
+		addNewClasses();
+		checkCancel();
+		
+		float amountPerIteration = 0.60f; // Approximation of n + (n/4) + (n/16) + ... = 0.85
+
+		/* keep compiling until there is nothing left to compile */
+		Vector vToCompile = fWorkQueue.getElementsToCompile();
+		while (vToCompile.size() != 0) {
+			fNotifier.setProgressPerCompilationUnit(amountPerIteration / vToCompile.size());
+			compile(vToCompile);
+			vToCompile = fWorkQueue.getElementsToCompile();
+			amountPerIteration *= 0.25f;
+		}
+
+		//		not using PrincipalStructureByPackageTable
+		//		propagatePrincipalStructureByPackageTable();
+
+		// Force all in build context
+		/*
+		Don't force -- we're not doing lazy builds.
+		
+		if (fAddedPackageHandles.size() > 0 || fChangedPackageHandles.size() > 0) {
+		for (int i = 0; i < fAddedPackageHandles.size(); ++i) {
+		IPackage pkg = (IPackage) fAddedPackageHandles.elementAt(i);
+		maybeForce(pkg);
+		}
+		for (int i = 0; i < fChangedPackageHandles.size(); ++i) {
+		IPackage pkg = (IPackage) fChangedPackageHandles.elementAt(i);
+		maybeForce(pkg);
+		}
+		}		
+		*/
+		/* Update resources in binary output */
+		IResourceDelta projectDelta = (IResourceDelta) deltas.get(fNewProject);
+		if (projectDelta != null) {
+			ProjectResourceCopier copier = new ProjectResourceCopier(fNewState.getJavaProject(), fDC, fNotifier, 0.10f);
+			copier.updateAffectedResources(projectDelta);
+		}
+		
+		/* Removals and recompilations can leave unused namespace nodes in the 
+		 * dependency graph.  Clean them up. */
+		cleanupUnusedNamespaceNodes();
+		checkCancel();
+		
+		/* Copy resource to binary output */
+		//copyResources(projectDelta, 0.05f);
+		
+		fNotifier.done();
+	} finally {
+		cleanUp();
 	}
+}
 

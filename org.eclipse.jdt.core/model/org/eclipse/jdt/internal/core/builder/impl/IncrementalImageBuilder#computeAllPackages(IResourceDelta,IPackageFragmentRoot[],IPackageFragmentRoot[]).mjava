@@ -1,46 +1,55 @@
-	protected void computeAllPackages(
-		IResourceDelta delta,
-		IPackageFragmentRoot[] oldRoots,
-		IPackageFragmentRoot[] newRoots) {
-		int status = delta.getKind();
-		IPath path = delta.getFullPath();
-		IResource rootResource = null;
-		switch (delta.getKind()) {
-			case IResourceDelta.ADDED :
-				/* Look for this package only in the new roots */
-				for (int i = 0; i < newRoots.length; i++) {
-					rootResource = null;
-					try {
-						rootResource = newRoots[i].getUnderlyingResource();
-					} catch (JavaModelException e) {
-					}
-					if (rootResource != null && rootResource.getFullPath().isPrefixOf(path)) {
-						fAddedPkgOrZips.addElement(path);
-						break;
-					}
+protected void computeAllPackages(IResourceDelta delta, IPackageFragmentRoot[] oldRoots, IPackageFragmentRoot[] newRoots) {
+	int status = delta.getKind();
+	IPath path = delta.getFullPath();
+	IResource rootResource = null;
+	switch (delta.getKind()) {
+		case IResourceDelta.ADDED :
+			/* Look for this package only in the new roots */
+			for (int i = 0; i < newRoots.length; i++) {
+				rootResource = null;
+				try {
+					rootResource = newRoots[i].getUnderlyingResource();
+				} catch (JavaModelException e) {
 				}
-				break;
-			case IResourceDelta.REMOVED :
-				/* Look for this package only in the old roots */
+				if (rootResource != null && rootResource.getFullPath().isPrefixOf(path)) {
+					fAddedPkgOrZips.addElement(path);
+					break;
+				}
+			}
+			break;
+		case IResourceDelta.REMOVED :
+			/* Look for this package only in the old roots */
+			for (int i = 0; i < oldRoots.length; i++) {
+				rootResource = null;
+				try {
+					rootResource = oldRoots[i].getUnderlyingResource();
+				} catch (JavaModelException e) {
+				}
+				if (rootResource != null && rootResource.getFullPath().isPrefixOf(path)) {
+					fRemovedPkgOrZips.addElement(path);
+					break;
+				}
+			}
+			break;
+		case IResourceDelta.CHANGED :
+			/* Look for this package in the union of both sets of roots */
+			boolean found = false;
+			for (int i = 0; i < newRoots.length; i++) {
+				rootResource = null;
+				try {
+					rootResource = newRoots[i].getUnderlyingResource();
+				} catch (JavaModelException e) {
+				}
+				if (rootResource != null && rootResource.getFullPath().isPrefixOf(path)) {
+					found = true;
+					break;
+				}
+			}
+			if (!found) {
 				for (int i = 0; i < oldRoots.length; i++) {
 					rootResource = null;
 					try {
-						rootResource = oldRoots[i].getUnderlyingResource();
-					} catch (JavaModelException e) {
-					}
-					if (rootResource != null && rootResource.getFullPath().isPrefixOf(path)) {
-						fRemovedPkgOrZips.addElement(path);
-						break;
-					}
-				}
-				break;
-			case IResourceDelta.CHANGED :
-				/* Look for this package in the union of both sets of roots */
-				boolean found = false;
-				for (int i = 0; i < newRoots.length; i++) {
-					rootResource = null;
-					try {
-						rootResource = newRoots[i].getUnderlyingResource();
+						oldRoots[i].getUnderlyingResource();
 					} catch (JavaModelException e) {
 					}
 					if (rootResource != null && rootResource.getFullPath().isPrefixOf(path)) {
@@ -48,37 +57,25 @@
 						break;
 					}
 				}
-				if (!found) {
-					for (int i = 0; i < oldRoots.length; i++) {
-						rootResource = null;
-						try {
-							oldRoots[i].getUnderlyingResource();
-						} catch (JavaModelException e) {
-						}
-						if (rootResource != null && rootResource.getFullPath().isPrefixOf(path)) {
-							found = true;
-							break;
-						}
-					}
-				}
-				if (found) {
-					/* Only include changes if it's not an archive, or if it's an archive and the contents really changed */
-					if (!fNewState.isZipElement(path)
-						|| (delta.getFlags() & IResourceDelta.CONTENT) != 0) {
-						fChangedPkgOrZips.addElement(delta);
-					}
-				}
-				break;
-		}
-		IResourceDelta[] children = delta.getAffectedChildren();
-		for (int i = 0; i < children.length; ++i) {
-			String extension = children[i].getFullPath().getFileExtension();
-			if (extension == null
-				|| extension.equalsIgnoreCase("zip")
-				|| extension.equalsIgnoreCase("jar")) {
-				// TBD: Currently rely on empty extension indicating folder
-				computeAllPackages(children[i], oldRoots, newRoots);
 			}
+			if (found) {
+				/* Only include changes if it's not an archive, or if it's an archive and the contents really changed */
+				if (!fNewState.isZipElement(path)
+					|| (delta.getFlags() & IResourceDelta.CONTENT) != 0) {
+					fChangedPkgOrZips.addElement(delta);
+				}
+			}
+			break;
+	}
+	IResourceDelta[] children = delta.getAffectedChildren();
+	for (int i = 0; i < children.length; ++i) {
+		String extension = children[i].getFullPath().getFileExtension();
+		if (extension == null
+			|| extension.equalsIgnoreCase("zip"/*nonNLS*/)
+			|| extension.equalsIgnoreCase("jar"/*nonNLS*/)) {
+			// TBD: Currently rely on empty extension indicating folder
+			computeAllPackages(children[i], oldRoots, newRoots);
 		}
 	}
+}
 

@@ -1,185 +1,123 @@
-	/**
-	 * Constructor pattern are formed by [declaringQualification.]type[(parameterTypes)]
-	 * e.g. java.lang.Runnable.run() void
-	 *		main(*)
-	 */
-	private static SearchPattern createConstructorPattern(
-		String patternString,
-		int limitTo,
-		int matchMode,
-		boolean isCaseSensitive) {
+/**
+ * Constructor pattern are formed by [declaringQualification.]type[(parameterTypes)]
+ * e.g. java.lang.Runnable.run() void
+ *		main(*)
+ */
+private static SearchPattern createConstructorPattern(String patternString, int limitTo, int matchMode, boolean isCaseSensitive) {
 
-		StringTokenizer tokenizer = new StringTokenizer(patternString, " .(,)", true);
-		final int InsideName = 1;
-		final int InsideParameter = 2;
-		String lastToken = null;
+	StringTokenizer tokenizer = new StringTokenizer(patternString, " .(,)", true);
+	final int InsideName = 1;
+	final int InsideParameter = 2;
+	String lastToken = null;
+	
+	String declaringQualification = null, typeName = null, parameterType = null;
+	String[] parameterTypes = null;
+	int parameterCount = -1;
+	String returnType = null;
+	boolean foundClosingParenthesis = false;
+	int mode = InsideName;
+	while (tokenizer.hasMoreTokens()){
+		String token = tokenizer.nextToken();
+		switch(mode){
 
-		String declaringQualification = null, typeName = null, parameterType = null;
-		String[] parameterTypes = null;
-		int parameterCount = -1;
-		String returnType = null;
-		boolean foundClosingParenthesis = false;
-		int mode = InsideName;
-		while (tokenizer.hasMoreTokens()) {
-			String token = tokenizer.nextToken();
-			switch (mode) {
-
-				// read declaring type and selector
-				case InsideName :
-					if (token.equals(".")) {
-						if (declaringQualification == null) {
-							if (typeName == null)
-								return null;
-							declaringQualification = typeName;
-						} else {
-							declaringQualification += token + typeName;
-						}
-						typeName = null;
-					} else
-						if (token.equals("(")) {
-							parameterTypes = new String[5];
-							parameterCount = 0;
-							mode = InsideParameter;
-						} else
-							if (token.equals(" ")) {
-								if (!(" ".equals(lastToken) || ".".equals(lastToken))) {
-									break;
-								}
-							} else { // name
-								if (typeName != null)
-									return null;
-								typeName = token;
-							}
-					break;
-					// read parameter types
-				case InsideParameter :
-					if (token.equals(" ")) {
-					} else
-						if (token.equals(",")) {
-							if (parameterType == null)
-								return null;
-							if (parameterTypes.length == parameterCount) {
-								System.arraycopy(
-									parameterTypes,
-									0,
-									parameterTypes = new String[parameterCount * 2],
-									0,
-									parameterCount);
-							}
-							parameterTypes[parameterCount++] = parameterType;
-							parameterType = null;
-						} else
-							if (token.equals(")")) {
-								foundClosingParenthesis = true;
-								if (parameterType != null) {
-									if (parameterTypes.length == parameterCount) {
-										System.arraycopy(
-											parameterTypes,
-											0,
-											parameterTypes = new String[parameterCount * 2],
-											0,
-											parameterCount);
-									}
-									parameterTypes[parameterCount++] = parameterType;
-								}
-								break;
-							} else {
-								if (parameterType == null) {
-									parameterType = token;
-								} else {
-									if (!(".".equals(lastToken) || ".".equals(token) || "[]".equals(token)))
-										return null;
-									parameterType += token;
-								}
-							}
-					break;
-			}
-			lastToken = token;
-		}
-		// parenthesis mismatch
-		if (parameterCount > 0 && !foundClosingParenthesis)
-			return null;
-		if (typeName == null)
-			return null;
-
-		char[] typeNameChars = typeName.toCharArray();
-		if (typeNameChars.length == 1 && typeNameChars[0] == '*')
-			typeNameChars = null;
-
-		char[] declaringQualificationChars = null;
-		if (declaringQualification != null)
-			declaringQualificationChars = declaringQualification.toCharArray();
-		char[][] parameterTypeQualifications = null, parameterTypeSimpleNames = null;
-
-		// extract parameter types infos
-		if (parameterCount >= 0) {
-			parameterTypeQualifications = new char[parameterCount][];
-			parameterTypeSimpleNames = new char[parameterCount][];
-			for (int i = 0; i < parameterCount; i++) {
-				char[] parameterTypePart = parameterTypes[i].toCharArray();
-				int lastDotPosition = CharOperation.lastIndexOf('.', parameterTypePart);
-				if (lastDotPosition >= 0) {
-					parameterTypeQualifications[i] =
-						CharOperation.subarray(parameterTypePart, 0, lastDotPosition);
-					if (parameterTypeQualifications[i].length == 1
-						&& parameterTypeQualifications[i][0] == '*')
-						parameterTypeQualifications[i] = null;
-					parameterTypeSimpleNames[i] =
-						CharOperation.subarray(
-							parameterTypePart,
-							lastDotPosition + 1,
-							parameterTypePart.length);
-				} else {
-					parameterTypeQualifications[i] = null;
-					parameterTypeSimpleNames[i] = parameterTypePart;
+			// read declaring type and selector
+			case InsideName :
+				if (token.equals(".")){
+					if (declaringQualification == null){
+						if (typeName == null) return null;
+						declaringQualification = typeName;
+					} else {
+						declaringQualification += token + typeName;
+					}
+					typeName = null;
+				} else if (token.equals("(")){
+					parameterTypes = new String[5];
+					parameterCount = 0;
+					mode = InsideParameter;
+				} else if (token.equals(" ")){
+					if (!(" ".equals(lastToken) || ".".equals(lastToken))){
+						break;
+					}
+				} else { // name
+					if (typeName != null) return null;
+					typeName = token;
 				}
-				if (parameterTypeSimpleNames[i].length == 1
-					&& parameterTypeSimpleNames[i][0] == '*')
-					parameterTypeSimpleNames[i] = null;
-			}
-		}
-		SearchPattern searchPattern = null;
-		switch (limitTo) {
-			case IJavaSearchConstants.DECLARATIONS :
-				searchPattern =
-					new ConstructorDeclarationPattern(
-						typeNameChars,
-						matchMode,
-						isCaseSensitive,
-						declaringQualificationChars,
-						parameterTypeQualifications,
-						parameterTypeSimpleNames);
 				break;
-			case IJavaSearchConstants.REFERENCES :
-				searchPattern =
-					new ConstructorReferencePattern(
-						typeNameChars,
-						matchMode,
-						isCaseSensitive,
-						declaringQualificationChars,
-						parameterTypeQualifications,
-						parameterTypeSimpleNames);
-				break;
-			case IJavaSearchConstants.ALL_OCCURRENCES :
-				searchPattern =
-					new OrPattern(
-						new ConstructorDeclarationPattern(
-							typeNameChars,
-							matchMode,
-							isCaseSensitive,
-							declaringQualificationChars,
-							parameterTypeQualifications,
-							parameterTypeSimpleNames),
-						new ConstructorReferencePattern(
-							typeNameChars,
-							matchMode,
-							isCaseSensitive,
-							declaringQualificationChars,
-							parameterTypeQualifications,
-							parameterTypeSimpleNames));
+			// read parameter types
+			case InsideParameter :
+				if (token.equals(" ")){
+				} else if (token.equals(",")){
+					if (parameterType == null) return null;
+					if (parameterTypes.length == parameterCount){
+						System.arraycopy(parameterTypes, 0, parameterTypes = new String[parameterCount*2], 0, parameterCount);
+					}
+					parameterTypes[parameterCount++] = parameterType;
+					parameterType = null;
+				} else if (token.equals (")")){
+					foundClosingParenthesis = true;
+					if (parameterType != null){
+						if (parameterTypes.length == parameterCount){
+							System.arraycopy(parameterTypes, 0, parameterTypes = new String[parameterCount*2], 0, parameterCount);
+						}
+						parameterTypes[parameterCount++] = parameterType;
+					}
+					break;
+				} else {
+					if (parameterType == null){
+						parameterType = token;
+					} else {
+						if (!(".".equals(lastToken) || ".".equals(token) || "[]".equals(token))) return null;
+						parameterType += token;
+					}
+				}
 				break;
 		}
-		return searchPattern;
-
+		lastToken = token;
 	}
+	// parenthesis mismatch
+	if (parameterCount>0 && !foundClosingParenthesis) return null;
+	if (typeName == null) return null;
+
+	char[] typeNameChars = typeName.toCharArray();
+	if (typeNameChars.length == 1 && typeNameChars[0] == '*') typeNameChars = null;
+		
+	char[] declaringQualificationChars = null;
+	if (declaringQualification != null) declaringQualificationChars = declaringQualification.toCharArray();
+	char[][] parameterTypeQualifications = null, parameterTypeSimpleNames = null;
+
+	// extract parameter types infos
+	if (parameterCount >= 0){
+		parameterTypeQualifications = new char[parameterCount][];
+		parameterTypeSimpleNames = new char[parameterCount][];
+		for (int i = 0; i < parameterCount; i++){
+			char[] parameterTypePart = parameterTypes[i].toCharArray();
+			int lastDotPosition = CharOperation.lastIndexOf('.', parameterTypePart);
+			if (lastDotPosition >= 0){
+				parameterTypeQualifications[i] = CharOperation.subarray(parameterTypePart, 0, lastDotPosition);
+				if (parameterTypeQualifications[i].length == 1 && parameterTypeQualifications[i][0] == '*') parameterTypeQualifications[i] = null;
+				parameterTypeSimpleNames[i] = CharOperation.subarray(parameterTypePart, lastDotPosition+1, parameterTypePart.length);
+			} else {
+				parameterTypeQualifications[i] = null;
+				parameterTypeSimpleNames[i] = parameterTypePart;
+			}
+			if (parameterTypeSimpleNames[i].length == 1 && parameterTypeSimpleNames[i][0] == '*') parameterTypeSimpleNames[i] = null;
+		}
+	}	
+	SearchPattern searchPattern = null;
+	switch (limitTo){
+		case IJavaSearchConstants.DECLARATIONS :
+			searchPattern = new ConstructorDeclarationPattern(typeNameChars, matchMode, isCaseSensitive, declaringQualificationChars, parameterTypeQualifications, parameterTypeSimpleNames);
+			break;
+		case IJavaSearchConstants.REFERENCES :
+			searchPattern = new ConstructorReferencePattern(typeNameChars, matchMode, isCaseSensitive, declaringQualificationChars, parameterTypeQualifications, parameterTypeSimpleNames);
+			break;
+		case IJavaSearchConstants.ALL_OCCURRENCES :
+			searchPattern = new OrPattern(
+				new ConstructorDeclarationPattern(typeNameChars, matchMode, isCaseSensitive, declaringQualificationChars, parameterTypeQualifications, parameterTypeSimpleNames),
+				new ConstructorReferencePattern(typeNameChars, matchMode, isCaseSensitive, declaringQualificationChars, parameterTypeQualifications, parameterTypeSimpleNames));
+			break;
+	}
+	return searchPattern;
+
+}
 

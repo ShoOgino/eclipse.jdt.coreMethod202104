@@ -1,133 +1,92 @@
-	public MethodBinding getImplicitMethod(
-		ReferenceBinding receiverType,
-		char[] selector,
-		TypeBinding[] argumentTypes,
-		InvocationSite invocationSite) {
-		boolean insideStaticContext = false;
-		boolean insideConstructorCall = false;
-		MethodBinding foundMethod = null;
-		ProblemMethodBinding foundFuzzyProblem = null;
-		// the weird method lookup case (matches method name in scope, then arg types, then visibility)
-		ProblemMethodBinding foundInsideProblem = null;
-		// inside Constructor call or inside static context
-		Scope scope = this;
-		boolean isExactMatch = true;
-		// retrieve an exact visible match (if possible)
-		MethodBinding methodBinding =
-			(foundMethod == null)
-				? findExactMethod(receiverType, selector, argumentTypes, invocationSite)
-				: findExactMethod(
-					receiverType,
-					foundMethod.selector,
-					foundMethod.parameters,
-					invocationSite);
-		//						? findExactMethod(receiverType, selector, argumentTypes, invocationSite)
-		//						: findExactMethod(receiverType, foundMethod.selector, foundMethod.parameters, invocationSite);
-		if (methodBinding == null && foundMethod == null) {
-			// answers closest approximation, may not check argumentTypes or visibility
-			isExactMatch = false;
-			methodBinding =
-				findMethod(receiverType, selector, argumentTypes, invocationSite);
-			//					methodBinding = findMethod(receiverType, selector, argumentTypes, invocationSite);
-		}
-		if (methodBinding != null) { // skip it if we did not find anything
-			if (methodBinding.problemId() == Ambiguous) {
-				if (foundMethod == null || foundMethod.problemId() == NotVisible)
-					// supercedes any potential InheritedNameHidesEnclosingName problem
-					return methodBinding;
-				else
-					// make the user qualify the method, likely wants the first inherited method (javac generates an ambiguous error instead)
-					return new ProblemMethodBinding(
-						selector,
-						argumentTypes,
-						InheritedNameHidesEnclosingName);
-			}
-
-			ProblemMethodBinding fuzzyProblem = null;
-			ProblemMethodBinding insideProblem = null;
-			if (methodBinding.isValidBinding()) {
-				if (!isExactMatch) {
-					if (!areParametersAssignable(methodBinding.parameters, argumentTypes)) {
-						fuzzyProblem =
-							new ProblemMethodBinding(methodBinding, selector, argumentTypes, NotFound);
-					} else
-						if (!canBeSeenByForCodeSnippet(methodBinding,
-							receiverType,
-							invocationSite,
-							this)) {
-							// using <classScope> instead of <this> for visibility check does grant all access to innerclass
-							fuzzyProblem =
-								new ProblemMethodBinding(
-									selector,
-									argumentTypes,
-									methodBinding.declaringClass,
-									NotVisible);
-						}
-				}
-				if (fuzzyProblem == null && !methodBinding.isStatic()) {
-					if (insideConstructorCall) {
-						insideProblem =
-							new ProblemMethodBinding(
-								methodBinding.selector,
-								methodBinding.parameters,
-								NonStaticReferenceInConstructorInvocation);
-					} else
-						if (insideStaticContext) {
-							insideProblem =
-								new ProblemMethodBinding(
-									methodBinding.selector,
-									methodBinding.parameters,
-									NonStaticReferenceInStaticContext);
-						}
-				}
-				if (receiverType == methodBinding.declaringClass
-					|| (receiverType.getMethods(selector)) != NoMethods) {
-					// found a valid method in the 'immediate' scope (ie. not inherited)
-					// OR the receiverType implemented a method with the correct name
-					if (foundMethod == null) {
-						// return the methodBinding if it is not declared in a superclass of the scope's binding (i.e. "inherited")
-						if (fuzzyProblem != null)
-							return fuzzyProblem;
-						if (insideProblem != null)
-							return insideProblem;
-						return methodBinding;
-					}
-					// if a method was found, complain when another is found in an 'immediate' enclosing type (ie. not inherited)
-					// NOTE: Unlike fields, a non visible method hides a visible method
-					if (foundMethod.declaringClass != methodBinding.declaringClass)
-						// ie. have we found the same method - do not trust field identity yet
-						return new ProblemMethodBinding(
-							methodBinding.selector,
-							methodBinding.parameters,
-							InheritedNameHidesEnclosingName);
-				}
-			}
-
-			if (foundMethod == null
-				|| (foundMethod.problemId() == NotVisible
-					&& methodBinding.problemId() != NotVisible)) {
-				// only remember the methodBinding if its the first one found or the previous one was not visible & methodBinding is...
-				// remember that private methods are visible if defined directly by an enclosing class
-				foundFuzzyProblem = fuzzyProblem;
-				foundInsideProblem = insideProblem;
-				if (fuzzyProblem == null)
-					foundMethod = methodBinding; // only keep it if no error was found
-			}
-		}
-		insideStaticContext |= receiverType.isStatic();
-		// 1EX5I8Z - accessing outer fields within a constructor call is permitted
-		// in order to do so, we change the flag as we exit from the type, not the method
-		// itself, because the class scope is used to retrieve the fields.
-		MethodScope enclosingMethodScope = scope.methodScope();
-		insideConstructorCall =
-			enclosingMethodScope == null ? false : enclosingMethodScope.isConstructorCall;
-
-		if (foundFuzzyProblem != null)
-			return foundFuzzyProblem;
-		if (foundInsideProblem != null)
-			return foundInsideProblem;
-		if (foundMethod != null)
-			return foundMethod;
-		return new ProblemMethodBinding(selector, argumentTypes, NotFound);
+public MethodBinding getImplicitMethod(ReferenceBinding receiverType, char[] selector, TypeBinding[] argumentTypes, InvocationSite invocationSite) {
+	boolean insideStaticContext = false;
+	boolean insideConstructorCall = false;
+	MethodBinding foundMethod = null;
+	ProblemMethodBinding foundFuzzyProblem = null; // the weird method lookup case (matches method name in scope, then arg types, then visibility)
+	ProblemMethodBinding foundInsideProblem = null; // inside Constructor call or inside static context
+	Scope scope = this;
+	boolean isExactMatch = true;
+	// retrieve an exact visible match (if possible)
+	MethodBinding methodBinding =
+		(foundMethod == null)
+			? findExactMethod(receiverType, selector, argumentTypes, invocationSite)
+			: findExactMethod(receiverType, foundMethod.selector, foundMethod.parameters, invocationSite);
+//						? findExactMethod(receiverType, selector, argumentTypes, invocationSite)
+//						: findExactMethod(receiverType, foundMethod.selector, foundMethod.parameters, invocationSite);
+	if (methodBinding == null && foundMethod == null) {
+		// answers closest approximation, may not check argumentTypes or visibility
+		isExactMatch = false;
+		methodBinding = findMethod(receiverType, selector, argumentTypes, invocationSite);
+//					methodBinding = findMethod(receiverType, selector, argumentTypes, invocationSite);
 	}
+	if (methodBinding != null) { // skip it if we did not find anything
+		if (methodBinding.problemId() == Ambiguous) {
+			if (foundMethod == null || foundMethod.problemId() == NotVisible)
+				// supercedes any potential InheritedNameHidesEnclosingName problem
+				return methodBinding;
+			else
+				// make the user qualify the method, likely wants the first inherited method (javac generates an ambiguous error instead)
+				return new ProblemMethodBinding(selector, argumentTypes, InheritedNameHidesEnclosingName);
+		}
+
+		ProblemMethodBinding fuzzyProblem = null;
+		ProblemMethodBinding insideProblem = null;
+		if (methodBinding.isValidBinding()) {
+			if (!isExactMatch) {
+				if (!areParametersAssignable(methodBinding.parameters, argumentTypes)) {
+					fuzzyProblem = new ProblemMethodBinding(methodBinding, selector, argumentTypes, NotFound);
+				} else if (!canBeSeenByForCodeSnippet(methodBinding, receiverType, invocationSite, this)) {	
+					// using <classScope> instead of <this> for visibility check does grant all access to innerclass
+					fuzzyProblem = new ProblemMethodBinding(selector, argumentTypes, methodBinding.declaringClass, NotVisible);
+				}
+			}
+			if (fuzzyProblem == null && !methodBinding.isStatic()) {
+				if (insideConstructorCall) {
+					insideProblem = new ProblemMethodBinding(methodBinding.selector, methodBinding.parameters, NonStaticReferenceInConstructorInvocation);
+				} else if (insideStaticContext) {
+					insideProblem = new ProblemMethodBinding(methodBinding.selector, methodBinding.parameters, NonStaticReferenceInStaticContext);
+				}
+			}
+			if (receiverType == methodBinding.declaringClass || (receiverType.getMethods(selector)) != NoMethods) {
+				// found a valid method in the 'immediate' scope (ie. not inherited)
+				// OR the receiverType implemented a method with the correct name
+				if (foundMethod == null) {
+					// return the methodBinding if it is not declared in a superclass of the scope's binding (i.e. "inherited")
+					if (fuzzyProblem != null)
+						return fuzzyProblem;
+					if (insideProblem != null)
+						return insideProblem;
+					return methodBinding;
+				}
+				// if a method was found, complain when another is found in an 'immediate' enclosing type (ie. not inherited)
+				// NOTE: Unlike fields, a non visible method hides a visible method
+				if (foundMethod.declaringClass != methodBinding.declaringClass) // ie. have we found the same method - do not trust field identity yet
+					return new ProblemMethodBinding(methodBinding.selector, methodBinding.parameters, InheritedNameHidesEnclosingName);
+			}
+		}
+
+		if (foundMethod == null || (foundMethod.problemId() == NotVisible && methodBinding.problemId() != NotVisible)) {
+			// only remember the methodBinding if its the first one found or the previous one was not visible & methodBinding is...
+			// remember that private methods are visible if defined directly by an enclosing class
+			foundFuzzyProblem = fuzzyProblem;
+			foundInsideProblem = insideProblem;
+			if (fuzzyProblem == null)
+				foundMethod = methodBinding; // only keep it if no error was found
+		}
+	}
+	insideStaticContext |= receiverType.isStatic();
+	// 1EX5I8Z - accessing outer fields within a constructor call is permitted
+	// in order to do so, we change the flag as we exit from the type, not the method
+	// itself, because the class scope is used to retrieve the fields.
+	MethodScope enclosingMethodScope = scope.methodScope();
+	insideConstructorCall = enclosingMethodScope == null ? false : enclosingMethodScope.isConstructorCall;
+
+	if (foundFuzzyProblem != null)
+		return foundFuzzyProblem;
+	if (foundInsideProblem != null)
+		return foundInsideProblem;
+	if (foundMethod != null)
+		return foundMethod;
+	return new ProblemMethodBinding(selector, argumentTypes, NotFound);
+}
 

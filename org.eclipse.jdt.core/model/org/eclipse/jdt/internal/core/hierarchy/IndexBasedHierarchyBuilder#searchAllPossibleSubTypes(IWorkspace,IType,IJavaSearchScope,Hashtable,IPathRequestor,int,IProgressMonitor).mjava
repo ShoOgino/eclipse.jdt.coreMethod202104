@@ -1,106 +1,76 @@
-	/**
-	 * Find the set of candidate subtypes of a given type.
-	 *
-	 * The requestor is notified of super type references (with actual path of
-	 * its occurrence) for all types which are potentially involved inside a particular
-	 * hierarchy.
-	 * The match locator is not used here to narrow down the results, the type hierarchy
-	 * resolver is rather used to compute the whole hierarchy at once.
-	 */
+/**
+ * Find the set of candidate subtypes of a given type.
+ *
+ * The requestor is notified of super type references (with actual path of
+ * its occurrence) for all types which are potentially involved inside a particular
+ * hierarchy.
+ * The match locator is not used here to narrow down the results, the type hierarchy
+ * resolver is rather used to compute the whole hierarchy at once.
+ */
 
-	public static void searchAllPossibleSubTypes(
-		IWorkspace workbench,
-		IType type,
-		IJavaSearchScope scope,
-		final Hashtable binariesFromIndexMatches,
-		final IPathRequestor pathRequestor,
-		int waitingPolicy,
-	// WaitUntilReadyToSearch | ForceImmediateSearch | CancelIfNotReadyToSearch
-	IProgressMonitor progressMonitor) throws JavaModelException, CoreException {
+public static void searchAllPossibleSubTypes(
+	IWorkspace workbench,
+	IType type,
+	IJavaSearchScope scope,
+	final Hashtable binariesFromIndexMatches,
+	final IPathRequestor pathRequestor,
+	int waitingPolicy,	// WaitUntilReadyToSearch | ForceImmediateSearch | CancelIfNotReadyToSearch
+	IProgressMonitor progressMonitor)  throws JavaModelException, CoreException {
 
-		/* embed constructs inside arrays so as to pass them to (inner) collector */
-		final Queue awaitings = new Queue();
-		final HashtableOfObject foundSuperNames = new HashtableOfObject(5);
+	/* embed constructs inside arrays so as to pass them to (inner) collector */
+	final Queue awaitings = new Queue();
+	final HashtableOfObject foundSuperNames = new HashtableOfObject(5);
 
-		IndexManager indexManager =
-			((JavaModelManager) JavaModelManager.getJavaModelManager()).getIndexManager();
-		if (indexManager == null)
-			return;
+	IndexManager indexManager = ((JavaModelManager)JavaModelManager.getJavaModelManager()).getIndexManager();
+	if (indexManager == null) return;
 
-		/* use a special collector to collect paths and queue new subtype names */
-		IIndexSearchRequestor searchRequestor = new IndexSearchAdapter() {
-			public void acceptSuperTypeReference(
-				String resourcePath,
-				char[] qualification,
-				char[] typeName,
-				char[] enclosingTypeName,
-				char classOrInterface,
-				char[] superQualification,
-				char[] superTypeName,
-				char superClassOrInterface,
-				int modifiers) {
-				pathRequestor.acceptPath(resourcePath);
-				if (resourcePath.endsWith("class")) {
-					HierarchyBinaryType binaryType =
-						(HierarchyBinaryType) binariesFromIndexMatches.get(resourcePath);
-					if (binaryType == null) {
-						binaryType =
-							new HierarchyBinaryType(
-								modifiers,
-								qualification,
-								typeName,
-								enclosingTypeName,
-								classOrInterface);
-						binariesFromIndexMatches.put(resourcePath, binaryType);
-					}
-					binaryType.recordSuperType(
-						superTypeName,
-						superQualification,
-						superClassOrInterface);
+	/* use a special collector to collect paths and queue new subtype names */
+	IIndexSearchRequestor searchRequestor = new IndexSearchAdapter(){
+		public void acceptSuperTypeReference(String resourcePath, char[] qualification, char[] typeName, char[] enclosingTypeName, char classOrInterface, char[] superQualification, char[] superTypeName, char superClassOrInterface, int modifiers) {
+			pathRequestor.acceptPath(resourcePath);
+			if (resourcePath.endsWith("class")){
+				HierarchyBinaryType binaryType = (HierarchyBinaryType)binariesFromIndexMatches.get(resourcePath);
+				if (binaryType == null){
+					binaryType = new HierarchyBinaryType(modifiers, qualification, typeName, enclosingTypeName, classOrInterface);
+					binariesFromIndexMatches.put(resourcePath, binaryType);
 				}
-				if (!foundSuperNames.containsKey(typeName)) {
-					foundSuperNames.put(typeName, typeName);
-					awaitings.add(typeName);
-				}
+				binaryType.recordSuperType(superTypeName, superQualification, superClassOrInterface);
 			}
-		};
-
-		SuperTypeReferencePattern pattern =
-			new SuperTypeReferencePattern(
-				null,
-				null,
-				IJavaSearchConstants.EXACT_MATCH,
-				IJavaSearchConstants.CASE_SENSITIVE);
-		SubTypeSearchJob job =
-			new SubTypeSearchJob(
-				pattern,
+			if (!foundSuperNames.containsKey(typeName)){
+				foundSuperNames.put(typeName, typeName);
+				awaitings.add(typeName);
+			}
+		}		
+	};
+	
+	SuperTypeReferencePattern pattern = new SuperTypeReferencePattern(null, null, IJavaSearchConstants.EXACT_MATCH, IJavaSearchConstants.CASE_SENSITIVE);
+	SubTypeSearchJob job = new SubTypeSearchJob(
+				pattern, 
 				scope,
-				type,
-				IInfoConstants.PathInfo,
-				searchRequestor,
-				indexManager,
+				type, 
+				IInfoConstants.PathInfo, 
+				searchRequestor, 
+				indexManager, 
 				progressMonitor);
+	
+	/* iterate all queued names */
+	awaitings.add(type.getElementName().toCharArray());
+	while (awaitings.start <= awaitings.end){
+		if (progressMonitor != null && progressMonitor.isCanceled()) return;
 
-		/* iterate all queued names */
-		awaitings.add(type.getElementName().toCharArray());
-		while (awaitings.start <= awaitings.end) {
-			if (progressMonitor != null && progressMonitor.isCanceled())
-				return;
+		char[] currentTypeName = awaitings.retrieve();
 
-			char[] currentTypeName = awaitings.retrieve();
-
-			/* all subclasses of OBJECT are actually all types */
-			if (CharOperation.equals(currentTypeName, AbstractIndexer.OBJECT)) {
-				currentTypeName = null;
-			}
-			/* search all index references to a given supertype */
-			pattern.superSimpleName = currentTypeName;
-			indexManager.performConcurrentJob(job, waitingPolicy, progressMonitor);
-			/* in case, we search all subtypes, no need to search further */
-			if (currentTypeName == null)
-				break;
-		}
-		/* close all cached index inputs */
-		job.closeAll();
+		/* all subclasses of OBJECT are actually all types */
+		if (CharOperation.equals(currentTypeName, AbstractIndexer.OBJECT)){
+			currentTypeName = null;
+		}			
+		/* search all index references to a given supertype */
+		pattern.superSimpleName = currentTypeName;
+		indexManager.performConcurrentJob(job, waitingPolicy, progressMonitor);
+		/* in case, we search all subtypes, no need to search further */
+		if (currentTypeName == null) break;
 	}
+	/* close all cached index inputs */
+	job.closeAll();
+}
 

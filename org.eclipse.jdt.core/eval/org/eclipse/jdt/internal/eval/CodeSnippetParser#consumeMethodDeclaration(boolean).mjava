@@ -1,110 +1,85 @@
-	/**
-	 * In case emulating local variables, wrap the (recovered) statements inside a 
-	 * try statement so as to achieve local state commiting (copy local vars back to fields).
-	 * The CSToCuMapper could not be used, since it could have interfered with
-	 * the syntax recovery specific to code snippets.
-	 */
-	protected void consumeMethodDeclaration(boolean isNotAbstract) {
-		// MethodDeclaration ::= MethodHeader MethodBody
-		// AbstractMethodDeclaration ::= MethodHeader ';'
+/**
+ * In case emulating local variables, wrap the (recovered) statements inside a 
+ * try statement so as to achieve local state commiting (copy local vars back to fields).
+ * The CSToCuMapper could not be used, since it could have interfered with
+ * the syntax recovery specific to code snippets.
+ */
+protected void consumeMethodDeclaration(boolean isNotAbstract) {
+	// MethodDeclaration ::= MethodHeader MethodBody
+	// AbstractMethodDeclaration ::= MethodHeader ';'
 
-		super.consumeMethodDeclaration(isNotAbstract);
+	super.consumeMethodDeclaration(isNotAbstract);
+	
+	// now we know that we have a method declaration at the top of the ast stack
+	MethodDeclaration methodDecl = (MethodDeclaration) astStack[astPtr];
 
-		// now we know that we have a method declaration at the top of the ast stack
-		MethodDeclaration methodDecl = (MethodDeclaration) astStack[astPtr];
-
-		// automatically wrap the last statement inside a return statement, if it is an expression
-		// support have to be defined at toplevel only
-		if (this.isTopLevelType()) {
-			int last =
-				methodDecl.statements == null ? -1 : methodDecl.statements.length - 1;
-			if (last >= 0 && methodDecl.statements[last] instanceof Expression) {
-				Expression lastExpression = (Expression) methodDecl.statements[last];
-				methodDecl.statements[last] =
-					new CodeSnippetReturnStatement(
-						lastExpression,
-						lastExpression.sourceStart(),
-						lastExpression.sourceEnd(),
-						evaluationContext);
-			}
-		}
-
-		int start = methodDecl.bodyStart - 1, end = start;
-		long position = (start << 32) + end;
-		long[] positions = new long[] { position };
-		if (this.evaluationContext.localVariableNames != null) {
-
-			int varCount = this.evaluationContext.localVariableNames.length;
-			// n local decls+ try statement
-
-			// generate n local variable declarations: [type] [name] = val$[name];
-			Statement[] newStatements = new Statement[varCount + 1];
-			for (int i = 0; i < varCount; i++) {
-				char[] trimmedTypeName = this.evaluationContext.localVariableTypeNames[i];
-				int nameEnd = CharOperation.indexOf('[', trimmedTypeName);
-				if (nameEnd >= 0)
-					trimmedTypeName = CharOperation.subarray(trimmedTypeName, 0, nameEnd);
-				nameEnd = CharOperation.indexOf(' ', trimmedTypeName);
-				if (nameEnd >= 0)
-					trimmedTypeName = CharOperation.subarray(trimmedTypeName, 0, nameEnd);
-
-				TypeReference typeReference =
-					new QualifiedTypeReference(
-						CharOperation.splitOn('.', trimmedTypeName),
-						positions);
-				int dimCount =
-					CharOperation.occurencesOf(
-						'[',
-						this.evaluationContext.localVariableTypeNames[i]);
-				if (dimCount > 0) {
-					typeReference = typeReference.copyDims(dimCount);
-				}
-				NameReference init =
-					new SingleNameReference(
-						CharOperation.concat(
-							LOCAL_VAR_PREFIX,
-							this.evaluationContext.localVariableNames[i]),
-						position);
-				LocalDeclaration declaration =
-					new LocalDeclaration(
-						init,
-						this.evaluationContext.localVariableNames[i],
-						start,
-						end);
-				declaration.type = typeReference;
-				declaration.modifiers = this.evaluationContext.localVariableModifiers[i];
-				newStatements[i] = declaration;
-			}
-
-			// generate try { [snippet] } finally { [save locals to fields] }
-			// try block
-			TryStatement tryStatement = new TryStatement();
-			Block tryBlock = new Block(methodDecl.explicitDeclarations);
-			tryBlock.sourceStart = start;
-			tryBlock.sourceEnd = end;
-			tryBlock.statements = methodDecl.statements; // snippet statements
-			tryStatement.tryBlock = tryBlock;
-			// finally block
-			Block finallyBlock = new Block(0);
-			finallyBlock.sourceStart = start;
-			finallyBlock.sourceEnd = end;
-			finallyBlock.statements = new Statement[varCount];
-			for (int i = 0; i < varCount; i++) {
-				finallyBlock.statements[i] =
-					new Assignment(
-						new SingleNameReference(
-							CharOperation.concat(
-								LOCAL_VAR_PREFIX,
-								this.evaluationContext.localVariableNames[i]),
-							position),
-						new SingleNameReference(
-							this.evaluationContext.localVariableNames[i],
-							position));
-			}
-			tryStatement.finallyBlock = finallyBlock;
-
-			newStatements[varCount] = tryStatement;
-			methodDecl.statements = newStatements;
+	// automatically wrap the last statement inside a return statement, if it is an expression
+	// support have to be defined at toplevel only
+	if (this.isTopLevelType()) {
+		int last = methodDecl.statements == null ? -1 : methodDecl.statements.length - 1;
+		if (last >= 0 && methodDecl.statements[last] instanceof Expression){
+			Expression lastExpression = (Expression) methodDecl.statements[last];
+			methodDecl.statements[last] = new CodeSnippetReturnStatement(
+											lastExpression, 
+											lastExpression.sourceStart(), 
+											lastExpression.sourceEnd(),
+											evaluationContext);
 		}
 	}
+	
+	int start = methodDecl.bodyStart-1, end = start;
+	long position = (start << 32) + end;
+	long[] positions = new long[]{position};
+	if (this.evaluationContext.localVariableNames != null) {
+
+		int varCount = this.evaluationContext.localVariableNames.length; // n local decls+ try statement
+
+		// generate n local variable declarations: [type] [name] = val$[name];
+		Statement[] newStatements = new Statement[varCount+1];
+		for (int i = 0; i < varCount; i++){
+			char[] trimmedTypeName = this.evaluationContext.localVariableTypeNames[i];
+			int nameEnd = CharOperation.indexOf('[', trimmedTypeName);
+			if (nameEnd >= 0) trimmedTypeName = CharOperation.subarray(trimmedTypeName, 0, nameEnd);
+			nameEnd = CharOperation.indexOf(' ', trimmedTypeName);
+			if (nameEnd >= 0) trimmedTypeName = CharOperation.subarray(trimmedTypeName, 0, nameEnd);
+			
+			TypeReference typeReference = new QualifiedTypeReference(
+				CharOperation.splitOn('.', trimmedTypeName),
+				positions);
+			int dimCount = CharOperation.occurencesOf('[', this.evaluationContext.localVariableTypeNames[i]);
+			if (dimCount > 0) {
+				typeReference = typeReference.copyDims(dimCount);
+			}
+			NameReference init = new SingleNameReference(
+									CharOperation.concat(LOCAL_VAR_PREFIX, this.evaluationContext.localVariableNames[i]), position);
+			LocalDeclaration declaration = new LocalDeclaration(init, this.evaluationContext.localVariableNames[i], start, end);
+			declaration.type = typeReference;
+			declaration.modifiers = this.evaluationContext.localVariableModifiers[i];
+			newStatements[i] = declaration;
+		}
+
+		// generate try { [snippet] } finally { [save locals to fields] }
+		// try block
+		TryStatement tryStatement = new TryStatement();
+		Block tryBlock = new Block(methodDecl.explicitDeclarations);
+		tryBlock.sourceStart = start;
+		tryBlock.sourceEnd = end;
+		tryBlock.statements = methodDecl.statements; // snippet statements
+		tryStatement.tryBlock = tryBlock;
+		// finally block
+		Block finallyBlock = new Block(0);
+		finallyBlock.sourceStart = start;
+		finallyBlock.sourceEnd = end;
+		finallyBlock.statements = new Statement[varCount];
+		for (int i = 0; i < varCount; i++){
+			finallyBlock.statements[i] = new Assignment(
+				new SingleNameReference(CharOperation.concat(LOCAL_VAR_PREFIX, this.evaluationContext.localVariableNames[i]), position),
+				new SingleNameReference(this.evaluationContext.localVariableNames[i], position));
+		}
+		tryStatement.finallyBlock = finallyBlock;
+
+		newStatements[varCount] = tryStatement;
+		methodDecl.statements = newStatements;
+	}
+}
 

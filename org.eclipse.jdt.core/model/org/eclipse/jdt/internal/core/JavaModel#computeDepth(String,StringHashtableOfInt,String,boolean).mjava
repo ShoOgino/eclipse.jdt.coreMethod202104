@@ -1,64 +1,51 @@
-	/**
-	 * Computes the depth of the given java project following its classpath.
-	 * Only projects are taken into consideration. Store the depth in the given table.
-	 * Returns the depth.
-	 * Note that a project with no prerequisites has a depth of 0.
-	 * Returns -1 if a cycle is detected
-	 */
-	protected int computeDepth(
-		String projectName,
-		StringHashtableOfInt depthTable,
-		String dependentProjectName,
-		boolean generateMarkerOnError)
-		throws JavaModelException {
-		int depth = depthTable.get(projectName);
-		switch (depth) {
-			case -2 : // project already visited -> it's a cycle
-				if (generateMarkerOnError) {
-					try {
-						IMarker marker =
-							this.workspace.getRoot().getProject(dependentProjectName).createMarker(
-								IJavaModelMarker.TRANSIENT_PROBLEM);
-						marker.setAttribute(
-							IMarker.MESSAGE,
-							"A cycle was detected in the project's classpath");
-						marker.setAttribute(IMarker.PRIORITY, IMarker.PRIORITY_HIGH);
-						marker.setAttribute(IMarker.LOCATION, dependentProjectName);
-						marker.setAttribute(IJavaModelMarker.CYCLE_DETECTED, dependentProjectName);
-					} catch (CoreException e) {
-						e.printStackTrace();
-					}
-				} else {
-					throw new JavaModelException(
-						new JavaModelStatus(IJavaModelStatusConstants.NAME_COLLISION));
-				}
-				return -1;
-			case -1 :
-				depthTable.put(projectName, -2); // mark we're visiting the project
-				int prereqDepth = -1;
-				JavaProject project = (JavaProject) this.getJavaProject(projectName);
-				String[] prerequisites = null;
+/**
+ * Computes the depth of the given java project following its classpath.
+ * Only projects are taken into consideration. Store the depth in the given table.
+ * Returns the depth.
+ * Note that a project with no prerequisites has a depth of 0.
+ * Returns -1 if a cycle is detected
+ */
+protected int computeDepth(String projectName, StringHashtableOfInt depthTable, String dependentProjectName, boolean generateMarkerOnError) throws JavaModelException {
+	int depth = depthTable.get(projectName);
+	switch (depth) {
+		case -2: // project already visited -> it's a cycle
+			if (generateMarkerOnError) {
 				try {
-					prerequisites = project.getRequiredProjectNames();
-				} catch (JavaModelException e) {
-					prerequisites = JavaProject.NO_PREREQUISITES;
+					IMarker marker = this.workspace.getRoot().getProject(dependentProjectName).createMarker(IJavaModelMarker.TRANSIENT_PROBLEM);
+					marker.setAttribute(IMarker.MESSAGE, Util.bind("classpath.cycle"/*nonNLS*/));
+					marker.setAttribute(IMarker.PRIORITY, IMarker.PRIORITY_HIGH);
+					marker.setAttribute(IMarker.LOCATION, dependentProjectName);
+					marker.setAttribute(IJavaModelMarker.CYCLE_DETECTED, dependentProjectName);
+				} catch (CoreException e) {
+					e.printStackTrace();
 				}
-				for (int i = 0, length = prerequisites.length; i < length; i++) {
-					String prerequisite = prerequisites[i];
-					prereqDepth =
-						Math.max(
-							prereqDepth,
-							this.computeDepth(
-								prerequisite,
-								depthTable,
-								projectName,
-								generateMarkerOnError));
-				}
-				depth = 1 + prereqDepth;
-				depthTable.put(projectName, depth);
-				return depth;
-			default :
-				return depth;
-		}
+			} else {
+				throw new JavaModelException(new JavaModelStatus(IJavaModelStatusConstants.NAME_COLLISION));
+			}
+			return -1;
+		case -1:
+			depthTable.put(projectName, -2); // mark we're visiting the project
+			int prereqDepth = -1;
+			JavaProject project = (JavaProject)this.getJavaProject(projectName);
+			String[] prerequisites = null;
+			try {
+				prerequisites = project.getRequiredProjectNames();
+			} catch (JavaModelException e) {
+				prerequisites = JavaProject.NO_PREREQUISITES;
+			}
+			for (int i = 0, length = prerequisites.length; i < length; i++) {
+				String prerequisite = prerequisites[i];
+				prereqDepth = 
+					Math.max(
+						prereqDepth, 
+						this.computeDepth(prerequisite, depthTable, projectName, generateMarkerOnError)
+					);
+			}
+			depth = 1 + prereqDepth;
+			depthTable.put(projectName, depth);
+			return depth;
+		default:
+			return depth;
 	}
+}
 
