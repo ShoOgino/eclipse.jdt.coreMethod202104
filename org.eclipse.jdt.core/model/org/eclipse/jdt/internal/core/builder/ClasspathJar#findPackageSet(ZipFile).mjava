@@ -1,0 +1,35 @@
+/**
+ * Calculate and cache the package list available in the zipFile.
+ * @param zipFile The zip file to use
+ * @return A SimpleSet with the all the package names in the zipFile.
+ */
+static SimpleSet findPackageSet(ZipFile zipFile) {
+	String zipFileName = zipFile.getName();
+	File zipFileObject = new File(zipFileName);
+	long lastModified = zipFileObject.lastModified();
+	long fileSize = zipFileObject.length();
+	PackageCacheEntry cacheEntry = (PackageCacheEntry) PackageCache.get(zipFileName);
+	if (cacheEntry != null && cacheEntry.lastModified == lastModified && cacheEntry.fileSize == fileSize)
+		return cacheEntry.packageSet;
+
+	SimpleSet packageSet = new SimpleSet(41);
+	packageSet.add(""); //$NON-NLS-1$
+	nextEntry : for (Enumeration e = zipFile.entries(); e.hasMoreElements(); ) {
+		String fileName = ((ZipEntry) e.nextElement()).getName();
+
+		// add the package name & all of its parent packages
+		int last = fileName.lastIndexOf('/');
+		while (last > 0) {
+			// extract the package name
+			String packageName = fileName.substring(0, last);
+			if (packageSet.includes(packageName))
+				continue nextEntry;
+			packageSet.add(packageName);
+			last = packageName.lastIndexOf('/');
+		}
+	}
+
+	PackageCache.put(zipFileName, new PackageCacheEntry(lastModified, fileSize, packageSet));
+	return packageSet;
+}
+
