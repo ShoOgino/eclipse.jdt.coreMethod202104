@@ -2,17 +2,30 @@
 		 * @see List#set(int, java.lang.Object)
 		 */
 		public Object set(int index, Object element) {
+		    if (element == null) {
+		        throw new IllegalArgumentException();
+		    }
+			if ((ASTNode.this.flags & PROTECT) != 0) {
+				// this node is protected => cannot gain or lose children
+				throw new IllegalArgumentException("AST node cannot be modified"); //$NON-NLS-1$
+			}
 			// delink old child from parent, and link new child to parent
 			ASTNode newChild = (ASTNode) element;
 			ASTNode oldChild = (ASTNode) this.store.get(index);
 			if (oldChild == newChild) {
 				return oldChild;
 			}
-			ASTNode.checkNewChild(ASTNode.this, newChild, this.cycleCheck, this.nodeType);
+			if ((oldChild.flags & PROTECT) != 0) {
+				// old child is protected => cannot be unparented
+				throw new IllegalArgumentException("AST node cannot be modified"); //$NON-NLS-1$
+			}
+			ASTNode.checkNewChild(ASTNode.this, newChild, this.propertyDescriptor.cycleRisk, this.propertyDescriptor.elementType);
 			Object result = this.store.set(index, newChild);
-			// n.b. setParent will call modifying()
-			oldChild.setParent(null);
-			newChild.setParent(ASTNode.this);
+			// n.b. setParent will call ast.modifying()
+			ASTNode.this.ast.preRemoveChildEvent(ASTNode.this, oldChild, this.propertyDescriptor);
+			oldChild.setParent(null, null);
+			newChild.setParent(ASTNode.this, this.propertyDescriptor);
+			ASTNode.this.ast.postAddChildEvent(ASTNode.this, newChild, this.propertyDescriptor);
 			return result;
 		}
 

@@ -1,0 +1,88 @@
+	public void testProtect() {
+		final ASTNode root = SampleASTs.oneOfEach(ast);
+		
+		// check that all properties are again modifiable
+		class Slammer extends ASTVisitor {
+			boolean shouldBeProtected;
+			Slammer(boolean shouldBeProtected){
+				super(true); // visit doc
+				this.shouldBeProtected = shouldBeProtected;
+			}
+			public void postVisit(ASTNode node) {
+				try {
+					node.setSourceRange(1, 1);
+					assertTrue(!shouldBeProtected);
+				} catch (RuntimeException e) {
+					assertTrue(shouldBeProtected);
+				}
+				List ps = node.structuralPropertiesForType();
+				for (Iterator it = ps.iterator(); it.hasNext(); ) {
+					StructuralPropertyDescriptor p = (StructuralPropertyDescriptor) it.next();
+					Object o = node.getStructuralProperty(p);
+					if (p.isSimpleProperty()) {
+						// slam simple properties
+						try {
+							node.setStructuralProperty(p, o);
+							assertTrue(!shouldBeProtected);
+						} catch (RuntimeException e) {
+							assertTrue(shouldBeProtected);
+						}
+					} else if (p.isChildProperty()) {
+						// replace child with a copy
+						ASTNode copy = ASTNode.copySubtree(ast, (ASTNode) o);
+						try {
+							node.setStructuralProperty(p, copy);
+							assertTrue(!shouldBeProtected);
+						} catch (RuntimeException e) {
+							assertTrue(shouldBeProtected);
+						}
+					} else if (p.isChildListProperty()) {
+						// replace child list with copies
+						List list = (List) o;
+						List copy = ASTNode.copySubtrees(ast, list);
+						if (!list.isEmpty()) {
+							try {
+								list.clear();
+								assertTrue(!shouldBeProtected);
+							} catch (RuntimeException e) {
+								assertTrue(shouldBeProtected);
+							}
+							try {
+								list.addAll(copy);
+								assertTrue(!shouldBeProtected);
+							} catch (RuntimeException e) {
+								assertTrue(shouldBeProtected);
+							}
+						}
+					}
+				}
+			}
+		}
+		
+		class Protector extends ASTVisitor {
+			boolean shouldBeProtected;
+			Protector(boolean shouldBeProtected){
+				super(true); // visit doc
+				this.shouldBeProtected = shouldBeProtected;
+			}
+			public void preVisit(ASTNode node) {
+				int f = node.getFlags();
+				if (shouldBeProtected) {
+					f |= ASTNode.PROTECT;
+				} else {
+					f &= ~ASTNode.PROTECT;
+				}
+				node.setFlags(f);
+			}
+		}
+
+
+		// mark all nodes as protected
+		root.accept(new Protector(true));
+		root.accept(new Slammer(true));
+		
+		// mark all nodes as unprotected
+		root.accept(new Protector(false));
+		root.accept(new Slammer(false));
+	}
+
