@@ -12,17 +12,25 @@
 	 * @return the path, or <code>null</code> if none 
 	 * @see #setClasspathVariable
 	 */
-	public static IPath getClasspathVariable(String variableName) {
+	public static IPath getClasspathVariable(final String variableName) {
 
 		IPath variablePath = (IPath) JavaModelManager.variableGet(variableName);
 
 		if (variablePath == JavaModelManager.VariableInitializationInProgress) return null; // break cycle
 		
 		if (variablePath == null){
-			ClasspathVariableInitializer initializer = getClasspathVariableInitializer(variableName);
+			final ClasspathVariableInitializer initializer = getClasspathVariableInitializer(variableName);
 			if (initializer != null){
 				JavaModelManager.variablePut(variableName, JavaModelManager.VariableInitializationInProgress); // avoid initialization cycles
-				initializer.initialize(variableName);
+				// wrap initializer call with Safe runnable in case initializer would be causing some grief
+				Platform.run(new ISafeRunnable() {
+					public void handleException(Throwable exception) {
+						Util.log(exception, "Exception occurred in classpath variable initializer: "+initializer); //$NON-NLS-1$
+					}
+					public void run() throws Exception {
+						initializer.initialize(variableName);
+					}
+				});
 				variablePath = (IPath) JavaModelManager.variableGet(variableName); // retry
 				if (variablePath == JavaModelManager.VariableInitializationInProgress) return null; // break cycle
 				if (JavaModelManager.CP_RESOLVE_VERBOSE){
