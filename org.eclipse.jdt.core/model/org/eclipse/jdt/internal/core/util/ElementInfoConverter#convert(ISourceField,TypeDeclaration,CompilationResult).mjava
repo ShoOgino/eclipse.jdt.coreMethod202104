@@ -1,0 +1,47 @@
+	/*
+	 * Convert a field source element into a parsed field declaration
+	 */
+	private FieldDeclaration convert(ISourceField sourceField, TypeDeclaration type, CompilationResult compilationResult) {
+
+		FieldDeclaration field = new FieldDeclaration();
+
+		int start = sourceField.getNameSourceStart();
+		int end = sourceField.getNameSourceEnd();
+
+		field.name = sourceField.getName();
+		field.sourceStart = start;
+		field.sourceEnd = end;
+		field.type = createTypeReference(sourceField.getTypeName(), start, end);
+		field.declarationSourceStart = sourceField.getDeclarationSourceStart();
+		field.declarationSourceEnd = sourceField.getDeclarationSourceEnd();
+		field.modifiers = sourceField.getModifiers();
+
+		/* convert local and anonymous types */
+		if (this.needLocalTypes && sourceField instanceof SourceFieldElementInfo) {
+			IJavaElement[] children = ((SourceFieldElementInfo)sourceField).getChildren();
+			int typesLength = children.length;
+			if (typesLength > 0) {
+				ArrayInitializer initializer = new ArrayInitializer();
+				field.initialization = initializer;
+				Expression[] expressions = new Expression[typesLength];
+				initializer.expressions = expressions;
+				for (int i = 0; i < typesLength; i++) {
+					IJavaElement localType = children[i];
+					try {
+						AnonymousLocalTypeDeclaration anonymousLocalTypeDeclaration = (AnonymousLocalTypeDeclaration)convert((ISourceType)((JavaElement)localType).getElementInfo(),compilationResult);
+						QualifiedAllocationExpression expression = new QualifiedAllocationExpression(anonymousLocalTypeDeclaration);
+						expression.type = anonymousLocalTypeDeclaration.superclass;
+						anonymousLocalTypeDeclaration.superclass = null;
+						anonymousLocalTypeDeclaration.superInterfaces = null;
+						anonymousLocalTypeDeclaration.allocation = expression;
+						expressions[i] = expression;
+					} catch (JavaModelException e) {
+						// ignore
+					}
+				}
+			}
+		}
+		
+		return field;
+	}
+
