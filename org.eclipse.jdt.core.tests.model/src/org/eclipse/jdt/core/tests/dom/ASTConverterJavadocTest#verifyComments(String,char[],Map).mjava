@@ -1,0 +1,68 @@
+	protected CompilationUnit verifyComments(String fileName, char[] source, Map options) {
+
+		// Get comments infos from test file
+		setSourceComment(source);
+		
+		// Verify comments either in unicode or not
+		char[] testedSource = source;
+		if (unicode) {
+			testedSource = getUnicodeSource(source);
+		}
+		List unitComments = null;
+		CompilationUnit compilUnit = (CompilationUnit) runConversion(testedSource, fileName, this.currentProject, options);
+		if (this.compilerOption.equals(JavaCore.ERROR)) {
+			assumeEquals(this.prefix+"Unexpected problems", 0, compilUnit.getProblems().length); //$NON-NLS-1$
+		} else if (this.compilerOption.equals(JavaCore.WARNING)) {
+			IProblem[] problemsList = compilUnit.getProblems();
+			int length = problemsList.length;
+			if (length > 0) {
+				problems.append("  - "+this.prefix+length+" problems:"); //$NON-NLS-1$
+				for (int i = 0; i < problemsList.length; i++) {
+					problems.append("	+ "+problemsList[i]);
+				}
+			}
+		}
+		unitComments = compilUnit.getCommentList();
+		assumeNotNull(this.prefix+"Unexpected problems", unitComments);
+		
+		// Basic comments verification
+		int size = unitComments.size();
+		assumeEquals(this.prefix+"Wrong number of comments!", this.comments.size(), size);
+
+		// Verify comments positions and bindings
+		for (int i=0; i<size; i++) {
+			Comment comment = (Comment) unitComments.get(i);
+			List tags = (List) allTags.get(i);
+			// Verify flattened content
+			String stringComment = (String) this.comments.get(i);
+//			ASTConverterJavadocFlattener printer = new ASTConverterJavadocFlattener(stringComment);
+//			comment.accept(printer);
+			String text = new String(testedSource, comment.getStartPosition(), comment.getLength());
+			assumeEquals(this.prefix+"Flattened comment does NOT match source!", stringComment, text);
+			// Verify javdoc tags positions and bindings
+			if (comment.isDocComment()) {
+				Javadoc docComment = (Javadoc)comment;
+				if (this.docCommentSupport.equals(JavaCore.ENABLED)) {
+					assumeEquals(this.prefix+"Invalid tags number in javadoc:\n"+docComment+"\n", tags.size(), allTags(docComment));
+					verifyPositions(docComment, testedSource);
+					if (this.resolveBinding) {
+						verifyBindings(docComment);
+					}
+				} else {
+					assumeEquals("Javadoc should be flat!", 0, docComment.tags().size());
+				}
+			}
+		}
+		
+		/* Verify each javadoc: not implemented yet
+		Iterator types = compilUnit.types().listIterator();
+		while (types.hasNext()) {
+			TypeDeclaration typeDeclaration = (TypeDeclaration) types.next();
+			verifyJavadoc(typeDeclaration.getJavadoc());
+		}
+		*/
+
+		// Return compilation unit for possible further verifications
+		return compilUnit;
+	}
+
