@@ -1,0 +1,102 @@
+private void launchVerifyTestsIfNeeded(String[] classpaths, String[] vmArguments) {
+	// determine if we can reuse the vm
+	if (this.vm != null && this.vm.isRunning() && this.classpaths != null) {
+		boolean sameClasspaths = true;
+		for (int i = 0; i < classpaths.length; i++) {
+			if (!this.classpaths[i].equals(classpaths[i])) {
+				sameClasspaths = false;
+				break;
+			}
+		}
+		if (sameClasspaths) {
+			return;
+		}
+	}
+
+	// we could not reuse the vm, shut the existing one if running
+	if (this.vm != null) {
+		try {
+			vm.shutDown();
+		} catch (TargetException e) {
+		}
+	}
+
+	this.classpaths = classpaths;
+
+	// launch a new one
+	LocalVMLauncher launcher = new StandardVMLauncher();
+	int length = classpaths.length;
+	String[] cp = new String[length + 1];
+	System.arraycopy(classpaths, 0, cp, 0, length);
+	String verifierDir = Util.getOutputDirectory() + File.separator + "verifier";
+	this.compileVerifyTests(verifierDir);
+	cp[length] = verifierDir;
+	launcher.setClassPath(cp);
+	launcher.setVMPath(Util.getJREDirectory());
+	if (vmArguments != null) {
+		String[] completeVmArguments = new String[vmArguments.length + 1];
+		System.arraycopy(vmArguments, 0, completeVmArguments, 1, vmArguments.length);
+		completeVmArguments[0] = "-verify";
+		launcher.setVMArguments(completeVmArguments);
+	} else {
+		launcher.setVMArguments(new String[] {"-verify"});
+	}
+	launcher.setProgramClass(VerifyTests.class.getName());
+	int portNumber = Util.nextAvailablePortNumber();
+	launcher.setProgramArguments(new String[] {Integer.toString(portNumber)});
+	try {
+		this.vm = launcher.launch();
+		final InputStream input = this.vm.getInputStream();
+		Thread outputThread = new Thread(new Runnable() {
+			public void run() {
+				try {
+					int c = input.read();
+					while (c != -1) {
+						outputBuffer.append((char) c);
+						c = input.read();
+					}
+				} catch(IOException ioEx) {
+				}
+			}
+		});
+		final InputStream errorStream = this.vm.getErrorStream();
+		Thread errorThread = new Thread(new Runnable() {
+			public void run() {
+				try {
+					int c = errorStream.read();
+					while (c != -1) {
+						errorBuffer.append((char) c);
+						c = errorStream.read();
+					}
+				} catch(IOException ioEx) {
+				}
+			}
+		});
+		outputThread.start();
+		errorThread.start();
+	} catch(TargetException e) {
+		throw new Error(e.getMessage());
+	}
+
+	// connect to the vm
+	this.socket = null;
+	boolean isVMRunning = false;
+	do {
+		try {
+			this.socket = new Socket("localhost", portNumber);
+			this.socket.setTcpNoDelay(true);
+			break;
+		} catch (UnknownHostException e) {
+		} catch (IOException e) {
+		}
+		if (this.socket == null) {
+			try {
+				Thread.sleep(100);
+			} catch (InterruptedException e) {
+			}
+			isVMRunning = vm.isRunning();
+		}
+	} while (this.socket == null && isVMRunning);
+	
+}
+

@@ -1,0 +1,68 @@
+private void launchAndRun(String className, String[] classpaths, String[] programArguments, String[] vmArguments) {
+	// we won't reuse the vm, shut the existing one if running
+	if (this.vm != null) {
+		try {
+			vm.shutDown();
+		} catch (TargetException e) {
+		}
+	}
+	this.classpaths = null;
+
+	// launch a new one
+	LocalVMLauncher launcher = new StandardVMLauncher();
+	launcher.setClassPath(classpaths);
+	launcher.setVMPath(Util.getJREDirectory());
+	if (vmArguments != null) {
+		String[] completeVmArguments = new String[vmArguments.length + 1];
+		System.arraycopy(vmArguments, 0, completeVmArguments, 1, vmArguments.length);
+		completeVmArguments[0] = "-verify";
+		launcher.setVMArguments(completeVmArguments);
+	} else {
+		launcher.setVMArguments(new String[] {"-verify"});
+	}
+	launcher.setProgramClass(className);
+	launcher.setProgramArguments(programArguments);
+	Thread outputThread;
+	Thread errorThread;
+	try {
+		this.vm = launcher.launch();
+		final InputStream input = this.vm.getInputStream();
+		outputThread = new Thread(new Runnable() {
+			public void run() {
+				try {
+					int c = input.read();
+					while (c != -1) {
+						outputBuffer.append((char) c);
+						c = input.read();
+					}
+				} catch(IOException ioEx) {
+				}
+			}
+		});
+		final InputStream errorStream = this.vm.getErrorStream();
+		errorThread = new Thread(new Runnable() {
+			public void run() {
+				try {
+					int c = errorStream.read();
+					while (c != -1) {
+						errorBuffer.append((char) c);
+						c = errorStream.read();
+					}
+				} catch(IOException ioEx) {
+				}
+			}
+		});
+		outputThread.start();
+		errorThread.start();
+	} catch(TargetException e) {
+		throw new Error(e.getMessage());
+	}
+
+	// wait for vm to shut down by itself
+	try {
+		outputThread.join(5000);
+		errorThread.join(5000);
+	} catch (InterruptedException e) {
+	}
+}
+

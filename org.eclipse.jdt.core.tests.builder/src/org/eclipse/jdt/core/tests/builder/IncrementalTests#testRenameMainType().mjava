@@ -1,0 +1,55 @@
+	/*
+	 * http://bugs.eclipse.org/bugs/show_bug.cgi?id=17329
+	 */
+	public void testRenameMainType() {
+		IPath projectPath = env.addProject("Project");
+		env.addExternalJar(projectPath, env.getMinimalJarPath());
+
+		// remove old package fragment root so that names don't collide
+		env.removePackageFragmentRoot(projectPath, "");
+
+		IPath root = env.addPackageFragmentRoot(projectPath, "src");
+		env.setOutputFolder(projectPath, "bin");
+
+		/* A.java */
+		IPath pathToA = env.addClass(root, "p", "A",
+			"package p;	\n"+
+			"public class A {}");
+
+		/* B.java */
+		IPath pathToB = env.addClass(root, "p", "B",
+			"package p;	\n"+
+			"public class B extends A {}");
+
+		/* C.java */
+		IPath pathToC = env.addClass(root, "p", "C",
+			"package p;	\n"+
+			"public class C extends B {}");
+
+		fullBuild(projectPath);
+		expectingNoProblems();
+
+		/* Touch both A and C, removing A main type */
+		pathToA = env.addClass(root, "p", "A",
+			"package p;	\n"+
+			"public class _A {}");
+
+		pathToC = env.addClass(root, "p", "C",
+			"package p;	\n"+
+			"public class C extends B { }");
+
+		incrementalBuild(projectPath);
+		expectingProblemsFor(new IPath[]{ pathToA, pathToB, pathToC });
+		expectingSpecificProblemFor(pathToA, new Problem("_A", "The public type _A must be defined in its own file", pathToA));
+		expectingSpecificProblemFor(pathToB, new Problem("B", "A cannot be resolved or is not a valid superclass", pathToB));
+		expectingSpecificProblemFor(pathToC, new Problem("C", "The hierarchy of the type C is inconsistent", pathToC));
+
+		/* Touch both A and C, removing A main type */
+		pathToA = env.addClass(root, "p", "A",
+			"package p;	\n"+
+			"public class A {}");
+
+		incrementalBuild(projectPath);
+		expectingNoProblems();
+	}
+

@@ -1,0 +1,68 @@
+	/*
+	 * http://bugs.eclipse.org/bugs/show_bug.cgi?id=17807
+	 * case 2
+	 */
+	public void testRemoveSecondaryType2() {
+		IPath projectPath = env.addProject("Project");
+		env.addExternalJar(projectPath, env.getMinimalJarPath());
+		env.addExternalJar(projectPath, env.getBuilderTestsJarPath());
+
+		// remove old package fragment root so that names don't collide
+		env.removePackageFragmentRoot(projectPath, "");
+
+		IPath root = env.addPackageFragmentRoot(projectPath, "src");
+		env.setOutputFolder(projectPath, "bin");
+
+		IPath pathToAA = env.addClass(root, "p", "AA",
+			"package p;	\n"+
+			"public class AA {}	\n"+
+			"class AZ {}");
+
+		IPath pathToAB = env.addClass(root, "p", "AB",
+			"package p;	\n"+
+			"public class AB extends AZ {}");
+
+		IPath pathToBB = env.addClass(root, "p", "BB",
+			"package p;	\n"+
+			"public class BB {	\n"+
+			"	void foo(){	\n" +
+			"		System.out.println(new AB());	\n" +
+			"		System.out.println(new ZA());	\n" +
+			"	}	\n" +
+			"}");
+
+		IPath pathToZZ = env.addClass(root, "p", "ZZ",
+			"package p;	\n"+
+			"public class ZZ {}	\n"+
+			"class ZA {}");
+
+		fullBuild(projectPath);
+		expectingNoProblems();
+
+		/* Remove ZA and touch BB */
+		pathToZZ = env.addClass(root, "p", "ZZ",
+			"package p;	\n"+
+			"public class ZZ {}");
+
+		pathToBB = env.addClass(root, "p", "BB",
+			"package p;	\n"+
+			"public class BB {	\n"+
+			"	void foo() {	\n" +
+			"		System.out.println(new AB());	\n" +
+			"		System.out.println(new ZA());	\n" +
+			"	}	\n" +
+			"}");
+
+		incrementalBuild(projectPath);
+		expectingProblemsFor(new IPath[]{ pathToBB });
+		expectingSpecificProblemFor(pathToBB, new Problem("BB.foo()", "ZA cannot be resolved or is not a type", pathToBB));
+
+		pathToZZ = env.addClass(root, "p", "ZZ",
+			"package p;	\n"+
+			"public class ZZ {}	\n"+
+			"class ZA {}");
+
+		incrementalBuild(projectPath);
+		expectingNoProblems();
+	}
+

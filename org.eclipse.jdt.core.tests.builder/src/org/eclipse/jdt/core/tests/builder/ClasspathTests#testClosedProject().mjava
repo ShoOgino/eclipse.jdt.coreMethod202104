@@ -1,0 +1,65 @@
+	public void testClosedProject() {
+		IPath project1Path = env.addProject("CP1");
+		env.addExternalJar(project1Path, env.getMinimalJarPath());
+		IPath jarPath = env.addInternalJar(project1Path, "temp.jar", new byte[] {0});
+
+		IPath project2Path = env.addProject("CP2");
+		env.addExternalJar(project2Path, env.getMinimalJarPath());
+		env.addRequiredProject(project2Path, project1Path);
+
+		IPath project3Path = env.addProject("CP3");
+		env.addExternalJar(project3Path, env.getMinimalJarPath());
+		env.addExternalJar(project3Path, jarPath.toString());
+
+		fullBuild();
+		expectingNoProblems();
+
+		//----------------------------
+		//           Step 2
+		//----------------------------
+		env.closeProject(project1Path);
+
+		incrementalBuild();
+		expectingOnlyProblemsFor(new IPath[] {project2Path, project3Path});
+		expectingOnlySpecificProblemsFor(project2Path,
+			new Problem[] {
+				new Problem("", "The project was not built since it is involved in a cycle or has classpath problems.", project2Path),
+				new Problem("Build path", "Missing required Java project: CP1.", project2Path)
+			}
+		);
+		expectingOnlySpecificProblemsFor(project3Path,
+			new Problem[] {
+				new Problem("", "The project was not built since it is involved in a cycle or has classpath problems.", project3Path),
+				new Problem("Build path", "Missing required library: /CP1/temp.jar.", project3Path)
+			}
+		);
+
+		env.openProject(project1Path);
+		incrementalBuild();
+		expectingNoProblems();
+
+		//----------------------------
+		//           Step 3
+		//----------------------------
+		Hashtable options = JavaCore.getOptions();
+		options.put(JavaCore.CORE_JAVA_BUILD_INVALID_CLASSPATH, JavaCore.IGNORE);
+		JavaCore.setOptions(options);
+		env.closeProject(project1Path);
+
+		incrementalBuild();
+		expectingOnlyProblemsFor(new IPath[] {project2Path, project3Path});
+		expectingOnlySpecificProblemFor(project2Path,
+			new Problem("Build path", "Missing required Java project: CP1.", project2Path)
+		);
+		expectingOnlySpecificProblemFor(project3Path,
+			new Problem("Build path", "Missing required library: /CP1/temp.jar.", project3Path)
+		);
+
+		env.openProject(project1Path);
+		incrementalBuild();
+		expectingNoProblems();
+
+		options.put(JavaCore.CORE_JAVA_BUILD_INVALID_CLASSPATH, JavaCore.ABORT);
+		JavaCore.setOptions(options);
+	}
+
