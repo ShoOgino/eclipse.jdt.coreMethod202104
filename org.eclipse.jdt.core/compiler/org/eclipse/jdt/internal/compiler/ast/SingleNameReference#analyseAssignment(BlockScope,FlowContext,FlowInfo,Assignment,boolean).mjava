@@ -1,78 +1,78 @@
-public FlowInfo analyseAssignment(BlockScope currentScope, FlowContext flowContext, FlowInfo flowInfo, Assignment assignment, boolean isCompound) {
-
-	// compound assignment extra work
-	if (isCompound) { // check the variable part is initialized if blank final
-		switch (bits & RestrictiveFlagMASK) {
-			case FIELD : // reading a field
-				FieldBinding fieldBinding;
-				if ((fieldBinding = (FieldBinding) binding).isBlankFinal() 
-						&& currentScope.allowBlankFinalFieldAssignment(fieldBinding)) {
-					if (!flowInfo.isDefinitelyAssigned(fieldBinding)) {
-						currentScope.problemReporter().uninitializedBlankFinalField(fieldBinding, this);
+	public FlowInfo analyseAssignment(BlockScope currentScope, FlowContext flowContext, FlowInfo flowInfo, Assignment assignment, boolean isCompound) {
+	
+		// compound assignment extra work
+		if (isCompound) { // check the variable part is initialized if blank final
+			switch (bits & RestrictiveFlagMASK) {
+				case FIELD : // reading a field
+					FieldBinding fieldBinding;
+					if ((fieldBinding = (FieldBinding) binding).isBlankFinal() 
+							&& currentScope.allowBlankFinalFieldAssignment(fieldBinding)) {
+						if (!flowInfo.isDefinitelyAssigned(fieldBinding)) {
+							currentScope.problemReporter().uninitializedBlankFinalField(fieldBinding, this);
+						}
 					}
-				}
-				manageSyntheticReadAccessIfNecessary(currentScope, flowInfo);
-				break;
-			case LOCAL : // reading a local variable
-				// check if assigning a final blank field
-				LocalVariableBinding localBinding;
-				if (!flowInfo.isDefinitelyAssigned(localBinding = (LocalVariableBinding) binding)) {
-					currentScope.problemReporter().uninitializedLocalVariable(localBinding, this);
-					// we could improve error msg here telling "cannot use compound assignment on final local variable"
-				}
-				if (flowInfo.isReachable()) {
-					localBinding.useFlag = LocalVariableBinding.USED;
-				} else if (localBinding.useFlag == LocalVariableBinding.UNUSED) {
-					localBinding.useFlag = LocalVariableBinding.FAKE_USED;
-				}
+					manageSyntheticReadAccessIfNecessary(currentScope, flowInfo);
+					break;
+				case LOCAL : // reading a local variable
+					// check if assigning a final blank field
+					LocalVariableBinding localBinding;
+					if (!flowInfo.isDefinitelyAssigned(localBinding = (LocalVariableBinding) binding)) {
+						currentScope.problemReporter().uninitializedLocalVariable(localBinding, this);
+						// we could improve error msg here telling "cannot use compound assignment on final local variable"
+					}
+					if (flowInfo.isReachable()) {
+						localBinding.useFlag = LocalVariableBinding.USED;
+					} else if (localBinding.useFlag == LocalVariableBinding.UNUSED) {
+						localBinding.useFlag = LocalVariableBinding.FAKE_USED;
+					}
+			}
 		}
-	}
-	if (assignment.expression != null) {
-		flowInfo = assignment.expression.analyseCode(currentScope, flowContext, flowInfo).unconditionalInits();
-	}
-	switch (bits & RestrictiveFlagMASK) {
-		case FIELD : // assigning to a field
-			manageSyntheticWriteAccessIfNecessary(currentScope, flowInfo);
-
-			// check if assigning a final field
-			FieldBinding fieldBinding;
-			if ((fieldBinding = (FieldBinding) binding).isFinal()) {
-				// inside a context where allowed
-				if (!isCompound && fieldBinding.isBlankFinal() && currentScope.allowBlankFinalFieldAssignment(fieldBinding)) {
-					if (flowInfo.isPotentiallyAssigned(fieldBinding)) {
-						currentScope.problemReporter().duplicateInitializationOfBlankFinalField(fieldBinding, this);
+		if (assignment.expression != null) {
+			flowInfo = assignment.expression.analyseCode(currentScope, flowContext, flowInfo).unconditionalInits();
+		}
+		switch (bits & RestrictiveFlagMASK) {
+			case FIELD : // assigning to a field
+				manageSyntheticWriteAccessIfNecessary(currentScope, flowInfo);
+	
+				// check if assigning a final field
+				FieldBinding fieldBinding;
+				if ((fieldBinding = (FieldBinding) binding).isFinal()) {
+					// inside a context where allowed
+					if (!isCompound && fieldBinding.isBlankFinal() && currentScope.allowBlankFinalFieldAssignment(fieldBinding)) {
+						if (flowInfo.isPotentiallyAssigned(fieldBinding)) {
+							currentScope.problemReporter().duplicateInitializationOfBlankFinalField(fieldBinding, this);
+						} else {
+							flowContext.recordSettingFinal(fieldBinding, this);						
+						}
+						flowInfo.markAsDefinitelyAssigned(fieldBinding);
 					} else {
-						flowContext.recordSettingFinal(fieldBinding, this);						
+						currentScope.problemReporter().cannotAssignToFinalField(fieldBinding, this);
 					}
-					flowInfo.markAsDefinitelyAssigned(fieldBinding);
-				} else {
-					currentScope.problemReporter().cannotAssignToFinalField(fieldBinding, this);
 				}
-			}
-			break;
-		case LOCAL : // assigning to a local variable 
-			LocalVariableBinding localBinding = (LocalVariableBinding) binding;
-			if (!flowInfo.isDefinitelyAssigned(localBinding)){// for local variable debug attributes
-				bits |= FirstAssignmentToLocalMASK;
-			} else {
-				bits &= ~FirstAssignmentToLocalMASK;
-			}
-			if (localBinding.isFinal()) {
-				if ((bits & DepthMASK) == 0) {
-					if (isCompound || !localBinding.isBlankFinal()){
-						currentScope.problemReporter().cannotAssignToFinalLocal(localBinding, this);
-					} else if (flowInfo.isPotentiallyAssigned(localBinding)) {
-						currentScope.problemReporter().duplicateInitializationOfFinalLocal(localBinding, this);
+				break;
+			case LOCAL : // assigning to a local variable 
+				LocalVariableBinding localBinding = (LocalVariableBinding) binding;
+				if (!flowInfo.isDefinitelyAssigned(localBinding)){// for local variable debug attributes
+					bits |= FirstAssignmentToLocalMASK;
+				} else {
+					bits &= ~FirstAssignmentToLocalMASK;
+				}
+				if (localBinding.isFinal()) {
+					if ((bits & DepthMASK) == 0) {
+						if (isCompound || !localBinding.isBlankFinal()){
+							currentScope.problemReporter().cannotAssignToFinalLocal(localBinding, this);
+						} else if (flowInfo.isPotentiallyAssigned(localBinding)) {
+							currentScope.problemReporter().duplicateInitializationOfFinalLocal(localBinding, this);
+						} else {
+							flowContext.recordSettingFinal(localBinding, this);								
+						}
 					} else {
-						flowContext.recordSettingFinal(localBinding, this);								
+						currentScope.problemReporter().cannotAssignToFinalOuterLocal(localBinding, this);
 					}
-				} else {
-					currentScope.problemReporter().cannotAssignToFinalOuterLocal(localBinding, this);
 				}
-			}
-			flowInfo.markAsDefinitelyAssigned(localBinding);
+				flowInfo.markAsDefinitelyAssigned(localBinding);
+		}
+		manageEnclosingInstanceAccessIfNecessary(currentScope, flowInfo);
+		return flowInfo;
 	}
-	manageEnclosingInstanceAccessIfNecessary(currentScope, flowInfo);
-	return flowInfo;
-}
 

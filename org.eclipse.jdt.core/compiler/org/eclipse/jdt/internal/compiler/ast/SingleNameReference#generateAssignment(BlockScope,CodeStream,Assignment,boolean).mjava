@@ -1,87 +1,87 @@
-public void generateAssignment(BlockScope currentScope, CodeStream codeStream, Assignment assignment, boolean valueRequired) {
-
-	// optimizing assignment like: i = i + 1 or i = 1 + i
-	if (assignment.expression.isCompactableOperation()) {
-		BinaryExpression operation = (BinaryExpression) assignment.expression;
-		SingleNameReference variableReference;
-		if ((operation.left instanceof SingleNameReference) && ((variableReference = (SingleNameReference) operation.left).binding == binding)) {
-			// i = i + value, then use the variable on the right hand side, since it has the correct implicit conversion
-			variableReference.generateCompoundAssignment(currentScope, codeStream, syntheticAccessors == null ? null : syntheticAccessors[WRITE], operation.right, (operation.bits & OperatorMASK) >> OperatorSHIFT, operation.left.implicitConversion /*should be equivalent to no conversion*/, valueRequired);
-			return;
-		}
-		int operator = (operation.bits & OperatorMASK) >> OperatorSHIFT;
-		if ((operation.right instanceof SingleNameReference)
-			&& ((operator == PLUS) || (operator == MULTIPLY)) // only commutative operations
-			&& ((variableReference = (SingleNameReference) operation.right).binding == binding)
-			&& (operation.left.constant != NotAConstant) // exclude non constant expressions, since could have side-effect
-			&& ((operation.left.implicitConversion >> 4) != T_String) // exclude string concatenation which would occur backwards
-			&& ((operation.right.implicitConversion >> 4) != T_String)) { // exclude string concatenation which would occur backwards
-			// i = value + i, then use the variable on the right hand side, since it has the correct implicit conversion
-			variableReference.generateCompoundAssignment(currentScope, codeStream, syntheticAccessors == null ? null : syntheticAccessors[WRITE], operation.left, operator, operation.right.implicitConversion /*should be equivalent to no conversion*/, valueRequired);
-			return;
-		}
-	}
-	switch (bits & RestrictiveFlagMASK) {
-		case FIELD : // assigning to a field
-			FieldBinding fieldBinding;
-			if (!(fieldBinding = (FieldBinding) this.codegenBinding).isStatic()) { // need a receiver?
-				if ((bits & DepthMASK) != 0) {
-					ReferenceBinding targetType = currentScope.enclosingSourceType().enclosingTypeAt((bits & DepthMASK) >> DepthSHIFT);
-					Object[] emulationPath = currentScope.getEmulationPath(targetType, true /*only exact match*/, false/*consider enclosing arg*/);
-					codeStream.generateOuterAccess(emulationPath, this, targetType, currentScope);
-				} else {
-					this.generateReceiver(codeStream);
-				}
-			}
-			assignment.expression.generateCode(currentScope, codeStream, true);
-			fieldStore(codeStream, fieldBinding, syntheticAccessors == null ? null : syntheticAccessors[WRITE], valueRequired);
-			if (valueRequired) {
-				codeStream.generateImplicitConversion(assignment.implicitConversion);
-			}
-			return;
-		case LOCAL : // assigning to a local variable
-			LocalVariableBinding localBinding = (LocalVariableBinding) this.codegenBinding;
-			if (localBinding.resolvedPosition != -1) {
-				assignment.expression.generateCode(currentScope, codeStream, true);
-			} else {
-				if (assignment.expression.constant != NotAConstant) {
-					// assigning an unused local to a constant value = no actual assignment is necessary
-					if (valueRequired) {
-						codeStream.generateConstant(assignment.expression.constant, assignment.implicitConversion);
-					}
-				} else {
-					assignment.expression.generateCode(currentScope, codeStream, true);
-					/* Even though the value may not be required, we force it to be produced, and discard it later
-					on if it was actually not necessary, so as to provide the same behavior as JDK1.2beta3.	*/
-					if (valueRequired) {
-						codeStream.generateImplicitConversion(assignment.implicitConversion); // implicit conversion
-					} else {
-						if ((localBinding.type == LongBinding) || (localBinding.type == DoubleBinding)) {
-							codeStream.pop2();
-						} else {
-							codeStream.pop();
-						}
-					}
-				}
+	public void generateAssignment(BlockScope currentScope, CodeStream codeStream, Assignment assignment, boolean valueRequired) {
+	
+		// optimizing assignment like: i = i + 1 or i = 1 + i
+		if (assignment.expression.isCompactableOperation()) {
+			BinaryExpression operation = (BinaryExpression) assignment.expression;
+			SingleNameReference variableReference;
+			if ((operation.left instanceof SingleNameReference) && ((variableReference = (SingleNameReference) operation.left).binding == binding)) {
+				// i = i + value, then use the variable on the right hand side, since it has the correct implicit conversion
+				variableReference.generateCompoundAssignment(currentScope, codeStream, syntheticAccessors == null ? null : syntheticAccessors[WRITE], operation.right, (operation.bits & OperatorMASK) >> OperatorSHIFT, operation.left.implicitConversion /*should be equivalent to no conversion*/, valueRequired);
 				return;
 			}
-			// 26903, need extra cast to store null in array local var	
-			if (localBinding.type.isArrayType() 
-				&& (assignment.expression.resolvedType == NullBinding	// arrayLoc = null
-					|| ((assignment.expression instanceof CastExpression)	// arrayLoc = (type[])null
-						&& (((CastExpression)assignment.expression).innermostCastedExpression().resolvedType == NullBinding)))){
-				codeStream.checkcast(localBinding.type); 
+			int operator = (operation.bits & OperatorMASK) >> OperatorSHIFT;
+			if ((operation.right instanceof SingleNameReference)
+				&& ((operator == PLUS) || (operator == MULTIPLY)) // only commutative operations
+				&& ((variableReference = (SingleNameReference) operation.right).binding == binding)
+				&& (operation.left.constant != NotAConstant) // exclude non constant expressions, since could have side-effect
+				&& ((operation.left.implicitConversion >> 4) != T_String) // exclude string concatenation which would occur backwards
+				&& ((operation.right.implicitConversion >> 4) != T_String)) { // exclude string concatenation which would occur backwards
+				// i = value + i, then use the variable on the right hand side, since it has the correct implicit conversion
+				variableReference.generateCompoundAssignment(currentScope, codeStream, syntheticAccessors == null ? null : syntheticAccessors[WRITE], operation.left, operator, operation.right.implicitConversion /*should be equivalent to no conversion*/, valueRequired);
+				return;
 			}
-			
-			// normal local assignment (since cannot store in outer local which are final locations)
-			codeStream.store(localBinding, valueRequired);
-			if ((bits & FirstAssignmentToLocalMASK) != 0) { // for local variable debug attributes
-				localBinding.recordInitializationStartPC(codeStream.position);
-			}
-			// implicit conversion
-			if (valueRequired) {
-				codeStream.generateImplicitConversion(assignment.implicitConversion);
-			}
+		}
+		switch (bits & RestrictiveFlagMASK) {
+			case FIELD : // assigning to a field
+				FieldBinding fieldBinding;
+				if (!(fieldBinding = (FieldBinding) this.codegenBinding).isStatic()) { // need a receiver?
+					if ((bits & DepthMASK) != 0) {
+						ReferenceBinding targetType = currentScope.enclosingSourceType().enclosingTypeAt((bits & DepthMASK) >> DepthSHIFT);
+						Object[] emulationPath = currentScope.getEmulationPath(targetType, true /*only exact match*/, false/*consider enclosing arg*/);
+						codeStream.generateOuterAccess(emulationPath, this, targetType, currentScope);
+					} else {
+						this.generateReceiver(codeStream);
+					}
+				}
+				assignment.expression.generateCode(currentScope, codeStream, true);
+				fieldStore(codeStream, fieldBinding, syntheticAccessors == null ? null : syntheticAccessors[WRITE], valueRequired);
+				if (valueRequired) {
+					codeStream.generateImplicitConversion(assignment.implicitConversion);
+				}
+				return;
+			case LOCAL : // assigning to a local variable
+				LocalVariableBinding localBinding = (LocalVariableBinding) this.codegenBinding;
+				if (localBinding.resolvedPosition != -1) {
+					assignment.expression.generateCode(currentScope, codeStream, true);
+				} else {
+					if (assignment.expression.constant != NotAConstant) {
+						// assigning an unused local to a constant value = no actual assignment is necessary
+						if (valueRequired) {
+							codeStream.generateConstant(assignment.expression.constant, assignment.implicitConversion);
+						}
+					} else {
+						assignment.expression.generateCode(currentScope, codeStream, true);
+						/* Even though the value may not be required, we force it to be produced, and discard it later
+						on if it was actually not necessary, so as to provide the same behavior as JDK1.2beta3.	*/
+						if (valueRequired) {
+							codeStream.generateImplicitConversion(assignment.implicitConversion); // implicit conversion
+						} else {
+							if ((localBinding.type == LongBinding) || (localBinding.type == DoubleBinding)) {
+								codeStream.pop2();
+							} else {
+								codeStream.pop();
+							}
+						}
+					}
+					return;
+				}
+				// 26903, need extra cast to store null in array local var	
+				if (localBinding.type.isArrayType() 
+					&& (assignment.expression.resolvedType == NullBinding	// arrayLoc = null
+						|| ((assignment.expression instanceof CastExpression)	// arrayLoc = (type[])null
+							&& (((CastExpression)assignment.expression).innermostCastedExpression().resolvedType == NullBinding)))){
+					codeStream.checkcast(localBinding.type); 
+				}
+				
+				// normal local assignment (since cannot store in outer local which are final locations)
+				codeStream.store(localBinding, valueRequired);
+				if ((bits & FirstAssignmentToLocalMASK) != 0) { // for local variable debug attributes
+					localBinding.recordInitializationStartPC(codeStream.position);
+				}
+				// implicit conversion
+				if (valueRequired) {
+					codeStream.generateImplicitConversion(assignment.implicitConversion);
+				}
+		}
 	}
-}
 
