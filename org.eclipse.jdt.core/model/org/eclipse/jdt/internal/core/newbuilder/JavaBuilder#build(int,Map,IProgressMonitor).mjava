@@ -1,0 +1,45 @@
+protected IProject[] build(int kind, Map ignored, IProgressMonitor monitor) throws CoreException {
+	this.currentProject = getProject();
+	if (currentProject == null || !currentProject.exists()) return new IProject[0];
+
+	this.notifier = new BuildNotifier(monitor, currentProject);
+	notifier.begin();
+	boolean ok = false;
+	try {
+		initializeBuilder();
+
+		if (kind == FULL_BUILD) {
+			buildAll();
+		} else {
+			if (lastState == null || hasClasspathChanged() || hasOutputLocationChanged()) {
+				// if the output location changes, do not delete the binary files from old location
+				// the user may be trying something
+				buildAll();
+			} else if (sourceFolders.length > 0) {
+				// if there is no source to compile & no classpath changes then we are done
+				SimpleLookupTable deltas = findDeltas();
+				if (deltas == null)
+					buildAll();
+				else
+					buildDeltas(deltas);
+			}
+		}
+		ok = true;
+	} catch (ImageBuilderInternalException e) {
+		// Fix for 1FW2XY6: ITPJCORE:ALL - Image builder wrappers CoreException
+		// WHY not just let the CoreException thru instead of wrappering it?
+		if (e.getThrowable() instanceof CoreException)
+			throw (CoreException) e.getThrowable();
+		throw new CoreException(
+			new Status(IStatus.ERROR, JavaCore.PLUGIN_ID, -1,
+				Util.bind("build.builderName"), e)); //$NON-NLS-1$
+	} finally {
+		if (!ok)
+			// If the build failed, clear the previously built state, forcing a full build next time.
+			clearLastState();
+		notifier.done();
+		cleanup();
+	}
+	return getRequiredProjects();
+}
+

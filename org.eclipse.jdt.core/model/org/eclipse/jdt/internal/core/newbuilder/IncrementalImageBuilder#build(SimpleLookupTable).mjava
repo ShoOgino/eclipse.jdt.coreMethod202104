@@ -1,0 +1,64 @@
+public boolean build(SimpleLookupTable deltas) {
+	// initialize builder
+	// walk this project's deltas, find changed source files
+	// walk prereq projects' deltas, find changed class files & add affected source files
+	//   use the build state # to skip the deltas for certain prereq projects
+	//   ignore changed zip/jar files since they caused a full build
+	// compile the source files & acceptResult()
+	// compare the produced class files against the existing ones on disk
+	// recompile all dependent source files of any type with structural changes or new/removed secondary type
+	// keep a loop counter to abort & perform a full build
+
+	try {
+		resetCollections();
+
+		notifier.subTask(Util.bind("build.analyzingDeltas")); //$NON-NLS-1$
+		IResourceDelta sourceDelta = (IResourceDelta) deltas.get(javaBuilder.currentProject);
+		if (sourceDelta != null)
+			findSourceFiles(sourceDelta);
+		notifier.updateProgressDelta(0.10f);
+		notifier.checkCancel();
+
+		Object[] keyTable = javaBuilder.prereqOutputFolders.keyTable;
+		Object[] valueTable = javaBuilder.prereqOutputFolders.valueTable;
+		for (int i = 0, l = keyTable.length; i < l; i++) {
+			IProject prereqProject = (IProject) keyTable[i];
+			if (prereqProject != null) {
+				IResourceDelta binaryDelta = (IResourceDelta) deltas.get(prereqProject);
+				if (binaryDelta != null)
+					findAffectedSourceFiles(binaryDelta, (IResource) valueTable[i]);
+			}
+		}
+		notifier.updateProgressDelta(0.10f);
+		notifier.checkCancel();
+
+		notifier.subTask(Util.bind("build.analyzingSources")); //$NON-NLS-1$
+		addAffectedSourceFiles();
+		notifier.updateProgressDelta(0.05f);
+
+		int compileLoop = 0;
+		float increment = 0.40f;
+		while (locations.size() > 0) { // added to in acceptResult
+			if (++compileLoop > MaxCompileLoop) return false;
+			notifier.checkCancel();
+
+			String[] allSourceFiles = new String[locations.size()];
+			locations.toArray(allSourceFiles);
+			String[] initialTypeStrings = new String[typeNames.size()];
+			typeNames.toArray(initialTypeStrings);
+			resetCollections();
+
+			workQueue.addAll(allSourceFiles);
+			notifier.setProgressPerCompilationUnit(increment / allSourceFiles.length);
+			increment = increment / 2;
+			compile(allSourceFiles, initialTypeStrings);
+			addAffectedSourceFiles();
+		}
+	} catch (CoreException e) {
+		throw internalException(e);
+	} finally {
+		cleanUp();
+	}
+	return true;
+}
+

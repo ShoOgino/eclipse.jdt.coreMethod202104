@@ -1,0 +1,45 @@
+protected void addAffectedSourceFiles() {
+	if (qualifiedStrings.isEmpty() && simpleStrings.isEmpty()) return;
+
+	// the qualifiedStrings are of the form 'p1/p1' & the simpleStrings are just 'X'
+	char[][][] qualifiedNames = ReferenceCollection.internQualifiedNames(qualifiedStrings);
+	// if a well known qualified name was found then we can skip over these
+	if (qualifiedNames.length < qualifiedStrings.size())
+		qualifiedNames = null;
+	char[][] simpleNames = ReferenceCollection.internSimpleNames(simpleStrings);
+	// if a well known name was found then we can skip over these
+	if (simpleNames.length < simpleStrings.size())
+		simpleNames = null;
+
+	char[][] keyTable = newState.references.keyTable;
+	Object[] valueTable = newState.references.valueTable;
+	next : for (int i = 0, l = keyTable.length; i < l; i++) {
+		char[] key = keyTable[i];
+		if (key != null) {
+			String location = new String(key);
+			// must add previously compiled locations, otherwise we do not find hierarchy related problems
+			if (locations.contains(location))
+				continue next; // already know to compile this file so skip it
+
+			ReferenceCollection refs = (ReferenceCollection) valueTable[i];
+			if (refs.includes(qualifiedNames, simpleNames)) {
+				// check that the file still exists... the file or its package may have been deleted
+				IResource affectedFile = javaBuilder.workspaceRoot.getFileForLocation(new Path(location));
+				if (affectedFile != null && affectedFile.exists()) {
+					if (JavaBuilder.DEBUG)
+						System.out.println("  adding affected source file " + location); //$NON-NLS-1$
+					locations.add(location);
+					for (int j = 0, k = sourceFolders.length; j < k; j++) {
+						String sourceLocation = sourceFolders[j].getLocation().toString();
+						if (location.startsWith(sourceLocation)) {
+							typeNames.add(location.substring(sourceLocation.length(), location.length() - 5)); // length of ".java"
+							continue next;
+						}
+					}
+					typeNames.add(location); // should not reach here
+				}
+			}
+		}
+	}
+}
+

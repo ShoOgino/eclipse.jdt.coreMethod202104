@@ -1,0 +1,49 @@
+protected void findAffectedSourceFiles(IResourceDelta binaryDelta, int outputFolderSegmentCount) {
+	// When a package becomes a type or vice versa, expect 2 deltas,
+	// one on the folder & one on the class file
+	IPath location = binaryDelta.getResource().getLocation();
+	String extension = location.getFileExtension();
+	if (extension == null) { // no extension indicates a folder
+		switch (binaryDelta.getKind()) {
+			case IResourceDelta.ADDED :
+				IPath addedPackagePath = location.removeFirstSegments(outputFolderSegmentCount);
+				if (JavaBuilder.DEBUG)
+					System.out.println("Add dependents of added package " + addedPackagePath); //$NON-NLS-1$
+				addDependentsOf(addedPackagePath, false);
+				return;
+			case IResourceDelta.REMOVED :
+				IPath removedPackagePath = location.removeFirstSegments(outputFolderSegmentCount);
+				if (JavaBuilder.DEBUG)
+					System.out.println("Add dependents of removed package " + removedPackagePath); //$NON-NLS-1$
+				addDependentsOf(removedPackagePath, false);
+				return;
+			case IResourceDelta.CHANGED :
+				IResourceDelta[] children = binaryDelta.getAffectedChildren();
+				for (int i = 0, length = children.length; i < length; ++i)
+					findAffectedSourceFiles(children[i], outputFolderSegmentCount);
+				return;
+		}
+	} else if (JavaBuilder.CLASS_EXTENSION.equalsIgnoreCase(extension)) {
+		IPath typePath = location.removeFirstSegments(outputFolderSegmentCount).removeFileExtension();
+		switch (binaryDelta.getKind()) {
+			case IResourceDelta.ADDED :
+				if (JavaBuilder.DEBUG)
+					System.out.println("Add dependents of added class file " + typePath); //$NON-NLS-1$
+				addDependentsOf(typePath, false);
+				return;
+			case IResourceDelta.REMOVED :
+				if (JavaBuilder.DEBUG)
+					System.out.println("Add dependents of removed class file " + typePath); //$NON-NLS-1$
+				addDependentsOf(typePath, false);
+				return;
+			case IResourceDelta.CHANGED :
+				if ((binaryDelta.getFlags() & IResourceDelta.CONTENT) == 0)
+					return; // skip it since it really isn't changed
+				if (JavaBuilder.DEBUG)
+					System.out.println("Add dependents of changed class file " + typePath); //$NON-NLS-1$
+				addDependentsOf(typePath, false);
+				return;
+		}
+	}
+}
+
