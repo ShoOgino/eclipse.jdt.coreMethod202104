@@ -1,0 +1,50 @@
+	public TypeDeclaration convert(org.eclipse.jdt.internal.compiler.ast.TypeDeclaration typeDeclaration) {
+		TypeDeclaration typeDecl = this.ast.newTypeDeclaration();
+		if (resolveBindings) {
+			recordNodes(typeDecl, typeDeclaration);
+		}
+		typeDecl.setModifiers(typeDeclaration.modifiers & ~0x200); // remove AccInterface: 0x200
+		typeDecl.setInterface(typeDeclaration.isInterface());
+		SimpleName typeName = this.ast.newSimpleName(new String(typeDeclaration.name));
+		typeName.setSourceRange(typeDeclaration.sourceStart, typeDeclaration.sourceEnd - typeDeclaration.sourceStart + 1);
+		typeDecl.setName(this.ast.newSimpleName(new String(typeDeclaration.name)));
+		typeDecl.setSourceRange(typeDeclaration.declarationSourceStart, typeDeclaration.declarationSourceEnd - typeDeclaration.declarationSourceStart + 1);
+		
+		// need to set the superclass and super interfaces here since we cannot distinguish them at
+		// the type references level.
+		if (typeDeclaration.superclass != null) {
+			typeDecl.setSuperclass(convert(typeDeclaration.superclass));
+		}
+		
+		TypeReference[] superInterfaces = typeDeclaration.superInterfaces;
+		if (superInterfaces != null) {
+			for (int index = 0, length = superInterfaces.length; index < length; index++) {
+				typeDecl.superInterfaces().add(convert(superInterfaces[index]));
+			}
+		}
+		MemberTypeDeclaration[] members = typeDeclaration.memberTypes;
+		if (members != null) {
+			for (int i = 0, length = members.length; i < length; i++) {
+				typeDecl.bodyDeclarations().add(convert(members[i]));
+			}
+		}
+		org.eclipse.jdt.internal.compiler.ast.FieldDeclaration[] fields = typeDeclaration.fields;
+		if (fields != null) {
+			int fieldsLength = fields.length;
+			for (int i = 0; i < fieldsLength; i++) {
+				checkAndAddMultipleFieldDeclaration(fields, i, typeDecl.bodyDeclarations());
+			}
+		}
+		AbstractMethodDeclaration[] methods = typeDeclaration.methods;
+		if (methods != null) {
+			int methodsLength = methods.length;
+			for (int i = 0; i < methodsLength; i++) {
+				if (!methods[i].isDefaultConstructor() && !methods[i].isClinit()) {
+					typeDecl.bodyDeclarations().add(convert(methods[i]));
+				}
+			}
+		}
+		setJavaDocComment(typeDecl);
+		return typeDecl;
+	}
+
