@@ -4,40 +4,51 @@
 	 *
 	 * @exception NotPresentException if this project does not exist.
 	 */
-	protected void setRawClasspath0(IClasspathEntry[] entries)
+	protected void setRawClasspath0(IClasspathEntry[] rawEntries)
 		throws JavaModelException {
 
 		JavaProjectElementInfo info = getJavaProjectElementInfo();
 
 		synchronized (info) {
-			if (entries == null) {
-				entries = defaultClasspath();
+			if (rawEntries == null) {
+				rawEntries = defaultClasspath();
 			}
 
 			// clear the existing children
 			info.setChildren(new IPackageFragmentRoot[] {});
-			info.setRawClasspath(entries);
+			info.setRawClasspath(rawEntries);
 
 			IndexManager indexManager =
 				((JavaModelManager) JavaModelManager.getJavaModelManager()).getIndexManager();
 
-			// determine the new children
-			for (int i = 0; i < entries.length; i++) {
-				IClasspathEntry entry = entries[i];
+			// map of all immediate (resolved) entries			
+			IClasspathEntry[] resolvedEntries = getResolvedClasspath(true);
+			Hashtable immediateEntries = new Hashtable(resolvedEntries.length);
+			for (int i = 0; i < resolvedEntries.length; i++) {
+				immediateEntries.put(resolvedEntries[i], this);
+			}
+
+			// compute the new roots, and trigger indexing of referenced JARs
+			IClasspathEntry[] expandedEntries = getExpandedClasspath(true);
+			for (int i = 0; i < expandedEntries.length; i++) {
+				IClasspathEntry entry = expandedEntries[i];
 				IPackageFragmentRoot[] roots = getPackageFragmentRoots(entry);
 				for (int j = 0; j < roots.length; j++) {
 					PackageFragmentRoot root = (PackageFragmentRoot) roots[j];
 					if (root.exists0()) {
-						if (root.getKind() == IPackageFragmentRoot.K_BINARY && indexManager != null) {
-							if (root.isArchive()) {
-								indexManager.indexJarFile(root.getPath(), getUnderlyingResource().getName());
-							} else {
-								indexManager.indexBinaryFolder(
-									(IFolder) root.getUnderlyingResource(),
-									(IProject) this.getUnderlyingResource());
+						// only trigger indexing of immediate libraries
+						if (immediateEntries.get(entry) != null){
+							if (root.getKind() == IPackageFragmentRoot.K_BINARY && indexManager != null) {
+								if (root.isArchive()) {
+									indexManager.indexJarFile(root.getPath(), getUnderlyingResource().getName());
+								} else {
+									indexManager.indexBinaryFolder(
+										(IFolder) root.getUnderlyingResource(),
+										(IProject) this.getUnderlyingResource());
+								}
 							}
 						}
-						info.addChild(roots[j]);
+						info.addChild(root);
 					}
 				}
 			}
