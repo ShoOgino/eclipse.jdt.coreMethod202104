@@ -11,12 +11,16 @@
 	*/
 	private boolean connectSuperclass() {
 		SourceTypeBinding sourceType = referenceContext.binding;
+		if (isJavaLangObject(sourceType)) { // handle the case of redefining java.lang.Object up front
+			sourceType.superclass = null;
+			sourceType.superInterfaces = NoSuperInterfaces;
+			if (referenceContext.superclass != null || referenceContext.superInterfaces != null)
+				problemReporter().objectCannotHaveSuperTypes(sourceType);
+			return true; // do not propagate Object's hierarchy problems down to every subtype
+		}
 		if (referenceContext.superclass == null) {
-			if (isJavaLangObject(sourceType))
-				return true;
 			sourceType.superclass = getJavaLangObject();
 			return !detectCycle(sourceType, sourceType.superclass, null);
-			// ensure Object is initialized if it comes from a source file
 		}
 		ReferenceBinding superclass = findSupertype(referenceContext.superclass);
 		if (superclass != null) { // is null if a cycle was detected cycle
@@ -26,11 +30,6 @@
 				problemReporter().superclassMustBeAClass(sourceType, referenceContext.superclass, superclass);
 			} else if (superclass.isFinal()) {
 				problemReporter().classExtendFinalClass(sourceType, referenceContext.superclass, superclass);
-			} else if (isJavaLangObject(sourceType)) {
-				// can only happen if Object extends another type... will never happen unless we're testing for it.
-				sourceType.tagBits |= HierarchyHasProblems;
-				sourceType.superclass = null;
-				return true;
 			} else {
 				// only want to reach here when no errors are reported
 				referenceContext.superclass.resolvedType = superclass;
@@ -39,12 +38,9 @@
 			}
 		}
 		sourceType.tagBits |= HierarchyHasProblems;
-		if (!isJavaLangObject(sourceType)) {
-			sourceType.superclass = getJavaLangObject();
-			if ((sourceType.superclass.tagBits & BeginHierarchyCheck) == 0)
-				detectCycle(sourceType, sourceType.superclass, null);
-			// ensure Object is initialized if it comes from a source file
-		}
+		sourceType.superclass = getJavaLangObject();
+		if ((sourceType.superclass.tagBits & BeginHierarchyCheck) == 0)
+			detectCycle(sourceType, sourceType.superclass, null);
 		return false; // reported some error against the source type
 	}
 
