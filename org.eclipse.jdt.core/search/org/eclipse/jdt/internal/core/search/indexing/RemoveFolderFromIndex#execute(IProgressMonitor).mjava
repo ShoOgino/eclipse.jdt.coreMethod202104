@@ -1,23 +1,20 @@
 	public boolean execute(IProgressMonitor progressMonitor) {
-		
-		if (progressMonitor != null && progressMonitor.isCanceled()) return COMPLETE;
-		
-		try {
-			IIndex index = manager.getIndex(this.indexedContainer, true /*reuse index file*/, true /*create if none*/);
-			if (index == null)
-				return COMPLETE;
 
+		if (progressMonitor != null && progressMonitor.isCanceled()) return true;
+
+		try {
 			/* ensure no concurrent write access to index */
+			IIndex index = manager.getIndex(this.indexPath, true, /*reuse index file*/ true /*create if none*/);
+			if (index == null) return true;
 			ReadWriteMonitor monitor = manager.getMonitorFor(index);
-			if (monitor == null)
-				return COMPLETE; // index got deleted since acquired
+			if (monitor == null) return true; // index got deleted since acquired
+
 			try {
 				monitor.enterRead(); // ask permission to read
-				IQueryResult[] results = index.queryInDocumentNames(this.folderPath); // all file names belonging to the folder or its subfolders
-				for (int i = 0, max = results == null ? 0 : results.length; i < max; i++) {
-					String fileName = results[i].getPath();
-					manager.remove(fileName, this.indexedContainer); // write lock will be acquired by the remove operation
-				}
+				IQueryResult[] results = index.queryInDocumentNames(this.folderPath);
+				// all file names belonging to the folder or its subfolders
+				for (int i = 0, max = results == null ? 0 : results.length; i < max; i++)
+					manager.remove(results[i].getPath(), this.indexPath); // write lock will be acquired by the remove operation
 			} finally {
 				monitor.exitRead(); // free read lock
 			}
@@ -26,8 +23,8 @@
 				JobManager.verbose("-> failed to remove " + this.folderPath + " from index because of the following exception:"); //$NON-NLS-1$ //$NON-NLS-2$
 				e.printStackTrace();
 			}
-			return FAILED;
+			return false;
 		}
-		return COMPLETE;
+		return true;
 	}
 
