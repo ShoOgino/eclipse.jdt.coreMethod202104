@@ -1,0 +1,108 @@
+static State read(IProject project, DataInputStream in) throws IOException {
+	if (JavaBuilder.DEBUG)
+		System.out.println("About to read state..."); //$NON-NLS-1$
+	if (VERSION != in.readByte()) {
+		if (JavaBuilder.DEBUG)
+			System.out.println("Found non-compatible state version... answered null"); //$NON-NLS-1$
+		return null;
+	}
+
+	State newState = new State();
+	newState.javaProjectName = in.readUTF();
+	if (!project.getName().equals(newState.javaProjectName)) {
+		if (JavaBuilder.DEBUG)
+			System.out.println("Project's name does not match... answered null"); //$NON-NLS-1$
+		return null;
+	}
+	newState.buildNumber = in.readInt();
+	newState.lastStructuralBuildTime = in.readLong();
+
+	int length = in.readInt();
+	newState.sourceLocations = new ClasspathMultiDirectory[length];
+	for (int i = 0; i < length; i++) {
+		IContainer sourceFolder = project, outputFolder = project;
+		String folderName;
+		if ((folderName = in.readUTF()).length() > 0) sourceFolder = project.getFolder(folderName);
+		if ((folderName = in.readUTF()).length() > 0) outputFolder = project.getFolder(folderName);
+		ClasspathMultiDirectory md =
+			(ClasspathMultiDirectory) ClasspathLocation.forSourceFolder(sourceFolder, outputFolder, readNames(in));
+		if (in.readBoolean())
+			md.hasIndependentOutputFolder = true;
+		newState.sourceLocations[i] = md;
+	}
+
+	length = in.readInt();
+	newState.binaryLocations = new ClasspathLocation[length];
+	for (int i = 0; i < length; i++) {
+		switch (in.readByte()) {
+			case 1 :
+				newState.binaryLocations[i] = newState.sourceLocations[in.readInt()];
+				break;
+			case 2 :
+				IContainer outputFolder = project;
+				String folderName = in.readUTF();
+				if (folderName.length() > 0) outputFolder = project.getFolder(folderName);
+				newState.binaryLocations[i] = ClasspathLocation.forBinaryFolder(outputFolder, in.readBoolean());
+				break;
+			case 3 :
+				newState.binaryLocations[i] = ClasspathLocation.forLibrary(project.getFile(in.readUTF()));
+				break;
+			case 4 :
+				newState.binaryLocations[i] = ClasspathLocation.forLibrary(in.readUTF());
+		}
+	}
+
+	newState.structuralBuildTimes = new SimpleLookupTable(length = in.readInt());
+	for (int i = 0; i < length; i++)
+		newState.structuralBuildTimes.put(in.readUTF(), new Long(in.readLong()));
+
+	String[] internedTypeLocators = new String[length = in.readInt()];
+	for (int i = 0; i < length; i++)
+		internedTypeLocators[i] = in.readUTF();
+
+	newState.typeLocators = new SimpleLookupTable(length = in.readInt());
+	for (int i = 0; i < length; i++)
+		newState.typeLocators.put(in.readUTF(), internedTypeLocators[in.readInt()]);
+
+	char[][] internedSimpleNames = ReferenceCollection.internSimpleNames(readNames(in), false);
+	char[][][] internedQualifiedNames = new char[length = in.readInt()][][];
+	for (int i = 0; i < length; i++) {
+		int qLength = in.readInt();
+		char[][] qName = new char[qLength][];
+		for (int j = 0; j < qLength; j++)
+			qName[j] = internedSimpleNames[in.readInt()];
+		internedQualifiedNames[i] = qName;
+	}
+	internedQualifiedNames = ReferenceCollection.internQualifiedNames(internedQualifiedNames);
+
+	newState.references = new SimpleLookupTable(length = in.readInt());
+	for (int i = 0; i < length; i++) {
+		String typeLocator = internedTypeLocators[in.readInt()];
+		ReferenceCollection collection = null;
+		switch (in.readByte()) {
+			case 1 :
+				char[][] additionalTypeNames = readNames(in);
+				char[][][] qualifiedNames = new char[in.readInt()][][];
+				for (int j = 0, m = qualifiedNames.length; j < m; j++)
+					qualifiedNames[j] = internedQualifiedNames[in.readInt()];
+				char[][] simpleNames = new char[in.readInt()][];
+				for (int j = 0, m = simpleNames.length; j < m; j++)
+					simpleNames[j] = internedSimpleNames[in.readInt()];
+				collection = new AdditionalTypeCollection(additionalTypeNames, qualifiedNames, simpleNames);
+				break;
+			case 2 :
+				char[][][] qNames = new char[in.readInt()][][];
+				for (int j = 0, m = qNames.length; j < m; j++)
+					qNames[j] = internedQualifiedNames[in.readInt()];
+				char[][] sNames = new char[in.readInt()][];
+				for (int j = 0, m = sNames.length; j < m; j++)
+					sNames[j] = internedSimpleNames[in.readInt()];
+				collection = new ReferenceCollection(qNames, sNames);
+		}
+		newState.references.put(typeLocator, collection);
+	}
+	if (JavaBuilder.DEBUG)
+		System.out.println("Successfully read state for " + newState.javaProjectName); //$NON-NLS-1$
+	return newState;
+}
+

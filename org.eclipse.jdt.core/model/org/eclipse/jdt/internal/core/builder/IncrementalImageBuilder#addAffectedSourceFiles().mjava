@@ -13,22 +13,30 @@ protected void addAffectedSourceFiles() {
 
 	Object[] keyTable = newState.references.keyTable;
 	Object[] valueTable = newState.references.valueTable;
-	next : for (int i = 0, l = keyTable.length; i < l; i++) {
-		String sourceLocation = (String) keyTable[i];
-		if (sourceLocation != null && !locations.contains(sourceLocation)) {
-			if (compiledAllAtOnce && previousLocations != null && previousLocations.contains(sourceLocation))
-				continue next; // can skip previously compiled locations since already saw hierarchy related problems
-
-			ReferenceCollection refs = (ReferenceCollection) valueTable[i];
-			if (refs.includes(qualifiedNames, simpleNames)) {
-				// check that the file still exists... the file or its package may have been deleted
-				IResource affectedFile = resourceForLocation(sourceLocation);
-				if (affectedFile != null && affectedFile.exists()) {
-					if (JavaBuilder.DEBUG)
-						System.out.println("  adding affected source file " + sourceLocation); //$NON-NLS-1$
-					locations.add(sourceLocation);
-					typeNames.add(extractTypeNameFrom(sourceLocation));
+	next : for (int i = 0, l = valueTable.length; i < l; i++) {
+		ReferenceCollection refs = (ReferenceCollection) valueTable[i];
+		if (refs != null && refs.includes(qualifiedNames, simpleNames)) {
+			String typeLocator = (String) keyTable[i];
+			IFile file = javaBuilder.currentProject.getFile(typeLocator);
+			if (file.exists()) {
+				ClasspathMultiDirectory md = sourceLocations[0];
+				if (sourceLocations.length > 1) {
+					IPath sourceFileFullPath = file.getFullPath();
+					for (int j = 0, m = sourceLocations.length; j < m; j++) {
+						if (sourceLocations[j].sourceFolder.getFullPath().isPrefixOf(sourceFileFullPath)) {
+							md = sourceLocations[j];
+							break;
+						}
+					}
 				}
+				SourceFile sourceFile = new SourceFile(file, md, encoding);
+				if (sourceFiles.contains(sourceFile)) continue next;
+				if (compiledAllAtOnce && previousSourceFiles != null && previousSourceFiles.contains(sourceFile))
+					continue next; // can skip previously compiled files since already saw hierarchy related problems
+
+				if (JavaBuilder.DEBUG)
+					System.out.println("  adding affected source file " + typeLocator); //$NON-NLS-1$
+				sourceFiles.add(sourceFile);
 			}
 		}
 	}

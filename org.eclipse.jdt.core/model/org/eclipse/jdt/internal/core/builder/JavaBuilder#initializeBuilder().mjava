@@ -1,54 +1,41 @@
 private void initializeBuilder() throws CoreException {
-	this.javaProject = JavaCore.create(currentProject);
+	this.javaProject = (JavaProject) JavaCore.create(currentProject);
 	this.workspaceRoot = currentProject.getWorkspace().getRoot();
-	this.outputFolder = (IContainer) workspaceRoot.findMember(javaProject.getOutputLocation());
-	if (this.outputFolder == null) {
-		this.outputFolder = workspaceRoot.getFolder(javaProject.getOutputLocation());
-		createFolder(this.outputFolder);
-	}
 
 	// Flush the existing external files cache if this is the beginning of a build cycle
-	String projectName = this.currentProject.getName();
+	String projectName = currentProject.getName();
 	if (builtProjects == null || builtProjects.contains(projectName)) {
 		JavaModel.flushExternalFileCache();
 		builtProjects = new ArrayList();
 	}
 	builtProjects.add(projectName);
 
-	ArrayList sourceList = new ArrayList();
-	this.binaryResources = new SimpleLookupTable(3);
-	this.classpath = NameEnvironment.computeLocations(
-		workspaceRoot,
-		javaProject,
-		outputFolder.getLocation().toString(),
-		sourceList,
-		binaryResources);
-	this.sourceFolders = new IContainer[sourceList.size()];
-	sourceList.toArray(this.sourceFolders);
+	this.binaryLocationsPerProject = new SimpleLookupTable(3);
+	this.nameEnvironment = new NameEnvironment(workspaceRoot, javaProject, binaryLocationsPerProject);
 
 	String filterSequence = javaProject.getOption(JavaCore.CORE_JAVA_BUILD_RESOURCE_COPY_FILTER, true);
 	char[][] filters = filterSequence != null && filterSequence.length() > 0
 		? CharOperation.splitAndTrimOn(',', filterSequence.toCharArray())
 		: null;
 	if (filters == null) {
-		this.fileFilters = null;
-		this.folderFilters = null;
+		this.extraResourceFileFilters = null;
+		this.extraResourceFolderFilters = null;
 	} else {
 		int fileCount = 0, folderCount = 0;
-		for (int i = 0, length = filters.length; i < length; i++) {
+		for (int i = 0, l = filters.length; i < l; i++) {
 			char[] f = filters[i];
 			if (f.length == 0) continue;
 			if (f[f.length - 1] == '/') folderCount++; else fileCount++;
 		}
-		this.fileFilters = new char[fileCount][];
-		this.folderFilters = new String[folderCount];
-		for (int i = 0, length = filters.length; i < length; i++) {
+		this.extraResourceFileFilters = new char[fileCount][];
+		this.extraResourceFolderFilters = new String[folderCount];
+		for (int i = 0, l = filters.length; i < l; i++) {
 			char[] f = filters[i];
 			if (f.length == 0) continue;
 			if (f[f.length - 1] == '/')
-				folderFilters[--folderCount] = new String(CharOperation.subarray(f, 0, f.length - 1));
+				extraResourceFolderFilters[--folderCount] = new String(CharOperation.subarray(f, 0, f.length - 1));
 			else
-				fileFilters[--fileCount] = f;
+				extraResourceFileFilters[--fileCount] = f;
 		}
 	}
 }

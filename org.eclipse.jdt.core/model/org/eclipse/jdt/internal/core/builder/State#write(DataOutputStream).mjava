@@ -8,35 +8,56 @@ void write(DataOutputStream out) throws IOException {
  * String		project name
  * int				build number
  * int				last structural build number
- * String		output location
 */
 	out.writeByte(VERSION);
 	out.writeUTF(javaProjectName);
 	out.writeInt(buildNumber);
 	out.writeLong(lastStructuralBuildTime);
-	out.writeUTF(outputLocationString);
 
 /*
- * Class path locations[]
+ * ClasspathMultiDirectory[]
  * int				id
  * String		path(s)
- * 
- * NOTE: Cannot have portable build states while classpath directories are full filesystem paths
 */
-	out.writeInt(length = classpathLocations.length);
-	for (int i = 0; i < length; ++i) {
-		ClasspathLocation c = classpathLocations[i];
+	out.writeInt(length = sourceLocations.length);
+	for (int i = 0; i < length; i++) {
+		ClasspathMultiDirectory md = sourceLocations[i];
+		out.writeUTF(md.sourceFolder.getProjectRelativePath().toString());
+		out.writeUTF(md.binaryFolder.getProjectRelativePath().toString());
+		writeNames(md.exclusionPatterns, out);
+		out.writeBoolean(md.hasIndependentOutputFolder);
+	}
+
+/*
+ * ClasspathLocation[]
+ * int				id
+ * String		path(s)
+*/
+	out.writeInt(length = binaryLocations.length);
+	next : for (int i = 0; i < length; i++) {
+		ClasspathLocation c = binaryLocations[i];
 		if (c instanceof ClasspathMultiDirectory) {
 			out.writeByte(1);
-			ClasspathMultiDirectory md = (ClasspathMultiDirectory) c;
-			out.writeUTF(md.sourcePath);
-			out.writeUTF(md.binaryPath);
+			for (int j = 0, m = sourceLocations.length; j < m; j++) {
+				if (sourceLocations[j] == c) {
+					out.writeInt(j);
+					continue next;
+				}
+			}
 		} else if (c instanceof ClasspathDirectory) {
 			out.writeByte(2);
-			out.writeUTF(((ClasspathDirectory) c).binaryPath);
-		} else if (c instanceof ClasspathJar) {
-			out.writeByte(3);
-			out.writeUTF(((ClasspathJar) c).zipFilename);
+			ClasspathDirectory cd = (ClasspathDirectory) c;
+			out.writeUTF(cd.binaryFolder.getProjectRelativePath().toString());
+			out.writeBoolean(cd.isOutputFolder);
+		} else {
+			ClasspathJar jar = (ClasspathJar) c;
+			if (jar.zipFilename.equals(jar.relativePathname)) {
+				out.writeByte(3);
+				out.writeUTF(jar.relativePathname);
+			} else {
+				out.writeByte(4);
+				out.writeUTF(jar.zipFilename);
+			}
 		}
 	}
 
@@ -61,10 +82,10 @@ void write(DataOutputStream out) throws IOException {
 	}
 
 /*
- * String[]		Interned locations
+ * String[]		Interned type locators
  */
 	out.writeInt(length = references.elementSize);
-	ArrayList internedLocations = new ArrayList(length);
+	ArrayList internedTypeLocators = new ArrayList(length);
 	if (length > 0) {
 		keyTable = references.keyTable;
 		for (int i = 0, l = keyTable.length; i < l; i++) {
@@ -72,7 +93,7 @@ void write(DataOutputStream out) throws IOException {
 				length--;
 				String key = (String) keyTable[i];
 				out.writeUTF(key);
-				internedLocations.add(key);
+				internedTypeLocators.add(key);
 			}
 		}
 		if (JavaBuilder.DEBUG && length != 0)
@@ -80,23 +101,23 @@ void write(DataOutputStream out) throws IOException {
 	}
 
 /*
- * Type locations table
+ * Type locators table
  * String		type name
- * int				interned location id
+ * int				interned locator id
  */
-	out.writeInt(length = typeLocations.elementSize);
+	out.writeInt(length = typeLocators.elementSize);
 	if (length > 0) {
-		keyTable = typeLocations.keyTable;
-		valueTable = typeLocations.valueTable;
+		keyTable = typeLocators.keyTable;
+		valueTable = typeLocators.valueTable;
 		for (int i = 0, l = keyTable.length; i < l; i++) {
 			if (keyTable[i] != null) {
 				length--;
 				out.writeUTF((String) keyTable[i]);
-				out.writeInt(internedLocations.indexOf((String) valueTable[i]));
+				out.writeInt(internedTypeLocators.indexOf((String) valueTable[i]));
 			}
 		}
 		if (JavaBuilder.DEBUG && length != 0)
-			System.out.println("typeLocations table is inconsistent"); //$NON-NLS-1$
+			System.out.println("typeLocators table is inconsistent"); //$NON-NLS-1$
 	}
 
 /*
@@ -110,11 +131,11 @@ void write(DataOutputStream out) throws IOException {
 		if (valueTable[i] != null) {
 			ReferenceCollection collection = (ReferenceCollection) valueTable[i];
 			char[][][] qNames = collection.qualifiedNameReferences;
-			for (int j = 0, qLength = qNames.length; j < qLength; j++) {
+			for (int j = 0, m = qNames.length; j < m; j++) {
 				char[][] qName = qNames[j];
 				if (!internedQualifiedNames.contains(qName)) { // remember the names have been interned
 					internedQualifiedNames.add(qName);
-					for (int k = 0, sLength = qName.length; k < sLength; k++) {
+					for (int k = 0, n = qName.length; k < n; k++) {
 						char[] sName = qName[k];
 						if (!internedSimpleNames.contains(sName)) // remember the names have been interned
 							internedSimpleNames.add(sName);
@@ -122,7 +143,7 @@ void write(DataOutputStream out) throws IOException {
 				}
 			}
 			char[][] sNames = collection.simpleNameReferences;
-			for (int j = 0, sLength = sNames.length; j < sLength; j++) {
+			for (int j = 0, m = sNames.length; j < m; j++) {
 				char[] sName = sNames[j];
 				if (!internedSimpleNames.contains(sName)) // remember the names have been interned
 					internedSimpleNames.add(sName);
@@ -144,7 +165,7 @@ void write(DataOutputStream out) throws IOException {
 
 /*
  * References table
- * int			interned location id
+ * int			interned locator id
  * ReferenceCollection
 */
 	out.writeInt(length = references.elementSize);
@@ -153,7 +174,7 @@ void write(DataOutputStream out) throws IOException {
 		for (int i = 0, l = keyTable.length; i < l; i++) {
 			if (keyTable[i] != null) {
 				length--;
-				out.writeInt(internedLocations.indexOf((String) keyTable[i]));
+				out.writeInt(internedTypeLocators.indexOf((String) keyTable[i]));
 				ReferenceCollection collection = (ReferenceCollection) valueTable[i];
 				if (collection instanceof AdditionalTypeCollection) {
 					out.writeByte(1);
