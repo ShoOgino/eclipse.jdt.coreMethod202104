@@ -1,0 +1,90 @@
+	private void resolve(ICompilationUnit[] compilationUnits, String[] bindingKeys, ASTRequestor astRequestor, int apiLevel, Map compilerOptions, WorkingCopyOwner owner, IProgressMonitor monitor) {
+	
+		astRequestor.compilationUnitResolver = this;
+		this.bindingTables = new DefaultBindingResolver.BindingTables();
+		CompilationUnitDeclaration unit = null;
+		int i = 0;
+		try {
+			int length = compilationUnits.length;
+			org.eclipse.jdt.internal.compiler.env.ICompilationUnit[] sourceUnits = new org.eclipse.jdt.internal.compiler.env.ICompilationUnit[length];
+			System.arraycopy(compilationUnits, 0, sourceUnits, 0, length);
+			beginToCompile(sourceUnits, bindingKeys);
+			// process all units (some more could be injected in the loop by the lookup environment)
+			for (; i < this.totalUnits; i++) {
+				unit = this.unitsToProcess[i];
+				try {
+					process(unit, i);
+					
+					ICompilationUnit source = (ICompilationUnit) this.requestedSources.removeKey(unit.compilationResult.getFileName());
+					if (source != null) {
+						// convert AST
+						CompilationResult compilationResult = unit.compilationResult;
+						org.eclipse.jdt.internal.compiler.env.ICompilationUnit sourceUnit = compilationResult.compilationUnit;
+						char[] contents = sourceUnit.getContents();
+						AST ast = AST.newAST(apiLevel);
+						ast.setDefaultNodeFlag(ASTNode.ORIGINAL);
+						ASTConverter converter = new ASTConverter(compilerOptions, true/*need to resolve bindings*/, monitor);
+						BindingResolver resolver = new DefaultBindingResolver(unit.scope, owner, this.bindingTables, this);
+						ast.setBindingResolver(resolver);
+						converter.setAST(ast);
+						CompilationUnit compilationUnit = converter.convert(unit, contents);
+						compilationUnit.setLineEndTable(compilationResult.lineSeparatorPositions);
+						ast.setDefaultNodeFlag(0);
+						ast.setOriginalModificationCount(ast.modificationCount());
+						
+						// pass it to requestor
+						astRequestor.acceptAST(compilationUnit, source);
+					} 
+					
+					BindingKey bindingKey = (BindingKey) this.requestedKeys.removeKey(unit.compilationResult.getFileName());
+					if (bindingKey != null) {
+						Binding compilerBinding = bindingKey.getCompilerBinding(unit, this);
+						if (compilerBinding != null) {
+							DefaultBindingResolver resolver = new DefaultBindingResolver(unit.scope, owner, this.bindingTables, this);
+							IBinding binding = resolver.getBinding(compilerBinding);
+							
+							// pass it to requestor
+							if (binding != null)
+								astRequestor.acceptBinding(binding, bindingKey.getKey());
+						}
+					}
+				} finally {
+					// cleanup compilation unit result
+					unit.cleanUp();
+				}
+				this.unitsToProcess[i] = null; // release reference to processed unit declaration
+				this.requestor.acceptResult(unit.compilationResult.tagAsAccepted());
+			}
+			
+			// remaining binding keys are package binding keys
+			char[][] pkgNames = this.requestedKeys.keyTable;
+			for (int j = 0, pkgLength = pkgNames.length; j < pkgLength; j++) {
+				char[] pkgName = pkgNames[j];
+				if (pkgName == null) continue;
+				Binding compilerBinding = new PackageBinding(CharOperation.splitOn('.', pkgName), null, this.lookupEnvironment);
+				DefaultBindingResolver resolver = new DefaultBindingResolver(null, owner, this.bindingTables, this);
+				IBinding binding = resolver.getBinding(compilerBinding);
+				
+				// pass it to requestor
+				if (binding != null)
+					astRequestor.acceptBinding(binding, ((BindingKey) this.requestedKeys.valueTable[j]).getKey());
+			}
+		} catch (AbortCompilation e) {
+			this.handleInternalException(e, unit);
+		} catch (Error e) {
+			this.handleInternalException(e, unit, null);
+			throw e; // rethrow
+		} catch (RuntimeException e) {
+			this.handleInternalException(e, unit, null);
+			throw e; // rethrow
+		} finally {
+			// No reset is performed there anymore since,
+			// within the CodeAssist (or related tools),
+			// the compiler may be called *after* a call
+			// to this resolve(...) method. And such a call
+			// needs to have a compiler with a non-empty
+			// environment.
+			// this.reset();
+		}
+	}
+
