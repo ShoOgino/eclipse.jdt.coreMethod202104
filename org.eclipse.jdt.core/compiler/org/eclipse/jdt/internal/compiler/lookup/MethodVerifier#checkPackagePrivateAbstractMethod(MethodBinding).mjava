@@ -1,18 +1,23 @@
 void checkPackagePrivateAbstractMethod(MethodBinding abstractMethod) {
+	// check that the inherited abstract method (package private visibility) is implemented within the same package
+	PackageBinding necessaryPackage = abstractMethod.declaringClass.fPackage;
+	if (necessaryPackage == this.type.fPackage) return; // not a problem
+
 	ReferenceBinding superType = this.type.superclass();
 	char[] selector = abstractMethod.selector;
 	do {
 		if (!superType.isValidBinding()) return;
 		if (!superType.isAbstract()) return; // closer non abstract super type will be flagged instead
 
-		MethodBinding[] methods = superType.getMethods(selector);
-		nextMethod : for (int m = methods.length; --m >= 0;) {
-			MethodBinding method = methods[m];
-			if (!areReturnTypesEqual(method, abstractMethod) || !areParametersEqual(method, abstractMethod))
-				continue nextMethod;
-			if (method.isPrivate() || method.isConstructor() || method.isDefaultAbstract())
-				continue nextMethod;
-			if (superType.fPackage == abstractMethod.declaringClass.fPackage) return; // found concrete implementation of abstract method in same package
+		if (necessaryPackage == superType.fPackage) {
+			MethodBinding[] methods = superType.getMethods(selector);
+			nextMethod : for (int m = methods.length; --m >= 0;) {
+				MethodBinding method = methods[m];
+				if (method.isPrivate() || method.isConstructor() || method.isDefaultAbstract())
+					continue nextMethod;
+				if (doesMethodOverride(method, abstractMethod))
+					return; // found concrete implementation of abstract method in same package
+			}
 		}
 	} while ((superType = superType.superclass()) != abstractMethod.declaringClass);
 
