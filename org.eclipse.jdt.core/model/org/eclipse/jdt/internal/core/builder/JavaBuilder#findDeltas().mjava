@@ -1,7 +1,7 @@
 private SimpleLookupTable findDeltas() {
 	notifier.subTask(Util.bind("build.readingDelta", currentProject.getName())); //$NON-NLS-1$
 	IResourceDelta delta = getDelta(currentProject);
-	SimpleLookupTable deltas = new SimpleLookupTable(prereqOutputFolders.elementSize + 1);
+	SimpleLookupTable deltas = new SimpleLookupTable(binaryResources.elementSize + 1);
 	if (delta != null) {
 		deltas.put(currentProject, delta);
 	} else {
@@ -11,17 +11,25 @@ private SimpleLookupTable findDeltas() {
 		return null;
 	}
 
-	Object[] keyTable = prereqOutputFolders.keyTable;
-	for (int i = 0, l = keyTable.length; i < l; i++) {
-		IProject prereqProject = (IProject) keyTable[i];
-		if (prereqProject != null && lastState.isStructurallyChanged(prereqProject, getLastState(prereqProject))) {
-			notifier.subTask(Util.bind("build.readingDelta", prereqProject.getName())); //$NON-NLS-1$
-			delta = getDelta(prereqProject);
+	Object[] keyTable = binaryResources.keyTable;
+	Object[] valueTable = binaryResources.valueTable;
+	nextProject : for (int i = 0, l = keyTable.length; i < l; i++) {
+		IProject p = (IProject) keyTable[i];
+		if (p != null && p != currentProject) {
+			if (!lastState.isStructurallyChanged(p, getLastState(p))) { // see if we can skip its delta
+				IResource[] binaryResources = (IResource[]) valueTable[i];
+				if (binaryResources.length <= 1)
+					continue nextProject; // project has no structural changes in its output folder
+				binaryResources[0] = null; // skip the output folder
+			}
+
+			notifier.subTask(Util.bind("build.readingDelta", p.getName())); //$NON-NLS-1$
+			delta = getDelta(p);
 			if (delta != null) {
-				deltas.put(prereqProject, delta);
+				deltas.put(p, delta);
 			} else {
 				if (DEBUG)
-					System.out.println("Missing delta for: " + prereqProject.getName());	 //$NON-NLS-1$
+					System.out.println("Missing delta for: " + p.getName());	 //$NON-NLS-1$
 				notifier.subTask(""); //$NON-NLS-1$
 				return null;
 			}
