@@ -1,8 +1,9 @@
 	/*
 	 * Convert a method source element into a parsed method/constructor declaration 
 	 */
-	private AbstractMethodDeclaration convert(SourceMethodElementInfo methodInfo, CompilationResult compilationResult) {
+	private AbstractMethodDeclaration convert(SourceMethod methodHandle, CompilationResult compilationResult) throws JavaModelException {
 
+		SourceMethodElementInfo methodInfo = (SourceMethodElementInfo) methodHandle.getElementInfo();
 		AbstractMethodDeclaration method;
 
 		/* only source positions available */
@@ -36,12 +37,9 @@
 
 				/* conversion of default value */
 				if ((this.flags & FIELD_INITIALIZATION) != 0) {
-					char[] defaultValueSource = ((SourceAnnotationMethodInfo) methodInfo).getDefaultValueSource(this.source.getContents());
+					char[] defaultValueSource = ((SourceAnnotationMethodInfo) methodInfo).getDefaultValueSource(getSource());
 					if (defaultValueSource != null) {
-						if (this.parser == null) {
-							this.parser = new Parser(this.problemReporter, true);
-						}
-						Expression expression =  this.parser.parseMemberValue(defaultValueSource, 0, defaultValueSource.length, this.unit);
+						Expression expression =  parseMemberValue(defaultValueSource);
 						if (expression != null) {
 							annotationMethodDeclaration.defaultValue = expression;
 							modifiers |= AccAnnotationDefault;
@@ -68,6 +66,9 @@
 		method.sourceEnd = end;
 		method.declarationSourceStart = methodInfo.getDeclarationSourceStart();
 		method.declarationSourceEnd = methodInfo.getDeclarationSourceEnd();
+
+		/* convert annotations */
+		method.annotations = convertAnnotations(methodHandle);
 
 		/* convert arguments */
 		char[][] argumentTypeNames = methodInfo.getArgumentTypeNames();
@@ -105,21 +106,17 @@
 			if (typesLength != 0) {
 				Statement[] statements = new Statement[typesLength];
 				for (int i = 0; i < typesLength; i++) {
-					JavaElement type = (JavaElement)children[i];
-					try {
-						TypeDeclaration localType = convert((SourceTypeElementInfo)type.getElementInfo(), compilationResult);
-						if ((localType.bits & ASTNode.IsAnonymousTypeMASK) != 0) {
-							QualifiedAllocationExpression expression = new QualifiedAllocationExpression(localType);
-							expression.type = localType.superclass;
-							localType.superclass = null;
-							localType.superInterfaces = null;
-							localType.allocation = expression;
-							statements[i] = expression;
-						} else {
-							statements[i] = localType;
-						}
-					} catch (JavaModelException e) {
-						// ignore
+					SourceType type = (SourceType) children[i];
+					TypeDeclaration localType = convert(type, compilationResult);
+					if ((localType.bits & ASTNode.IsAnonymousTypeMASK) != 0) {
+						QualifiedAllocationExpression expression = new QualifiedAllocationExpression(localType);
+						expression.type = localType.superclass;
+						localType.superclass = null;
+						localType.superInterfaces = null;
+						localType.allocation = expression;
+						statements[i] = expression;
+					} else {
+						statements[i] = localType;
 					}
 				}
 				method.statements = statements;

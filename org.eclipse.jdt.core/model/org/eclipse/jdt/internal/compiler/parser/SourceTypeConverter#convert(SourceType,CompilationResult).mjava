@@ -1,22 +1,18 @@
 	/*
 	 * Convert a source element type into a parsed type declaration
 	 */
-	private TypeDeclaration convert(SourceTypeElementInfo typeInfo, CompilationResult compilationResult) {
+	private TypeDeclaration convert(SourceType typeHandle, CompilationResult compilationResult) throws JavaModelException {
+		SourceTypeElementInfo typeInfo = (SourceTypeElementInfo) typeHandle.getElementInfo();
 		/* create type declaration - can be member type */
 		TypeDeclaration type = new TypeDeclaration(compilationResult);
 		if (typeInfo.getEnclosingType() == null) {
-			IType typeHandle = typeInfo.getHandle();
-			try {
-				if (typeHandle.isAnonymous()) {
-					type.name = TypeDeclaration.ANONYMOUS_EMPTY_NAME;
-					type.bits |= ASTNode.AnonymousAndLocalMask;
-				} else {
-					if (typeHandle.isLocal()) {
-						type.bits |= ASTNode.IsLocalTypeMASK;
-					}
+			if (typeHandle.isAnonymous()) {
+				type.name = TypeDeclaration.ANONYMOUS_EMPTY_NAME;
+				type.bits |= ASTNode.AnonymousAndLocalMask;
+			} else {
+				if (typeHandle.isLocal()) {
+					type.bits |= ASTNode.IsLocalTypeMASK;
 				}
-			} catch (JavaModelException e) {
-				// could not figure, assume toplevel
 			}
 		}  else {
 			type.bits |= ASTNode.IsMemberTypeMASK;
@@ -32,6 +28,9 @@
 		type.declarationSourceStart = typeInfo.getDeclarationSourceStart();
 		type.declarationSourceEnd = typeInfo.getDeclarationSourceEnd();
 		type.bodyEnd = type.declarationSourceEnd;
+		
+		/* convert annotations */
+		type.annotations = convertAnnotations(typeHandle);
 
 		/* convert type parameters */
 		char[][] typeParameterNames = typeInfo.getTypeParameterNames();
@@ -59,11 +58,11 @@
 		}
 		/* convert member types */
 		if ((this.flags & MEMBER_TYPE) != 0) {
-			ISourceType[] sourceMemberTypes = typeInfo.getMemberTypes();
+			SourceType[] sourceMemberTypes = typeInfo.getMemberTypeHandles();
 			int sourceMemberTypeCount = sourceMemberTypes.length;
 			type.memberTypes = new TypeDeclaration[sourceMemberTypeCount];
 			for (int i = 0; i < sourceMemberTypeCount; i++) {
-				type.memberTypes[i] = convert((SourceTypeElementInfo) sourceMemberTypes[i], compilationResult);
+				type.memberTypes[i] = convert(sourceMemberTypes[i], compilationResult);
 			}
 		}
 
@@ -74,10 +73,10 @@
 			initializers = typeInfo.getInitializers();
 			initializerCount = initializers.length;
 		}
-		ISourceField[] sourceFields = null;
+		SourceField[] sourceFields = null;
 		int sourceFieldCount = 0;
 		if ((this.flags & FIELD) != 0) {
-			sourceFields = typeInfo.getFields();
+			sourceFields = typeInfo.getFieldHandles();
 			sourceFieldCount = sourceFields.length;
 		}
 		int length = initializerCount + sourceFieldCount;
@@ -88,7 +87,7 @@
 			}
 			int index = 0;
 			for (int i = initializerCount; i < length; i++) {
-				type.fields[i] = convert((SourceFieldElementInfo) sourceFields[index++], type, compilationResult);
+				type.fields[i] = convert(sourceFields[index++], type, compilationResult);
 			}
 		}
 
@@ -97,7 +96,7 @@
 		boolean needMethod = (this.flags & METHOD) != 0;
 		if (needConstructor || needMethod) {
 			
-			ISourceMethod[] sourceMethods = typeInfo.getMethods();
+			SourceMethod[] sourceMethods = typeInfo.getMethodHandles();
 			int sourceMethodCount = sourceMethods.length;
 	
 			/* source type has a constructor ?           */
@@ -128,13 +127,13 @@
 			int index = 0;
 			boolean hasAbstractMethods = false;
 			for (int i = 0; i < sourceMethodCount; i++) {
-				ISourceMethod sourceMethod = sourceMethods[i];
+				SourceMethod sourceMethod = sourceMethods[i];
 				boolean isConstructor = sourceMethod.isConstructor();
-				if ((sourceMethod.getModifiers() & Flags.AccAbstract) != 0) {
+				if ((sourceMethod.getFlags() & Flags.AccAbstract) != 0) {
 					hasAbstractMethods = true;
 				}
 				if ((isConstructor && needConstructor) || (!isConstructor && needMethod)) {
-					AbstractMethodDeclaration method = convert((SourceMethodElementInfo) sourceMethod, compilationResult);
+					AbstractMethodDeclaration method = convert(sourceMethod, compilationResult);
 					if (isAbstract || method.isAbstract()) { // fix-up flag 
 						method.modifiers |= AccSemicolonBody;
 					}
