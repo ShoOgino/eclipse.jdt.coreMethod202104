@@ -1,0 +1,144 @@
+	private int addFieldAttributes(FieldBinding fieldBinding, int fieldAttributeOffset) {
+		int attributesNumber = 0;
+		// 4.7.2 only static constant fields get a ConstantAttribute
+		// Generate the constantValueAttribute
+		if (fieldBinding.isConstantValue()){
+			if (contentsOffset + 8 >= contents.length) {
+				resizeContents(8);
+			}
+			// Now we generate the constant attribute corresponding to the fieldBinding
+			int constantValueNameIndex =
+				constantPool.literalIndex(AttributeNamesConstants.ConstantValueName);
+			contents[contentsOffset++] = (byte) (constantValueNameIndex >> 8);
+			contents[contentsOffset++] = (byte) constantValueNameIndex;
+			// The attribute length = 2 in case of a constantValue attribute
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 2;
+			attributesNumber++;
+			// Need to add the constant_value_index
+			Constant fieldConstant = fieldBinding.constant();
+			switch (fieldConstant.typeID()) {
+				case T_boolean :
+					int booleanValueIndex =
+						constantPool.literalIndex(fieldConstant.booleanValue() ? 1 : 0);
+					contents[contentsOffset++] = (byte) (booleanValueIndex >> 8);
+					contents[contentsOffset++] = (byte) booleanValueIndex;
+					break;
+				case T_byte :
+				case T_char :
+				case T_int :
+				case T_short :
+					int integerValueIndex =
+						constantPool.literalIndex(fieldConstant.intValue());
+					contents[contentsOffset++] = (byte) (integerValueIndex >> 8);
+					contents[contentsOffset++] = (byte) integerValueIndex;
+					break;
+				case T_float :
+					int floatValueIndex =
+						constantPool.literalIndex(fieldConstant.floatValue());
+					contents[contentsOffset++] = (byte) (floatValueIndex >> 8);
+					contents[contentsOffset++] = (byte) floatValueIndex;
+					break;
+				case T_double :
+					int doubleValueIndex =
+						constantPool.literalIndex(fieldConstant.doubleValue());
+					contents[contentsOffset++] = (byte) (doubleValueIndex >> 8);
+					contents[contentsOffset++] = (byte) doubleValueIndex;
+					break;
+				case T_long :
+					int longValueIndex =
+						constantPool.literalIndex(fieldConstant.longValue());
+					contents[contentsOffset++] = (byte) (longValueIndex >> 8);
+					contents[contentsOffset++] = (byte) longValueIndex;
+					break;
+				case T_String :
+					int stringValueIndex =
+						constantPool.literalIndex(
+							((StringConstant) fieldConstant).stringValue());
+					if (stringValueIndex == -1) {
+						if (!creatingProblemType) {
+							// report an error and abort: will lead to a problem type classfile creation
+							TypeDeclaration typeDeclaration = referenceBinding.scope.referenceContext;
+							FieldDeclaration[] fieldDecls = typeDeclaration.fields;
+							for (int i = 0, max = fieldDecls.length; i < max; i++) {
+								if (fieldDecls[i].binding == fieldBinding) {
+									// problem should abort
+									typeDeclaration.scope.problemReporter().stringConstantIsExceedingUtf8Limit(
+										fieldDecls[i]);
+								}
+							}
+						} else {
+							// already inside a problem type creation : no constant for this field
+							contentsOffset = fieldAttributeOffset;
+						}
+					} else {
+						contents[contentsOffset++] = (byte) (stringValueIndex >> 8);
+						contents[contentsOffset++] = (byte) stringValueIndex;
+					}
+			}
+		}
+		if (this.targetJDK < ClassFileConstants.JDK1_5 && fieldBinding.isSynthetic()) {
+			if (contentsOffset + 6 >= contents.length) {
+				resizeContents(6);
+			}
+			int syntheticAttributeNameIndex =
+				constantPool.literalIndex(AttributeNamesConstants.SyntheticName);
+			contents[contentsOffset++] = (byte) (syntheticAttributeNameIndex >> 8);
+			contents[contentsOffset++] = (byte) syntheticAttributeNameIndex;
+			// the length of a synthetic attribute is equals to 0
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			attributesNumber++;
+		}
+		if (fieldBinding.isDeprecated()) {
+			if (contentsOffset + 6 >= contents.length) {
+				resizeContents(6);
+			}
+			int deprecatedAttributeNameIndex =
+				constantPool.literalIndex(AttributeNamesConstants.DeprecatedName);
+			contents[contentsOffset++] = (byte) (deprecatedAttributeNameIndex >> 8);
+			contents[contentsOffset++] = (byte) deprecatedAttributeNameIndex;
+			// the length of a deprecated attribute is equals to 0
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			attributesNumber++;
+		}
+		// add signature attribute
+		char[] genericSignature = fieldBinding.genericSignature();
+		if (genericSignature != null) {
+			// check that there is enough space to write all the bytes for the field info corresponding
+			// to the @fieldBinding
+			if (contentsOffset + 8 >= contents.length) {
+				resizeContents(8);
+			}
+			int signatureAttributeNameIndex =
+				constantPool.literalIndex(AttributeNamesConstants.SignatureName);
+			contents[contentsOffset++] = (byte) (signatureAttributeNameIndex >> 8);
+			contents[contentsOffset++] = (byte) signatureAttributeNameIndex;
+			// the length of a signature attribute is equals to 2
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 0;
+			contents[contentsOffset++] = 2;
+			int signatureIndex =
+				constantPool.literalIndex(genericSignature);
+			contents[contentsOffset++] = (byte) (signatureIndex >> 8);
+			contents[contentsOffset++] = (byte) signatureIndex;
+			attributesNumber++;
+		}
+		FieldDeclaration fieldDeclaration = fieldBinding.sourceField();
+		if (fieldDeclaration != null) {
+			Annotation[] annotations = fieldDeclaration.annotations;
+			if (annotations != null) {
+				attributesNumber += generateRuntimeAnnotations(annotations);
+			}
+		}
+		return attributesNumber;
+	}
+
