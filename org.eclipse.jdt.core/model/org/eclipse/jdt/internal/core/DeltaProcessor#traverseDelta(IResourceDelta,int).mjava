@@ -1,0 +1,110 @@
+	/**
+	 * Converts an <code>IResourceDelta</code> and its children into
+	 * the corresponding <code>IJavaElementDelta</code>s.
+	 * The classpath is passed along. If it is null, the resource
+	 * is already known to be on the classpath, if it is UNKNOWN_CLASSPATH, then 
+	 * it will be computed if the resource corresponds to a Java project.
+	 * Return whether the delta corresponds to a resource on the classpath.
+	 */
+	protected boolean traverseDelta(IResourceDelta delta, int parentType) {
+
+		IResource res = delta.getResource();
+		
+		// check if current resource is now on classpath and determine the element type
+		boolean isOnClasspath = false;
+		int elementType = -1;
+		switch (parentType) {
+			case IJavaElement.JAVA_MODEL:
+			case IJavaElement.JAVA_PROJECT:
+				isOnClasspath = this.isOnClasspath(res.getFullPath());
+				if (isOnClasspath) {
+					elementType = IJavaElement.PACKAGE_FRAGMENT_ROOT;
+				} else {
+					elementType = IJavaElement.JAVA_PROJECT; // not yet in a package fragment root
+				}
+				break;
+			case IJavaElement.PACKAGE_FRAGMENT_ROOT:
+			case IJavaElement.PACKAGE_FRAGMENT:
+				isOnClasspath = true;
+				if (res instanceof IFolder) {
+					elementType = IJavaElement.PACKAGE_FRAGMENT;
+				} else {
+					String extension = res.getFileExtension();
+					if ("java".equalsIgnoreCase(extension)) { //$NON-NLS-1$
+						elementType = IJavaElement.COMPILATION_UNIT;
+					} else if ("class".equalsIgnoreCase(extension)) { //$NON-NLS-1$
+						elementType = IJavaElement.CLASS_FILE;
+					}
+				}
+				break;
+		}						
+		
+		boolean processChildren = true;
+		if (isOnClasspath) {
+			processChildren = this.updateCurrentDeltaAndIndex(delta, elementType);
+		} else {
+			if (res instanceof IProject) {
+				try {
+					if (this.isOpen(res) && !((IProject)res).hasNature(JavaCore.NATURE_ID)) return false; // non java project
+				} catch (CoreException e) {
+					return false;
+				}
+				processChildren = this.updateCurrentDeltaAndIndex(delta, elementType);
+				if (delta.getKind() != IResourceDelta.CHANGED 
+						|| (delta.getFlags() & IResourceDelta.OPEN) != 0) {
+					return false; // don't go deeper for added, removed, opened or closed projects
+				}
+			} else {
+				// not yet inside a package fragment root
+				processChildren = true;
+			}
+		}
+		if (processChildren) {
+			IResourceDelta[] children = delta.getAffectedChildren();
+			boolean oneChildOnClasspath = false;
+			int length = children.length;
+			IResourceDelta[] orphanChildren = new IResourceDelta[length];
+			Openable element = null;
+			for (int i = 0; i < length; i++) {
+				IResourceDelta child = children[i];
+				if (!traverseDelta(child, elementType)) {
+					try {
+						if (isOnClasspath) { 
+							if (element == null) {
+								element = this.createElement(res, elementType);
+								if (element == null) continue;
+							}
+							// add child as non java resource if current element on classpath
+							nonJavaResourcesChanged(element, child);
+						} else {
+							orphanChildren[i] = child;
+						}
+					} catch (JavaModelException e) {
+					}
+				} else {
+					oneChildOnClasspath = true;
+				}
+			}
+			if (oneChildOnClasspath || res instanceof IProject) {
+				// add orphan children (case of non java resources under project)
+				JavaProject project = (JavaProject)JavaCore.getJavaCore().create(res.getProject());
+				if (project != null) {
+					for (int i = 0; i < length; i++) {
+						if (orphanChildren[i] != null) {
+							try {
+								nonJavaResourcesChanged(project, orphanChildren[i]);
+							} catch (JavaModelException e) {
+							}
+						}
+					}
+				}
+			} // else resource delta will be added by parent
+			return isOnClasspath || oneChildOnClasspath;
+		} else {
+			return 
+				isOnClasspath 
+					&& (elementType == IJavaElement.COMPILATION_UNIT 
+						|| elementType == IJavaElement.CLASS_FILE);
+		}
+	}
+

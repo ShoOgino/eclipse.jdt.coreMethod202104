@@ -12,13 +12,18 @@
 		fCurrentDelta.removed(element);
 
 		switch (element.getElementType()) {
+			case IJavaElement.JAVA_MODEL :
+				element.getJavaModelManager().getIndexManager().reset();
+				element.getJavaModelManager().fModelInfo = null;
+				break;
 			case IJavaElement.JAVA_PROJECT :
 				JavaModelManager.getJavaModelManager().removePerProjectInfo(
 					(JavaProject) element);
 				break;
 			case IJavaElement.PACKAGE_FRAGMENT_ROOT :
 				this.projectsToUpdate.add(element.getJavaProject());
-				break;
+				element = (Openable)((IPackageFragmentRoot)element).getPackageFragment("");//$NON-NLS-1$
+				// don't break so that subpackages are also removed
 			case IJavaElement.PACKAGE_FRAGMENT :
 				//1G1TW2T - get rid of namelookup since it holds onto obsolete cached info 
 				JavaProject project = (JavaProject) element.getJavaProject();
@@ -26,10 +31,23 @@
 					project.getJavaProjectElementInfo().setNameLookup(null);
 				} catch (JavaModelException e) {
 				}
-				break;
-			case IJavaElement.JAVA_MODEL :
-				element.getJavaModelManager().getIndexManager().reset();
-				element.getJavaModelManager().fModelInfo = null;
+				// remove subpackages
+				PackageFragmentRoot root = element.getPackageFragmentRoot();
+				String name = element.getElementName();
+				IResourceDelta[] children = delta.getAffectedChildren();
+				for (int i = 0, length = children.length; i < length; i++) {
+					IResourceDelta child = children[i];
+					IResource resource = child.getResource();
+					if (resource instanceof IFolder) {
+						String subpkgName = 
+							name.length() == 0 ? 
+								resource.getName() : 
+								name + "." + resource.getName(); //$NON-NLS-1$
+						Openable subpkg = (Openable)root.getPackageFragment(subpkgName);
+						this.updateIndex(subpkg, child);
+						this.elementRemoved(subpkg, child);
+					}
+				}
 				break;
 		}
 	}

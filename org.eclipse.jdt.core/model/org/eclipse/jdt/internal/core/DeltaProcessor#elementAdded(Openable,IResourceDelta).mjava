@@ -8,15 +8,50 @@
 	 * </ul>
 	 */
 	protected void elementAdded(Openable element, IResourceDelta delta) {
-
-		if (element.getElementType() == IJavaElement.JAVA_PROJECT) {
+		int elementType = element.getElementType();
+		if (elementType == IJavaElement.JAVA_PROJECT) {
 			// project add is handled by JavaProject.configure() because
 			// when a project is created, it does not yet have a java nature
 			if (hasJavaNature(delta.getResource())) {
-				basicElementAdded(element, delta);
+				addToParentInfo(element);
+				fCurrentDelta.added(element);
 			}
 		} else {
-			basicElementAdded(element, delta);
+			addToParentInfo(element);
+			fCurrentDelta.added(element);
+			
+			switch (elementType) {
+				case IJavaElement.PACKAGE_FRAGMENT_ROOT :
+					// when a root is added, and is on the classpath, the project must be updated
+					this.projectsToUpdate.add(element.getJavaProject());
+					element = (Openable)((IPackageFragmentRoot)element).getPackageFragment("");//$NON-NLS-1$
+					// don't break as subpackages must be added too
+				case IJavaElement.PACKAGE_FRAGMENT :
+					// get rid of namelookup since it holds onto obsolete cached info 
+					JavaProject project = (JavaProject) element.getJavaProject();
+					try {
+						project.getJavaProjectElementInfo().setNameLookup(null);
+					} catch (JavaModelException e) {
+					}
+					// add subpackages
+					PackageFragmentRoot root = element.getPackageFragmentRoot();
+					String name = element.getElementName();
+					IResourceDelta[] children = delta.getAffectedChildren();
+					for (int i = 0, length = children.length; i < length; i++) {
+						IResourceDelta child = children[i];
+						IResource resource = child.getResource();
+						if (resource instanceof IFolder) {
+							String subpkgName = 
+								name.length() == 0 ? 
+									resource.getName() : 
+									name + "." + resource.getName(); //$NON-NLS-1$
+							Openable subpkg = (Openable)root.getPackageFragment(subpkgName);
+							this.updateIndex(subpkg, child);
+							this.elementAdded(subpkg, child);
+						}
+					}
+					break;
+			}
 		}
 	}
 
