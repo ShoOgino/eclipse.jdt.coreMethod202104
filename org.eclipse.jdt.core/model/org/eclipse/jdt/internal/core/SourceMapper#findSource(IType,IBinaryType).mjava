@@ -38,39 +38,64 @@
 		if (name == null) {
 			return null;
 		}
-		// try to get the entry
-		ZipEntry entry = null;
-		ZipFile zip = null;
+
+		String fullName;
+		//add the root path if specified
+		if (!this.rootPath.equals(IPackageFragmentRoot.DEFAULT_PACKAGEROOT_PATH)) {
+			fullName = this.rootPath + '/' + name;
+		} else {
+			fullName = name;
+		}
+
 		char[] source = null;
-		try {
-			String fullName;
-			//add the root path if specified
-			if (!fRootPath.equals(IPackageFragmentRoot.DEFAULT_PACKAGEROOT_PATH)) {
-				fullName = fRootPath + '/' + name;
-			} else {
-				fullName = name;
-			}
-			zip = getZip();
-			entry = zip.getEntry(fullName);
-			if (entry != null) {
-				// now read the source code
-				byte[] bytes = null;
-				try {
-					bytes = Util.getZipEntryByteContent(entry, zip);
-				} catch (IOException e) {
-				}
-				if (bytes != null) {
+		if (Util.isArchiveFileName(this.sourcePath.lastSegment())) {
+			// try to get the entry
+			ZipEntry entry = null;
+			ZipFile zip = null;
+			try {
+				zip = getZip();
+				entry = zip.getEntry(fullName);
+				if (entry != null) {
+					// now read the source code
+					byte[] bytes = null;
 					try {
-						source = Util.bytesToChar(bytes, this.encoding);
+						bytes = Util.getZipEntryByteContent(entry, zip);
 					} catch (IOException e) {
-						source = null;
+					}
+					if (bytes != null) {
+						try {
+							source = Util.bytesToChar(bytes, this.encoding);
+						} catch (IOException e) {
+							source = null;
+						}
+					}
+				}
+			} catch (CoreException e) {
+				return null;
+			} finally {
+				JavaModelManager.getJavaModelManager().closeZipFile(zip);
+			}
+		} else {
+			Object target = JavaModel.getTarget(ResourcesPlugin.getWorkspace().getRoot(), this.sourcePath, true);
+			if (target instanceof IFolder) {
+				IFolder folder = (IFolder)target;
+				IResource res = folder.findMember(fullName);
+				if (res instanceof IFile) {
+					try {
+						source = org.eclipse.jdt.internal.core.Util.getResourceContentsAsCharArray((IFile)res, this.encoding);
+					} catch (JavaModelException e) {
+					}
+				}
+			} else if (target instanceof File) {
+				File file = (File)target;
+				if (file.isDirectory()) {
+					File sourceFile = new File(file, fullName);
+					try {
+						source = Util.getFileCharContent(sourceFile, this.encoding);
+					} catch (IOException e) {
 					}
 				}
 			}
-		} catch (CoreException e) {
-			return null;
-		} finally {
-			JavaModelManager.getJavaModelManager().closeZipFile(zip);
 		}
 		return source;
 	}

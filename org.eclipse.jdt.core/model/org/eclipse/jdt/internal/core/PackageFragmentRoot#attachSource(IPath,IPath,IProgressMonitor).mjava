@@ -1,7 +1,95 @@
 /**
  * @see IPackageFragmentRoot
  */
-public void attachSource(IPath zipPath, IPath rootPath, IProgressMonitor monitor) throws JavaModelException {
-	throw new JavaModelException(new JavaModelStatus(IJavaModelStatusConstants.INVALID_ELEMENT_TYPES, this));
+public void attachSource(IPath sourcePath, IPath rootPath, IProgressMonitor monitor) throws JavaModelException {
+	try {
+		verifyAttachSource(sourcePath);
+		if (monitor != null) {
+			monitor.beginTask(Util.bind("element.attachingSource"), 2); //$NON-NLS-1$
+		}
+		SourceMapper mapper= null;
+		SourceMapper oldMapper= getSourceMapper();
+		IWorkspace workspace= getJavaModel().getWorkspace();
+		boolean rootNeedsToBeClosed= false;
+
+		if (sourcePath == null) {
+			//source being detached
+			rootNeedsToBeClosed= true;
+		/* Disable deltas (see 1GDTUSD)
+			// fire a delta to notify the UI about the source detachement.
+			JavaModelManager manager = (JavaModelManager) JavaModelManager.getJavaModelManager();
+			JavaModel model = (JavaModel) getJavaModel();
+			JavaElementDelta attachedSourceDelta = new JavaElementDelta(model);
+			attachedSourceDelta .sourceDetached(this); // this would be a PackageFragmentRoot
+			manager.registerResourceDelta(attachedSourceDelta );
+			manager.fire(); // maybe you want to fire the change later. Let us know about it.
+		*/
+		} else {
+		/*
+			// fire a delta to notify the UI about the source attachement.
+			JavaModelManager manager = (JavaModelManager) JavaModelManager.getJavaModelManager();
+			JavaModel model = (JavaModel) getJavaModel();
+			JavaElementDelta attachedSourceDelta = new JavaElementDelta(model);
+			attachedSourceDelta .sourceAttached(this); // this would be a PackageFragmentRoot
+			manager.registerResourceDelta(attachedSourceDelta );
+			manager.fire(); // maybe you want to fire the change later. Let us know about it.
+		 */
+
+			//check if different from the current attachment
+			IPath storedSourcePath= getSourceAttachmentPath();
+			IPath storedRootPath= getSourceAttachmentRootPath();
+			if (monitor != null) {
+				monitor.worked(1);
+			}
+			if (storedSourcePath != null) {
+				if (!(storedSourcePath.equals(sourcePath) && rootPath.equals(storedRootPath))) {
+					rootNeedsToBeClosed= true;
+				}
+			}
+			// check if source path is valid
+			Object target = JavaModel.getTarget(workspace.getRoot(), sourcePath, false);
+			if (target == null) {
+				if (monitor != null) {
+					monitor.done();
+				}
+				throw new JavaModelException(new JavaModelStatus(IJavaModelStatusConstants.INVALID_PATH, sourcePath));
+			}
+			mapper= new SourceMapper(
+				sourcePath, 
+				rootPath.toOSString(), 
+				this.isExternal() ? JavaCore.getOptions() : this.getJavaProject().getOptions(true)); // only project options if associated with resource
+		}
+		setSourceMapper(mapper);
+		if (sourcePath == null) {
+			setSourceAttachmentProperty(null); //remove the property
+		} else {
+			//set the property to the path of the mapped source
+			setSourceAttachmentProperty(sourcePath.toString() + ATTACHMENT_PROPERTY_DELIMITER + rootPath.toString());
+		}
+		if (rootNeedsToBeClosed) {
+			if (oldMapper != null) {
+				oldMapper.close();
+			}
+			BufferManager manager= BufferManager.getDefaultBufferManager();
+			Enumeration openBuffers= manager.getOpenBuffers();
+			while (openBuffers.hasMoreElements()) {
+				IBuffer buffer= (IBuffer) openBuffers.nextElement();
+				IOpenable possibleMember= buffer.getOwner();
+				if (isAncestorOf((IJavaElement) possibleMember)) {
+					buffer.close();
+				}
+			}
+			if (monitor != null) {
+				monitor.worked(1);
+			}
+		}
+	} catch (JavaModelException e) {
+		setSourceAttachmentProperty(null); // loose info - will be recomputed
+		throw e;
+	} finally {
+		if (monitor != null) {
+			monitor.done();
+		}
+	}
 }
 
