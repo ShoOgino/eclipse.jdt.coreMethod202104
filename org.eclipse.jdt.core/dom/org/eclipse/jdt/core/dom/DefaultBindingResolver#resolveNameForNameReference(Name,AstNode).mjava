@@ -1,0 +1,67 @@
+	private IBinding resolveNameForNameReference(Name name, AstNode node) {
+		if (node != null) {
+			if (node instanceof SingleNameReference) {
+				SingleNameReference singleNameReference = (SingleNameReference) node;
+				if (singleNameReference.isTypeReference()) {
+					return this.getTypeBinding((ReferenceBinding)singleNameReference.binding);
+				} else {
+					// this is a variable or a field
+					return this.getVariableBinding((org.eclipse.jdt.internal.compiler.lookup.VariableBinding)singleNameReference.binding);				
+				}
+			} else if (node instanceof QualifiedNameReference) {
+				QualifiedNameReference qualifiedNameReference = (QualifiedNameReference) node;
+		
+				if (qualifiedNameReference.isTypeReference()) {
+					return this.getTypeBinding((ReferenceBinding)qualifiedNameReference.binding);
+				} else {
+					// this is a variable or a field
+					if (qualifiedNameReference.otherBindings == null) {
+						return this.getVariableBinding((org.eclipse.jdt.internal.compiler.lookup.VariableBinding) qualifiedNameReference.binding);				
+					} else {
+						return this.getVariableBinding((org.eclipse.jdt.internal.compiler.lookup.VariableBinding) qualifiedNameReference.otherBindings[qualifiedNameReference.otherBindings.length - 1]);				
+					}
+				}
+			}
+		}
+		// this might be a inner qualified name or simple name inside a qualified name
+		int index = 1;
+		QualifiedName firstQualifier = null;
+		Name firstName = name;
+		if (name.isSimpleName()) {
+			if (name.getParent() instanceof QualifiedName) {
+				name = (QualifiedName) name.getParent();
+				firstQualifier = (QualifiedName) name;
+			} else {
+				return super.resolveName(name);
+			}
+		}
+		while (name.getParent() instanceof QualifiedName) {
+			index++;
+			name = (QualifiedName) name.getParent();
+		}
+		// now we can retrieve the enclosing compiler's node corresponding to the inner name
+		node = (AstNode) this.newAstToOldAst.get(name);
+		if (node == null) {
+			return super.resolveName(name);
+		} else if (node instanceof NameReference) {
+			
+			QualifiedNameReference qualifiedNameReference = (QualifiedNameReference) node;
+			if (firstQualifier != null) {
+				// handle the first simple name in a qualified name a.b.c.d (handles the 'a' case)
+				Name firstQualifierName = firstQualifier.getQualifier();
+				if (firstQualifierName.isSimpleName() && firstName == firstQualifierName) {
+					return this.getVariableBinding((org.eclipse.jdt.internal.compiler.lookup.VariableBinding) qualifiedNameReference.binding);				
+				}
+			}
+			if (qualifiedNameReference.isTypeReference()) {
+				return this.getTypeBinding((ReferenceBinding)qualifiedNameReference.binding);
+			} else {
+				// this is a variable or a field
+				return this.getVariableBinding((org.eclipse.jdt.internal.compiler.lookup.VariableBinding) qualifiedNameReference.otherBindings[qualifiedNameReference.otherBindings.length - index]);				
+			}
+		} else if (node instanceof MessageSend) {
+			return this.resolveNameForMessageSend(name, node, index);
+		}
+		return super.resolveName(name);
+	}
+
