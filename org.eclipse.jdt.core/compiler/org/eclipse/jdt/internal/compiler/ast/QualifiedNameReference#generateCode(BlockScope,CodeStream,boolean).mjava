@@ -9,44 +9,59 @@
 				codeStream.generateConstant(constant, implicitConversion);
 			}
 		} else {
-			FieldBinding lastFieldBinding = generateReadSequence(currentScope, codeStream); 
-			if (valueRequired) {
-				if (lastFieldBinding.declaringClass == null) { // array length
-					codeStream.arraylength();
-					codeStream.generateImplicitConversion(implicitConversion);
+			FieldBinding lastFieldBinding = generateReadSequence(currentScope, codeStream);
+			if (lastFieldBinding != null) {
+				boolean isStatic = lastFieldBinding.isStatic();
+				if (lastFieldBinding.isConstantValue()) {
+					if (!isStatic){
+						codeStream.invokeObjectGetClass();
+						codeStream.pop();
+					}
+					if (valueRequired) { // inline the last field constant
+						codeStream.generateConstant(lastFieldBinding.constant(), implicitConversion);
+					}
 				} else {
-					if (lastFieldBinding.isConstantValue()) {
-						if (!lastFieldBinding.isStatic()){
-							codeStream.invokeObjectGetClass();
+					if (valueRequired  || currentScope.environment().options.complianceLevel >= ClassFileConstants.JDK1_4) {
+						if (lastFieldBinding.declaringClass == null) { // array length
+							codeStream.arraylength();
+							codeStream.generateImplicitConversion(implicitConversion);
+						} else {
+							SyntheticMethodBinding accessor =
+								syntheticReadAccessors == null
+									? null
+									: syntheticReadAccessors[syntheticReadAccessors.length - 1];
+							if (accessor == null) {
+								if (isStatic) {
+									codeStream.getstatic(lastFieldBinding);
+								} else {
+									codeStream.getfield(lastFieldBinding);
+								}
+							} else {
+								codeStream.invokestatic(accessor);
+							}
+							TypeBinding requiredGenericCast = getGenericCast(this.otherCodegenBindings == null ? 0 : this.otherCodegenBindings.length);
+							if (valueRequired) {
+								if (requiredGenericCast != null) codeStream.checkcast(requiredGenericCast);
+								codeStream.generateImplicitConversion(implicitConversion);
+							} else {
+								// could occur if !valueRequired but compliance >= 1.4
+								switch (lastFieldBinding.type.id) {
+									case T_long :
+									case T_double :
+										codeStream.pop2();
+										break;
+									default :
+										codeStream.pop();
+								}							
+							}
+						}
+					} else {
+						if (!isStatic){
+							codeStream.invokeObjectGetClass(); // perform null check
 							codeStream.pop();
 						}
-						// inline the last field constant
-						codeStream.generateConstant(lastFieldBinding.constant(), implicitConversion);
-					} else {
-						SyntheticMethodBinding accessor =
-							syntheticReadAccessors == null
-								? null
-								: syntheticReadAccessors[syntheticReadAccessors.length - 1];
-						if (accessor == null) {
-							if (lastFieldBinding.isStatic()) {
-								codeStream.getstatic(lastFieldBinding);
-							} else {
-								codeStream.getfield(lastFieldBinding);
-							}
-						} else {
-							codeStream.invokestatic(accessor);
-						}
-						TypeBinding requiredGenericCast = getGenericCast(this.otherCodegenBindings == null ? 0 : this.otherCodegenBindings.length);
-						if (requiredGenericCast != null) codeStream.checkcast(requiredGenericCast);
-						codeStream.generateImplicitConversion(implicitConversion);
-					}
+					}									
 				}
-			} else {
-				if (lastFieldBinding != null && !lastFieldBinding.isStatic()){
-					codeStream.invokeObjectGetClass(); // perform null check
-					codeStream.pop();
-				}
-							
 			}
 		}
 		codeStream.recordPositionsFrom(pc, this.sourceStart);
