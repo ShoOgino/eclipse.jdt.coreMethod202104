@@ -26,19 +26,47 @@ private boolean updateCurrentDeltaAndIndex(IResourceDelta delta, int elementType
 				if (element == null) throw newInvalidElementType();
 				this.updateIndex(element, delta);
 				this.contentChanged(element, delta);
-			} else if (elementType == IJavaElement.JAVA_PROJECT
-					&& (flags & IResourceDelta.OPEN) != 0) {
-				// project has been opened or closed
-				IProject res = (IProject)delta.getResource();
-				element = this.createElement(res, elementType, project);
-				if (element == null) throw newInvalidElementType();
-				if (res.isOpen()) {
-					this.elementOpened(element, delta);
-				} else {
-					this.elementClosed(element, delta);
+			} else if (elementType == IJavaElement.JAVA_PROJECT) {
+				if ((flags & IResourceDelta.OPEN) != 0) {
+					// project has been opened or closed
+					IProject res = (IProject)delta.getResource();
+					element = this.createElement(res, elementType, project);
+					if (element == null) throw newInvalidElementType();
+					if (res.isOpen()) {
+						if (this.hasJavaNature(res)) {
+							this.elementAdded(element, delta);
+							this.indexManager.indexAll(res);
+						}
+					} else {
+						JavaModel javaModel = JavaModelManager.getJavaModelManager().getJavaModel();
+						boolean wasJavaProject = javaModel.findJavaProject(res) != null;
+						if (wasJavaProject) {
+							this.elementRemoved(element, delta);
+							this.indexManager.removeIndex(res.getFullPath());
+							
+						}
+					}
+					return false; // when a project is open/closed don't process children
 				}
-				this.updateIndex(element, delta);
-				return false; // when a project is open/closed don't process children
+				if ((flags & IResourceDelta.DESCRIPTION) != 0) {
+					IProject res = (IProject)delta.getResource();
+					JavaModel javaModel = JavaModelManager.getJavaModelManager().getJavaModel();
+					boolean wasJavaProject = javaModel.findJavaProject(res) != null;
+					boolean isJavaProject = this.hasJavaNature(res);
+					if (wasJavaProject != isJavaProject) {
+						// project's nature has been added or removed
+						element = this.createElement(res, elementType, project);
+						if (element == null) throw newInvalidElementType();
+						if (isJavaProject) {
+							this.elementAdded(element, delta);
+							this.indexManager.indexAll(res);
+						} else {
+							this.elementRemoved(element, delta);
+							this.indexManager.removeIndex(res.getFullPath());
+						}
+						return false; // when a project's nature is added/removed don't process children
+					}
+				}
 			}
 			return true;
 	}
