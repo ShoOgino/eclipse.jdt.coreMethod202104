@@ -46,11 +46,12 @@
 			throw new IllegalArgumentException();
 		}
 		
-		CompilationUnitDeclaration compilationUnitDeclaration = null;
 		char[] source = null;
 		try {
 			source = unit.getSource().toCharArray();
 		} catch(JavaModelException e) {
+			// no source, then we cannot build anything
+			throw new IllegalArgumentException();
 		}
 
 		if (resolveBindings) {
@@ -61,18 +62,28 @@
 			// discarded, and the various public resolveBinding methods should
 			// thereafter return null.
 			try {
-				compilationUnitDeclaration = CompilationUnitResolver.resolve(
+				CompilationUnitDeclaration compilationUnitDeclaration = CompilationUnitResolver.resolve(
 					unit,
 					new AbstractSyntaxTreeVisitorAdapter());
-				return convert(compilationUnitDeclaration, source);
+				ASTConverter converter = new ASTConverter(true);
+				AST ast = new AST();
+				BindingResolver resolver = new DefaultBindingResolver(ast, compilationUnitDeclaration.scope);
+				ast.setBindingResolver(resolver);
+				converter.setAST(ast);
+			
+				CompilationUnit cu = converter.convert(compilationUnitDeclaration, source);
+				cu.setLineEndTable(compilationUnitDeclaration.compilationResult.lineSeparatorPositions);
+				resolver.storeModificationCount(ast.modificationCount());
+				return cu;
 			} catch(JavaModelException e) {
-				// FIXME - if this exception can happen, it needs to be converted
-				// to an appropriate RuntimeException of some ilk
+				/* if a JavaModelException is thrown trying to retrieve the name environment
+				 * then we simply do a parsing without creating bindings.
+				 * Therefore all binding resolution will return null.
+				 */
+				return parseCompilationUnit(source);			
 			}
 		} else {
 			return parseCompilationUnit(source);
 		}
-		// FIXME - this method must not return null!
-		return null;
 	}
 
