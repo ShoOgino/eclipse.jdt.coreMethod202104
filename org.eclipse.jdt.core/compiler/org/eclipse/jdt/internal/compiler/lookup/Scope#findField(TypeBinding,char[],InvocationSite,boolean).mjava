@@ -62,10 +62,11 @@
 			if ((field = currentType.getField(fieldName, needResolve)) != null) {
 				keepLooking = false;
 				if (field.canBeSeenBy(receiverType, invocationSite, this)) {
-					if (visibleField == null)
-						visibleField = field;
-					else
+					if (visibleField != null)
 						return new ProblemFieldBinding(visibleField /* closest match*/, visibleField.declaringClass, fieldName, Ambiguous);
+					if (!currentType.canBeSeenBy(this))
+						return new ProblemFieldBinding(currentType, fieldName, ReceiverTypeNotVisible);
+					visibleField = field;
 				} else {
 					notVisible = true;
 				}
@@ -75,6 +76,7 @@
 		// walk all visible interfaces to find ambiguous references
 		if (interfacesToVisit != null) {
 			ProblemFieldBinding ambiguous = null;
+			ProblemFieldBinding nonVisibleType = null;
 			done : for (int i = 0; i <= lastPosition; i++) {
 				ReferenceBinding[] interfaces = interfacesToVisit[i];
 				for (int j = 0, length = interfaces.length; j < length; j++) {
@@ -85,7 +87,10 @@
 						unitScope.recordTypeReference(anInterface);
 						if ((field = anInterface.getField(fieldName, true /*resolve*/)) != null) {
 							if (visibleField == null) {
-								visibleField = field;
+								if (anInterface.canBeSeenBy(this))
+									visibleField = field;
+								else
+									nonVisibleType = new ProblemFieldBinding(anInterface, fieldName, ReceiverTypeNotVisible);
 							} else {
 								ambiguous = new ProblemFieldBinding(visibleField /* closest match*/, visibleField.declaringClass, fieldName, Ambiguous);
 								break done;
@@ -108,6 +113,8 @@
 				for (int j = 0, length = interfaces.length; j < length; j++)
 					interfaces[j].tagBits &= ~InterfaceVisited;
 			}
+			if (nonVisibleType != null)
+				return nonVisibleType;
 			if (ambiguous != null)
 				return ambiguous;
 		}
