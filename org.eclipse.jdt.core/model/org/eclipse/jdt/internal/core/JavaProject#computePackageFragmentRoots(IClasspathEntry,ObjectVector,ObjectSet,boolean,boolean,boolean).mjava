@@ -1,21 +1,21 @@
 	/**
-	 * Returns the package fragment roots identified by the given entry.
+	 * Returns the package fragment roots identified by the given entry. In case it refers to
+	 * a project, it will follow its classpath so as to find exported roots as well.
 	 */
 	public void computePackageFragmentRoots(
 		IClasspathEntry entry,
 		ObjectVector accumulatedRoots, 
-		ObjectSet visitedProjects, 
+		ObjectSet rootIDs, 
 		boolean insideOriginalProject,
 		boolean checkExistency,
 		boolean computeBuilderRoots) {
 			
-		IWorkspaceRoot workspaceRoot = getWorkspace().getRoot();
+		String rootID = ((ClasspathEntry)entry).rootID();
+		if (rootIDs.contains(rootID)) return;
+
 		IPath projectPath = getProject().getFullPath();
 		IPath entryPath = entry.getPath();
-
-		// existency check
-		Object target = JavaModel.getTarget(workspaceRoot, entryPath, checkExistency);
-		if (target == null) return;
+		IWorkspaceRoot workspaceRoot = getWorkspace().getRoot();
 		
 		switch(entry.getEntryKind()){
 			
@@ -23,11 +23,14 @@
 			case IClasspathEntry.CPE_SOURCE :
 
 				if (computeBuilderRoots) return;
-				
 				if (projectPath.isPrefixOf(entryPath)){
+					Object target = JavaModel.getTarget(workspaceRoot, entryPath, checkExistency);
+					if (target == null) return;
+
 					if (target instanceof IFolder || target instanceof IProject){
 						accumulatedRoots.add(
 							new PackageFragmentRoot((IResource)target, this));
+						rootIDs.add(rootID);
 					}
 				}
 				break;
@@ -38,6 +41,10 @@
 				if (!insideOriginalProject && !entry.isExported()) return;
 
 				String extension = entryPath.getFileExtension();
+
+				Object target = JavaModel.getTarget(workspaceRoot, entryPath, checkExistency);
+				if (target == null) return;
+
 				if (target instanceof IResource){
 					
 					// internal target
@@ -46,6 +53,7 @@
 						case IResource.FOLDER :
 							accumulatedRoots.add(
 								new PackageFragmentRoot(resource, this));
+							rootIDs.add(rootID);
 							break;
 						case IResource.FILE :
 							if ("jar".equalsIgnoreCase(extension) //$NON-NLS-1$
@@ -53,7 +61,8 @@
 								accumulatedRoots.add(
 									new JarPackageFragmentRoot(resource, this));
 								}
-							break;
+								rootIDs.add(rootID);
+						break;
 					}
 				} else {
 					// external target - only JARs allowed
@@ -61,6 +70,7 @@
 						|| "zip".equalsIgnoreCase(extension)) { //$NON-NLS-1$
 						accumulatedRoots.add(
 							new JarPackageFragmentRoot(entryPath.toOSString(), this));
+						rootIDs.add(rootID);
 					}
 				}
 				break;
@@ -71,8 +81,8 @@
 				if (!insideOriginalProject && !entry.isExported()) return;
 
 				JavaProject requiredProject = (JavaProject)getJavaModel().getJavaProject(entryPath.segment(0));
-
-				if (requiredProject.getProject().isOpen()){ // special builder binary output
+				IProject requiredProjectRsc = requiredProject.getProject();
+				if (requiredProjectRsc.exists() && requiredProjectRsc.isOpen()){ // special builder binary output
 					if (computeBuilderRoots){
 						try {
 							IResource output = workspaceRoot.findMember(requiredProject.getOutputLocation());
@@ -88,7 +98,8 @@
 						} catch (JavaModelException e){
 						}
 					}
-					requiredProject.computePackageFragmentRoots(accumulatedRoots, visitedProjects, false, checkExistency, computeBuilderRoots);
+					rootIDs.add(rootID);
+					requiredProject.computePackageFragmentRoots(accumulatedRoots, rootIDs, false, checkExistency, computeBuilderRoots);
 				}
 				break;
 			}
