@@ -1,4 +1,4 @@
-private void checkAgainstInheritedMethods(MethodBinding currentMethod, MethodBinding[] methods, int length) {
+void checkAgainstInheritedMethods(MethodBinding currentMethod, MethodBinding[] methods, int length) {
 	nextMethod : for (int i = length; --i >= 0;) {
 		MethodBinding inheritedMethod = methods[i];
 		if (currentMethod.isStatic() != inheritedMethod.isStatic()) {  // Cannot override a static method or hide an instance method
@@ -13,48 +13,26 @@ private void checkAgainstInheritedMethods(MethodBinding currentMethod, MethodBin
 			currentMethod.modifiers |= CompilerModifiers.AccOverriding;
 		}
 
-		boolean addBridgeMethod = inheritedMethod.hasSubstitutedReturnType()
-			&& isTypeSubstituable(currentMethod.returnType, inheritedMethod.returnType);
-		if (!addBridgeMethod && !areTypesEqual(currentMethod.returnType, inheritedMethod.returnType)) {
-			// can be [] of Class#RAW vs. Class<T>
-			if (!isReturnTypeSubstituable(currentMethod, inheritedMethod)) {
-				this.problemReporter(currentMethod).incompatibleReturnType(currentMethod, inheritedMethod);
-				continue nextMethod;
-			} else if (inheritedMethod.typeVariables.length != currentMethod.typeVariables.length) {
-				// TODO (kent) work to do on this case
-				if (currentMethod.typeVariables.length == 0 && inheritedMethod.declaringClass.isRawType()) {
-					// bug 69626
-					// no error since the inheritedMethod's type variables are ignored in raw types... why does a raw type binding not remove the type variables?
-				} else {
-					this.problemReporter(currentMethod).incompatibleReturnType(currentMethod, inheritedMethod);
-//					this.problemReporter(currentMethod).nameClash(currentMethod, inheritedMethod);
-					continue nextMethod;
+		if (!areReturnTypesEqual(currentMethod, inheritedMethod)) {
+			this.problemReporter(currentMethod).incompatibleReturnType(currentMethod, inheritedMethod);
+		} else {
+			if (currentMethod.thrownExceptions != NoExceptions)
+				this.checkExceptions(currentMethod, inheritedMethod);
+			if (inheritedMethod.isFinal())
+				this.problemReporter(currentMethod).finalMethodCannotBeOverridden(currentMethod, inheritedMethod);
+			if (!this.isAsVisible(currentMethod, inheritedMethod))
+				this.problemReporter(currentMethod).visibilityConflict(currentMethod, inheritedMethod);
+			if (environment.options.reportDeprecationWhenOverridingDeprecatedMethod && inheritedMethod.isViewedAsDeprecated()) {
+				if (!currentMethod.isViewedAsDeprecated() || environment.options.reportDeprecationInsideDeprecatedCode) {
+					// check against the other inherited methods to see if they hide this inheritedMethod
+					ReferenceBinding declaringClass = inheritedMethod.declaringClass;
+					if (declaringClass.isInterface())
+						for (int j = length; --j >= 0;)
+							if (i != j && methods[j].declaringClass.implementsInterface(declaringClass, false))
+								continue nextMethod;
+
+					this.problemReporter(currentMethod).overridesDeprecatedMethod(currentMethod, inheritedMethod);
 				}
-			}
-		}
-
-		if (addBridgeMethod || inheritedMethod.hasSubstitutedParameters()) {
-		    MethodBinding original = inheritedMethod.original();
-		    if (!isReturnTypeSubstituable(original, currentMethod) || !areParameterErasuresEqual(original, currentMethod))
-				this.type.addSyntheticBridgeMethod(original, currentMethod);
-		}
-
-		if (currentMethod.thrownExceptions != NoExceptions)
-			this.checkExceptions(currentMethod, inheritedMethod);
-		if (inheritedMethod.isFinal())
-			this.problemReporter(currentMethod).finalMethodCannotBeOverridden(currentMethod, inheritedMethod);
-		if (!this.isAsVisible(currentMethod, inheritedMethod))
-			this.problemReporter(currentMethod).visibilityConflict(currentMethod, inheritedMethod);
-		if (environment.options.reportDeprecationWhenOverridingDeprecatedMethod && inheritedMethod.isViewedAsDeprecated()) {
-			if (!currentMethod.isViewedAsDeprecated() || environment.options.reportDeprecationInsideDeprecatedCode) {
-				// check against the other inherited methods to see if they hide this inheritedMethod
-				ReferenceBinding declaringClass = inheritedMethod.declaringClass;
-				if (declaringClass.isInterface())
-					for (int j = length; --j >= 0;)
-						if (i != j && methods[j].declaringClass.implementsInterface(declaringClass, false))
-							continue nextMethod;
-
-				this.problemReporter(currentMethod).overridesDeprecatedMethod(currentMethod, inheritedMethod);
 			}
 		}
 	}
