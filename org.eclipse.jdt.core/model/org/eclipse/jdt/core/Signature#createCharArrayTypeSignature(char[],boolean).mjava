@@ -1,0 +1,104 @@
+/**
+ * Creates a new type signature from the given type name encoded as a character
+ * array. This method is equivalent to
+ * <code>createTypeSignature(new String(typeName),isResolved).toCharArray()</code>, although
+ * more efficient for callers with character arrays rather than strings. If the 
+ * type name is qualified, then it is expected to be dot-based.
+ *
+ * @param typeName the possibly qualified type name
+ * @param isResolved <code>true</code> if the type name is to be considered
+ *   resolved (for example, a type name from a binary class file), and 
+ *   <code>false</code> if the type name is to be considered unresolved
+ *   (for example, a type name found in source code)
+ * @return the encoded type signature
+ * @see #createTypeSignature(java.lang.String,boolean)
+ * 
+ * @since 2.0
+ */
+public static char[] createCharArrayTypeSignature(char[] typeName, boolean isResolved) {
+	try {
+		Scanner scanner = new Scanner();
+		scanner.setSource(typeName);
+		int token = scanner.getNextToken();
+		boolean primitive = true;
+		char primitiveSig = ' ';
+		StringBuffer sig = null;
+		int arrayCount = 0;
+		switch (token) {
+			case ITerminalSymbols.TokenNameIdentifier :
+				char[] idSource = scanner.getCurrentIdentifierSource();
+				sig = new StringBuffer(idSource.length);
+				sig.append(idSource);
+				primitive = false;
+				break;
+			case ITerminalSymbols.TokenNameboolean :
+				primitiveSig = Signature.C_BOOLEAN;
+				break;
+			case ITerminalSymbols.TokenNamebyte :
+				primitiveSig = Signature.C_BYTE;
+				break;
+			case ITerminalSymbols.TokenNamechar :
+				primitiveSig = Signature.C_CHAR;
+				break;
+			case ITerminalSymbols.TokenNamedouble :
+				primitiveSig = Signature.C_DOUBLE;
+				break;
+			case ITerminalSymbols.TokenNamefloat :
+				primitiveSig = Signature.C_FLOAT;
+				break;
+			case ITerminalSymbols.TokenNameint :
+				primitiveSig = Signature.C_INT;
+				break;
+			case ITerminalSymbols.TokenNamelong :
+				primitiveSig = Signature.C_LONG;
+				break;
+			case ITerminalSymbols.TokenNameshort :
+				primitiveSig = Signature.C_SHORT;
+				break;
+			case ITerminalSymbols.TokenNamevoid :
+				primitiveSig = Signature.C_VOID;
+				break;
+			default :
+				throw new IllegalArgumentException();
+		}
+		token = scanner.getNextToken();
+		while (!primitive && token == ITerminalSymbols.TokenNameDOT) {
+			sig.append(scanner.getCurrentIdentifierSource());
+			token = scanner.getNextToken();
+			if (token == ITerminalSymbols.TokenNameIdentifier) {
+				sig.append(scanner.getCurrentIdentifierSource());
+				token = scanner.getNextToken();
+			} else {
+				throw new IllegalArgumentException();
+			}
+		}
+		while (token == ITerminalSymbols.TokenNameLBRACKET) {
+			token = scanner.getNextToken();
+			if (token != ITerminalSymbols.TokenNameRBRACKET)
+				throw new IllegalArgumentException();
+			arrayCount++;
+			token = scanner.getNextToken();
+		}
+		if (token != ITerminalSymbols.TokenNameEOF)
+			throw new IllegalArgumentException();
+		char[] result;
+		if (primitive) {
+			result = new char[arrayCount+1];
+			result[arrayCount] = primitiveSig;
+		} else {
+			int sigLength = sig.length(); 
+			int resultLength = arrayCount + 1 + sigLength + 1; // e.g. '[[[Ljava.lang.String;'
+			result = new char[resultLength];
+			sig.getChars(0, sigLength, result, arrayCount + 1);
+			result[arrayCount] = isResolved ? C_RESOLVED : C_UNRESOLVED;
+			result[resultLength-1] = C_NAME_END;
+		}
+		for (int i = 0; i < arrayCount; i++) {
+			result[i] = C_ARRAY;
+		}
+		return result;
+	} catch (InvalidInputException e) {
+		throw new IllegalArgumentException();
+	}
+}
+
