@@ -1,0 +1,36 @@
+	/*
+	 * No need to emulate access to protected fields since not implicitly accessed
+	 */
+	public void manageSyntheticWriteAccessIfNecessary(
+		BlockScope currentScope,
+		FieldBinding fieldBinding,
+		TypeBinding lastReceiverType) {
+
+		// if the binding declaring class is not visible, need special action
+		// for runtime compatibility on 1.2 VMs : change the declaring class of the binding
+		// NOTE: from 1.4 on, field's declaring class is touched if any different from receiver type
+		boolean useDelegate = fieldBinding == binding && this.delegateThis != null;
+		if (useDelegate) lastReceiverType = this.delegateThis.type;
+
+		if (fieldBinding.declaringClass != lastReceiverType
+			&& !lastReceiverType.isArrayType()			
+			&& fieldBinding.declaringClass != null
+			&& fieldBinding.constant == NotAConstant
+			&& ((currentScope.environment().options.complianceLevel >= CompilerOptions.JDK1_4
+					&& (fieldBinding != binding || indexOfFirstFieldBinding > 1 || !fieldBinding.isStatic())
+					&& fieldBinding.declaringClass.id != T_Object)
+				|| !(useDelegate
+						? new CodeSnippetScope(currentScope).canBeSeenByForCodeSnippet(fieldBinding.declaringClass, (ReferenceBinding) this.delegateThis.type)
+						: fieldBinding.declaringClass.canBeSeenBy(currentScope)))){
+			if (fieldBinding == binding){
+				this.codegenBinding = currentScope.enclosingSourceType().getUpdatedFieldBinding(fieldBinding, (ReferenceBinding)lastReceiverType);
+			} else {
+				if (this.otherCodegenBindings == this.otherBindings){
+					int l = this.otherBindings.length;
+					System.arraycopy(this.otherBindings, 0, this.otherCodegenBindings = new FieldBinding[l], 0, l);
+				}
+				this.otherCodegenBindings[this.otherCodegenBindings.length-1] = currentScope.enclosingSourceType().getUpdatedFieldBinding(fieldBinding, (ReferenceBinding)lastReceiverType);
+			}
+		}
+	}
+

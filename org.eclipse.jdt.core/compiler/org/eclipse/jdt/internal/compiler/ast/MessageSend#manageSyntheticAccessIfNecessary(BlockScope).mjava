@@ -7,6 +7,7 @@ public void manageSyntheticAccessIfNecessary(BlockScope currentScope){
 		
 			syntheticAccessor = ((SourceTypeBinding)binding.declaringClass).addSyntheticMethod(binding);
 			currentScope.problemReporter().needToEmulateMethodAccess(binding, this);
+			return;
 		}
 
 	} else if (receiver instanceof QualifiedSuperReference){ // qualified super
@@ -15,6 +16,7 @@ public void manageSyntheticAccessIfNecessary(BlockScope currentScope){
 		SourceTypeBinding destinationType = (SourceTypeBinding)(((QualifiedSuperReference)receiver).currentCompatibleType);
 		syntheticAccessor = destinationType.addSyntheticMethod(binding);
 		currentScope.problemReporter().needToEmulateMethodAccess(binding, this);
+		return;
 
 	} else if (binding.isProtected()){
 
@@ -26,7 +28,21 @@ public void manageSyntheticAccessIfNecessary(BlockScope currentScope){
 			SourceTypeBinding currentCompatibleType = (SourceTypeBinding)enclosingSourceType.enclosingTypeAt((bits & DepthMASK) >> DepthSHIFT);
 			syntheticAccessor = currentCompatibleType.addSyntheticMethod(binding);
 			currentScope.problemReporter().needToEmulateMethodAccess(binding, this);
+			return;
 		}
+	}
+	// if the binding declaring class is not visible, need special action
+	// for runtime compatibility on 1.2 VMs : change the declaring class of the binding
+	// NOTE: from 1.4 on, method's declaring class is touched if any different from receiver type
+	// and not from Object or implicit static method call.	
+	if (binding.declaringClass != this.qualifyingType
+		&& !this.qualifyingType.isArrayType()
+		&& ((currentScope.environment().options.complianceLevel >= CompilerOptions.JDK1_4
+				&& (receiver != ThisReference.ThisImplicit || !binding.isStatic())
+				&& binding.declaringClass.id != T_Object) // no change for Object methods
+			|| !binding.declaringClass.canBeSeenBy(currentScope))) {
+
+		this.codegenBinding = currentScope.enclosingSourceType().getUpdatedMethodBinding(binding, (ReferenceBinding) this.qualifyingType);
 	}
 }
 

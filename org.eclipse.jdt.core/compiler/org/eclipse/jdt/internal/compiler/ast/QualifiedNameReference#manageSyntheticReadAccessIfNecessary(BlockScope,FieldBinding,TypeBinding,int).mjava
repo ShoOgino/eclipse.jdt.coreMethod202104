@@ -1,8 +1,8 @@
 	public void manageSyntheticReadAccessIfNecessary(
 		BlockScope currentScope,
 		FieldBinding fieldBinding,
+		TypeBinding lastReceiverType,
 		int index) {
-
 		// index == 0 denotes the first fieldBinding, index > 0 denotes one of the 'otherBindings'
 		if (fieldBinding.constant != NotAConstant)
 			return;
@@ -17,10 +17,9 @@
 				}
 				syntheticReadAccessors[index] = ((SourceTypeBinding) fieldBinding.declaringClass).addSyntheticMethod(fieldBinding, true);
 				currentScope.problemReporter().needToEmulateFieldReadAccess(fieldBinding, this);
+				return;
 			}
-			return;
-		}
-		if (fieldBinding.isProtected()){
+		} else if (fieldBinding.isProtected()){
 			int depth = index == 0 ? (bits & DepthMASK) >> DepthSHIFT : otherDepths[index-1];
 			// implicit protected access (only for first one)
 			if (depth > 0 && (fieldBinding.declaringClass.getPackage()
@@ -36,6 +35,28 @@
 					((SourceTypeBinding) currentScope.enclosingSourceType().enclosingTypeAt(depth))
 											.addSyntheticMethod(fieldBinding, true);
 				currentScope.problemReporter().needToEmulateFieldReadAccess(fieldBinding, this);
+				return;
+			}
+		}
+		// if the binding declaring class is not visible, need special action
+		// for runtime compatibility on 1.2 VMs : change the declaring class of the binding
+		// NOTE: from 1.4 on, field's declaring class is touched if any different from receiver type
+		if (fieldBinding.declaringClass != lastReceiverType
+			&& !lastReceiverType.isArrayType()			
+			&& fieldBinding.declaringClass != null
+			&& fieldBinding.constant == NotAConstant
+			&& ((currentScope.environment().options.complianceLevel >= CompilerOptions.JDK1_4
+					&& (index > 0 || indexOfFirstFieldBinding > 1 || !fieldBinding.isStatic())
+					&& fieldBinding.declaringClass.id != T_Object)
+				|| !fieldBinding.declaringClass.canBeSeenBy(currentScope))){
+			if (index == 0){
+				this.codegenBinding = currentScope.enclosingSourceType().getUpdatedFieldBinding(fieldBinding, (ReferenceBinding)lastReceiverType);
+			} else {
+				if (this.otherCodegenBindings == this.otherBindings){
+					int l = this.otherBindings.length;
+					System.arraycopy(this.otherBindings, 0, this.otherCodegenBindings = new FieldBinding[l], 0, l);
+				}
+				this.otherCodegenBindings[index-1] = currentScope.enclosingSourceType().getUpdatedFieldBinding(fieldBinding, (ReferenceBinding)lastReceiverType);
 			}
 		}
 	}

@@ -6,6 +6,7 @@ public void manageSyntheticReadAccessIfNecessary(BlockScope currentScope){
 		if ((currentScope.enclosingSourceType() != binding.declaringClass) && (binding.constant == NotAConstant)) {
 			syntheticReadAccessor =  ((SourceTypeBinding) binding.declaringClass).addSyntheticMethod(binding, true);
 			currentScope.problemReporter().needToEmulateFieldReadAccess(binding, this);
+			return;
 		}
 
 	} else if (receiver instanceof QualifiedSuperReference){ // qualified super
@@ -14,7 +15,8 @@ public void manageSyntheticReadAccessIfNecessary(BlockScope currentScope){
 		SourceTypeBinding destinationType = (SourceTypeBinding)(((QualifiedSuperReference)receiver).currentCompatibleType);
 		syntheticReadAccessor = destinationType.addSyntheticMethod(binding, true);
 		currentScope.problemReporter().needToEmulateFieldReadAccess(binding, this);
-
+		return;
+		
 	} else if (binding.isProtected()) {
 
 		SourceTypeBinding enclosingSourceType;
@@ -25,7 +27,20 @@ public void manageSyntheticReadAccessIfNecessary(BlockScope currentScope){
 			SourceTypeBinding currentCompatibleType = (SourceTypeBinding)enclosingSourceType.enclosingTypeAt((bits & DepthMASK) >> DepthSHIFT);
 			syntheticReadAccessor = currentCompatibleType.addSyntheticMethod(binding, true);
 			currentScope.problemReporter().needToEmulateFieldReadAccess(binding, this);
+			return;
 		}
+	}
+	// if the binding declaring class is not visible, need special action
+	// for runtime compatibility on 1.2 VMs : change the declaring class of the binding
+	// NOTE: from 1.4 on, field's declaring class is touched if any different from receiver type
+	if (binding.declaringClass != this.receiverType
+		&& !this.receiverType.isArrayType()
+		&& binding.declaringClass != null // array.length
+		&& binding.constant == NotAConstant
+		&& ((currentScope.environment().options.complianceLevel >= CompilerOptions.JDK1_4
+				&& binding.declaringClass.id != T_Object) //no change for Object fields (in case there was)
+			|| !binding.declaringClass.canBeSeenBy(currentScope))){
+			this.codegenBinding = currentScope.enclosingSourceType().getUpdatedFieldBinding(binding, (ReferenceBinding) this.receiverType);
 	}
 }
 
