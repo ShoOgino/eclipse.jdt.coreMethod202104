@@ -1,0 +1,87 @@
+	private void processConfiguration() {
+		// if the configuration area is not already defined, discover the config area by
+		// trying to find a base config area.  This is either defined in a system property or
+		// is computed relative to the install location.
+		// Note that the config info read here is only used to determine a value 
+		// for the user configuration area
+		URL baseConfigurationLocation = null;
+		Properties baseConfiguration = null;
+		if (System.getProperty(PROP_CONFIG_AREA) == null) {
+			String baseLocation = System.getProperty(PROP_BASE_CONFIG_AREA);
+			if (baseLocation != null)
+				// here the base config cannot have any symbolic (e..g, @xxx) entries.  It must just
+				// point to the config file.
+				baseConfigurationLocation = buildURL(baseLocation, true);
+			if (baseConfigurationLocation == null)
+				// here we access the install location but this is very early.  This case will only happen if
+				// the config area is not set and the base config area is not set (or is bogus).
+				// In this case we compute based on the install location.
+				baseConfigurationLocation = buildURL(getInstallLocation() + CONFIG_DIR, true);
+			baseConfiguration = loadConfiguration(baseConfigurationLocation.toExternalForm());
+			if (baseConfiguration != null) {
+				// if the base sets the install area then use that value if the property.  We know the 
+				// property is not already set.
+				String location = baseConfiguration.getProperty(PROP_CONFIG_AREA);
+				if (location != null)
+					System.getProperties().put(PROP_CONFIG_AREA, location);
+				// if the base sets the install area then use that value if the property is not already set.
+				// This helps in selfhosting cases where you cannot easily compute the install location
+				// from the code base.
+				location = baseConfiguration.getProperty(PROP_INSTALL_AREA);
+				if (location != null && System.getProperty(PROP_INSTALL_AREA) == null)
+					System.getProperties().put(PROP_INSTALL_AREA, location);
+			}
+		}
+
+		// Now we know where the base configuration is supposed to be.  Go ahead and load
+		// it and merge into the System properties.  Then, if cascaded, read the parent configuration
+		// Note that the parent may or may not be the same parent as we read above since the 
+		// base can define its parent.  The first parent we read was either defined by the user
+		// on the command line or was the one in the install dir.  
+		// if the config or parent we are about to read is the same as the base config we read above,
+		// just reuse the base
+		Properties configuration = baseConfiguration;
+		if (configuration == null || !getConfigurationLocation().equals(baseConfigurationLocation.toExternalForm()))
+			configuration = loadConfiguration(getConfigurationLocation());
+		mergeProperties(System.getProperties(), configuration);
+		if ("false".equalsIgnoreCase(System.getProperty(PROP_CONFIG_CASCADED)))
+			// if we are not cascaded then remvoe the parent property even if it was set.
+			System.getProperties().remove(PROP_SHARED_CONFIG_AREA);
+		else {
+			URL sharedConfigURL = buildLocation(PROP_SHARED_CONFIG_AREA, null, CONFIG_DIR);
+			if (sharedConfigURL == null)
+				// here we access the install location but this is very early.  This case will only happen if
+				// the config is cascaded and the parent config area is not set (or is bogus).
+				// In this case we compute based on the install location.  Note that we should not 
+				// precompute this value and use it as the default in the call to buildLocation as it will
+				// unnecessarily bind the install location.
+				sharedConfigURL = buildURL(getInstallLocation() + CONFIG_DIR, true);
+
+			// if the parent location is different from the config location, read it too.
+			if (sharedConfigURL != null) {
+				String location = sharedConfigURL.toExternalForm();
+				if (location.equals(getConfigurationLocation()))
+					// remove the property to show that we do not have a parent.
+					System.getProperties().remove(PROP_SHARED_CONFIG_AREA);
+				else {
+					// if the parent we are about to read is the same as the base config we read above,
+					// just reuse the base
+					configuration = baseConfiguration;
+					if (!sharedConfigURL.equals(baseConfigurationLocation))
+						configuration = loadConfiguration(location);
+					mergeProperties(System.getProperties(), configuration);
+					System.getProperties().put(PROP_SHARED_CONFIG_AREA, location);
+					if (debug)
+						System.out.println("Shared configuration location:\n    " + location);
+				}
+			}
+		}
+		// setup the path to the framework
+		String urlString = System.getProperty(PROP_FRAMEWORK, null);
+		if (urlString != null) {
+			urlString = adjustTrailingSlash(urlString, true);
+			System.getProperties().put(PROP_FRAMEWORK, urlString);
+			bootLocation = resolve(urlString);
+		}
+	}
+

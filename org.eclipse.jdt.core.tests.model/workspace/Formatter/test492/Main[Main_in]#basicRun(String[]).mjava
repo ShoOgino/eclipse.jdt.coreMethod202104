@@ -1,0 +1,42 @@
+	/**
+	 * Executes the launch.
+	 * 
+	 * @return the result of performing the launch
+	 * @param args command-line arguments
+	 * @exception Exception thrown if a problem occurs during the launch
+	 */
+	protected Object basicRun(String[] args) throws Exception {
+		System.getProperties().setProperty("eclipse.debug.startupTime", Long.toString(System.currentTimeMillis())); //$NON-NLS-1$
+		commands = args;
+		String[] passThruArgs = processCommandLine(args);
+		setupVMProperties();
+		processConfiguration();
+		// need to ensure that getInstallLocation is called at least once to initialize the value.
+		// Do this AFTER processing the configuration to allow the configuration to set
+		// the install location.  
+		getInstallLocation();
+
+		// locate boot plugin (may return -dev mode variations)
+		URL[] bootPath = getBootPath(bootLocation);
+
+		// splash handling is done here, because the default case needs to know
+		// the location of the boot plugin we are going to use
+		handleSplash(bootPath);
+
+		// load the BootLoader and startup the platform
+		URLClassLoader loader = new URLClassLoader(bootPath, null);
+		Class clazz = loader.loadClass(STARTER);
+		Method method = clazz.getDeclaredMethod("run", new Class[] {String[].class, Runnable.class}); //$NON-NLS-1$
+		try {
+			return method.invoke(clazz, new Object[] {passThruArgs, endSplashHandler});
+		} catch (InvocationTargetException e) {
+			if (e.getTargetException() instanceof Error)
+				throw (Error) e.getTargetException();
+			else if (e.getTargetException() instanceof Exception)
+				throw (Exception) e.getTargetException();
+			else
+				//could be a subclass of Throwable!
+				throw e;
+		}
+	}
+
