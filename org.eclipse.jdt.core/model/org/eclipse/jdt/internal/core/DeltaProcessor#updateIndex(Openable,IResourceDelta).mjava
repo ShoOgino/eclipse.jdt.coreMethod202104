@@ -1,122 +1,122 @@
-protected void updateIndex(Openable element, IResourceDelta delta) {
-
-	if (indexManager == null)
-		return;
-
-	switch (element.getElementType()) {
-		case IJavaElement.JAVA_PROJECT :
-			switch (delta.getKind()) {
-				case IResourceDelta.ADDED :
-					this.indexManager.indexAll(element.getJavaProject().getProject());
+	private void updateIndex(Openable element, IResourceDelta delta) {
+	
+		if (indexManager == null)
+			return;
+	
+		switch (element.getElementType()) {
+			case IJavaElement.JAVA_PROJECT :
+				switch (delta.getKind()) {
+					case IResourceDelta.ADDED :
+						this.indexManager.indexAll(element.getJavaProject().getProject());
+						break;
+					case IResourceDelta.REMOVED :
+						this.indexManager.removeIndexFamily(element.getJavaProject().getProject().getFullPath());
+						// NB: Discarding index jobs belonging to this project was done during PRE_DELETE
+						break;
+					// NB: Update of index if project is opened, closed, or its java nature is added or removed
+					//     is done in updateCurrentDeltaAndIndex
+				}
+				break;
+			case IJavaElement.PACKAGE_FRAGMENT_ROOT :
+				if (element instanceof JarPackageFragmentRoot) {
+					JarPackageFragmentRoot root = (JarPackageFragmentRoot)element;
+					// index jar file only once (if the root is in its declaring project)
+					IPath jarPath = root.getPath();
+					switch (delta.getKind()) {
+						case IResourceDelta.ADDED:
+							// index the new jar
+							indexManager.indexLibrary(jarPath, root.getJavaProject().getProject());
+							break;
+						case IResourceDelta.CHANGED:
+							// first remove the index so that it is forced to be re-indexed
+							indexManager.removeIndex(jarPath);
+							// then index the jar
+							indexManager.indexLibrary(jarPath, root.getJavaProject().getProject());
+							break;
+						case IResourceDelta.REMOVED:
+							// the jar was physically removed: remove the index
+							this.indexManager.discardJobs(jarPath.toString());
+							this.indexManager.removeIndex(jarPath);
+							break;
+					}
 					break;
-				case IResourceDelta.REMOVED :
-					this.indexManager.removeIndexFamily(element.getJavaProject().getProject().getFullPath());
-					// NB: Discarding index jobs belonging to this project was done during PRE_DELETE
-					break;
-				// NB: Update of index if project is opened, closed, or its java nature is added or removed
-				//     is done in updateCurrentDeltaAndIndex
-			}
-			break;
-		case IJavaElement.PACKAGE_FRAGMENT_ROOT :
-			if (element instanceof JarPackageFragmentRoot) {
-				JarPackageFragmentRoot root = (JarPackageFragmentRoot)element;
-				// index jar file only once (if the root is in its declaring project)
-				IPath jarPath = root.getPath();
+				} else {
+					int kind = delta.getKind();
+					if (kind == IResourceDelta.ADDED || kind == IResourceDelta.REMOVED) {
+						IPackageFragmentRoot root = (IPackageFragmentRoot)element;
+						this.updateRootIndex(root, root.getPackageFragment(""), delta); //$NON-NLS-1$
+						break;
+					}
+				}
+				// don't break as packages of the package fragment root can be indexed below
+			case IJavaElement.PACKAGE_FRAGMENT :
 				switch (delta.getKind()) {
 					case IResourceDelta.ADDED:
-						// index the new jar
-						indexManager.indexLibrary(jarPath, root.getJavaProject().getProject());
-						break;
-					case IResourceDelta.CHANGED:
-						// first remove the index so that it is forced to be re-indexed
-						indexManager.removeIndex(jarPath);
-						// then index the jar
-						indexManager.indexLibrary(jarPath, root.getJavaProject().getProject());
-						break;
 					case IResourceDelta.REMOVED:
-						// the jar was physically removed: remove the index
-						this.indexManager.discardJobs(jarPath.toString());
-						this.indexManager.removeIndex(jarPath);
+						IPackageFragment pkg = null;
+						if (element instanceof IPackageFragmentRoot) {
+							IPackageFragmentRoot root = (IPackageFragmentRoot)element;
+							pkg = root.getPackageFragment(""); //$NON-NLS-1$
+						} else {
+							pkg = (IPackageFragment)element;
+						}
+						IResourceDelta[] children = delta.getAffectedChildren();
+						for (int i = 0, length = children.length; i < length; i++) {
+							IResourceDelta child = children[i];
+							IResource resource = child.getResource();
+							if (resource instanceof IFile) {
+								String name = resource.getName();
+								if (Util.isJavaFileName(name)) {
+									Openable cu = (Openable)pkg.getCompilationUnit(name);
+									this.updateIndex(cu, child);
+								} else if (Util.isClassFileName(name)) {
+									Openable classFile = (Openable)pkg.getClassFile(name);
+									this.updateIndex(classFile, child);
+								}
+							}
+						}
 						break;
 				}
 				break;
-			} else {
-				int kind = delta.getKind();
-				if (kind == IResourceDelta.ADDED || kind == IResourceDelta.REMOVED) {
-					IPackageFragmentRoot root = (IPackageFragmentRoot)element;
-					this.updateRootIndex(root, root.getPackageFragment(""), delta); //$NON-NLS-1$
-					break;
-				}
-			}
-			// don't break as packages of the package fragment root can be indexed below
-		case IJavaElement.PACKAGE_FRAGMENT :
-			switch (delta.getKind()) {
-				case IResourceDelta.ADDED:
-				case IResourceDelta.REMOVED:
-					IPackageFragment pkg = null;
-					if (element instanceof IPackageFragmentRoot) {
-						IPackageFragmentRoot root = (IPackageFragmentRoot)element;
-						pkg = root.getPackageFragment(""); //$NON-NLS-1$
-					} else {
-						pkg = (IPackageFragment)element;
-					}
-					IResourceDelta[] children = delta.getAffectedChildren();
-					for (int i = 0, length = children.length; i < length; i++) {
-						IResourceDelta child = children[i];
-						IResource resource = child.getResource();
-						if (resource instanceof IFile) {
-							String name = resource.getName();
-							if (Util.isJavaFileName(name)) {
-								Openable cu = (Openable)pkg.getCompilationUnit(name);
-								this.updateIndex(cu, child);
-							} else if (Util.isClassFileName(name)) {
-								Openable classFile = (Openable)pkg.getClassFile(name);
-								this.updateIndex(classFile, child);
-							}
-						}
-					}
-					break;
-			}
-			break;
-		case IJavaElement.CLASS_FILE :
-			IFile file = (IFile) delta.getResource();
-			IJavaProject project = element.getJavaProject();
-			IPath binaryFolderPath = element.getPackageFragmentRoot().getPath();
-			// if the class file is part of the binary output, it has been created by
-			// the java builder -> ignore
-			try {
-				if (binaryFolderPath.equals(project.getOutputLocation())) {
-					break;
-				}
-			} catch (JavaModelException e) {
-			}
-			switch (delta.getKind()) {
-				case IResourceDelta.CHANGED :
-					// no need to index if the content has not changed
-					if ((delta.getFlags() & IResourceDelta.CONTENT) == 0)
+			case IJavaElement.CLASS_FILE :
+				IFile file = (IFile) delta.getResource();
+				IJavaProject project = element.getJavaProject();
+				IPath binaryFolderPath = element.getPackageFragmentRoot().getPath();
+				// if the class file is part of the binary output, it has been created by
+				// the java builder -> ignore
+				try {
+					if (binaryFolderPath.equals(project.getOutputLocation())) {
 						break;
-				case IResourceDelta.ADDED :
-					indexManager.addBinary(file, binaryFolderPath);
-					break;
-				case IResourceDelta.REMOVED :
-					indexManager.remove(file.getFullPath().toString(), binaryFolderPath);
-					break;
-			}
-			break;
-		case IJavaElement.COMPILATION_UNIT :
-			file = (IFile) delta.getResource();
-			switch (delta.getKind()) {
-				case IResourceDelta.CHANGED :
-					// no need to index if the content has not changed
-					if ((delta.getFlags() & IResourceDelta.CONTENT) == 0)
+					}
+				} catch (JavaModelException e) {
+				}
+				switch (delta.getKind()) {
+					case IResourceDelta.CHANGED :
+						// no need to index if the content has not changed
+						if ((delta.getFlags() & IResourceDelta.CONTENT) == 0)
+							break;
+					case IResourceDelta.ADDED :
+						indexManager.addBinary(file, binaryFolderPath);
 						break;
-				case IResourceDelta.ADDED :
-					indexManager.addSource(file, file.getProject().getProject().getFullPath());
-					break;
-				case IResourceDelta.REMOVED :
-					indexManager.remove(file.getFullPath().toString(), file.getProject().getProject().getFullPath());
-					break;
-			}
+					case IResourceDelta.REMOVED :
+						indexManager.remove(file.getFullPath().toString(), binaryFolderPath);
+						break;
+				}
+				break;
+			case IJavaElement.COMPILATION_UNIT :
+				file = (IFile) delta.getResource();
+				switch (delta.getKind()) {
+					case IResourceDelta.CHANGED :
+						// no need to index if the content has not changed
+						if ((delta.getFlags() & IResourceDelta.CONTENT) == 0)
+							break;
+					case IResourceDelta.ADDED :
+						indexManager.addSource(file, file.getProject().getProject().getFullPath());
+						break;
+					case IResourceDelta.REMOVED :
+						indexManager.remove(file.getFullPath().toString(), file.getProject().getProject().getFullPath());
+						break;
+				}
+		}
 	}
-}
 

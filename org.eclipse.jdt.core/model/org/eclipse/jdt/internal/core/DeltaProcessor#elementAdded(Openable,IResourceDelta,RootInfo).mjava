@@ -1,4 +1,4 @@
-	/**
+	/*
 	 * Processing for an element that has been added:<ul>
 	 * <li>If the element is a project, do nothing, and do not process
 	 * children, as when a project is created it does not yet have any
@@ -8,7 +8,7 @@
 	 * </ul>
 	 * Delta argument could be null if processing an external JAR change
 	 */
-	protected void elementAdded(Openable element, IResourceDelta delta, RootInfo rootInfo) {
+	private void elementAdded(Openable element, IResourceDelta delta, RootInfo rootInfo) {
 		int elementType = element.getElementType();
 		
 		if (elementType == IJavaElement.JAVA_PROJECT) {
@@ -22,9 +22,11 @@
 				} else {
 					currentDelta().added(element);
 				}
-				this.projectsToUpdate.add(element);
 				this.updateRoots(element.getPath(), delta);
-				this.projectsForDependentNamelookupRefresh.add((JavaProject) element);
+				
+				// refresh pkg fragment roots and namelookup of the project (and its dependents)
+				this.rootsToRefresh.add(element);
+				this.namelookupsToRefresh.add(element);
 			}
 		} else {			
 			addToParentInfo(element);
@@ -81,18 +83,17 @@
 				case IJavaElement.PACKAGE_FRAGMENT_ROOT :
 					// when a root is added, and is on the classpath, the project must be updated
 					JavaProject project = (JavaProject) element.getJavaProject();
-					this.projectsToUpdate.add(project);
-					this.projectsForDependentNamelookupRefresh.add(project);
+
+					// refresh pkg fragment roots and namelookup of the project (and its dependents)
+					this.rootsToRefresh.add(project);
+					this.namelookupsToRefresh.add(project);
 					
 					break;
 				case IJavaElement.PACKAGE_FRAGMENT :
-					// get rid of namelookup since it holds onto obsolete cached info 
+					//refresh namelookup since it holds onto obsolete cached info 
 					project = (JavaProject) element.getJavaProject();
-					try {
-						project.getJavaProjectElementInfo().setNameLookup(null);
-						this.projectsForDependentNamelookupRefresh.add(project);						
-					} catch (JavaModelException e) {
-					}
+					this.namelookupsToRefresh.add(project);						
+
 					// add subpackages
 					if (delta != null){
 						PackageFragmentRoot root = element.getPackageFragmentRoot();
