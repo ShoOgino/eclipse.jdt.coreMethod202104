@@ -5,11 +5,21 @@
 		previousCount = ast.modificationCount();
 		assertTrue(x.getAST() == ast);
 		assertTrue(x.getParent() == null);
-		assertTrue(x.getModifiers() == Modifier.NONE);
+		if (ast.apiLevel() == AST.LEVEL_2_0) {
+			assertTrue(x.getModifiers() == Modifier.NONE);
+			assertTrue(x.getReturnType().getParent() == x);
+			assertTrue(x.getReturnType().isPrimitiveType());
+			assertTrue(((PrimitiveType) x.getReturnType()).getPrimitiveTypeCode() == PrimitiveType.VOID);
+		} else {
+			assertTrue(x.modifiers().size() == 0);
+			assertTrue(x.typeParameters().size() == 0);
+			assertTrue(x.getReturnType2().getParent() == x);
+			assertTrue(x.getReturnType2().isPrimitiveType());
+			assertTrue(((PrimitiveType) x.getReturnType2()).getPrimitiveTypeCode() == PrimitiveType.VOID);
+		}
 		assertTrue(x.isConstructor() == false);
 		assertTrue(x.getName().getParent() == x);
 		assertTrue(x.getName().isDeclaration() == true);
-		assertTrue(x.getReturnType().getParent() == x);
 		assertTrue(x.getExtraDimensions() == 0);
 		assertTrue(x.getJavadoc() == null);
 		assertTrue(x.parameters().size() == 0);
@@ -30,19 +40,21 @@
 		assertTrue(ast.modificationCount() > previousCount);
 		assertTrue(x.isConstructor() == false);
 		
-		previousCount = ast.modificationCount();
-		int legal = Modifier.PUBLIC | Modifier.PROTECTED
-			| Modifier.PRIVATE | Modifier.ABSTRACT | Modifier.STATIC 
-			| Modifier.FINAL | Modifier.SYNCHRONIZED| Modifier.NATIVE
-			| Modifier.STRICTFP;
-		x.setModifiers(legal);
-		assertTrue(ast.modificationCount() > previousCount);
-		assertTrue(x.getModifiers() == legal);
-
-		previousCount = ast.modificationCount();
-		x.setModifiers(Modifier.NONE);
-		assertTrue(ast.modificationCount() > previousCount);
-		assertTrue(x.getModifiers() == Modifier.NONE);
+		if (ast.apiLevel() == AST.LEVEL_2_0) {
+			previousCount = ast.modificationCount();
+			int legal = Modifier.PUBLIC | Modifier.PROTECTED
+				| Modifier.PRIVATE | Modifier.ABSTRACT | Modifier.STATIC 
+				| Modifier.FINAL | Modifier.SYNCHRONIZED| Modifier.NATIVE
+				| Modifier.STRICTFP;
+			x.setModifiers(legal);
+			assertTrue(ast.modificationCount() > previousCount);
+			assertTrue(x.getModifiers() == legal);
+	
+			previousCount = ast.modificationCount();
+			x.setModifiers(Modifier.NONE);
+			assertTrue(ast.modificationCount() > previousCount);
+			assertTrue(x.getModifiers() == Modifier.NONE);
+		}
 
 		previousCount = ast.modificationCount();
 		x.setExtraDimensions(1);
@@ -55,7 +67,21 @@
 		assertTrue(x.getExtraDimensions() == 0);
 
 		tJavadocComment(x);
+		tModifiers(x);
 						
+		if (ast.apiLevel() >= AST.LEVEL_3_0) {
+			genericPropertyListTest(x, x.typeParameters(),
+			  new Property("TypeParameters", true, TypeParameter.class) { //$NON-NLS-1$
+				public ASTNode sample(AST targetAst, boolean parented) {
+					TypeParameter result = targetAst.newTypeParameter();
+					if (parented) {
+						targetAst.newMethodDeclaration().typeParameters().add(result);
+					}
+					return result;
+				}
+			});
+		}
+		
 		genericPropertyTest(x, new Property("Name", true, SimpleName.class) { //$NON-NLS-1$
 			public ASTNode sample(AST targetAst, boolean parented) {
 				SimpleName result = targetAst.newSimpleName("foo"); //$NON-NLS-1$
@@ -72,22 +98,43 @@
 			}
 		});
 		
-		genericPropertyTest(x, new Property("ReturnType", true, Type.class) { //$NON-NLS-1$
-			public ASTNode sample(AST targetAst, boolean parented) {
-				SimpleType result = targetAst.newSimpleType(
-					targetAst.newSimpleName("foo")); //$NON-NLS-1$
-				if (parented) {
-					targetAst.newArrayType(result);
+		if (ast.apiLevel() == AST.LEVEL_2_0) {
+			genericPropertyTest(x, new Property("ReturnType", true, Type.class) { //$NON-NLS-1$
+				public ASTNode sample(AST targetAst, boolean parented) {
+					SimpleType result = targetAst.newSimpleType(
+						targetAst.newSimpleName("foo")); //$NON-NLS-1$
+					if (parented) {
+						targetAst.newArrayType(result);
+					}
+					return result;
 				}
-				return result;
-			}
-			public ASTNode get() {
-				return x.getReturnType();
-			}
-			public void set(ASTNode value) {
-				x.setReturnType((Type) value);
-			}
-		});
+				public ASTNode get() {
+					return x.getReturnType();
+				}
+				public void set(ASTNode value) {
+					x.setReturnType((Type) value);
+				}
+			});
+		}
+		
+		if (ast.apiLevel() >= AST.LEVEL_3_0) {
+			genericPropertyTest(x, new Property("ReturnType2", false, Type.class) { //$NON-NLS-1$
+				public ASTNode sample(AST targetAst, boolean parented) {
+					SimpleType result = targetAst.newSimpleType(
+						targetAst.newSimpleName("foo")); //$NON-NLS-1$
+					if (parented) {
+						targetAst.newArrayType(result);
+					}
+					return result;
+				}
+				public ASTNode get() {
+					return x.getReturnType2();
+				}
+				public void set(ASTNode value) {
+					x.setReturnType2((Type) value);
+				}
+			});
+		}
 		
 		genericPropertyListTest(x, x.parameters(),
 		  new Property("Parameters", true, SingleVariableDeclaration.class) { //$NON-NLS-1$
@@ -153,5 +200,20 @@
 				x.setBody((Block) value);
 			}
 		});
+		
+		if (ast.apiLevel() >= AST.LEVEL_3_0) {
+			// check isVariableArity convenience method
+			x.parameters().clear();
+			assertTrue(!x.isVariableArity()); // 0 params
+			x.parameters().add(ast.newSingleVariableDeclaration());
+			assertTrue(!x.isVariableArity()); // 1 params
+			SingleVariableDeclaration v = ast.newSingleVariableDeclaration();
+			x.parameters().add(v);
+			assertTrue(!x.isVariableArity()); // 2 param fixed arity
+			v.setVariableArity(true);
+			assertTrue(x.isVariableArity()); // 2 param fixed arity
+			x.parameters().add(ast.newSingleVariableDeclaration());
+			assertTrue(!x.isVariableArity()); // only last param counts
+		}
 	}	
 
