@@ -20,15 +20,15 @@ public final void jumpOverMethodBody() {
 			} while (isWhiteSpace);
 
 			// -------consume token until } is found---------
-			switch (this.currentCharacter) {
+			NextToken: switch (this.currentCharacter) {
 				case '{' :
 					found++;
-					break;
+					break NextToken;
 				case '}' :
 					found--;
 					if (found == 0)
 						return;
-					break;
+					break NextToken;
 				case '\'' :
 					{
 						boolean test;
@@ -47,7 +47,7 @@ public final void jumpOverMethodBody() {
 									getNextUnicodeChar();
 								} else {
 									if (this.withoutUnicodePtr != 0) {
-										unicodeStoreAt(++this.withoutUnicodePtr);
+										unicodeStore();
 									}
 								}
 							} catch (InvalidInputException ex) {
@@ -55,7 +55,7 @@ public final void jumpOverMethodBody() {
 							}
 						}
 						getNextChar('\'');
-						break;
+						break NextToken;
 					}
 				case '"' :
 					try {
@@ -66,7 +66,7 @@ public final void jumpOverMethodBody() {
 								getNextUnicodeChar();
 							} else {
 								if (this.withoutUnicodePtr != 0) {
-								    unicodeStoreAt(++this.withoutUnicodePtr);
+								    unicodeStore();
 								}
 							}
 						} catch (InvalidInputException ex) {
@@ -75,7 +75,7 @@ public final void jumpOverMethodBody() {
 						while (this.currentCharacter != '"') {
 							if (this.currentCharacter == '\r'){
 								if (this.source[this.currentPosition] == '\n') this.currentPosition++;
-								break; // the string cannot go further that the line
+								break NextToken; // the string cannot go further that the line
 							}
 							if (this.currentCharacter == '\n'){
 								break; // the string cannot go further that the line
@@ -94,7 +94,7 @@ public final void jumpOverMethodBody() {
 									getNextUnicodeChar();
 								} else {
 									if (this.withoutUnicodePtr != 0) {
-										unicodeStoreAt(++this.withoutUnicodePtr);
+										unicodeStore();
 									}
 								}
 							} catch (InvalidInputException ex) {
@@ -104,7 +104,7 @@ public final void jumpOverMethodBody() {
 					} catch (IndexOutOfBoundsException e) {
 						return;
 					}
-					break;
+					break NextToken;
 				case '/' :
 					{
 						int test;
@@ -168,7 +168,7 @@ public final void jumpOverMethodBody() {
 									this.currentPosition++; 
 								}
 							}
-							break;
+							break NextToken;
 						}
 						if (test > 0) { //traditional and javadoc comment
 							boolean isJavadoc = false;
@@ -184,7 +184,7 @@ public final void jumpOverMethodBody() {
 								} else {
 									isUnicode = false;
 									if (this.withoutUnicodePtr != 0) {
-    								    unicodeStoreAt(++this.withoutUnicodePtr);
+    								    unicodeStore();
 									}
 								}
 	
@@ -252,43 +252,53 @@ public final void jumpOverMethodBody() {
 							} catch (IndexOutOfBoundsException e) {
 								return;
 							}
-							break;
+							break NextToken;
 						}
-						break;
+						break NextToken;
 					}
 
 				default :
 					try {
-						boolean isJavaIdStart = false;
-						if (this.currentCharacter >= HIGH_SURROGATE_MIN_VALUE && this.currentCharacter <= HIGH_SURROGATE_MAX_VALUE) {
+						char c = this.currentCharacter;
+						if (c < MAX_OBVIOUS) {
+							switch (ObviousIdentCharNatures[c]) {
+								case C_LETTER :
+									scanIdentifierOrKeyword();
+									break NextToken;
+								case C_DIGIT :
+									scanNumber(false);
+									break NextToken;
+							}
+						}
+						boolean isJavaIdStart;
+						if (c >= HIGH_SURROGATE_MIN_VALUE && c <= HIGH_SURROGATE_MAX_VALUE) {
 							if (this.complianceLevel < ClassFileConstants.JDK1_5) {
 								throw new InvalidInputException(INVALID_UNICODE_ESCAPE);
 							}
 							// Unicode 4 detection
-							char high = this.currentCharacter;
 							char low = (char) getNextChar();
 							if (low < LOW_SURROGATE_MIN_VALUE || low > LOW_SURROGATE_MAX_VALUE) {
 								// illegal low surrogate
 								throw new InvalidInputException(INVALID_LOW_SURROGATE);
 							}
-							isJavaIdStart = ScannerHelper.isJavaIdentifierStart(high, low);
+							isJavaIdStart = ScannerHelper.isJavaIdentifierStart(c, low);
 						}
-						else if (this.currentCharacter >= LOW_SURROGATE_MIN_VALUE && this.currentCharacter <= LOW_SURROGATE_MAX_VALUE) {
+						else if (c >= LOW_SURROGATE_MIN_VALUE && c <= LOW_SURROGATE_MAX_VALUE) {
 							if (this.complianceLevel < ClassFileConstants.JDK1_5) {
 								throw new InvalidInputException(INVALID_UNICODE_ESCAPE);
 							}
 							throw new InvalidInputException(INVALID_HIGH_SURROGATE);
 						} else {
-							isJavaIdStart = Character.isJavaIdentifierStart(this.currentCharacter);
+							isJavaIdStart = Character.isJavaIdentifierStart(c);
 						}
 						if (isJavaIdStart) {
 							scanIdentifierOrKeyword();
-							break;
+							break NextToken;
 						}
 						if (isDigit(this.currentCharacter)) {
 							scanNumber(false);
-							break;
-						}
+							break NextToken;
+						}						
 					} catch (InvalidInputException ex) {
 						// ignore
 					}
