@@ -1,0 +1,92 @@
+/**
+ * Loads the given class definitions. The way these class definitions are loaded is described
+ * in the CodeSnippetRunner constructor.
+ * The class definitions are code snippet classes and/or global variable classes.
+ * Code snippet classes are assumed be direct or indirect subclasses of CodeSnippet and implement 
+ * only the run()V method. 
+ * They are instanciated and run.
+ * Global variable classes are assumed to be direct subclasses of CodeSnippet. Their fields are assumed
+ * to be static. The value of each field is sent back to the IDE.
+ */
+void processClasses(boolean mustRun, byte[][] classDefinitions) {
+	// store the class definitions (either in the code snippet class loader or on disk)
+	String[] newClasses = new String[classDefinitions.length];
+	for (int i = 0; i < classDefinitions.length; i++) {
+		byte[] classDefinition = classDefinitions[i];
+		String classFileName = className(classDefinition);
+		String className = classFileName.replace('/', '.');
+		if (this.loader != null) {
+			this.loader.storeClassDefinition(className, classDefinition);
+		} else {
+			writeClassOnDisk(classFileName, classDefinition);
+		}
+		newClasses[i] = className;
+	}
+
+	// load the classes and collect code snippet classes
+	Vector codeSnippetClasses = new Vector();
+	for (int i = 0; i < newClasses.length; i++) {
+		String className = newClasses[i];
+		Class clazz = null;
+		if (this.loader != null) {
+			clazz = this.loader.loadIfNeeded(className);
+			if (clazz == null) {
+				System.err.println("Could not find class definition for " + className);
+				break;
+			}
+		} else {
+			// use the system class loader
+			try {
+				clazz = Class.forName(className);
+			} catch (ClassNotFoundException e) {
+				e.printStackTrace(); // should never happen since we just wrote it on disk
+				this.ide.sendResult(void.class, null);
+				break;
+			}
+		}
+		
+		Class superclass = clazz.getSuperclass();
+		Method[] methods = clazz.getDeclaredMethods();
+		if (this.codeSnippetClass == null) {
+			if (superclass.equals(Object.class) && clazz.getName().equals(CODE_SNIPPET_CLASS_NAME)) {
+				// The CodeSnippet class is being deployed
+				this.codeSnippetClass = clazz;
+			} else {
+				System.out.println("Expecting CodeSnippet class to be deployed first");
+			}
+		} else if (superclass.equals(this.codeSnippetClass)) {
+			// It may be a code snippet class with no global variable
+			if (methods.length == 1 && methods[0].getName().equals(RUN_METHOD_NAME)) {
+				codeSnippetClasses.addElement(clazz);
+			}
+			// Evaluate global variables and send result back
+			Field[] fields = clazz.getDeclaredFields();
+			for (int j = 0; j < fields.length; j++) {
+				Field field = fields[j];
+				if (Modifier.isPublic(field.getModifiers())) {
+					try {
+						this.ide.sendResult(field.getType(), field.get(null));
+					} catch (IllegalAccessException e) {
+						e.printStackTrace(); // Cannot happen because the field is public
+						this.ide.sendResult(void.class, null);
+						break;
+					}
+				}
+			}
+		} else if (this.codeSnippetClass.equals(superclass.getSuperclass()) && methods.length == 1 && methods[0].getName().equals("run")) {
+			// It is a code snippet class with a global variable superclass
+			codeSnippetClasses.addElement(clazz);
+		}
+	}
+
+	// run the code snippet classes
+	if (codeSnippetClasses.size() != 0 && mustRun) {
+		for (Enumeration e = codeSnippetClasses.elements(); e.hasMoreElements();) {
+			Object codeSnippet = this.createCodeSnippet((Class) e.nextElement());
+			if (codeSnippet != null) {
+				this.runCodeSnippet(codeSnippet);
+			}
+		}
+	}
+}
+
