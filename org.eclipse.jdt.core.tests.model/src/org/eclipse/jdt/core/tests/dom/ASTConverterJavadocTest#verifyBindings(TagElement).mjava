@@ -1,0 +1,57 @@
+	/*
+	 * Verify that bindings of Javadoc tag structure are resolved or not.
+	 * For expected unresolved binding, verify that following text starts with 'Unknown'
+	 */
+	protected void verifyBindings(TagElement tagElement) {
+		// Verify each fragment
+		Iterator elements = tagElement.fragments().listIterator();
+		IBinding previousBinding = null;
+		boolean resolvedBinding = false;
+		ASTNode previousFragment = null;
+		while (elements.hasNext()) {
+			ASTNode fragment = (ASTNode) elements.next();
+			if (fragment.getNodeType() == ASTNode.TEXT_ELEMENT) {
+				TextElement text = (TextElement) fragment;
+				if (resolvedBinding) {
+					if (previousBinding == null) {
+						assertTrue("Reference in '"+previousFragment+"' should be bound!", text.getText().trim().startsWith("Unknown"));
+					} else {
+						assertFalse("Unknown reference in'"+previousFragment+"' should NOT be bound!", text.getText().trim().startsWith("Unknown"));
+					}
+				}
+				previousBinding = null;
+				resolvedBinding = false;
+			} else if (fragment.getNodeType() == ASTNode.TAG_ELEMENT) {
+				verifyBindings((TagElement) fragment);
+				previousBinding = null;
+				resolvedBinding = false;
+			} else {
+				resolvedBinding = true;
+				if (fragment.getNodeType() == ASTNode.SIMPLE_NAME) {
+					previousBinding = ((Name)fragment).resolveBinding();
+				} else if (fragment.getNodeType() == ASTNode.SIMPLE_NAME || fragment.getNodeType() == ASTNode.QUALIFIED_NAME) {
+					QualifiedName name = (QualifiedName) fragment;
+					previousBinding = name.resolveBinding();
+					verifyName(name.getQualifier());
+				} else if (fragment.getNodeType() == ASTNode.MEMBER_REF) {
+					MemberRef memberRef = (MemberRef) fragment;
+					previousBinding = memberRef.resolveBinding();
+					previousFragment = fragment;
+					if (previousBinding != null) {
+						assertNotNull(memberRef.getName()+" binding was not found!", memberRef.getName().resolveBinding());
+						verifyName(memberRef.getQualifier());
+					}
+				} else if (fragment.getNodeType() == ASTNode.METHOD_REF) {
+					MethodRef methodRef = (MethodRef) fragment;
+					previousBinding = methodRef.resolveBinding();
+					if (previousBinding != null) {
+						assertNotNull(methodRef.getName()+" binding was not found!", methodRef.getName().resolveBinding());
+						verifyName(methodRef.getQualifier());
+					}
+				}
+				previousFragment = fragment;
+			}
+		}
+		assertTrue("Reference in '"+previousFragment+"' should be bound!", (!resolvedBinding || previousBinding != null));
+	}
+
