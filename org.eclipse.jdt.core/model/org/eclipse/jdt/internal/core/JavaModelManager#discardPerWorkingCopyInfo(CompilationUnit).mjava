@@ -1,0 +1,45 @@
+	/*
+	 * Discards the per working copy info for the given working copy (making it a compilation unit)
+	 * if its use count was 1. Otherwise, just decrement the use count.
+	 * Close the working copy, its buffer and remove it from the shared working copy table.
+	 * Ignore if no per-working copy info existed.
+	 * Returns the new use count (or -1 if it didn't exist).
+	 */
+	public int discardPerWorkingCopyInfo(CompilationUnit workingCopy) throws JavaModelException {
+		synchronized(perWorkingCopyInfos) {
+			PerWorkingCopyInfo info = (PerWorkingCopyInfo)perWorkingCopyInfos.get(workingCopy);
+			if (info != null) {
+				if (--info.useCount == 0) {
+					IJavaElement originalElement = workingCopy.getOriginalElement();
+
+					// remove per working copy info first so that the buffer can be closed while closing the working copy
+					perWorkingCopyInfos.remove(workingCopy);
+
+					// remove infos + close buffer (since no longer working copy)
+					removeInfoAndChildren(workingCopy);
+					
+					// if original element is not on classpath flush it from the cache 
+					if (!workingCopy.getParent().exists()) {
+						((CompilationUnit)originalElement).close();
+					}
+					
+					// remove working copy from the shared working copy cache if needed
+					// TODO backward compatibility for #getSharedWorkingCopies support
+					// In order to be shared, working copies have to denote the same compilation unit 
+					// AND use the same buffer factory.
+					// Assuming there is a little set of buffer factories, then use a 2 level Map cache.
+					Map perFactoryWorkingCopies = (Map) this.sharedWorkingCopies.get(workingCopy.owner);
+					if (perFactoryWorkingCopies != null){
+						if (perFactoryWorkingCopies.remove(originalElement) != null
+								&& CompilationUnit.SHARED_WC_VERBOSE) {
+							System.out.println("Destroying shared working copy " + workingCopy.toStringWithAncestors());//$NON-NLS-1$
+						}
+					}
+				}
+				return info.useCount;
+			} else {
+				return -1;
+			}	
+		}
+	}
+
