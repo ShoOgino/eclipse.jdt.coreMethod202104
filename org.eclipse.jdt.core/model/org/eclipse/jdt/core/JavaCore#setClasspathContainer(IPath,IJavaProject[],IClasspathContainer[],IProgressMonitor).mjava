@@ -1,30 +1,44 @@
-	/** TOFIX
-	 * Notification of a classpath container change. This notification must be performed
-	 * by client code which did register some classpath container initializers, whenever 
-	 * changes in container need to be reflected onto the JavaModel.
+	/** 
+	 * Bind a container reference path to some actual containers (<code>IClasspathContainer</code>).
+	 * This API must be invoked whenever changes in container need to be reflected onto the JavaModel.
+	 * Containers can have distinct values in different projects, therefore this API considers a
+	 * set of projects with their respective containers.
 	 * <p>
-	 * In reaction to this notification, the JavaModel will be updated to reflect the new
-	 * state of the updated container. Note that the update can be scoped to either
-	 * a given project or the entire Java model according to the affectedElement argument.
-	 * This is symetric to container resolution which enables project specific resolution.
+	 * <code>containerPath</code> is the path under which these values can be referenced through
+	 * container classpath entries (<code>IClasspathEntry#CPE_CONTAINER</code>). A container path 
+	 * is a 2-segments path, formed by an ID segment followed with a clue segment. The container ID
+	 * is used to identify a<code>ClasspathContainerInitializer</code> registered on the extension point 
+	 * "org.eclipse.jdt.core.classpathContainerInitializer".
+	 * <p>
+	 * There is no assumption that each individual container value passed in argument 
+	 * (<code>respectiveContainers</code>) must answer the exact same path when requested 
+	 * <code>IClasspathContainer#getPath</code>. 
+	 * Indeed, the containerPath is just an indication for resolving it to an actual container object. It can be 
+	 * delegated to a <code>ClasspathContainerInitializer</code>, which can be activated through the extension
+	 * point "org.eclipse.jdt.core.ClasspathContainerInitializer"). 
+	 * <p>
+	 * In reaction to changing container values, the JavaModel will be updated to reflect the new
+	 * state of the updated container. 
 	 * <p>
 	 * This functionality cannot be used while the resource tree is locked.
 	 * <p>
-	 * Classpath container states are persisted locally to the workspace, and 
-	 * are preserved from session to session.
+	 * Classpath container values are persisted locally to the workspace, but 
+	 * are not preserved from a session to another. It is thus highly recommended to register a 
+	 * <code>ClasspathContainerInitializer</code> for each referenced container 
+	 * (through the extension point "org.eclipse.jdt.core.ClasspathContainerInitializer").
 	 * <p>
-	 * When notifying a container change, the corresponding container initializer should
-	 * in turn expect to be activated so as to resolve the updated container path.
 	 * 
-	 * @param containerPath - the name of the container which is being updated
-	 * @param affectedElement - the scope of the change, either a specific project (IJavaProject)
-	 *     or the entire JavaModel (IJavaModel).
+	 * @param containerPath - the name of the container reference which is being updated
+	 * @param affectedProjects - the set of projects for which this container is being bound
+	 * @param respectiveContainers - the set of respective containers for the affected projects
 	 * @param monitor a monitor to report progress
 	 * 
 	 * @see #getClasspathContainer(IPath, IJavaProject)
 	 * @since 2.0
 	 */
-	public static void setClasspathContainer(IPath containerPath, IJavaProject[] affectedProjects, IClasspathContainer[] newContainers, IProgressMonitor monitor) throws JavaModelException {
+	public static void setClasspathContainer(IPath containerPath, IJavaProject[] affectedProjects, IClasspathContainer[] respectiveContainers, IProgressMonitor monitor) throws JavaModelException {
+
+		Assert.isTrue(affectedProjects.length == respectiveContainers.length, Util.bind("classpath.mismatchProjectsContainers" )); //$NON-NLS-1$
 
 		if (monitor != null && monitor.isCanceled()) return;
 
@@ -39,7 +53,7 @@
 			if (monitor != null && monitor.isCanceled()) return;
 
 			IJavaProject affectedProject = affectedProjects[i];
-			IClasspathContainer newContainer = newContainers[i];
+			IClasspathContainer newContainer = respectiveContainers[i];
 			
 			IClasspathEntry[] rawClasspath = affectedProject.getRawClasspath();
 			boolean found = false;
@@ -60,7 +74,7 @@
 				JavaModelManager.Containers.put(affectedProject, perProjectContainers);
 			} else {
 				IClasspathContainer oldContainer = (IClasspathContainer) perProjectContainers.get(containerPath);
-				if (oldContainer != null && oldContainer.equals(newContainers[i])){
+				if (oldContainer != null && oldContainer.equals(respectiveContainers[i])){
 					affectedProjects[i] = null; // filter out this project - container did not change
 					continue;
 				}
