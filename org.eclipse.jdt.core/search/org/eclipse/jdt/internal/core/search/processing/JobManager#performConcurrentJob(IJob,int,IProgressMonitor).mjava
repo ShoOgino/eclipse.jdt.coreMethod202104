@@ -1,64 +1,80 @@
-/**
- * This API is allowing to run one job in concurrence with background processing.
- * Indeed since other jobs are performed in background, resource sharing might be 
- * an issue.Therefore, this functionality allows a given job to be run without
- * colliding with background ones.
- * Note: multiple thread might attempt to perform concurrent jobs at the same time,
- * 			and shoud synchronize (it is deliberately left to clients to decide whether
- *			concurrent jobs might interfere or not, i.e. multiple read jobs are ok).
- *
- * Waiting policy can be:
- * 		IJobConstants.ForceImmediateSearch
- * 		IJobConstants.CancelIfNotReadyToSearch
- * 		IJobConstants.WaitUntilReadyToSearch
- *
- */
-public boolean performConcurrentJob(IJob searchJob, int waitingPolicy, IProgressMonitor progress) {
+	/**
+	 * This API is allowing to run one job in concurrence with background processing.
+	 * Indeed since other jobs are performed in background, resource sharing might be 
+	 * an issue.Therefore, this functionality allows a given job to be run without
+	 * colliding with background ones.
+	 * Note: multiple thread might attempt to perform concurrent jobs at the same time,
+	 * 			and shoud synchronize (it is deliberately left to clients to decide whether
+	 *			concurrent jobs might interfere or not, i.e. multiple read jobs are ok).
+	 *
+	 * Waiting policy can be:
+	 * 		IJobConstants.ForceImmediateSearch
+	 * 		IJobConstants.CancelIfNotReadyToSearch
+	 * 		IJobConstants.WaitUntilReadyToSearch
+	 *
+	 */
+	public boolean performConcurrentJob(
+		IJob searchJob,
+		int waitingPolicy,
+		IProgressMonitor progress) {
 
-	if (VERBOSE) System.out.println("-> performing concurrent job : START - " + searchJob); //$NON-NLS-1$
-	boolean status = FAILED;
-	if (awaitingJobsCount() > 0){
-		switch(waitingPolicy){
-			
-			case ForceImmediate :
-				if (VERBOSE) System.out.println("-> performing concurrent job : NOT READY - ForceImmediate - " + searchJob); //$NON-NLS-1$
-				boolean wasEnabled = isEnabled();
-				try {
-					disable(); // pause indexing
-					status = searchJob.execute();
-				if (VERBOSE) System.out.println("-> performing concurrent job : END - " + searchJob); //$NON-NLS-1$
-				} finally {
-					if (wasEnabled) enable();
-				}
-				return status;
-			case CancelIfNotReady :
-				if (VERBOSE) System.out.println("-> performing concurrent job : NOT READY - CancelIfNotReady - " + searchJob); //$NON-NLS-1$
-				progress.setCanceled(true);
-				break; 
+		if (VERBOSE)
+			System.out.println("-> performing concurrent job : START - " + searchJob); //$NON-NLS-1$
+		boolean status = IJob.FAILED;
+		if (awaitingJobsCount() > 0) {
+			switch (waitingPolicy) {
 
-			case WaitUntilReady :
+				case IJob.ForceImmediate :
+					if (VERBOSE)
+						System.out.println(
+							"-> performing concurrent job : NOT READY - ForceImmediate - " + searchJob);//$NON-NLS-1$
+					boolean wasEnabled = isEnabled();
+					try {
+						disable(); // pause indexing
+						status = searchJob.execute();
+						if (VERBOSE)
+							System.out.println("-> performing concurrent job : END - " + searchJob); //$NON-NLS-1$
+					} finally {
+						if (wasEnabled)
+							enable();
+					}
+					return status;
+				case IJob.CancelIfNotReady :
+					if (VERBOSE)
+						System.out.println(
+							"-> performing concurrent job : NOT READY - CancelIfNotReady - " + searchJob); //$NON-NLS-1$
+					progress.setCanceled(true);
+					break;
+
+				case IJob.WaitUntilReady :
 					int awaitingWork;
 					IJob previousJob = null;
 					IJob currentJob;
 					while ((awaitingWork = awaitingJobsCount()) > 0) {
-						if (progress != null && progress.isCanceled()) throw new OperationCanceledException();
-						currentJob = currentJob(); // currentJob can be null when jobs have been added to the queue but job manager is not enabled
-						if (currentJob != null && currentJob != previousJob){
-							if (VERBOSE) System.out.println("-> performing concurrent job : NOT READY - WaitUntilReady - " + searchJob); //$NON-NLS-1$
-							if (progress != null){
-								progress.subTask(Util.bind("manager.filesToIndex", Integer.toString(awaitingWork))); //$NON-NLS-1$
+						if (progress != null && progress.isCanceled())
+							throw new OperationCanceledException();
+						currentJob = currentJob();
+						// currentJob can be null when jobs have been added to the queue but job manager is not enabled
+						if (currentJob != null && currentJob != previousJob) {
+							if (VERBOSE)
+								System.out.println(
+									"-> performing concurrent job : NOT READY - WaitUntilReady - " + searchJob);//$NON-NLS-1$
+							if (progress != null) {
+								progress.subTask(
+									Util.bind("manager.filesToIndex", Integer.toString(awaitingWork))); //$NON-NLS-1$
 							}
 							previousJob = currentJob;
 						}
 						try {
 							Thread.currentThread().sleep(50);
-						} catch(InterruptedException e){
+						} catch (InterruptedException e) {
 						}
 					}
+			}
 		}
+		status = searchJob.execute();
+		if (VERBOSE)
+			System.out.println("-> performing concurrent job : END - " + searchJob); //$NON-NLS-1$
+		return status;
 	}
-	status = searchJob.execute();
-	if (VERBOSE) System.out.println("-> performing concurrent job : END - " + searchJob); //$NON-NLS-1$
-	return status;
-}
 
