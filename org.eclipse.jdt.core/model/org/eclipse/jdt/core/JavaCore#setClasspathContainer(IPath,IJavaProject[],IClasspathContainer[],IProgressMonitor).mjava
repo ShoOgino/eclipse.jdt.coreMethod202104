@@ -1,0 +1,128 @@
+	/** TOFIX
+	 * Notification of a classpath container change. This notification must be performed
+	 * by client code which did register some classpath container initializers, whenever 
+	 * changes in container need to be reflected onto the JavaModel.
+	 * <p>
+	 * In reaction to this notification, the JavaModel will be updated to reflect the new
+	 * state of the updated container. Note that the update can be scoped to either
+	 * a given project or the entire Java model according to the affectedElement argument.
+	 * This is symetric to container resolution which enables project specific resolution.
+	 * <p>
+	 * This functionality cannot be used while the resource tree is locked.
+	 * <p>
+	 * Classpath container states are persisted locally to the workspace, and 
+	 * are preserved from session to session.
+	 * <p>
+	 * When notifying a container change, the corresponding container initializer should
+	 * in turn expect to be activated so as to resolve the updated container path.
+	 * 
+	 * @param containerPath - the name of the container which is being updated
+	 * @param affectedElement - the scope of the change, either a specific project (IJavaProject)
+	 *     or the entire JavaModel (IJavaModel).
+	 * @param monitor a monitor to report progress
+	 * 
+	 * @see #getClasspathContainer(IPath, IJavaProject)
+	 * @since 2.0
+	 */
+	public static void setClasspathContainer(IPath containerPath, IJavaProject[] affectedProjects, IClasspathContainer[] newContainers, IProgressMonitor monitor) throws JavaModelException {
+
+		if (monitor != null && monitor.isCanceled()) return;
+
+		int projectLength = affectedProjects.length;
+		JavaModelManager manager = JavaModelManager.getJavaModelManager();
+		IClasspathEntry[][] oldResolvedPaths = new IClasspathEntry[projectLength][];
+
+		// filter out unmodified project containers
+		int remaining = 0;
+		for (int i = 0; i < projectLength; i++){
+
+			if (monitor != null && monitor.isCanceled()) return;
+
+			IJavaProject affectedProject = affectedProjects[i];
+			IClasspathContainer newContainer = newContainers[i];
+			
+			IClasspathEntry[] rawClasspath = affectedProject.getRawClasspath();
+			boolean found = false;
+			for (int j = 0, cpLength = rawClasspath.length; j <cpLength; j++) {
+				IClasspathEntry entry = rawClasspath[j];
+				if (entry.getEntryKind() == IClasspathEntry.CPE_CONTAINER && entry.getPath().equals(containerPath)){
+					found = true;
+					break;
+				}
+			}
+			if (!found){
+				affectedProjects[i] = null; // filter out this project - does not reference the container path
+				continue;
+			}
+			Map perProjectContainers = (Map)JavaModelManager.Containers.get(affectedProject);
+			if (perProjectContainers == null){
+				perProjectContainers = new HashMap();
+				JavaModelManager.Containers.put(affectedProject, perProjectContainers);
+			} else {
+				IClasspathContainer oldContainer = (IClasspathContainer) perProjectContainers.get(containerPath);
+				if (oldContainer != null && oldContainer.equals(newContainers[i])){
+					affectedProjects[i] = null; // filter out this project - container did not change
+					continue;
+				}
+			}
+			remaining++;
+			oldResolvedPaths[i] = affectedProject.getResolvedClasspath(true);
+			perProjectContainers.put(containerPath, newContainer);
+		}
+		
+		if (remaining == 0) return;
+		
+		// trigger model refresh
+		boolean wasFiring = manager.isFiring();
+		int count = 0;
+		try {
+			if (wasFiring)
+				manager.stopDeltas();
+				
+			for(int i = 0; i < projectLength; i++){
+
+				if (monitor != null && monitor.isCanceled()) return;
+
+				JavaProject affectedProject = (JavaProject)affectedProjects[i];
+				if (affectedProject == null) continue; // was filtered out
+				
+				if (++count == remaining) { // re-enable firing for the last operation
+					if (wasFiring) {
+						wasFiring = false;
+						manager.startDeltas();
+					}
+				}
+			
+				// force a refresh of the affected project (will compute deltas)
+				affectedProject.setRawClasspath(
+						affectedProject.getRawClasspath(),
+						SetClasspathOperation.ReuseOutputLocation,
+						monitor,
+						true,
+						affectedProject.getWorkspace().isAutoBuilding(),
+						oldResolvedPaths[i],
+						remaining == 1); // no individual cycle check if more than 1 project
+			}
+			if (remaining > 1){
+				try {
+					// use workspace runnable so as to allow marker creation - workaround bug 14733
+					ResourcesPlugin.getWorkspace().run(
+						new IWorkspaceRunnable() {
+							public void run(IProgressMonitor monitor) throws CoreException {
+								JavaProject.updateAllCycleMarkers(); // update them all at once
+							}
+						}, 
+						monitor);					
+				} catch(CoreException e){
+					throw new JavaModelException(e);
+				}
+			}
+		} finally {
+			if (wasFiring) {
+				manager.startDeltas();
+				// in case of exception traversing, deltas may be fired only in the next #fire() iteration
+			}
+		}
+					
+	}
+
