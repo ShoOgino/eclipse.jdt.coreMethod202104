@@ -29,7 +29,7 @@
 			this.deprecated = false;
 			this.linePtr = getLineNumber(javadocStart);
 			this.lastLinePtr = getLineNumber(javadocEnd);
-			this.lineEnd = (this.linePtr == this.lastLinePtr) ? this.endComment : getLineEnd(this.linePtr);
+			this.lineEnd = (this.linePtr == this.lastLinePtr) ? this.endComment : this.scanner.getLineEnd(this.linePtr);
 			this.textStart = -1;
 			char previousChar = 0;
 			int invalidTagLineEnd = -1;
@@ -121,7 +121,7 @@
 											case '&':
 											case '\'':
 											case ':':
-											case '-':
+											// case '-': allowed in tag names as this character is often used in doclets (bug 68087)
 											case '<':
 											case '>':
 											case '*': // break for '*' as this is perhaps the end of comment (bug 65288)
@@ -197,6 +197,13 @@
 										break;
 									case TerminalTokens.TokenNamereturn :
 										valid = parseReturn();
+										// verify characters after return tag (we're expecting text description)
+										if(!verifyCharsAfterReturnTag(this.index)) {
+											if (this.sourceParser != null) {
+												int end = this.starPosition == -1 || this.lineEnd<this.starPosition ? this.lineEnd : this.starPosition;
+												this.sourceParser.problemReporter().javadocEmptyReturnTag(this.tagSourceStart, end);
+											}
+										}
 										break;
 									case TerminalTokens.TokenNamethrows :
 										valid = parseThrows(true);
@@ -320,15 +327,17 @@
 						this.inlineTagStart = previousPosition;
 						break;
 					case '*' :
-						// do nothing for '*' character
+					case '\u000c' :	/* FORM FEED               */
+					case ' ' :			/* SPACE                   */
+					case '\t' :			/* HORIZONTAL TABULATION   */
+						// do nothing for space or '*' characters
 						break;
 					default :
-						if (!CharOperation.isWhitespace(nextCharacter)) {
-							if (!this.lineStarted) {
-								this.textStart = previousPosition;
-							}
-							this.lineStarted = true;
+						if (!this.lineStarted) {
+							this.textStart = previousPosition;
 						}
+						this.lineStarted = true;
+						break;
 				}
 			}
 			// bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=53279

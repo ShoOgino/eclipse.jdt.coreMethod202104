@@ -5,45 +5,42 @@
 		Object typeRef = null;
 		Object reference = null;
 		int previousPosition = -1;
+		int typeRefStartPosition = -1;
 		nextToken : while (this.index < this.scanner.eofPosition) {
 			previousPosition = this.index;
 			int token = readToken();
 			switch (token) {
-				case TerminalTokens.TokenNameStringLiteral :
-					// @see "string"
+				case TerminalTokens.TokenNameStringLiteral : // @see "string"
 					int start = this.scanner.getCurrentTokenStartPosition();
-					if (typeRef == null) {
-						consumeToken();
-						while (Character.isWhitespace(this.source[this.index])) {
-							if (this.source[this.index] == '\r' || this.source[this.index] == '\n') {
-								if (this.kind == DOM_PARSER) {
-									parseTag();
-									pushText(previousPosition, this.index);
-								}
-								return true;
-							}
-							this.index++;
-						}
+					consumeToken();
+					// If typeRef != null we may raise a warning here to let user know there's an unused reference...
+					// Currently as javadoc 1.4.2 ignore it, we do the same (see bug 69302)
+					if (typeRef != null) {
+						start = this.tagSourceEnd+1;
+						previousPosition = start;
+						typeRef = null;
+					}
+					// verify end line (expecting empty or end comment)
+					if (verifyEndLine(previousPosition)) {
+						return true;
 					}
 					if (this.sourceParser != null) this.sourceParser.problemReporter().javadocInvalidSeeReference(start, this.lineEnd);
 					return false;
-				case TerminalTokens.TokenNameLESS :
-					// @see "<a href="URL#Value">label</a>
+				case TerminalTokens.TokenNameLESS : // @see "<a href="URL#Value">label</a>
 					consumeToken();
 					start = this.scanner.getCurrentTokenStartPosition();
 					if (parseHref()) {
-						if (typeRef == null) {
-							consumeToken();
-							while (Character.isWhitespace(this.source[this.index])) {
-								if (this.source[this.index] == '\r' || this.source[this.index] == '\n') {
-									if (this.kind == DOM_PARSER) {
-										parseTag();
-										pushText(previousPosition, this.index);
-									}
-									return true;
-								}
-								this.index++;
-							}
+						consumeToken();
+						// If typeRef != null we may raise a warning here to let user know there's an unused reference...
+						// Currently as javadoc 1.4.2 ignore it, we do the same (see bug 69302)
+						if (typeRef != null) {
+							start = this.tagSourceEnd+1;
+							previousPosition = start;
+							typeRef = null;
+						}
+						// verify end line (expecting empty or end comment)
+						if (verifyEndLine(previousPosition)) {
+							return true;
 						}
 						if (this.sourceParser != null) this.sourceParser.problemReporter().javadocInvalidSeeReference(start, this.lineEnd);
 					}
@@ -60,6 +57,7 @@
 					break nextToken;
 				case TerminalTokens.TokenNameIdentifier :
 					if (typeRef == null) {
+						typeRefStartPosition = this.scanner.getCurrentTokenStartPosition();
 						typeRef = parseQualifiedName(true);
 						break;
 					}
@@ -79,28 +77,31 @@
 			return false;
 		}
 
-		// Verify that line end does not start with an open parenthese (which could be a constructor reference wrongly written...)
-		// bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=47215
-		int start = this.scanner.getCurrentTokenStartPosition();
-		try {
-			int token = readToken();
-			if (token != TerminalTokens.TokenNameLPAREN) {
-				// Reset position: we want to rescan last token
-				if (this.currentTokenType != -1) {
-					this.index = this.tokenPreviousPosition;
-					this.scanner.currentPosition = this.tokenPreviousPosition;
-					this.currentTokenType = -1;
-				}
-				return pushSeeRef(reference, plain);
-			}
-		} catch (InvalidInputException e) {
-			// Do nothing as we report an error after
-		}
-		// Reset position to avoid missing tokens when new line was encountered
-		this.index = this.tokenPreviousPosition;
-		this.scanner.currentPosition = this.tokenPreviousPosition;
+		// Reset position at the end of type reference
+		this.index = this.lastIdentifierEndPosition+1;
+		this.scanner.currentPosition = this.index;
 		this.currentTokenType = -1;
-		if (this.sourceParser != null) this.sourceParser.problemReporter().javadocInvalidSeeReference(start, this.lineEnd);
-		return false;
+
+		// Verify that line end does not start with an open parenthese (which could be a constructor reference wrongly written...)
+		// See bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=47215
+		char ch = peekChar();
+		if (ch == '(') {
+			if (this.sourceParser != null) this.sourceParser.problemReporter().javadocMissingHashCharacter(typeRefStartPosition, this.lineEnd, String.valueOf(this.source, typeRefStartPosition, this.lineEnd-typeRefStartPosition));
+			return false;
+		}
+
+		// Verify that we get white space after reference
+		if (!verifySpaceOrEndComment()) {
+			this.index = this.tokenPreviousPosition;
+			this.scanner.currentPosition = this.tokenPreviousPosition;
+			this.currentTokenType = -1;
+			int end = this.starPosition == -1 ? this.lineEnd : this.starPosition;
+			if (this.source[end]=='\n') end--;
+			if (this.sourceParser != null) this.sourceParser.problemReporter().javadocMalformedSeeReference(typeRefStartPosition, end);
+			return false;
+		}
+		
+		// Everything is OK, store reference
+		return pushSeeRef(reference, plain);
 	}
 

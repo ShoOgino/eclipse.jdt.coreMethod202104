@@ -12,6 +12,7 @@
 		if (readToken() == TerminalTokens.TokenNameIdentifier) {
 			consumeToken();
 			pushIdentifier(true);
+			// Look for next token to know whether it's a field or method reference
 			int previousPosition = this.index;
 			if (readToken() == TerminalTokens.TokenNameLPAREN) {
 				consumeToken();
@@ -27,16 +28,23 @@
 				}
 				return null;
 			}
+
 			// Reset position: we want to rescan last token
-			if (this.currentTokenType != -1) {
-				this.index = previousPosition;
-				this.scanner.currentPosition = previousPosition;
-				this.currentTokenType = -1;
+			this.index = previousPosition;
+			this.scanner.currentPosition = previousPosition;
+			this.currentTokenType = -1;
+
+			// Verify character(s) after identifier (expecting space or end comment)
+			if (!verifySpaceOrEndComment()) {
+				int end = this.starPosition == -1 ? this.lineEnd : this.starPosition;
+				if (this.source[end]=='\n') end--;
+				if (this.sourceParser != null) this.sourceParser.problemReporter().javadocMalformedSeeReference(start, end);
+				return null;
 			}
 			return createFieldReference(receiver);
 		}
 		int end = getEndPosition() - 1;
-		end = start > end ? getEndPosition() : end;
+		end = start > end ? start : end;
 		if (this.sourceParser != null) this.sourceParser.problemReporter().javadocInvalidSeeReference(start, end);
 		// Reset position: we want to rescan last token
 		this.index = this.tokenPreviousPosition;
