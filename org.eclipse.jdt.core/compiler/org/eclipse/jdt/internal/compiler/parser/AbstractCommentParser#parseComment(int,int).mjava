@@ -29,7 +29,7 @@
 			this.deprecated = false;
 			this.linePtr = getLineNumber(javadocStart);
 			this.lastLinePtr = getLineNumber(javadocEnd);
-			this.lineEnd = (this.linePtr == this.lastLinePtr) ? this.endComment : javadocStart;
+			this.lineEnd = (this.linePtr == this.lastLinePtr) ? this.endComment : getLineEnd(this.linePtr);
 			this.textStart = -1;
 			char previousChar = 0;
 			int invalidTagLineEnd = -1;
@@ -43,7 +43,6 @@
 				// Calculate line end (cannot use this.scanner.linePtr as scanner does not parse line ends again)
 				if (this.index > (this.lineEnd+1)) {
 					updateLineEnd();
-					this.lineStarted = false;
 				}
 				
 				// Read next char only if token was consumed
@@ -72,7 +71,7 @@
 					case '@' :
 						boolean valid = false;
 						// Start tag parsing only if we have a java identifier start character and if we are on line beginning or at inline tag beginning
-						if ((!this.lineStarted || previousChar == '{') && Character.isJavaIdentifierStart(peekChar())) {
+						if ((!this.lineStarted || previousChar == '{')) {
 							this.lineStarted = true;
 							if (this.inlineTagStarted) {
 								this.inlineTagStarted = false;
@@ -113,8 +112,7 @@
 									tagNameToken: while (tk != TerminalTokens.TokenNameEOF) {
 										this.tagSourceEnd = this.scanner.getCurrentTokenEndPosition();
 										token = tk;
-										// !, ", #, %, &, ', -, :, <, >
-										if (Character.isWhitespace(pc)) break;
+										// !, ", #, %, &, ', -, :, <, >, * chars and spaces are not allowed in tag names
 										switch (pc) {
 											case '}':
 											case '!':
@@ -124,9 +122,12 @@
 											case '\'':
 											case ':':
 											case '-':
-											case '<' :
+											case '<':
 											case '>':
+											case '*': // break for '*' as this is perhaps the end of comment (bug 65288)
 												break tagNameToken;
+											default:
+												if (pc == ' ' || Character.isWhitespace(pc)) break tagNameToken;
 										}
 										tk = readTokenAndConsume();
 										pc = peekChar();
