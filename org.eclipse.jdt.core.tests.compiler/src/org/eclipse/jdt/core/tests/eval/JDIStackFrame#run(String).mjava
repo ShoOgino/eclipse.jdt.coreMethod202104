@@ -1,0 +1,105 @@
+public boolean run(String codeSnippetClassName) {
+		ClassType codeSnippetClass;
+		ObjectReference codeSnippet;
+		Method method;
+		List arguments;
+		ObjectReference codeSnippetRunner;
+		try {
+			// Get the code snippet class
+			List classes = jdiVM.classesByName(codeSnippetClassName);
+			while (classes.size() == 0) {
+				try {
+					Thread.sleep(100);
+				} catch (InterruptedException e) {
+				}
+				classes = jdiVM.classesByName(codeSnippetClassName);
+				if (classes.size() == 0) {
+					// workaround bug in Sun's VM
+					Iterator iterator = this.jdiVM.allClasses().iterator();
+					while (iterator.hasNext()) {
+						ReferenceType type = (ReferenceType)iterator.next();
+						if (type.name().equals(codeSnippetClassName)) {
+							classes = new ArrayList(1);
+							classes.add(type);
+							break;
+						}
+					}
+				}
+			}
+			codeSnippetClass = (ClassType)classes.get(0);
+
+			// Create a new code snippet
+			Method constructor = (Method)codeSnippetClass.methodsByName("<init>").get(0);
+			codeSnippet = codeSnippetClass.newInstance(jdiThread, constructor, new ArrayList(), ClassType.INVOKE_SINGLE_THREADED);
+
+			// Install local variables and "this" into generated fields
+			StackFrame stackFrame = getStackFrame();
+			try {
+				Iterator variables = stackFrame.visibleVariables().iterator();
+				while (variables.hasNext()) {
+					LocalVariable jdiVariable = (LocalVariable)variables.next();
+					Value value = stackFrame.getValue(jdiVariable);
+					Field field = codeSnippetClass.fieldByName(new String(LOCAL_VAR_PREFIX) + jdiVariable.name());
+					codeSnippet.setValue(field, value);
+				}
+			} catch (AbsentInformationException e) {
+				// No variables
+			}
+			Field delegateThis = codeSnippetClass.fieldByName(new String(DELEGATE_THIS));
+			ObjectReference thisObject;
+			if (delegateThis != null && ((thisObject = stackFrame.thisObject()) != null)) {
+				codeSnippet.setValue(delegateThis, thisObject);
+			}
+
+			// Get the code snippet runner
+			ClassType codeSnippetRunnerClass = (ClassType)jdiVM.classesByName(CODE_SNIPPET_RUNNER_CLASS_NAME).get(0);
+			Field theRunner = codeSnippetRunnerClass.fieldByName(THE_RUNNER_FIELD);
+			codeSnippetRunner = (ObjectReference)codeSnippetRunnerClass.getValue(theRunner);
+
+			// Get the method 'runCodeSnippet' and its arguments		
+			method = (Method)codeSnippetRunnerClass.methodsByName(RUN_CODE_SNIPPET_METHOD).get(0);
+			arguments = new ArrayList();
+			arguments.add(codeSnippet);
+		} catch (ClassNotLoadedException e) {
+			e.printStackTrace();
+			return false;
+		} catch (IncompatibleThreadStateException e) {
+			e.printStackTrace();
+			return false;
+		} catch (InvalidTypeException e) {
+			e.printStackTrace();
+			return false;
+		} catch (InvocationException e) {
+			e.printStackTrace();
+			return false;
+		}
+
+		try {
+			// Invoke runCodeSnippet(CodeSnippet)
+			codeSnippetRunner.invokeMethod(jdiThread, method, arguments, ClassType.INVOKE_SINGLE_THREADED);
+
+			// Retrieve values of local variables and put them back in the stack frame
+			StackFrame stackFrame = getStackFrame();
+			try {
+				Iterator variables = stackFrame.visibleVariables().iterator();
+				while (variables.hasNext()) {
+					LocalVariable jdiVariable = (LocalVariable)variables.next();
+					Field field = codeSnippetClass.fieldByName(new String(LOCAL_VAR_PREFIX) + jdiVariable.name());
+					Value value = codeSnippet.getValue(field);
+					stackFrame.setValue(jdiVariable, value);
+				}
+			} catch (AbsentInformationException e) {
+				// No variables
+			}
+		} catch (ClassNotLoadedException e) {
+			e.printStackTrace();
+		} catch (IncompatibleThreadStateException e) {
+			e.printStackTrace();
+		} catch (InvalidTypeException e) {
+			e.printStackTrace();
+		} catch (InvocationException e) {
+			e.printStackTrace();
+		}
+		return true;
+	}
+

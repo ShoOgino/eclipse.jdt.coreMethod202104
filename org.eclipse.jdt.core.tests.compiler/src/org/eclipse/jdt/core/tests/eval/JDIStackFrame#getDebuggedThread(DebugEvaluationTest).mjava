@@ -1,0 +1,103 @@
+protected ThreadReference getDebuggedThread(DebugEvaluationTest test) {
+	try {
+		// desintall previous breakpoints
+		this.jdiVM.eventRequestManager().deleteAllBreakpoints();
+
+		// install a breakpoint at the breakpointLine
+		List classes = this.jdiVM.classesByName(this.breakpointClassName);
+		if (classes.size() == 0) {
+			if (this.breakpointClassName.equals("_JDIStackFrame_")) {
+				// install special class
+				String source =
+					"public class _JDIStackFrame_ {\n" +
+					"  public int foo() {\n" +
+					"    return -1;\n" +
+					"  }\n" +
+					"}";
+				test.compileAndDeploy(source, "_JDIStackFrame_");
+			}
+			
+			// force load of class 
+			test.evaluateWithExpectedDisplayString(
+				("return Class.forName(\"" + this.breakpointClassName + "\");").toCharArray(),
+				("class " + this.breakpointClassName).toCharArray()
+			);
+			classes = this.jdiVM.classesByName(this.breakpointClassName);
+			if (classes.size() == 0) {
+				// workaround bug in Sun's VM
+				Iterator iterator = this.jdiVM.allClasses().iterator();
+				while (iterator.hasNext()) {
+					ReferenceType type = (ReferenceType)iterator.next();
+					if (type.name().equals(this.breakpointClassName)) {
+						classes = new ArrayList(1);
+						classes.add(type);
+						break;
+					}
+				}
+				if (classes.size() == 0) {
+					throw new Error("JDI could not retrieve class for " + this.breakpointClassName);
+				}
+			}
+		}
+		ClassType clazz = (ClassType)classes.get(0);
+		Method method = (Method)clazz.methodsByName(this.breakpointMethodName).get(0);
+		Location location;
+		if (this.breakpointLine < 0 || this.breakpointLine == Integer.MAX_VALUE) {
+			location = method.location();
+		} else {
+			location = (Location)method.locationsOfLine(this.breakpointLine).get(0);
+		}
+		BreakpointRequest request = this.jdiVM.eventRequestManager().createBreakpointRequest(location);
+		request.setSuspendPolicy(EventRequest.SUSPEND_EVENT_THREAD);
+		request.enable();
+
+		// create a new thread that hit the breakpoint
+		EvaluationTest.Requestor requestor = test.new Requestor();
+		try {
+			test.resetEnv();
+			test.context.evaluate(
+				("(new Thread() {\n" +
+				"  public void run() {\n" +
+				     userCode + "\n" +
+				(this.breakpointClassName.equals("_JDIStackFrame_") ? "    new _JDIStackFrame_().foo();\n" : "") +
+				"  }\n" +
+				"  public String toString() {\n" +
+				"    return \"my thread\";\n" +
+				"  }\n" +
+				"}).start();\n").toCharArray(),
+				test.getEnv(), 
+				test.getOptions(), 
+				requestor, 
+				test.getProblemFactory());
+		} catch (InstallException e) {
+			EvaluationTest.assertTrue("Target exception " + e.getMessage(), false);
+		}
+		EvaluationResult[] results = requestor.results;
+		for (int i = 0; i < requestor.resultIndex + 1; i++){
+			if (results[i].hasErrors()) {
+				EvaluationTest.assertTrue("Compilation error in user code", false);
+			}
+		}
+
+		// Wait for the breakpoint event
+		Event event = null;
+		do {
+			EventSet set = this.jdiVM.eventQueue().remove();
+			Iterator iterator = set.eventIterator();
+			while (iterator.hasNext()) {
+				event = (Event)iterator.next();
+				if (event instanceof BreakpointEvent)
+					break;
+			}
+		} while (!(event instanceof BreakpointEvent));
+
+		// Return the suspended thread
+		return ((BreakpointEvent)event).thread();
+	} catch (AbsentInformationException e) {
+		e.printStackTrace();
+	} catch (InterruptedException e) {
+		e.printStackTrace();
+	}
+	return null;
+}
+

@@ -1,0 +1,72 @@
+/**
+ * Read access to a instance private member of the class different from the enclosing class
+ */
+public void test032() {
+	try {
+		String sourceA32 =
+			"public class A32 {\n"
+				+ "\tprivate int i = 2;\n"
+				+ "\tpublic void bar() {\n"
+				+ "\t}\n"
+				+ "}";
+		compileAndDeploy(sourceA32, "A32");
+
+		String sourceB32 =
+			"public class B32 {\n"
+				+ "\tprivate int j = 2;\n"
+				+ "\tpublic void bar() {\n"
+				+ "\t}\n"
+				+ "}";
+		compileAndDeploy(sourceB32, "B32");
+
+		String userCode = "new A32().bar();";
+		JDIStackFrame stackFrame =
+			new JDIStackFrame(
+				this.jdiVM,
+				this,
+				userCode,
+				"A32",
+				"bar",
+				-1);
+
+		DebugRequestor requestor = new DebugRequestor();
+		char[] snippet = "return new B32().j;".toCharArray();
+		try {
+			context.evaluate(
+				snippet,
+				stackFrame.localVariableTypeNames(),
+				stackFrame.localVariableNames(),
+				stackFrame.localVariableModifiers(),
+				stackFrame.declaringTypeName(),
+				stackFrame.isStatic(),
+				stackFrame.isConstructorCall(),
+				getEnv(),
+				getOptions(),
+				requestor,
+				getProblemFactory());
+		} catch (InstallException e) { 
+			assertTrue("No targetException " + e.getMessage(), false);
+		}
+		assertTrue(
+			"Should get one result but got " + (requestor.resultIndex + 1),
+			requestor.resultIndex == 0);
+		EvaluationResult result = requestor.results[0];
+		assertTrue("Code snippet should not have problems", result.hasProblems());
+		IProblem[] problems = result.getProblems();
+		StringBuffer buffer = null;
+		for (int i = 0, max = problems.length; i < max; i++){
+			if (problems[i].isError()){
+				if (buffer == null) buffer = new StringBuffer(10);
+				buffer.append(problems[i].getMessage());
+				buffer.append('|');
+			}
+		}
+		assertEquals("Unexpected errors",
+			"The field j is not visible|",
+			buffer == null ? "none" : buffer.toString());       
+	} finally {
+		removeTempClass("B32");
+		removeTempClass("A32");
+	}
+}
+

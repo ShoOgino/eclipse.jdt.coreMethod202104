@@ -1,0 +1,61 @@
+/**
+ * Return non-static field in static environment.
+ */
+public void testNegative002() {
+	try {
+		String sourceANegative002 =
+			"public class ANegative002 {\n" +
+			"  public int x = 1;\n" +
+			"  public int foo() {\n" +
+			"    x++;\n" + // workaround pb with JDK 1.4.1 that doesn't stop if only return
+			"    return x;\n" +
+			"  }\n" +
+			"}";
+		compileAndDeploy(sourceANegative002, "ANegative002");
+		String userCode =
+			"new ANegative002().foo();";
+		JDIStackFrame stackFrame = new JDIStackFrame(
+			this.jdiVM, 
+			this,
+			userCode,
+			"ANegative002",
+			"foo",
+			-1);
+
+		DebugRequestor requestor = new DebugRequestor();
+		char[] snippet = "return x;".toCharArray();
+		try {
+			context.evaluate(
+				snippet,
+				stackFrame.localVariableTypeNames(),
+				stackFrame.localVariableNames(),
+				stackFrame.localVariableModifiers(),
+				stackFrame.declaringTypeName(),
+				true, // force is static
+				stackFrame.isConstructorCall(),
+				getEnv(), 
+				getOptions(), 
+				requestor, 
+				getProblemFactory());
+		} catch (InstallException e) {
+			assertTrue("No targetException " + e.getMessage(), false);
+		}
+		assertTrue("Got one result", requestor.resultIndex == 0);
+		EvaluationResult result = requestor.results[0];
+		IProblem[] problems = result.getProblems();
+		StringBuffer buffer = null;
+		for (int i = 0, max = problems.length; i < max; i++){
+			if (problems[i].isError()){
+				if (buffer == null) buffer = new StringBuffer(10);
+				buffer.append(problems[i].getMessage());
+				buffer.append('|');
+			}
+		}
+		assertEquals("Unexpected errors",
+			"Cannot make a static reference to the non-static field x|",
+			buffer == null ? "none" : buffer.toString());
+	} finally {
+		removeTempClass("ANegative002");
+	}
+}
+

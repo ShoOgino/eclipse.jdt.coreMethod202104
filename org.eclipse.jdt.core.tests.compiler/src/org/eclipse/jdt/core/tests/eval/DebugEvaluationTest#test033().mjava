@@ -1,0 +1,62 @@
+/**
+ * Read access to an instance private member of the enclosing class
+ */
+public void test033() {
+	try {
+		String sourceA33 =
+			"public class A33 {\n"
+				+ "\tprivate long l = 2000000L;\n"
+				+ "\tpublic void bar() {\n"
+				+ "\t}\n"
+				+ "}";
+		compileAndDeploy(sourceA33, "A33");
+
+		String userCode = "new A33().bar();";
+		JDIStackFrame stackFrame =
+			new JDIStackFrame(
+				this.jdiVM,
+				this,
+				userCode,
+				"A33",
+				"bar",
+				-1);
+
+		DebugRequestor requestor = new DebugRequestor();
+		char[] snippet =
+			("try {\n" +
+			"Class c = Class.forName(\"A33\");\n" +
+			"java.lang.reflect.Field field = c.getDeclaredField(\"l\");\n" +
+			"field.setAccessible(true);\n" +
+			"Object o = c.newInstance();\n" +
+			"System.out.println(field.getInt(o));\n" +
+			"} catch(Exception e) {}\n" +
+			"return l;").toCharArray();
+		try {
+			context.evaluate(
+				snippet,
+				stackFrame.localVariableTypeNames(),
+				stackFrame.localVariableNames(),
+				stackFrame.localVariableModifiers(),
+				stackFrame.declaringTypeName(),
+				stackFrame.isStatic(),
+				stackFrame.isConstructorCall(),
+				getEnv(),
+				getOptions(),
+				requestor,
+				getProblemFactory());
+		} catch (InstallException e) { 
+			assertTrue("No targetException " + e.getMessage(), false);
+		}
+		assertTrue(
+			"Should get one result but got " + (requestor.resultIndex + 1),
+			requestor.resultIndex == 0);
+		EvaluationResult result = requestor.results[0];
+		assertTrue("Code snippet should not have problems", !result.hasProblems());
+		assertTrue("Result should have a value", result.hasValue());
+		assertEquals("Value", "2000000".toCharArray(), result.getValueDisplayString());
+		assertEquals("Type", "long".toCharArray(), result.getValueTypeName());
+	} finally {
+		removeTempClass("A33");
+	}
+}
+

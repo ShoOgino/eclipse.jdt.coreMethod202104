@@ -1,0 +1,60 @@
+/**
+ * Implicit message expression
+ */
+public void test020() {
+	try {
+		String sourceA =
+			"public class A {\n"
+				+ "\tObject o = null;\n"
+				+ "\tpublic int foo() {\n"
+				+ "\t\treturn 2;\n"
+				+ "\t}\n"
+				+ "\tpublic void bar() {\n"
+				+ "\t}\n"
+				+ "\tpublic Object bar2() {\n"
+				+ "\t\treturn new Object();\n"
+				+ "\t}\n"
+				+ "}";
+		compileAndDeploy(sourceA, "A");
+
+		String userCode = "new A().bar();";
+		JDIStackFrame stackFrame =
+			new JDIStackFrame(
+				this.jdiVM,
+				this,
+				userCode,
+				"A",
+				"bar",
+				-1);
+
+		DebugRequestor requestor = new DebugRequestor();
+		char[] snippet = "return foo();".toCharArray();
+		try {
+			context.evaluate(
+				snippet,
+				stackFrame.localVariableTypeNames(),
+				stackFrame.localVariableNames(),
+				stackFrame.localVariableModifiers(),
+				stackFrame.declaringTypeName(),
+				stackFrame.isStatic(),
+				stackFrame.isConstructorCall(),
+				getEnv(),
+				getOptions(),
+				requestor,
+				getProblemFactory());
+		} catch (InstallException e) {
+			assertTrue("No targetException " + e.getMessage(), false);
+		}
+		assertTrue(
+			"Should get one result but got " + (requestor.resultIndex + 1),
+			requestor.resultIndex == 0);
+		EvaluationResult result = requestor.results[0];
+		assertTrue("Code snippet should not have problems", !result.hasProblems());
+		assertTrue("Result should have a value", result.hasValue());
+		assertEquals("Value", "2".toCharArray(), result.getValueDisplayString());
+		assertEquals("Type", "int".toCharArray(), result.getValueTypeName());
+	} finally {
+		removeTempClass("A");
+	}
+}
+
