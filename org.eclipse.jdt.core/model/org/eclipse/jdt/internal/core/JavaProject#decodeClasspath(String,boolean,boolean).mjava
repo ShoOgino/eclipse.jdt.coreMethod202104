@@ -1,0 +1,77 @@
+	/**
+	 * Reads and decode an XML classpath string
+	 */
+	protected IClasspathEntry[] decodeClasspath(String xmlClasspath, boolean createMarker, boolean logProblems) {
+
+		ArrayList paths = new ArrayList();
+		try {
+			if (xmlClasspath == null) return null;
+			StringReader reader = new StringReader(xmlClasspath);
+			Element cpElement;
+	
+			try {
+				DocumentBuilder parser =
+					DocumentBuilderFactory.newInstance().newDocumentBuilder();
+				cpElement = parser.parse(new InputSource(reader)).getDocumentElement();
+			} catch (SAXException e) {
+				throw new IOException(Util.bind("file.badFormat")); //$NON-NLS-1$
+			} catch (ParserConfigurationException e) {
+				reader.close();
+				throw new IOException(Util.bind("file.badFormat")); //$NON-NLS-1$
+			} finally {
+				reader.close();
+			}
+	
+			if (!cpElement.getNodeName().equalsIgnoreCase("classpath")) { //$NON-NLS-1$
+				throw new IOException(Util.bind("file.badFormat")); //$NON-NLS-1$
+			}
+			NodeList list = cpElement.getElementsByTagName("classpathentry"); //$NON-NLS-1$
+			int length = list.getLength();
+	
+			for (int i = 0; i < length; ++i) {
+				Node node = list.item(i);
+				if (node.getNodeType() == Node.ELEMENT_NODE) {
+					IClasspathEntry entry = ClasspathEntry.elementDecode((Element)node, this);
+					if (entry != null) paths.add(entry);
+				}
+			}
+		} catch (IOException e) {
+			// bad format
+			if (createMarker && this.getProject().isAccessible()) {
+				this.createClasspathProblemMarker(
+					Util.bind("classpath.xmlFormatError", this.getElementName(), e.getMessage()), //$NON-NLS-1$
+					IMarker.SEVERITY_ERROR,
+					false,	//  cycle error
+					true);	//	file format error
+			}
+			if (logProblems) {
+				Util.log(e, 
+					"Exception while retrieving "+ this.getPath() //$NON-NLS-1$
+					+"/.classpath, will mark classpath as invalid"); //$NON-NLS-1$
+			}
+			return INVALID_CLASSPATH;
+		} catch (Assert.AssertionFailedException e) { 
+			// failed creating CP entries from file
+			if (createMarker && this.getProject().isAccessible()) {
+				this.createClasspathProblemMarker(
+					Util.bind("classpath.illegalEntryInClasspathFile", this.getElementName(), e.getMessage()), //$NON-NLS-1$
+					IMarker.SEVERITY_ERROR,
+					false,	//  cycle error
+					true);	//	file format error
+			}
+			if (logProblems) {
+				Util.log(e, 
+					"Exception while retrieving "+ this.getPath() //$NON-NLS-1$
+					+"/.classpath, will mark classpath as invalid"); //$NON-NLS-1$
+			}
+			return INVALID_CLASSPATH;
+		}
+		if (paths.size() > 0) {
+			IClasspathEntry[] ips = new IClasspathEntry[paths.size()];
+			paths.toArray(ips);
+			return ips;
+		} else {
+			return null;
+		}
+	}
+

@@ -39,14 +39,15 @@
 	 * @since 2.0
 	 */
 	public static void setClasspathContainer(IPath containerPath, final IJavaProject[] affectedProjects, IClasspathContainer[] respectiveContainers, IProgressMonitor monitor) throws JavaModelException {
-	
+		//TODO: need support for avoiding reentering calls (through getResolvedClasspath
+
 		Assert.isTrue(affectedProjects.length == respectiveContainers.length, Util.bind("classpath.mismatchProjectsContainers" )); //$NON-NLS-1$
 	
 		if (monitor != null && monitor.isCanceled()) return;
 	
 		final int projectLength = affectedProjects.length;
 		final IClasspathEntry[][] oldResolvedPaths = new IClasspathEntry[projectLength][];
-	
+			
 		// filter out unmodified project containers
 		int remaining = 0;
 		for (int i = 0; i < projectLength; i++){
@@ -71,22 +72,29 @@
 				affectedProjects[i] = null; // filter out this project - does not reference the container path, or isnt't Java project
 			}
 			
-			Map perProjectContainers = (Map)JavaModelManager.Containers.get(affectedProject);
-			if (perProjectContainers == null){
-				perProjectContainers = new HashMap();
-				JavaModelManager.Containers.put(affectedProject, perProjectContainers);
-			} else {
-				IClasspathContainer oldContainer = (IClasspathContainer) perProjectContainers.get(containerPath);
-				if (oldContainer != null && oldContainer.equals(respectiveContainers[i])){
-					affectedProjects[i] = null; // filter out this project - container did not change
-					continue;
+			IClasspathContainer oldContainer = JavaModelManager.containerGet(affectedProject, containerPath);
+			if (oldContainer == JavaModelManager.ContainerInitializationInProgress) {
+				Map previousContainerValues = (Map)JavaModelManager.PreviousSessionContainers.get(affectedProject);
+				if (previousContainerValues != null){
+					IClasspathContainer previousContainer = (IClasspathContainer)previousContainerValues.get(containerPath);
+					if (previousContainer != null) {
+						if (JavaModelManager.CP_RESOLVE_VERBOSE){
+							System.out.println("CPContainer INIT - reentering access to project container: ["+affectedProject.getElementName()+"] " + containerPath + " during its initialization, will see previous value: "+ previousContainer); //$NON-NLS-1$ //$NON-NLS-2$
+						}
+						JavaModelManager.containerPut(affectedProject, containerPath, previousContainer); 
+					}
+					oldContainer = previousContainer;
 				}
 			}
+			if (oldContainer != null && oldContainer.equals(respectiveContainers[i])){// TODO: could improve to only compare entries
+				affectedProjects[i] = null; // filter out this project - container did not change
+				continue;
+			}
 			if (found){
-				remaining++;
+				remaining++; 
 				oldResolvedPaths[i] = affectedProject.getResolvedClasspath(true);
 			}
-			perProjectContainers.put(containerPath, newContainer);
+			JavaModelManager.containerPut(affectedProject, containerPath, newContainer);
 		}
 		
 		if (remaining == 0) return;

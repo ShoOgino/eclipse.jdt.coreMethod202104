@@ -16,34 +16,45 @@
 	 * @see #setClasspathVariable
 	 */
 	public static IPath getClasspathVariable(final String variableName) {
-
+	
 		IPath variablePath = JavaModelManager.variableGet(variableName);
 		if (variablePath == JavaModelManager.VariableInitializationInProgress) return null; // break cycle
 		
 		if (variablePath != null) {
 			return variablePath;
 		}
+
 		// even if persisted value exists, initializer is given priority, only if no initializer is found the persisted value is reused
-		final ClasspathVariableInitializer initializer = getClasspathVariableInitializer(variableName);
+		final ClasspathVariableInitializer initializer = JavaCore.getClasspathVariableInitializer(variableName);
 		if (initializer != null){
-			JavaModelManager.variablePut(variableName, JavaModelManager.VariableInitializationInProgress); // avoid initialization cycles
-			// wrap initializer call with Safe runnable in case initializer would be causing some grief
-			Platform.run(new ISafeRunnable() {
-				public void handleException(Throwable exception) {
-					Util.log(exception, "Exception occurred in classpath variable initializer: "+initializer); //$NON-NLS-1$
-				}
-				public void run() throws Exception {
-					initializer.initialize(variableName);
-				}
-			});
-			variablePath = (IPath) JavaModelManager.variableGet(variableName); // retry
-			if (variablePath == JavaModelManager.VariableInitializationInProgress) {
-				// variable was not initialized by initializer, remove it
-				JavaModelManager.variablePut(variableName, null);
-				return null; // break cycle
-			}
 			if (JavaModelManager.CP_RESOLVE_VERBOSE){
-				System.out.println("CPVariable INIT - after initialization: " + variableName + " --> " + variablePath); //$NON-NLS-2$//$NON-NLS-1$
+				System.out.println("CPVariable INIT - triggering initialization of: " + variableName+ " using initializer: "+ initializer); //$NON-NLS-1$ //$NON-NLS-2$
+				new Exception("FAKE exception for dumping current CPVariable ("+variableName+ ")INIT invocation stack trace").printStackTrace(); //$NON-NLS-1$//$NON-NLS-2$
+			}
+			JavaModelManager.variablePut(variableName, JavaModelManager.VariableInitializationInProgress); // avoid initialization cycles
+			boolean ok = false;
+			try {
+				// wrap initializer call with Safe runnable in case initializer would be causing some grief
+				Platform.run(new ISafeRunnable() {
+					public void handleException(Throwable exception) {
+						Util.log(exception, "Exception occurred in classpath variable initializer: "+initializer+" while initializing variable: "+variableName); //$NON-NLS-1$ //$NON-NLS-2$
+					}
+					public void run() throws Exception {
+						initializer.initialize(variableName);
+					}
+				});
+				variablePath = (IPath) JavaModelManager.variableGet(variableName); // initializer should have performed side-effect
+				if (variablePath == JavaModelManager.VariableInitializationInProgress) return null; // break cycle (initializer did not init or reentering call)
+				if (JavaModelManager.CP_RESOLVE_VERBOSE){
+					System.out.println("CPVariable INIT - after initialization: " + variableName + " --> " + variablePath); //$NON-NLS-2$//$NON-NLS-1$
+				}
+				ok = true;
+			} finally {
+				if (!ok) JavaModelManager.variablePut(variableName, null); // flush cache
+			}
+		} else {
+			if (JavaModelManager.CP_RESOLVE_VERBOSE){
+				System.out.println("CPVariable INIT - no initializer found for: " + variableName); //$NON-NLS-1$
 			}
 		}
 		return variablePath;

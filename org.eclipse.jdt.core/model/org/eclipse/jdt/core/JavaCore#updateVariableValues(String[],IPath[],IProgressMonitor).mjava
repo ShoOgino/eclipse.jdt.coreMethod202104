@@ -18,8 +18,18 @@
 		// filter out unmodified variables
 		int discardCount = 0;
 		for (int i = 0; i < varLength; i++){
-			IPath oldPath = (IPath)JavaModelManager.variableGet(variableNames[i]);
-			if (oldPath == JavaModelManager.VariableInitializationInProgress) oldPath = null;
+			String variableName = variableNames[i];
+			IPath oldPath = (IPath)JavaModelManager.variableGet(variableName); // if reentering will provide previous session value 
+			if (oldPath == JavaModelManager.VariableInitializationInProgress){
+				IPath previousPath = (IPath)JavaModelManager.PreviousSessionVariables.get(variableName);
+				if (previousPath != null){
+					if (JavaModelManager.CP_RESOLVE_VERBOSE){
+						System.out.println("CPVariable INIT - reentering access to variable: " + variableName+ " during its initialization, will see previous value: "+ previousPath); //$NON-NLS-1$ //$NON-NLS-2$
+					}
+					JavaModelManager.variablePut(variableName, previousPath); // replace value so reentering calls are seeing old value
+				}
+				oldPath = previousPath;
+			}
 			if (oldPath != null && oldPath.equals(variablePaths[i])){
 				variableNames[i] = null;
 				discardCount++;
@@ -60,14 +70,14 @@
 						if (entry.getEntryKind() ==  IClasspathEntry.CPE_VARIABLE){
 	
 							if (variableName.equals(entry.getPath().segment(0))){
-								affectedProjects.put(project, ((JavaProject)project).getResolvedClasspath(true));
+								affectedProjects.put(project, project.getResolvedClasspath(true));
 								continue nextProject;
 							}
 							IPath sourcePath, sourceRootPath;
 							if (((sourcePath = entry.getSourceAttachmentPath()) != null	&& variableName.equals(sourcePath.segment(0)))
 								|| ((sourceRootPath = entry.getSourceAttachmentRootPath()) != null	&& variableName.equals(sourceRootPath.segment(0)))) {
 	
-								affectedProjects.put(project, ((JavaProject)project).getResolvedClasspath(true));
+								affectedProjects.put(project, project.getResolvedClasspath(true));
 								continue nextProject;
 							}
 						}												
@@ -77,8 +87,7 @@
 		}
 		// update variables
 		for (int i = 0; i < varLength; i++){
-			IPath path = variablePaths[i];
-			JavaModelManager.variablePut(variableNames[i], path);
+			JavaModelManager.variablePut(variableNames[i], variablePaths[i]);
 		}
 				
 		// update affected project classpaths

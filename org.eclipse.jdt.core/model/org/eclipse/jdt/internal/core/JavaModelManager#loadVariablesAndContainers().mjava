@@ -1,4 +1,4 @@
-	public void loadVariables() throws CoreException {
+	public void loadVariablesAndContainers() throws CoreException {
 
 		// backward compatibility, consider persistent property	
 		QualifiedName qName = new QualifiedName(JavaCore.PLUGIN_ID, "variables"); //$NON-NLS-1$
@@ -46,26 +46,49 @@
 			
 		}
 		
-		// load variables from preferences into cache
+		// load variables and containers from preferences into cache
 		Preferences preferences = JavaCore.getPlugin().getPluginPreferences();
 
 		// only get variable from preferences not set to their default
 		String[] propertyNames = preferences.propertyNames();
-		int prefixLength = CP_VARIABLE_PREFERENCES_PREFIX.length();
+		int variablePrefixLength = CP_VARIABLE_PREFERENCES_PREFIX.length();
 		for (int i = 0; i < propertyNames.length; i++){
 			String propertyName = propertyNames[i];
 			if (propertyName.startsWith(CP_VARIABLE_PREFERENCES_PREFIX)){
-				String varName = propertyName.substring(prefixLength);
+				String varName = propertyName.substring(variablePrefixLength);
 				IPath varPath = new Path(preferences.getString(propertyName).trim());
 				
 				Variables.put(varName, varPath); 
+				PreviousSessionVariables.put(varName, varPath);
 			}
-		}		
+			if (propertyName.startsWith(CP_CONTAINER_PREFERENCES_PREFIX)){
+				recreatePersistedContainer(propertyName, preferences.getString(propertyName).trim(), true/*add to previous session values*/);
+			}
+		}
 		// override persisted values for variables which have a registered initializer
 		String[] registeredVariables = getRegisteredVariableNames();
 		for (int i = 0; i < registeredVariables.length; i++) {
 			String varName = registeredVariables[i];
 			Variables.put(varName, null); // reset variable, but leave its entry in the Map, so it will be part of variable names.
+		}
+		// override persisted values for containers which have a registered initializer
+		String[] registeredContainerIDs = getRegisteredContainerIDs();
+		for (int i = 0; i < registeredContainerIDs.length; i++) {
+			String containerID = registeredContainerIDs[i];
+			Iterator projectIterator = Containers.keySet().iterator();
+			while (projectIterator.hasNext()){
+				IJavaProject project = (IJavaProject)projectIterator.next();
+				Map projectContainers = (Map)Containers.get(project);
+				if (projectContainers != null){
+					Iterator containerIterator = projectContainers.keySet().iterator();
+					while (containerIterator.hasNext()){
+						IPath containerPath = (IPath)containerIterator.next();
+						if (containerPath.segment(0).equals(containerID)) { // registered container
+							projectContainers.put(containerPath, null); // reset container value, but leave entry in Map
+						}
+					}
+				}
+			}
 		}
 	}
 
