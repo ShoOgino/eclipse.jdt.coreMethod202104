@@ -1,68 +1,67 @@
-/**
- * An method accessor is a method with an access$N selector, where N is incremented in case of collisions.
- */
-
-public void initializeMethodAccessor(MethodBinding targetMethod, boolean isSuperAccess, ReferenceBinding declaringClass) {
+	/**
+	 * An method accessor is a method with an access$N selector, where N is incremented in case of collisions.
+	 */
+	public void initializeMethodAccessor(MethodBinding targetMethod, boolean isSuperAccess, ReferenceBinding declaringClass) {
+		
+		this.targetMethod = targetMethod;
+		this.modifiers = AccDefault | AccStatic | AccSynthetic;
+		SourceTypeBinding declaringSourceType = (SourceTypeBinding) declaringClass;
+		SyntheticAccessMethodBinding[] knownAccessMethods = declaringSourceType.syntheticAccessMethods();
+		int methodId = knownAccessMethods == null ? 0 : knownAccessMethods.length;
+		this.index = methodId;
 	
-	this.targetMethod = targetMethod;
-	this.modifiers = AccDefault | AccStatic | AccSynthetic;
-	SourceTypeBinding declaringSourceType = (SourceTypeBinding) declaringClass;
-	SyntheticAccessMethodBinding[] knownAccessMethods = declaringSourceType.syntheticAccessMethods();
-	int methodId = knownAccessMethods == null ? 0 : knownAccessMethods.length;
-	this.index = methodId;
-
-	this.selector = CharOperation.concat(AccessMethodPrefix, String.valueOf(methodId).toCharArray());
-	this.returnType = targetMethod.returnType;
-	this.accessType = isSuperAccess ? SuperMethodAccess : MethodAccess;
+		this.selector = CharOperation.concat(AccessMethodPrefix, String.valueOf(methodId).toCharArray());
+		this.returnType = targetMethod.returnType;
+		this.accessType = isSuperAccess ? SuperMethodAccess : MethodAccess;
+		
+		if (targetMethod.isStatic()) {
+			this.parameters = targetMethod.parameters;
+		} else {
+			this.parameters = new TypeBinding[targetMethod.parameters.length + 1];
+			this.parameters[0] = declaringSourceType;
+			System.arraycopy(targetMethod.parameters, 0, this.parameters, 1, targetMethod.parameters.length);
+		}
+		this.thrownExceptions = targetMethod.thrownExceptions;
+		this.declaringClass = declaringSourceType;
 	
-	if (targetMethod.isStatic()) {
-		this.parameters = targetMethod.parameters;
-	} else {
-		this.parameters = new TypeBinding[targetMethod.parameters.length + 1];
-		this.parameters[0] = declaringSourceType;
-		System.arraycopy(targetMethod.parameters, 0, this.parameters, 1, targetMethod.parameters.length);
-	}
-	this.thrownExceptions = targetMethod.thrownExceptions;
-	this.declaringClass = declaringSourceType;
-
-	// check for method collision
-	boolean needRename;
-	do {
-		check : {
-			needRename = false;
-			// check for collision with known methods
-			MethodBinding[] methods = declaringSourceType.methods;
-			for (int i = 0, length = methods.length; i < length; i++) {
-				if (this.selector == methods[i].selector && this.areParametersEqual(methods[i])) {
-					needRename = true;
-					break check;
-				}
-			}
-			// check for collision with synthetic accessors
-			if (knownAccessMethods != null) {
-				for (int i = 0, length = knownAccessMethods.length; i < length; i++) {
-					if (knownAccessMethods[i] == null) continue;
-					if (this.selector == knownAccessMethods[i].selector && this.areParametersEqual(methods[i])) {
+		// check for method collision
+		boolean needRename;
+		do {
+			check : {
+				needRename = false;
+				// check for collision with known methods
+				MethodBinding[] methods = declaringSourceType.methods;
+				for (int i = 0, length = methods.length; i < length; i++) {
+					if (this.selector == methods[i].selector && this.areParametersEqual(methods[i])) {
 						needRename = true;
 						break check;
 					}
 				}
+				// check for collision with synthetic accessors
+				if (knownAccessMethods != null) {
+					for (int i = 0, length = knownAccessMethods.length; i < length; i++) {
+						if (knownAccessMethods[i] == null) continue;
+						if (this.selector == knownAccessMethods[i].selector && this.areParametersEqual(knownAccessMethods[i])) {
+							needRename = true;
+							break check;
+						}
+					}
+				}
 			}
-		}
-		if (needRename) { // retry with a selector & a growing methodId
-			this.selector(CharOperation.concat(AccessMethodPrefix, String.valueOf(++methodId).toCharArray()));
-		}
-	} while (needRename);
-
-	// retrieve sourceStart position for the target method for line number attributes
-	AbstractMethodDeclaration[] methodDecls = declaringSourceType.scope.referenceContext.methods;
-	if (methodDecls != null) {
-		for (int i = 0, length = methodDecls.length; i < length; i++) {
-			if (methodDecls[i].binding == targetMethod) {
-				this.sourceStart = methodDecls[i].sourceStart;
-				return;
+			if (needRename) { // retry with a selector & a growing methodId
+				this.selector(CharOperation.concat(AccessMethodPrefix, String.valueOf(++methodId).toCharArray()));
+			}
+		} while (needRename);
+	
+		// retrieve sourceStart position for the target method for line number attributes
+		AbstractMethodDeclaration[] methodDecls = declaringSourceType.scope.referenceContext.methods;
+		if (methodDecls != null) {
+			for (int i = 0, length = methodDecls.length; i < length; i++) {
+				if (methodDecls[i].binding == targetMethod) {
+					this.sourceStart = methodDecls[i].sourceStart;
+					return;
+				}
 			}
 		}
 	}
-}
 
