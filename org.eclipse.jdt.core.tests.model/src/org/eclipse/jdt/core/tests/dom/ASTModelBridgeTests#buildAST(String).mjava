@@ -1,0 +1,38 @@
+	/*
+	 * Removes the marker comments "*start*" and "*end*" from the given contents,
+	 * builds an AST from the resulting source, and returns the AST node that was delimited
+	 * by "*start*" and "*end*".
+	 */
+	private ASTNode buildAST(String contents) throws JavaModelException {
+		String markerStart = "/*start*/";
+		String markerEnd = "/*end*/";
+		final int astStart = contents.indexOf(markerStart); // start of AST inclusive
+		contents = new String(CharOperation.replace(contents.toCharArray(), markerStart.toCharArray(), CharOperation.NO_CHAR));
+		final int astEnd = contents.indexOf(markerEnd); // end of AST exclusive
+		contents = new String(CharOperation.replace(contents.toCharArray(), markerEnd.toCharArray(), CharOperation.NO_CHAR));
+
+		this.workingCopy.getBuffer().setContents(contents);
+		CompilationUnit unit = this.workingCopy.reconcile(AST.JLS3, false, null, null);
+
+		class EndVisit extends RuntimeException {
+			private static final long serialVersionUID = 1L;
+		}
+		class Visitor extends ASTVisitor {
+			ASTNode found;
+			public void preVisit(ASTNode node) {
+				if (node instanceof CompilationUnit) return;
+				if (node.getStartPosition() == astStart && node.getStartPosition() + node.getLength() == astEnd) {
+					this.found = node;
+					throw new EndVisit();
+				}
+			}
+		}
+		Visitor visitor = new Visitor();
+		try {
+			unit.accept(visitor);
+		} catch (EndVisit e) {
+			return visitor.found;
+		}
+		return null;
+	}
+
