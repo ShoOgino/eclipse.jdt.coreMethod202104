@@ -14,6 +14,15 @@ protected IJavaElement createHandle(AbstractMethodDeclaration method, IJavaEleme
 		if (reader != null) {
 			IBinaryMethod[] methods = reader.getMethods();
 			if (methods != null) {
+				boolean firstIsSynthetic = false;
+				try {
+					if (type.isMember() && method.isConstructor() && !method.isStatic()) {
+						firstIsSynthetic = true;
+						argCount++;
+					}
+				} catch (JavaModelException e) {
+					// ignored
+				}
 				nextMethod : for (int i = 0, methodsLength = methods.length; i < methodsLength; i++) {
 					IBinaryMethod binaryMethod = methods[i];
 					char[] selector = binaryMethod.isConstructor() ? type.getElementName().toCharArray() : binaryMethod.getSelector();
@@ -21,10 +30,15 @@ protected IJavaElement createHandle(AbstractMethodDeclaration method, IJavaEleme
 						char[][] parameterTypes = Signature.getParameterTypes(binaryMethod.getMethodDescriptor());
 						if (argCount != parameterTypes.length) continue nextMethod;
 						for (int j = 0; j < argCount; j++) {
-							TypeReference typeRef = arguments[j].type;
-							char[] typeName = CharOperation.concatWith(typeRef.getTypeName(), '.');
-							for (int k = 0, dim = typeRef.dimensions(); k < dim; k++)
-								typeName = CharOperation.concat(typeName, new char[] {'[', ']'});
+							char[] typeName;
+							if (j == 0 && firstIsSynthetic) {
+								typeName = type.getDeclaringType().getFullyQualifiedName().toCharArray();
+							} else {
+								TypeReference typeRef = arguments[firstIsSynthetic ? j - 1 : j].type;
+								typeName = CharOperation.concatWith(typeRef.getTypeName(), '.');
+								for (int k = 0, dim = typeRef.dimensions(); k < dim; k++)
+									typeName = CharOperation.concat(typeName, new char[] {'[', ']'});
+							}
 							char[] parameterTypeName = ClassFileMatchLocator.convertClassFileFormat(parameterTypes[j]);
 							if (!CharOperation.endsWith(Signature.toCharArray(parameterTypeName), typeName))
 								continue nextMethod;
@@ -35,6 +49,7 @@ protected IJavaElement createHandle(AbstractMethodDeclaration method, IJavaEleme
 				}
 			}
 		}
+		return null;
 	}
 
 	String[] parameterTypeSignatures = new String[argCount];
@@ -45,8 +60,6 @@ protected IJavaElement createHandle(AbstractMethodDeclaration method, IJavaEleme
 			typeName = CharOperation.concat(typeName, new char[] {'[', ']'});
 		parameterTypeSignatures[i] = Signature.createTypeSignature(typeName, false);
 	}
-	IMethod handle = type.getMethod(new String(method.selector), parameterTypeSignatures);
-	if (type.isBinary() && !handle.exists()) return null; // element doesn't exist in the .class file
-	return handle;
+	return type.getMethod(new String(method.selector), parameterTypeSignatures);
 }
 
