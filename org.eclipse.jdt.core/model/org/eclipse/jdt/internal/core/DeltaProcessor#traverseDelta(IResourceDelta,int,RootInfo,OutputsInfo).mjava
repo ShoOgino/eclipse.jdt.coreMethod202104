@@ -1,8 +1,8 @@
 	/**
 	 * Converts an <code>IResourceDelta</code> and its children into
 	 * the corresponding <code>IJavaElementDelta</code>s.
-	 * Return whether the delta corresponds to a resource on the classpath.
-	 * If it is not a resource on the classpath, it will be added as a non-java
+	 * Return whether the delta corresponds to a java element.
+	 * If it is not a java element, it will be added as a non-java
 	 * resource by the sender of this method.
 	 */
 	protected boolean traverseDelta(
@@ -20,7 +20,15 @@
 		
 		// process current delta
 		boolean processChildren = true;
-		if (rootInfo != null || res instanceof IProject) {
+		if (res instanceof IProject) {
+			processChildren = 
+				this.updateCurrentDeltaAndIndex(
+					delta, 
+					elementType == IJavaElement.PACKAGE_FRAGMENT_ROOT ? 
+						IJavaElement.JAVA_PROJECT : // case of prj=src
+						elementType, 
+					rootInfo);
+		} else if (rootInfo != null) {
 			processChildren = this.updateCurrentDeltaAndIndex(delta, elementType, rootInfo);
 		} else {
 			// not yet inside a package fragment root
@@ -69,9 +77,7 @@
 				boolean isNestedRoot = rootInfo != null && childRootInfo != null;
 				if (!isResFilteredFromOutput 
 						&& !isNestedRoot) { // do not treat as non-java rsc if nested root
-					if (childType == NON_JAVA_RESOURCE
-							|| !this.traverseDelta(child, childType, rootInfo == null ? childRootInfo : rootInfo, outputsInfo)) { // traverse delta for child in the same project
-						
+					if (!this.traverseDelta(child, childType, rootInfo == null ? childRootInfo : rootInfo, outputsInfo)) { // traverse delta for child in the same project
 						// it is a non-java resource
 						try {
 							if (rootInfo != null) { // if inside a package fragment root
@@ -108,6 +114,8 @@
 					} else {
 						oneChildOnClasspath = true;
 					}
+				} else {
+					oneChildOnClasspath = true; // to avoid reporting child delta as non-java resource delta
 				}
 								
 				// if child is a nested root 
@@ -148,11 +156,9 @@
 					}
 				}
 			} // else resource delta will be added by parent
-			return isValidParent && (rootInfo != null || oneChildOnClasspath);
+			return elementType != NON_JAVA_RESOURCE || oneChildOnClasspath;
 		} else {
-			// if not on classpath or if the element type is NON_JAVA_RESOURCE, 
-			// it's a non-java resource
-			return rootInfo != null && elementType != NON_JAVA_RESOURCE;
+			return elementType != NON_JAVA_RESOURCE;
 		}
 	}
 

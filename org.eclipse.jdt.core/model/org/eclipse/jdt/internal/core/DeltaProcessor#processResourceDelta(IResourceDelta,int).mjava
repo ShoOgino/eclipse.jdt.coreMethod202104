@@ -31,16 +31,32 @@
 				fCurrentDelta = new JavaElementDelta(model);
 				
 				// find out the element type
-				RootInfo rootInfo = (RootInfo)this.roots.get(res.getFullPath());
-				int elementType = 
-					this.elementType(
-						res, 
-						delta.getKind(),
-						delta.getFlags(),
-						IJavaElement.JAVA_MODEL, 
-						rootInfo);
+				RootInfo rootInfo = null;
+				int elementType;
+				IProject proj = (IProject)res;
+				boolean wasJavaProject = JavaModelManager.getJavaModelManager().getJavaModel().findJavaProject(proj) != null;
+				boolean isJavaProject = JavaProject.hasJavaNature(proj);
+				if (!wasJavaProject && !isJavaProject) {
+					elementType = NON_JAVA_RESOURCE;
+				} else {
+					rootInfo = this.rootInfo(res.getFullPath());
+					if (rootInfo != null && (rootInfo.project.getProject().getFullPath().isPrefixOf(res.getFullPath()))) {
+						elementType = IJavaElement.PACKAGE_FRAGMENT_ROOT;
+					} else {
+						elementType = IJavaElement.JAVA_PROJECT; 
+					}
+				}
 				
-				this.traverseDelta(delta, elementType, rootInfo, null); // traverse delta
+				// traverse delta
+				if (!this.traverseDelta(delta, elementType, rootInfo, null) 
+						|| (wasJavaProject != isJavaProject && (delta.getKind()) == IResourceDelta.CHANGED)) { // project has changed nature (description or open/closed)
+					try {
+						// add child as non java resource
+						nonJavaResourcesChanged((JavaModel)model, delta);
+					} catch (JavaModelException e) {
+					}
+				}
+
 				translatedDeltas[i] = fCurrentDelta;
 			}
 			
