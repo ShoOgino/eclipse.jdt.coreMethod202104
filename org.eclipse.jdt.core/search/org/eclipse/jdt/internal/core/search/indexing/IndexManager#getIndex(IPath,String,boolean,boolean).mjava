@@ -1,0 +1,65 @@
+/**
+ * Returns the index for a given project, according to the following algorithm:
+ * - if index is already in memory: answers this one back
+ * - if (reuseExistingFile) then read it and return this index and record it in memory
+ * - if (createIfMissing) then create a new empty index and record it in memory
+ * 
+ * Warning: Does not check whether index is consistent (not being used)
+ */
+public synchronized Index getIndex(IPath containerPath, String indexLocation, boolean reuseExistingFile, boolean createIfMissing) {
+	// Path is already canonical per construction
+	Index index = (Index) indexes.get(indexLocation);
+	if (index == null) {
+		Object state = getIndexStates().get(indexLocation);
+		Integer currentIndexState = state == null ? UNKNOWN_STATE : (Integer) state;
+		if (currentIndexState == UNKNOWN_STATE) {
+			// should only be reachable for query jobs
+			// IF you put an index in the cache, then AddJarFileToIndex fails because it thinks there is nothing to do
+			rebuildIndex(indexLocation, containerPath);
+			return null;
+		}
+
+		// index isn't cached, consider reusing an existing index file
+		if (reuseExistingFile) {
+			File indexFile = new File(indexLocation);
+			if (indexFile.exists()) { // check before creating index so as to avoid creating a new empty index if file is missing
+				try {
+					index = new Index(indexLocation, "Index for " + containerPath.toOSString(), true /*reuse index file*/); //$NON-NLS-1$
+					indexes.put(indexLocation, index);
+					return index;
+				} catch (IOException e) {
+					// failed to read the existing file or its no longer compatible
+					if (currentIndexState != REBUILDING_STATE) { // rebuild index if existing file is corrupt, unless the index is already being rebuilt
+						if (VERBOSE)
+							Util.verbose("-> cannot reuse existing index: "+indexLocation+" path: "+containerPath.toOSString()); //$NON-NLS-1$ //$NON-NLS-2$
+						rebuildIndex(indexLocation, containerPath);
+						return null;
+					} 
+					index = null; // will fall thru to createIfMissing & create a empty index for the rebuild all job to populate
+				}
+			}
+			if (currentIndexState == SAVED_STATE) { // rebuild index if existing file is missing
+				rebuildIndex(indexLocation, containerPath);
+				return null;
+			}
+		} 
+		// index wasn't found on disk, consider creating an empty new one
+		if (createIfMissing) {
+			try {
+				if (VERBOSE)
+					Util.verbose("-> create empty index: "+indexLocation+" path: "+containerPath.toOSString()); //$NON-NLS-1$ //$NON-NLS-2$
+				index = new Index(indexLocation, "Index for " + containerPath.toOSString(), false /*do not reuse index file*/); //$NON-NLS-1$
+				indexes.put(indexLocation, index);
+				return index;
+			} catch (IOException e) {
+				if (VERBOSE)
+					Util.verbose("-> unable to create empty index: "+indexLocation+" path: "+containerPath.toOSString()); //$NON-NLS-1$ //$NON-NLS-2$
+				// The file could not be created. Possible reason: the project has been deleted.
+				return null;
+			}
+		}
+	}
+	//System.out.println(" index name: " + path.toOSString() + " <----> " + index.getIndexFile().getName());	
+	return index;
+}
+
