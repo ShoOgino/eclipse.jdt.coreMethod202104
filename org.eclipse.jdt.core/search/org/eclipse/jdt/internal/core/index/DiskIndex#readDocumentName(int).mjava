@@ -5,16 +5,24 @@ synchronized String readDocumentName(int docNumber) throws IOException {
 	int chunkNumber = docNumber / CHUNK_SIZE;
 	String[] chunk = this.cachedChunks[chunkNumber];
 	if (chunk == null) {
-		DataInputStream stream = new DataInputStream(new BufferedInputStream(new FileInputStream(getIndexFile()), 2048));
+		boolean isLastChunk = chunkNumber == this.numberOfChunks - 1;
+		int start = this.chunkOffsets[chunkNumber];
+		int numberOfBytes = (isLastChunk ? this.startOfCategoryTables : this.chunkOffsets[chunkNumber + 1]) - start;
+		if (numberOfBytes < 0)
+			throw new IllegalArgumentException();
+		byte[] bytes = new byte[numberOfBytes];
+		FileInputStream file = new FileInputStream(getIndexFile());
 		try {
-			stream.skip(this.chunkOffsets[chunkNumber]);
-			int size = chunkNumber == this.numberOfChunks - 1 ? this.sizeOfLastChunk : CHUNK_SIZE;
-			chunk = new String[size];
-			readChunk(chunk, stream, 0, size);
+			file.skip(start);
+			if (file.read(bytes, 0, numberOfBytes) != numberOfBytes)
+				throw new IOException();
 		} finally {
-			stream.close();
+			file.close();
 		}
-		this.cachedChunks[chunkNumber] = chunk;
+		DataInputStream stream = new DataInputStream(new ByteArrayInputStream(bytes));
+		int numberOfNames = isLastChunk ? this.sizeOfLastChunk : CHUNK_SIZE;
+		chunk = this.cachedChunks[chunkNumber] = new String[numberOfNames];
+		readChunk(chunk, stream, 0, numberOfNames);
 	}
 	return chunk[docNumber - (chunkNumber * CHUNK_SIZE)];
 }
