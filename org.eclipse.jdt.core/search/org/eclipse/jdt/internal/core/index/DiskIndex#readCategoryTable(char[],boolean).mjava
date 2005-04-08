@@ -1,4 +1,4 @@
-private synchronized HashtableOfObject readCategoryTable(char[] categoryName, boolean cacheDocNumbers) throws IOException {
+private synchronized HashtableOfObject readCategoryTable(char[] categoryName, boolean readDocNumbers) throws IOException {
 	// result will be null if categoryName is unknown
 	int offset = this.categoryOffsets.get(categoryName);
 	if (offset == HashtableOfIntValues.NO_VALUE)
@@ -21,20 +21,28 @@ private synchronized HashtableOfObject readCategoryTable(char[] categoryName, bo
 		stream.skip(offset);
 		int size = stream.readInt();
 		categoryTable = new HashtableOfObject(size);
-		if (cacheDocNumbers)
+		if (readDocNumbers)
 			matchingWords = new char[size][];
+		int largeArraySize = 256;
 		for (int i = 0; i < size; i++) {
 			char[] word = Util.readUTF(stream);
 			int arrayOffset = stream.readInt();
-			if (arrayOffset > 0) {
+			// if arrayOffset is:
+			//		<= 0 then the array size == 1 with the value -> -arrayOffset
+			//		> 1 & < 256 then the size of the array is > 1 & < 256, the document array follows immediately
+			//		256 if the array size >= 256 followed by another int which is the offset to the array (written prior to the table)
+			if (arrayOffset <= 0) {
+				categoryTable.put(word, new int[] {-arrayOffset}); // store 1 element array by negating documentNumber
+			} else if (arrayOffset < largeArraySize) {
+				categoryTable.put(word, readDocumentArray(stream, arrayOffset)); // read in-lined array providing size
+			} else {
+				arrayOffset = stream.readInt(); // read actual offset
 				if (matchingWords != null) {
 					if (count == 0)
 						firstOffset = arrayOffset;
 					matchingWords[count++] = word;
 				}
 				categoryTable.put(word, new Integer(arrayOffset)); // offset to array in the file
-			} else {
-				categoryTable.put(word, new int[] {-arrayOffset}); // stored a 1 element array by negating the documentNumber
 			}
 		}
 		this.categoryTables.put(categoryName, categoryTable);
@@ -47,7 +55,7 @@ private synchronized HashtableOfObject readCategoryTable(char[] categoryName, bo
 		try {
 			stream.skip(firstOffset);
 			for (int i = 0; i < count; i++) // each array follows the previous one
-				categoryTable.put(matchingWords[i], readDocumentArray(stream));
+				categoryTable.put(matchingWords[i], readDocumentArray(stream, stream.readInt()));
 		} finally {
 			stream.close();
 		}
