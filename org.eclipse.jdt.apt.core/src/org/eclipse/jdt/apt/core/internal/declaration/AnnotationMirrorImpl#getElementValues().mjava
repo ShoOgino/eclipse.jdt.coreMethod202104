@@ -1,0 +1,58 @@
+    public Map<AnnotationTypeElementDeclaration, AnnotationValue> getElementValues()
+    {
+        if( _annoAstNode.isSingleMemberAnnotation() ) {
+            final Expression value = ((SingleMemberAnnotation)_annoAstNode).getValue();
+            final ITypeBinding typeBinding = _annoAstNode.resolveTypeBinding();
+            if( typeBinding.isAnnotation() ){
+                final IMethodBinding[] methods  = typeBinding.getDeclaredMethods();
+                // There should only be one since this is a single member annotation.
+                // Ignore it otherwise.
+                if( methods != null && methods.length != 1 ){
+                    IMethodBinding elementMethod = methods[0];
+                    final DeclarationImpl mirrorDecl = Factory.createDeclaration(elementMethod, _env);
+                    final AnnotationValue annoValue = Factory.createAnnotationValue(value, _annotated, _env);
+                    if( mirrorDecl.kind() == EclipseMirrorImpl.MirrorKind.ANNOTATION_ELEMENT  &&
+                        annoValue != null )
+                        return Collections.singletonMap( (AnnotationTypeElementDeclaration)mirrorDecl, annoValue);
+                }
+            }
+        }
+        else if( _annoAstNode.isNormalAnnotation() ){
+            final NormalAnnotation normalAnnotation = (NormalAnnotation)_annoAstNode;
+            final List<MemberValuePair> pairs = normalAnnotation.values();
+            final ITypeBinding typeBinding = _annoAstNode.resolveTypeBinding();
+            if( typeBinding.isAnnotation() ){
+                final IMethodBinding[] methodBindings = typeBinding.getDeclaredMethods();
+                if( methodBindings != null && methodBindings.length > 0){
+                    // Annotation value has to appear in source order.
+                    final Map<AnnotationTypeElementDeclaration, AnnotationValue> result =
+                        new LinkedHashMap<AnnotationTypeElementDeclaration, AnnotationValue>(methodBindings.length * 4 / 3 + 1 );
+                    // locate all the member value pair.
+                    for( MemberValuePair pair : pairs ){
+                        final SimpleName simpleName = pair.getName();
+                        if( simpleName == null ) continue;
+                        final String name = simpleName.toString();
+                        IMethodBinding elementMethod = null;
+                        // look for the corresponding method binding.
+                        for( IMethodBinding m : methodBindings ) {
+                            if( name.equals( m.getName() ) ){
+                                elementMethod = m;
+                                break;
+                            }
+                        }
+                        if( elementMethod != null ){
+                            final DeclarationImpl mirrorDecl = Factory.createDeclaration(elementMethod, _env);
+                            final AnnotationValue annoValue = Factory.createAnnotationValue(pair.getValue(), _annotated, _env);
+                            if( mirrorDecl.kind() == EclipseMirrorImpl.MirrorKind.ANNOTATION_ELEMENT  &&
+                                annoValue != null )
+                                result.put( (AnnotationTypeElementDeclaration)mirrorDecl, annoValue);
+                        }
+                    }
+                    return result;
+                }
+            }
+        }
+        // marker annotation or if anything goes wrond above.
+        return Collections.emptyMap();
+    }
+

@@ -1,0 +1,46 @@
+    /**
+     * Building an annotation value object based on an expression
+     * @see com.sun.mirror.declaration.AnnotationValue.getObject()
+     */
+    public static Object createAnnotationValueObject(Expression expr, DeclarationImpl decl, ProcessorEnvImpl env)
+    {
+        if( expr == null ) return null;
+		final Object constantValue = expr.resolveConstantExpressionValue();
+		if( constantValue != null ) return constantValue;
+        switch(expr.getNodeType())
+        {
+        case ASTNode.SIMPLE_NAME:
+        case ASTNode.QUALIFIED_NAME:
+            final Name name = (Name)expr;
+            final IBinding nameBinding = name.resolveBinding();
+            if( nameBinding.getKind() == IBinding.VARIABLE ) {
+                return ((IVariableBinding)nameBinding).getConstantValue();
+            }
+            break;
+        case ASTNode.ARRAY_INITIALIZER:
+
+            final List<Expression> exprs = ((ArrayInitializer)expr).expressions();
+            final List<AnnotationValue> annoValues = new ArrayList<AnnotationValue>(exprs.size());
+            for(Expression initExpr : exprs ){
+                if( initExpr == null ) continue;
+                // can't have multi-dimensional array.
+                // there should be already a java compile time error
+                else if( initExpr.getNodeType() == ASTNode.ARRAY_INITIALIZER )
+                    return null;
+
+                final AnnotationValue value = createAnnotationValue(initExpr, decl, env);
+                if( value != null )
+                    annoValues.add(value);
+            }
+            return annoValues;
+        case ASTNode.NORMAL_ANNOTATION:
+        case ASTNode.MARKER_ANNOTATION:
+        case ASTNode.SINGLE_MEMBER_ANNOTATION:
+            return Factory.createAnnotationMirror((Annotation)expr, decl, env);        
+        case ASTNode.TYPE_LITERAL:
+            throw new IllegalStateException("illegal expression " + expr);     
+        }
+
+        return null;
+    }
+

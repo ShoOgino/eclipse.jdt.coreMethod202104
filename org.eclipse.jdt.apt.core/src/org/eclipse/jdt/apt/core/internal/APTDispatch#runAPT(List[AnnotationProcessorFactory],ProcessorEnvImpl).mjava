@@ -1,0 +1,68 @@
+	private static Set<IFile> runAPT(
+			final List<AnnotationProcessorFactory> factories,
+			final ProcessorEnvImpl processorEnv) {
+		try {
+			if (factories.size() == 0)
+				return Collections.emptySet();
+
+			if ( ! processorEnv.getFile().exists() )
+				return Collections.emptySet();
+			
+			// clear out all the markers from the previous round.
+			final String markerType = processorEnv.getPhase() == ProcessorEnvImpl.Phase.RECONCILE ? ProcessorEnvImpl.RECONCILE_MARKER
+					: ProcessorEnvImpl.BUILD_MARKER;
+			try {
+				processorEnv.getFile().deleteMarkers(markerType, true,
+						IResource.DEPTH_INFINITE);
+
+			} catch (CoreException e) {
+				throw new IllegalStateException(e);
+			}
+			final Map<String, AnnotationTypeDeclaration> annotationDecls = getAnnotationTypeDeclarations(
+					processorEnv.getAstCompilationUnit(), processorEnv);
+			if (annotationDecls.isEmpty())
+				return Collections.emptySet();
+
+			for (int i = 0, size = factories.size(); i < size; i++) {
+				final AnnotationProcessorFactory factory = (AnnotationProcessorFactory) factories
+						.get(i);
+				final Set<AnnotationTypeDeclaration> factoryDecls = getAnnotations(
+						factory, annotationDecls);
+
+				if (factoryDecls != null && factoryDecls.size() > 0) {
+					final AnnotationProcessor processor = factory
+							.getProcessorFor(factoryDecls, processorEnv);
+					if (processor != null)
+						processor.process();
+				}
+
+				if (annotationDecls.isEmpty())
+					break;
+			}
+			// TODO: (theodora) log unclaimed annotations.
+
+			// notify the processor listeners
+			final Set<AnnotationProcessorListener> listeners = processorEnv
+					.getProcessorListeners();
+			for (AnnotationProcessorListener listener : listeners) {
+				EclipseRoundCompleteEvent event = null;
+				if (listener instanceof RoundCompleteListener) {
+					if (event == null)
+						event = new EclipseRoundCompleteEvent(processorEnv);
+					final RoundCompleteListener rcListener = (RoundCompleteListener) listener;
+					rcListener.roundComplete(event);
+				}
+			}
+
+			final Set<IFile> generatedFiles = new HashSet<IFile>();
+			generatedFiles.addAll( processorEnv.getGeneratedFiles() );
+			processorEnv.close();
+			return generatedFiles;
+
+			// log unclaimed annotations.
+		} catch (Throwable t) {
+			t.printStackTrace();
+		}
+		return Collections.emptySet();
+	}
+
