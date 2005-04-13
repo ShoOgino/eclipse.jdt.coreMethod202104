@@ -1,4 +1,4 @@
-	private void complete(ASTNode astNode, ASTNode astNodeParent, Binding qualifiedBinding, Scope scope) {
+	private void complete(ASTNode astNode, ASTNode astNodeParent, Binding qualifiedBinding, Scope scope, boolean insideTypeAnnotation) {
 
 		setSourceRange(astNode.sourceStart, astNode.sourceEnd);
 		
@@ -64,23 +64,29 @@
 							this.findEnumConstant(this.completionToken, (SwitchStatement) astNodeParent);
 						}
 					} else {
-						findVariablesAndMethods(
-							this.completionToken,
-							scope,
-							(CompletionOnSingleNameReference) astNode,
-							scope);
-						// can be the start of a qualified type name
-						findTypesAndPackages(this.completionToken, scope);
-						if(!this.requestor.isIgnored(CompletionProposal.KEYWORD)) {
-							findKeywords(this.completionToken, singleNameReference.possibleKeywords);
-						}
-						if(singleNameReference.canBeExplicitConstructor && !this.requestor.isIgnored(CompletionProposal.METHOD_REF)){
-							if(CharOperation.prefixEquals(this.completionToken, Keywords.THIS, false)) {
-								ReferenceBinding ref = scope.enclosingSourceType();
-								findExplicitConstructors(Keywords.THIS, ref, (MethodScope)scope, singleNameReference);
-							} else if(CharOperation.prefixEquals(this.completionToken, Keywords.SUPER, false)) {
-								ReferenceBinding ref = scope.enclosingSourceType();
-								findExplicitConstructors(Keywords.SUPER, ref.superclass(), (MethodScope)scope, singleNameReference);
+						if(this.expectedTypesPtr > -1 && this.expectedTypes[0].isAnnotationType()) {
+							findTypesAndPackages(this.completionToken, scope);
+						} else {
+							findVariablesAndMethods(
+								this.completionToken,
+								scope,
+								singleNameReference,
+								scope,
+								insideTypeAnnotation,
+								singleNameReference.isInsideAnnotationAttribute);
+							// can be the start of a qualified type name
+							findTypesAndPackages(this.completionToken, scope);
+							if(!this.requestor.isIgnored(CompletionProposal.KEYWORD)) {
+								findKeywords(this.completionToken, singleNameReference.possibleKeywords);
+							}
+							if(singleNameReference.canBeExplicitConstructor && !this.requestor.isIgnored(CompletionProposal.METHOD_REF)){
+								if(CharOperation.prefixEquals(this.completionToken, Keywords.THIS, false)) {
+									ReferenceBinding ref = scope.enclosingSourceType();
+									findExplicitConstructors(Keywords.THIS, ref, (MethodScope)scope, singleNameReference);
+								} else if(CharOperation.prefixEquals(this.completionToken, Keywords.SUPER, false)) {
+									ReferenceBinding ref = scope.enclosingSourceType();
+									findExplicitConstructors(Keywords.SUPER, ref.superclass(), (MethodScope)scope, singleNameReference);
+								}
 							}
 						}
 					}
@@ -130,7 +136,7 @@
 							} else {
 	
 								if (qualifiedBinding instanceof ReferenceBinding) {
-	
+									boolean isInsideAnnotationAttribute = ref.isInsideAnnotationAttribute;
 									ReferenceBinding receiverType = (ReferenceBinding) qualifiedBinding;
 									setSourceRange((int) (completionPosition >>> 32), (int) completionPosition);
 	
@@ -142,7 +148,8 @@
 									}
 									
 									MethodScope methodScope = null;
-									if(!this.requestor.isIgnored(CompletionProposal.KEYWORD) &&
+									if(isInsideAnnotationAttribute &&
+											!this.requestor.isIgnored(CompletionProposal.KEYWORD) &&
 											((scope instanceof MethodScope && !((MethodScope)scope).isStatic)
 											|| ((methodScope = scope.enclosingMethodScope()) != null && !methodScope.isStatic))) {
 										if(this.completionToken.length > 0) {
@@ -181,7 +188,7 @@
 											true);
 									}
 	
-									if(!this.requestor.isIgnored(CompletionProposal.METHOD_REF)) {
+									if(!isInsideAnnotationAttribute && !this.requestor.isIgnored(CompletionProposal.METHOD_REF)) {
 										findMethods(
 											this.completionToken,
 											null,
@@ -459,9 +466,16 @@
 																	} else if(annot.type instanceof CompletionOnQualifiedTypeReference) {
 																		CompletionOnQualifiedTypeReference type = (CompletionOnQualifiedTypeReference) annot.type;
 																		this.completionToken = type.completionIdentifier;
-																		setSourceRange(type.sourceStart, type.sourceEnd);
-																		
-																		findTypesAndPackages(this.completionToken, scope);
+																		long completionPosition = type.sourcePositions[type.tokens.length];
+																		setSourceRange((int) (completionPosition >>> 32), (int) completionPosition);
+										
+																		findMemberTypes(
+																			this.completionToken,
+																			(ReferenceBinding) qualifiedBinding,
+																			scope,
+																			scope.enclosingSourceType(),
+																			false,
+																			new ObjectVector());
 																	}
 																} else if (astNode instanceof CompletionOnMemberValueName) {
 																	if(!this.requestor.isIgnored(CompletionProposal.ANNOTATION_ATTRIBUTE_REF)) {
@@ -470,7 +484,32 @@
 																		
 																		this.completionToken = memberValuePair.name;
 																		
+																		MemberValuePair[] memberValuePairs = annotation.memberValuePairs();
 																		this.findAnnotationAttributes(this.completionToken, annotation.memberValuePairs(), (ReferenceBinding)annotation.resolvedType);
+																		if(memberValuePairs == null || memberValuePairs.length == 0) {
+																			if(annotation.resolvedType instanceof ReferenceBinding) {
+																				MethodBinding[] methodBindings =
+																					((ReferenceBinding)annotation.resolvedType).availableMethods();
+																				if(methodBindings != null &&
+																						methodBindings.length == 1 &&
+																						CharOperation.equals(methodBindings[0].selector, VALUE)) {
+																					if(this.expectedTypesPtr > -1 && this.expectedTypes[0].isAnnotationType()) {
+																						findTypesAndPackages(this.completionToken, scope);
+																					} else {
+																						findVariablesAndMethods(
+																							this.completionToken,
+																							scope,
+																							FakeInvocationSite,
+																							scope,
+																							insideTypeAnnotation,
+																							true);
+																						// can be the start of a qualified type name
+																						findTypesAndPackages(this.completionToken, scope);
+																					}
+																				}
+																			}
+																			
+																		}
 																	}
 																}
 															}
