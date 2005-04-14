@@ -1,0 +1,88 @@
+	/**
+	 * Start a build on workspace using given options.
+	 * @param options
+	 * @throws IOException
+	 * @throws CoreException
+	 */
+	protected void startBuild(Hashtable options, boolean noWarning) throws IOException, CoreException {
+		if (DEBUG) System.out.print("\tstart build...");
+		JavaCore.setOptions(options);
+		
+		// Clean memory
+		runGc();
+		
+		// Measure
+		startMeasuring();
+		ENV.fullBuild();
+		stopMeasuring();
+		
+		// Verify markers
+		IMarker[] markers = ResourcesPlugin.getWorkspace().getRoot().findMarkers(IJavaModelMarker.JAVA_MODEL_PROBLEM_MARKER, true, IResource.DEPTH_INFINITE);
+		List resources = new ArrayList();
+		List messages = new ArrayList();
+		int warnings = 0;
+		for (int i = 0, length = markers.length; i < length; i++) {
+			IMarker marker = markers[i];
+			switch (((Integer) marker.getAttribute(IMarker.SEVERITY)).intValue()) {
+				case IMarker.SEVERITY_ERROR:
+					resources.add(marker.getResource().getName());
+					messages.add(marker.getAttribute(IMarker.MESSAGE));
+					break;
+				case IMarker.SEVERITY_WARNING:
+					warnings++;
+					if (noWarning) {
+						resources.add(marker.getResource().getName());
+						messages.add(marker.getAttribute(IMarker.MESSAGE));
+					}
+					break;
+			}
+		}
+		
+		// Assert result
+		int size = messages.size();
+		if (size > 0) {
+			/*
+			if (LOG_DIR == null) {
+				StringBuffer buffer = new StringBuffer();
+				int max = size > 10 ? 10 : size;
+				for (int i=0; i<max; i++) {
+					buffer.append(resources.get(i));
+					buffer.append(":\n\t");
+					buffer.append(messages.get(i));
+					buffer.append('\n');
+				}
+				if (size > max)
+					buffer.append("...\n");
+				assertTrue("Unexpected marker(s):\n" + buffer.toString(), size==0);
+			}
+			*/
+//			if (LOG_DIR != null || DEBUG) {
+				StringBuffer debugBuffer = new StringBuffer();
+				for (int i=0; i<size; i++) {
+					debugBuffer.append(resources.get(i));
+					debugBuffer.append(":\n\t");
+					debugBuffer.append(messages.get(i));
+					debugBuffer.append('\n');
+				}
+				System.out.println("ERROR: Unexpected marker(s):\n" + debugBuffer.toString());
+//			}
+		}
+		if (DEBUG) System.out.println("done");
+		
+		// Commit measure
+		commitMeasurements();
+		assertPerformance();
+
+		// Store warning
+		if (warnings>0) {
+			System.out.println("\t- "+warnings+" warnings found while performing build.");
+		}
+		if (this.scenarioComment == null) {
+			this.scenarioComment = new StringBuffer("["+TEST_POSITION+"]");
+		} else {
+			this.scenarioComment.append(' ');
+		}
+		this.scenarioComment.append("warn=");
+		this.scenarioComment.append(warnings);
+	}
+
