@@ -1,0 +1,47 @@
+	ProjectCache getProjectCache(JavaProject project) {
+		ProjectCache cache = this.projectCache;
+		if (cache == null) {
+			IPackageFragmentRoot[] roots;
+			Map reverseMap = new HashMap(3);
+			try {
+				roots = project.getAllPackageFragmentRoots(reverseMap);
+			} catch (JavaModelException e) {
+				// project does not exist: cannot happen since this is the info of the project
+				roots = new IPackageFragmentRoot[0];
+				reverseMap.clear();
+			}
+			HashtableOfArrayToObject fragmentsCache = new HashtableOfArrayToObject();
+			for (int i = 0, length = roots.length; i < length; i++) {
+				IPackageFragmentRoot root = roots[i];
+				IJavaElement[] frags = null;
+				try {
+					frags = root.getChildren();
+				} catch (JavaModelException e) {
+					// root doesn't exist: ignore
+					continue;
+				}
+				for (int j = 0, length2 = frags.length; j < length2; j++) {
+					PackageFragment fragment= (PackageFragment) frags[j];
+					String[] pkgName = fragment.names;
+					Object existing = fragmentsCache.get(pkgName);
+					if (existing == null) {
+						fragmentsCache.put(pkgName, root);
+					} else {
+						if (existing instanceof PackageFragmentRoot) {
+							fragmentsCache.put(pkgName, new IPackageFragmentRoot[] {(PackageFragmentRoot) existing, root});
+						} else {
+							IPackageFragmentRoot[] entry= (IPackageFragmentRoot[]) existing;
+							IPackageFragmentRoot[] copy= new IPackageFragmentRoot[entry.length + 1];
+							System.arraycopy(entry, 0, copy, 0, entry.length);
+							copy[entry.length]= root;
+							fragmentsCache.put(pkgName, copy);
+						}
+					}
+				}
+			}
+			cache = new ProjectCache(roots, fragmentsCache, reverseMap);
+			this.projectCache = cache;
+		}
+		return cache;
+	}
+
