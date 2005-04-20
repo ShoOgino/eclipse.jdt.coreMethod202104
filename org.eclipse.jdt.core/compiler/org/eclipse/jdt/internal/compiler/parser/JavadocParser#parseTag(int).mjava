@@ -1,21 +1,58 @@
-	/* (non-Javadoc)
-	 * @see org.eclipse.jdt.internal.compiler.parser.AbstractCommentParser#parseTag(int)
-	 */
 	protected boolean parseTag(int previousPosition) throws InvalidInputException {
 		boolean valid = false;
-
-		// In case of previous return tag, set it to not empty if parsing an inline tag
-		if (this.currentAstPtr != -2 && this.returnStatement != null) {
-			this.currentAstPtr = -2;
-			JavadocReturnStatement javadocReturn = (JavadocReturnStatement) this.returnStatement;
-			javadocReturn.empty = javadocReturn.empty && !this.inlineTagStarted;
-		}
-
+	
 		// Read tag name
 		int token = readTokenAndConsume();
 		this.tagSourceStart = this.scanner.getCurrentTokenStartPosition();
 		this.tagSourceEnd = this.scanner.getCurrentTokenEndPosition();
-		char[] tag = this.scanner.getCurrentIdentifierSource(); // first token is either an identifier or a keyword
+	
+		// Try to get tag name other than java identifier
+		// (see bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=51660)
+		char pc = peekChar();
+		boolean validTag = false;
+		switch (token) {
+			case TerminalTokens.TokenNameIdentifier:
+			case TerminalTokens.TokenNamereturn:
+			case TerminalTokens.TokenNamethrows:
+				validTag= true;
+		}
+		tagNameToken: while (token != TerminalTokens.TokenNameEOF && this.index < this.scanner.eofPosition) {
+			// !, ", #, %, &, ', -, :, <, >, * chars and spaces are not allowed in tag names
+			switch (pc) {
+				case '}':
+				case '*': // break for '*' as this is perhaps the end of comment (bug 65288)
+					break tagNameToken;
+				case '!':
+				case '#':
+				case '%':
+				case '&':
+				case '\'':
+				case '"':
+				case ':':
+				// case '-': allowed in tag names as this character is often used in doclets (bug 68087)
+				case '<':
+				case '>':
+					readChar();
+					this.tagSourceEnd = this.scanner.getCurrentTokenEndPosition();
+					validTag = false;
+					break;
+				default:
+					if (pc == ' ' || Character.isWhitespace(pc)) break tagNameToken;
+					this.tagSourceEnd = this.scanner.getCurrentTokenEndPosition();
+					token = readTokenAndConsume();
+			}
+			pc = peekChar();
+		}
+		if (!validTag) {
+			this.tagSourceEnd = this.scanner.getCurrentTokenEndPosition();
+			if (this.reportProblems) this.sourceParser.problemReporter().javadocInvalidTag(this.tagSourceStart, this.tagSourceEnd);
+			return false;
+		}
+		int length = this.tagSourceEnd-this.tagSourceStart+1;
+		char[] tag = new char[length];
+		System.arraycopy(this.source, this.tagSourceStart, tag, 0, length);
+		this.index = this.tagSourceEnd+1;
+		this.scanner.currentPosition = this.tagSourceEnd+1;
 
 		// Decide which parse to perform depending on tag name
 		this.tagValue = NO_TAG_VALUE;
