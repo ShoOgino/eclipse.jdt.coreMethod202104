@@ -3,8 +3,10 @@
 		int dimension;
 		TypeBinding originalType;
 		switch(type.kind()) {
+			case Binding.BASE_TYPE :
 			case Binding.TYPE_PARAMETER:
 			case Binding.WILDCARD_TYPE:
+			case Binding.RAW_TYPE:
 				return type;
 			case Binding.ARRAY_TYPE:
 				dimension = type.dimensions();
@@ -14,26 +16,50 @@
 				dimension = 0;
 				originalType = type;
 		}
-		if (originalType instanceof ReferenceBinding) {
-			boolean needToConvert = originalType.isGenericType() 
-					|| (originalType.erasure().isGenericType() 
-							&& originalType.isParameterizedType() 
-							&& ((ParameterizedTypeBinding)originalType).arguments == null);
-			
-			ReferenceBinding convertedType = (ReferenceBinding) originalType;
-			ReferenceBinding originalEnclosing = originalType.enclosingType();
-			ReferenceBinding convertedEnclosing = originalEnclosing;
-			if (originalEnclosing != null && (needToConvert || convertedType.isStatic() && originalEnclosing.isGenericType())) {
-				convertedEnclosing = (ReferenceBinding) convertToRawType(originalEnclosing);
+		boolean needToConvert;
+		switch (originalType.kind()) {
+			case Binding.BASE_TYPE :
+				return type;
+			case Binding.GENERIC_TYPE :
+				needToConvert = true;
+				break;
+			case Binding.PARAMETERIZED_TYPE :
+				ParameterizedTypeBinding paramType = (ParameterizedTypeBinding) originalType;
+				needToConvert = paramType.type.isGenericType(); // only recursive call to enclosing type can find parameterizedType with arguments
+				break;
+			default :
+				needToConvert = false;
+				break;
+		}
+		ReferenceBinding originalEnclosing = originalType.enclosingType();
+		TypeBinding convertedType;
+		if (originalEnclosing == null) {
+			convertedType = needToConvert ? environment().createRawType((ReferenceBinding)originalType.erasure(), null) : originalType;
+		} else {
+			ReferenceBinding convertedEnclosing;
+			switch (originalEnclosing.kind()) {
+				case Binding.GENERIC_TYPE :
+				case Binding.PARAMETERIZED_TYPE :
+					if (needToConvert || ((ReferenceBinding)originalType).isStatic()) {
+						convertedEnclosing = (ReferenceBinding) convertToRawType(originalEnclosing);
+					} else {
+						convertedEnclosing = originalEnclosing;
+					}
+					break;
+				default :
+					convertedEnclosing = originalEnclosing;
+					break;
 			}
 			if (needToConvert) {
-				convertedType = environment().createRawType(convertedType, convertedEnclosing);
+				convertedType = environment().createRawType((ReferenceBinding) originalType.erasure(), convertedEnclosing);
 			} else if (originalEnclosing != convertedEnclosing) {
-				convertedType = createParameterizedType(convertedType, null, convertedEnclosing);
+				convertedType = createParameterizedType((ReferenceBinding) originalType.erasure(), null, convertedEnclosing);
+			} else {
+				convertedType = originalType;
 			}
-			if (originalType != convertedType) {
-				return dimension > 0 ? (TypeBinding)createArrayType(convertedType, dimension) : convertedType;
-			}
+		}
+		if (originalType != convertedType) {
+			return dimension > 0 ? (TypeBinding)createArrayType(convertedType, dimension) : convertedType;
 		}
 		return type;
 	}

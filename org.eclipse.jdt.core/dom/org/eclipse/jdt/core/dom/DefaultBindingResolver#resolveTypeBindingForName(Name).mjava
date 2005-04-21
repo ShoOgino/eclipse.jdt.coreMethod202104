@@ -1,0 +1,202 @@
+	synchronized ITypeBinding resolveTypeBindingForName(Name name) {
+		org.eclipse.jdt.internal.compiler.ast.ASTNode node = (org.eclipse.jdt.internal.compiler.ast.ASTNode) this.newAstToOldAst.get(name);
+		int index = name.index;
+		if (node instanceof QualifiedNameReference) {
+			QualifiedNameReference qualifiedNameReference = (QualifiedNameReference) node;
+			final char[][] tokens = qualifiedNameReference.tokens;
+			if (tokens.length == index) {
+				return this.getTypeBinding(qualifiedNameReference.resolvedType);
+			}
+			int indexOfFirstFieldBinding = qualifiedNameReference.indexOfFirstFieldBinding; // one-based
+			if (index < indexOfFirstFieldBinding) {
+				// an extra lookup is required
+				BlockScope internalScope = (BlockScope) this.astNodesToBlockScope.get(name);
+				Binding binding = null;
+				try {
+					if (internalScope == null) {
+						binding = this.scope.getTypeOrPackage(CharOperation.subarray(tokens, 0, index));
+					} else {
+						binding = internalScope.getTypeOrPackage(CharOperation.subarray(tokens, 0, index));
+					}
+				} catch (RuntimeException e) {
+					// see https://bugs.eclipse.org/bugs/show_bug.cgi?id=53357
+					// see https://bugs.eclipse.org/bugs/show_bug.cgi?id=63550
+					// see https://bugs.eclipse.org/bugs/show_bug.cgi?id=64299
+				}
+				if (binding instanceof org.eclipse.jdt.internal.compiler.lookup.PackageBinding) {
+					return null;
+				} else if (binding instanceof org.eclipse.jdt.internal.compiler.lookup.TypeBinding) {
+					// it is a type
+					return this.getTypeBinding((org.eclipse.jdt.internal.compiler.lookup.TypeBinding)binding);
+				}
+			} else if (index == indexOfFirstFieldBinding) {
+				if (qualifiedNameReference.isTypeReference()) {
+					return this.getTypeBinding(qualifiedNameReference.resolvedType);
+				} else {
+					// in this case we want to get the next field declaring's class
+					if (qualifiedNameReference.otherBindings == null) {
+						return null;
+					}
+					FieldBinding fieldBinding = qualifiedNameReference.otherBindings[0];
+					if (fieldBinding == null) return null;
+					org.eclipse.jdt.internal.compiler.lookup.TypeBinding type = fieldBinding.declaringClass;
+					if (type == null) { // array length scenario
+						// use type from first binding (no capture needed for array type)
+						switch (qualifiedNameReference.bits & org.eclipse.jdt.internal.compiler.ast.ASTNode.RestrictiveFlagMASK) {
+							case Binding.FIELD:
+								type = ((FieldBinding) qualifiedNameReference.binding).type;
+								break;
+							case Binding.LOCAL:
+								type = ((LocalVariableBinding) qualifiedNameReference.binding).type;
+								break;
+						}
+					}
+					return this.getTypeBinding(type);
+				}
+			} else {
+				/* This is the case for a name which is part of a qualified name that
+				 * cannot be resolved. See PR 13063.
+				 */
+				if (qualifiedNameReference.otherBindings == null) return null;
+				final int otherBindingsLength = qualifiedNameReference.otherBindings.length;
+				if (otherBindingsLength == (index - indexOfFirstFieldBinding)) {
+					return this.getTypeBinding(qualifiedNameReference.resolvedType);
+				}
+				FieldBinding fieldBinding = qualifiedNameReference.otherBindings[index - indexOfFirstFieldBinding];
+				if (fieldBinding == null) return null;
+				org.eclipse.jdt.internal.compiler.lookup.TypeBinding type = fieldBinding.declaringClass;
+				if (type == null) { // array length scenario
+					// use type from previous binding (no capture needed for array type)
+					fieldBinding = qualifiedNameReference.otherBindings[index - indexOfFirstFieldBinding - 1];
+					if (fieldBinding == null) return null;
+					type = fieldBinding.type;
+				}
+				return this.getTypeBinding(type);
+			}
+		} else if (node instanceof QualifiedTypeReference) {
+			QualifiedTypeReference qualifiedTypeReference = (QualifiedTypeReference) node;
+			if (qualifiedTypeReference.resolvedType == null) {
+				return null;
+			}
+			if (index == qualifiedTypeReference.tokens.length) {
+				if (!qualifiedTypeReference.resolvedType.isValidBinding() && qualifiedTypeReference instanceof JavadocQualifiedTypeReference) {
+					JavadocQualifiedTypeReference typeRef = (JavadocQualifiedTypeReference) node;
+					if (typeRef.packageBinding != null) {
+						return null;
+					}
+				}
+				return this.getTypeBinding(qualifiedTypeReference.resolvedType.leafComponentType());
+			} else {
+				if (index >= 0) {
+					BlockScope internalScope = (BlockScope) this.astNodesToBlockScope.get(name);
+					Binding binding = null;
+					try {
+						if (internalScope == null) {
+							binding = this.scope.getTypeOrPackage(CharOperation.subarray(qualifiedTypeReference.tokens, 0, index));
+						} else {
+							binding = internalScope.getTypeOrPackage(CharOperation.subarray(qualifiedTypeReference.tokens, 0, index));
+						}
+					} catch (RuntimeException e) {
+						// see https://bugs.eclipse.org/bugs/show_bug.cgi?id=53357
+					}
+					if (binding instanceof org.eclipse.jdt.internal.compiler.lookup.PackageBinding) {
+						return null;
+					} else if (binding instanceof org.eclipse.jdt.internal.compiler.lookup.TypeBinding) {
+						// it is a type
+						return this.getTypeBinding((org.eclipse.jdt.internal.compiler.lookup.TypeBinding)binding);
+					} else {
+						return null;
+					}
+				}
+			}
+		} else if (node instanceof ImportReference) {
+			ImportReference importReference = (ImportReference) node;
+			int importReferenceLength = importReference.tokens.length;
+			if (index >= 0) {
+				Binding binding = null;
+				if (importReferenceLength == index) {
+					try {
+						binding = this.scope.getImport(CharOperation.subarray(importReference.tokens, 0, index), importReference.onDemand, importReference.isStatic());
+					} catch (RuntimeException e) {
+						// see https://bugs.eclipse.org/bugs/show_bug.cgi?id=53357
+					}
+				} else {
+					try {
+						binding = this.scope.getImport(CharOperation.subarray(importReference.tokens, 0, index), true, importReference.isStatic());
+					} catch (RuntimeException e) {
+						// see https://bugs.eclipse.org/bugs/show_bug.cgi?id=53357
+					}
+				}
+				if (binding != null) {
+					if (binding instanceof org.eclipse.jdt.internal.compiler.lookup.TypeBinding) {
+						// it is a type
+						return this.getTypeBinding((org.eclipse.jdt.internal.compiler.lookup.TypeBinding)binding);
+					}
+					return null;
+				}
+			}
+		} else if (node instanceof AbstractMethodDeclaration) {
+			AbstractMethodDeclaration methodDeclaration = (AbstractMethodDeclaration) node;
+			if (methodDeclaration != null) {
+				IMethodBinding method = this.getMethodBinding(methodDeclaration.binding);
+				if (method == null) return null;
+				return method.getReturnType();
+			}
+		} else if (node instanceof org.eclipse.jdt.internal.compiler.ast.TypeDeclaration) {
+			org.eclipse.jdt.internal.compiler.ast.TypeDeclaration typeDeclaration = (org.eclipse.jdt.internal.compiler.ast.TypeDeclaration) node;
+			ITypeBinding typeBinding = this.getTypeBinding(typeDeclaration.binding);
+			if (typeBinding != null) {
+				return typeBinding;
+			}
+		} if (node instanceof SingleNameReference) {
+			SingleNameReference singleNameReference = (SingleNameReference) node;
+			return this.getTypeBinding(singleNameReference.resolvedType);
+		} else if (node instanceof QualifiedSuperReference) {
+			QualifiedSuperReference qualifiedSuperReference = (QualifiedSuperReference) node;
+			return this.getTypeBinding(qualifiedSuperReference.qualification.resolvedType);
+		} else if (node instanceof LocalDeclaration) {
+			IVariableBinding variable = this.getVariableBinding(((LocalDeclaration)node).binding);
+			if (variable == null) return null;
+			return variable.getType();
+		} else if (node instanceof JavadocFieldReference) {
+			JavadocFieldReference fieldRef = (JavadocFieldReference) node;
+			if (fieldRef.methodBinding != null) {
+				return getMethodBinding(fieldRef.methodBinding).getReturnType();
+			}
+			return getTypeBinding(fieldRef.resolvedType);
+		} else if (node instanceof FieldReference) {
+			return getTypeBinding(((FieldReference) node).resolvedType);
+		} else if (node instanceof SingleTypeReference) {
+			SingleTypeReference singleTypeReference = (SingleTypeReference) node;
+			org.eclipse.jdt.internal.compiler.lookup.TypeBinding binding = singleTypeReference.resolvedType;
+			if (binding != null) {
+				return this.getTypeBinding(binding.leafComponentType());
+			}
+		} else if (node instanceof org.eclipse.jdt.internal.compiler.ast.FieldDeclaration) {
+			org.eclipse.jdt.internal.compiler.ast.FieldDeclaration fieldDeclaration = (org.eclipse.jdt.internal.compiler.ast.FieldDeclaration) node;
+			IVariableBinding field = this.getVariableBinding(fieldDeclaration.binding);
+			if (field == null) return null;
+			return field.getType();
+		} else if (node instanceof MessageSend) {
+			MessageSend messageSend = (MessageSend) node;
+			IMethodBinding method = getMethodBinding(messageSend.binding);
+			if (method == null) return null;
+			return method.getReturnType();
+		} else if (node instanceof AllocationExpression) {
+			AllocationExpression allocation = (AllocationExpression) node;
+			return getTypeBinding(allocation.resolvedType);
+		} else if (node instanceof JavadocImplicitTypeReference) {
+			JavadocImplicitTypeReference implicitRef = (JavadocImplicitTypeReference) node;
+			return getTypeBinding(implicitRef.resolvedType);
+		} else if (node instanceof org.eclipse.jdt.internal.compiler.ast.TypeParameter) {
+			org.eclipse.jdt.internal.compiler.ast.TypeParameter typeParameter = (org.eclipse.jdt.internal.compiler.ast.TypeParameter) node;
+			return this.getTypeBinding(typeParameter.binding);
+		} else if (node instanceof org.eclipse.jdt.internal.compiler.ast.MemberValuePair) {
+			org.eclipse.jdt.internal.compiler.ast.MemberValuePair memberValuePair = (org.eclipse.jdt.internal.compiler.ast.MemberValuePair) node;
+			IMethodBinding method = getMethodBinding(memberValuePair.binding);
+			if (method == null) return null;
+			return method.getReturnType();
+		}
+		return null;
+	}	
+

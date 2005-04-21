@@ -1,0 +1,40 @@
+	public void test0169() throws CoreException {
+		this.workingCopy = getWorkingCopy("/Converter15/src/X.java", true/*resolve*/);
+		String contents =
+				"public class X {\n" + 
+				"    static class BB<T, S> { }\n" + 
+				"    static class BD<T> extends BB<T, T> { }\n" + 
+				"    void f() {\n" + 
+				"        BB<? extends Number, ? super Integer> bb = null;\n" + 
+				"        Object o = (BD<Number>) bb;\n" + 
+				"    }\n" + 
+				"}";
+	   	ASTNode node = buildAST(
+				contents,
+				this.workingCopy,
+				false);
+		assertNotNull("No node", node);
+		assertEquals("Not a compilation unit", ASTNode.COMPILATION_UNIT, node.getNodeType());
+		CompilationUnit compilationUnit = (CompilationUnit) node;
+		assertProblemsSize(compilationUnit, 1, "Type safety: The cast from X.BB<capture-of ? extends Number,capture-of ? super Integer> to X.BD<Number> is actually checking against the erased type X.BD");
+		node = getASTNode(compilationUnit, 0, 2, 1);
+		assertEquals("Not a variable declaration statement", ASTNode.VARIABLE_DECLARATION_STATEMENT, node.getNodeType());
+		VariableDeclarationStatement statement = (VariableDeclarationStatement) node;
+		List fragments = statement.fragments();
+		assertEquals("Wrong size", 1, fragments.size());
+		VariableDeclarationFragment fragment = (VariableDeclarationFragment) fragments.get(0);
+		Expression expression = fragment.getInitializer();
+	   	assertEquals("Not a cast expression", ASTNode.CAST_EXPRESSION, expression.getNodeType());
+		CastExpression castExpression = (CastExpression) expression;
+		Expression expression2 = castExpression.getExpression();
+		ITypeBinding typeBinding = expression2.resolveTypeBinding();
+		assertTrue("Not a parameterized type", typeBinding.isParameterizedType());
+		ITypeBinding[] typeArguments = typeBinding.getTypeArguments();
+		assertEquals("Wrong size", 2, typeArguments.length);
+		ITypeBinding typeBinding2 = typeArguments[0];
+		assertTrue("Not a capture binding", typeBinding2.isCapture());
+		ITypeBinding wildcardBinding = typeBinding2.getWildcard();
+		assertNotNull("No wildcard binding", wildcardBinding);
+		assertTrue("Not a wildcard", wildcardBinding.isWildcardType());
+	}
+
