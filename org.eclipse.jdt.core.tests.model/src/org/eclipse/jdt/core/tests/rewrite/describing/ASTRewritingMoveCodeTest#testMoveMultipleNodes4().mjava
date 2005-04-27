@@ -1,0 +1,46 @@
+	public void testMoveMultipleNodes4() throws Exception {
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("        if (i == 0) {\n");
+		buf.append("            foo();\n");
+		buf.append("            i++; // comment\n");
+		buf.append("            i++;\n");
+		buf.append("            i--;\n");
+		buf.append("        }\n");
+		buf.append("    }\n");
+		buf.append("}\n");
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+		
+		CompilationUnit astRoot= createAST(cu);
+		ASTRewrite rewrite= ASTRewrite.create(astRoot.getAST());
+		assertTrue("Code has errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+		MethodDeclaration methodDecl= findMethodDeclaration(type, "foo");
+		{
+			List statements= methodDecl.getBody().statements();
+			IfStatement ifStatement= (IfStatement) statements.get(0);
+			Block thenBlock= (Block) ifStatement.getThenStatement();
+
+			ListRewrite listRewrite= rewrite.getListRewrite(thenBlock, Block.STATEMENTS_PROPERTY);
+			List thenStatements= thenBlock.statements();
+			ASTNode first1= (ASTNode) thenStatements.get(0);
+			ASTNode last1= (ASTNode) thenStatements.get(2);
+			
+			listRewrite.createMoveTarget(first1, last1);
+			
+			ASTNode first2= (ASTNode) thenStatements.get(2);
+			ASTNode last2= (ASTNode) thenStatements.get(3);
+			
+			try {
+				listRewrite.createMoveTarget(first2, last2);
+				assertFalse(true);
+			} catch (IllegalArgumentException e) {
+				// overlapping move ranges
+			}
+		}	
+	}
+
