@@ -1,38 +1,46 @@
 	public static void parse(ICompilationUnit[] compilationUnits, ASTRequestor astRequestor, int apiLevel, Map options, IProgressMonitor monitor) {
-		CompilerOptions compilerOptions = new CompilerOptions(options);
-		Parser parser = new CommentRecorderParser(
-			new ProblemReporter(
-					DefaultErrorHandlingPolicies.proceedWithAllProblems(), 
-					compilerOptions, 
-					new DefaultProblemFactory()),
-			false);
-		for (int i = 0, length = compilationUnits.length; i < length; i++) {
-			org.eclipse.jdt.internal.compiler.env.ICompilationUnit sourceUnit = (org.eclipse.jdt.internal.compiler.env.ICompilationUnit) compilationUnits[i];
-			CompilationResult compilationResult = new CompilationResult(sourceUnit, 0, 0, compilerOptions.maxProblemsPerUnit);
-			CompilationUnitDeclaration compilationUnitDeclaration = parser.dietParse(sourceUnit, compilationResult);
-			
-			if (compilationUnitDeclaration.ignoreMethodBodies) {
-				compilationUnitDeclaration.ignoreFurtherInvestigation = true;
-				// if initial diet parse did not work, no need to dig into method bodies.
-				continue; 
+		SubProgressMonitor subProgressMonitor = monitor == null ? null : new SubProgressMonitor(monitor, 100); // 100% of the work is done in this method
+		try {
+			CompilerOptions compilerOptions = new CompilerOptions(options);
+			Parser parser = new CommentRecorderParser(
+				new ProblemReporter(
+						DefaultErrorHandlingPolicies.proceedWithAllProblems(), 
+						compilerOptions, 
+						new DefaultProblemFactory()),
+				false);
+			int length = compilationUnits.length;
+			if (subProgressMonitor != null) subProgressMonitor.beginTask("", length); //$NON-NLS-1$
+			for (int i = 0; i < length; i++) {
+				org.eclipse.jdt.internal.compiler.env.ICompilationUnit sourceUnit = (org.eclipse.jdt.internal.compiler.env.ICompilationUnit) compilationUnits[i];
+				CompilationResult compilationResult = new CompilationResult(sourceUnit, 0, 0, compilerOptions.maxProblemsPerUnit);
+				CompilationUnitDeclaration compilationUnitDeclaration = parser.dietParse(sourceUnit, compilationResult);
+				
+				if (compilationUnitDeclaration.ignoreMethodBodies) {
+					compilationUnitDeclaration.ignoreFurtherInvestigation = true;
+					// if initial diet parse did not work, no need to dig into method bodies.
+					continue; 
+				}
+				
+				//fill the methods bodies in order for the code to be generated
+				//real parse of the method....
+				parser.scanner.setSource(compilationResult);
+				org.eclipse.jdt.internal.compiler.ast.TypeDeclaration[] types = compilationUnitDeclaration.types;
+				if (types != null) {
+					for (int j = types.length; --j >= 0;)
+						types[j].parseMethod(parser, compilationUnitDeclaration);
+				}
+				
+				// convert AST
+				CompilationUnit node = convert(compilationUnitDeclaration, sourceUnit.getContents(), apiLevel, options, false/*don't resolve binding*/, null/*no owner needed*/, null/*no binding table needed*/, monitor);
+				node.setJavaElement(compilationUnits[i]);
+				
+				// accept AST
+				astRequestor.acceptAST(compilationUnits[i], node);
+				
+				if (subProgressMonitor != null) subProgressMonitor.worked(1);
 			}
-			
-			//fill the methods bodies in order for the code to be generated
-			//real parse of the method....
-			parser.scanner.setSource(compilationResult);
-			org.eclipse.jdt.internal.compiler.ast.TypeDeclaration[] types = compilationUnitDeclaration.types;
-			if (types != null) {
-				for (int j = types.length; --j >= 0;)
-					types[j].parseMethod(parser, compilationUnitDeclaration);
-			}
-			
-			// convert AST
-			CompilationUnit node = convert(compilationUnitDeclaration, sourceUnit.getContents(), apiLevel, options, false/*don't resolve binding*/, null/*no owner needed*/, null/*no binding table needed*/, monitor);
-			node.setJavaElement(compilationUnits[i]);
-			
-			
-			// accept AST
-			astRequestor.acceptAST(compilationUnits[i], node);
+		} finally {
+			if (subProgressMonitor != null) subProgressMonitor.done();
 		}
 	}
 
