@@ -1,6 +1,83 @@
     public PackageDeclaration getPackage(String name)
     {
+		if (name == null)
+			throw new IllegalArgumentException("name cannot be null");
+		
 		checkValid();
-        throw new UnsupportedOperationException("NYI");       
+        IPackageFragment[] pkgFrags = PackageUtil.getPackageFragments(name, this);
+		
+		// No packages found, null expected
+		if (pkgFrags.length == 0)
+			return null;
+		
+		// If there are no source or class files, we'll need to return
+		// a special implementation of the package decl that expects
+		// no declarations inside it
+		boolean containsNoJavaResources = true;
+		for (IPackageFragment pkg : pkgFrags) {
+			try {
+				if (pkg.containsJavaResources()) {
+					containsNoJavaResources = false;
+					break;
+				}
+			}
+			catch (JavaModelException e) {}
+		}
+		if (containsNoJavaResources)
+			return new PackageDeclarationImplNoBinding(pkgFrags, this);
+		
+		// We should be able to create a class or 
+		// source file from one of the packages.
+		ICompilationUnit compUnit = null;
+		IClassFile classFile = null;
+		
+		OUTER:
+		for (IPackageFragment pkg : pkgFrags) {
+			try {
+				ICompilationUnit[] compUnits = pkg.getCompilationUnits();
+				if (compUnits.length > 0) {
+					compUnit = compUnits[0];
+					break;
+				}
+				IClassFile[] classFiles = pkg.getClassFiles();
+				if (classFiles.length > 0) {
+					// Need to grab the first one that's not an inner class,
+					// as eclipse has trouble parsing inner class files
+					for (IClassFile tempClassFile : classFiles) {
+						if (tempClassFile.getElementName().indexOf("$") < 0) {
+							classFile = tempClassFile;
+							break OUTER;
+						}
+					}
+				}
+			}
+			catch (JavaModelException e) {}
+		}
+		
+		IType type = null;
+		if (compUnit != null) {
+			try {
+				IType[] types = compUnit.getAllTypes();
+			}
+			catch (JavaModelException e) {}
+		}
+		else if (classFile != null) {
+			try {
+				type = classFile.getType();
+			}
+			catch (JavaModelException e) {}
+		}
+		
+		// Given a type, we can construct a package declaration impl from it,
+		// but we must hide the fact that it came from a real declaration,
+		// as the client requested it without that context
+		if (type != null) {
+			TypeDeclarationImpl typeDecl = (TypeDeclarationImpl)getTypeDeclaration(type);
+			ITypeBinding binding = typeDecl.getDeclarationBinding();
+			return new PackageDeclarationImpl(binding.getPackage(), typeDecl, this, true);
+		}
+		
+		// No classes or source files found
+		return new PackageDeclarationImplNoBinding(pkgFrags, this);
     }
 

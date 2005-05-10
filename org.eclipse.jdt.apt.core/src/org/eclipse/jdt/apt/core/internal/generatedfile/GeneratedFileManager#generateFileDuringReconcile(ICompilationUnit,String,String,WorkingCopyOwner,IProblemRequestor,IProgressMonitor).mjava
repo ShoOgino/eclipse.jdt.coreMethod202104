@@ -10,28 +10,41 @@
 	 * @param progressMonitor
 	 * @return
 	 */
-	public ICompilationUnit generateFileDuringReconcile(
+	public synchronized FileGenerationResult generateFileDuringReconcile(
 			ICompilationUnit parentCompilationUnit, String typeName,
 			String contents, WorkingCopyOwner workingCopyOwner,
 			IProblemRequestor problemRequestor, IProgressMonitor progressMonitor ) 
 	{
 		ICompilationUnit workingCopy = null;
+		FileGenerationResult result = null;
 		try 
 		{
 			//
 			// get working copy (either from cache or create a new one)
 			//
-			workingCopy = getWorkingCopy( 
-				parentCompilationUnit,  typeName, contents,  
-				workingCopyOwner, problemRequestor,  progressMonitor);
+			workingCopy = getCachedWorkingCopy( parentCompilationUnit, typeName );
 			
-			//
-			//  Update working copy's buffer with the contents of the type 
-			// 
-			updateWorkingCopy( contents, workingCopy, workingCopyOwner, progressMonitor );
+			if ( workingCopy == null )
+			{
+				// create a new working copy
+				workingCopy = createNewWorkingCopy(  
+						parentCompilationUnit,  typeName, contents,  
+						workingCopyOwner, problemRequestor,  progressMonitor);
+				workingCopy.reconcile(AST.JLS3, true, workingCopyOwner,
+						progressMonitor);
+				result = new FileGenerationResult((IFile)workingCopy.getResource(), true);
+			}
+			else
+			{
+
+				//
+				//  Update working copy's buffer with the contents of the type 
+				// 
+				boolean modified = updateWorkingCopy( contents, workingCopy, workingCopyOwner, progressMonitor );
+				result = new FileGenerationResult((IFile)workingCopy.getResource(), modified);
+			}
 			
-			return workingCopy;
-		
+			return result;
 		} 
 		catch (JavaModelException jme) 
 		{
@@ -41,6 +54,6 @@
 		{
 			ce.printStackTrace();
 		}
-		return workingCopy;
+		return new FileGenerationResult((IFile)workingCopy.getResource(), true);
 	}
 

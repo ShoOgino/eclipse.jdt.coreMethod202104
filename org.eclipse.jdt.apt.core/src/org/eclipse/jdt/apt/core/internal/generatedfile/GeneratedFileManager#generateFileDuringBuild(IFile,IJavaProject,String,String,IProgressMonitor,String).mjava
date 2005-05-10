@@ -1,0 +1,104 @@
+	/**
+	 * Return the file and a flag indicating if the content was modified.
+	 * 
+	 * @param parentFile
+	 * @param typeName
+	 * @param contents
+	 * @param progressMonitor
+	 * @param charsetName
+	 * @return - the newly created IFile along with whether it was modified
+	 * @throws CoreException
+	 * @throws UnsupportedEncodingException
+	 */
+	public synchronized FileGenerationResult generateFileDuringBuild(
+			IFile parentFile,
+			IJavaProject javaProject,
+			String typeName, 
+			String contents, 
+			IProgressMonitor progressMonitor,
+			String charsetName ) 
+		throws CoreException, UnsupportedEncodingException
+	{
+		try
+		{		
+			IProject project = javaProject.getProject();
+			// create folder for generated source files
+			IFolder folder = project.getFolder( GENERATED_SOURCE_FOLDER_NAME );
+			if (!folder.exists())
+				folder.create(true, false, null);
+
+			//
+			// make sure __generated_src dir is on the cp if not already
+			//
+			updateProjectClasspath( (JavaProject)javaProject, folder, progressMonitor );
+			
+			// split the type name into its parts
+			String[] parts = typeName.split( "\\.");
+	
+			//  create folders for the package parts
+			int i = 0;
+			for ( ;i < parts.length - 1; i++ )
+			{
+				folder = folder.getFolder( parts[i] );
+				if ( !folder.exists() )
+					folder.create( true, false, null );
+			}
+			
+			String fileName = parts[i] + ".java";		
+			IFile file = folder.getFile( fileName );
+	
+			byte[] bytes;
+			if ( charsetName == null || charsetName == "" )
+				bytes = contents.getBytes();
+			else
+				bytes = contents.getBytes( charsetName );
+			InputStream is = new ByteArrayInputStream( bytes );
+			
+			boolean contentsDiffer = true;
+			
+			if ( !file.exists() )
+			{
+				file.create( is, true, progressMonitor );
+			}
+			else
+			{
+				// Check if the content has changed
+				InputStream oldData = null;
+				try {
+					oldData = new BufferedInputStream(file.getContents());
+					contentsDiffer = !compareStreams(oldData, is);
+				}
+				catch (CoreException ce) {
+					// Do nothing. Assume the new content is different
+				}
+				finally {
+					is.reset();
+					if (oldData != null) {
+						try {
+							oldData.close();
+						} 
+						catch (IOException ioe) 
+						{}
+					}
+				}
+				if (contentsDiffer) {
+					makeReadOnly( file, false );
+					file.setContents( is, true, true, progressMonitor );
+				}
+			}
+			
+			file.setDerived( true );
+			
+			makeReadOnly( file, true );
+			
+			updateFileMaps( typeName, parentFile, file );
+			return new FileGenerationResult(file, contentsDiffer);
+		}
+		catch ( Throwable t )
+		{
+			t.printStackTrace();
+		}
+		
+		return null;
+	}
+

@@ -1,0 +1,80 @@
+	private void internalTestStopGeneratingFileInBuilder( boolean fullBuild )
+	{
+		IProject project = env.getProject( getProjectName() );
+		IPath srcRoot = getSourcePath();
+		
+		String code = "package p1;\n"
+			+ "//import org.eclipse.jdt.apt.tests.annotations.helloworld.HelloWorldAnnotation;"
+			+ "\n" + "public class A " + "\n" + "{"
+			+ "    //@HelloWorldAnnotation" + "\n"
+			+ "    public static void main( String[] argv )" + "\n" + "    {"
+			+ "\n"
+			+ "        generatedfilepackage.GeneratedFileTest.helloWorld();"
+			+ "\n" + "    }" + "\n" + "}" + "\n";
+
+		
+		IPath p1aPath = env.addClass( srcRoot, "p1", "A", //$NON-NLS-1$ //$NON-NLS-2$
+			code );
+
+		if ( fullBuild )
+			fullBuild( project.getFullPath() );
+		else
+			incrementalBuild( project.getFullPath() );
+		
+
+		expectingOnlyProblemsFor( p1aPath );
+		expectingOnlySpecificProblemFor( p1aPath, new Problem(
+			"A", "generatedfilepackage cannot be resolved", p1aPath ) ); //$NON-NLS-1$ //$NON-NLS-2$	
+
+		code = "package p1;\n"
+			+ "import org.eclipse.jdt.apt.tests.annotations.helloworld.HelloWorldAnnotation;"
+			+ "\n" + "public class A " + "\n" + "{"
+			+ "    @HelloWorldAnnotation" + "\n"
+			+ "    public static void main( String[] argv )" + "\n" + "    {"
+			+ "\n"
+			+ "        generatedfilepackage.GeneratedFileTest.helloWorld();"
+			+ "\n" + "    }" + "\n" + "}" + "\n";
+
+		env.addClass( srcRoot, "p1", "A", code );
+		if ( fullBuild )
+			fullBuild( project.getFullPath() );
+		else
+			incrementalBuild( project.getFullPath() );
+		
+		expectingOnlyProblemsFor( new IPath[0] );
+
+		// do a full build again.  This is necessary because generating the file
+		// caused a classpath change, so the next inremental build will end up being
+		// a full build because of the classpath change
+		if ( ! fullBuild )
+			fullBuild( project.getFullPath() );
+		
+		// now remove the annotation.  The generated file should go away
+		// and we should see errors again
+		code = "package p1;\n"
+			+ "//import org.eclipse.jdt.apt.tests.annotations.helloworld.HelloWorldAnnotation;"
+			+ "\n" + "public class A " + "\n" + "{"
+			+ "    //@HelloWorldAnnotation" + "\n"
+			+ "    public static void main( String[] argv )" + "\n" + "    {"
+			+ "\n"
+			+ "        generatedfilepackage.GeneratedFileTest.helloWorld();"
+			+ "\n" + "    }" + "\n" + "}" + "\n";
+
+		env.addClass( srcRoot, "p1", "A", code );
+		
+		if ( fullBuild )
+			fullBuild( project.getFullPath() );
+		else
+			incrementalBuild( project.getFullPath() );
+		
+		expectingOnlyProblemsFor( p1aPath );
+		String expectedError;
+		if ( fullBuild )
+			expectedError = "generatedfilepackage cannot be resolved";
+		else
+			expectedError = "generatedfilepackage.GeneratedFileTest cannot be resolved to a type";
+
+		expectingOnlySpecificProblemFor( p1aPath, 
+					new Problem( "A", expectedError, p1aPath ) ); //$NON-NLS-1$ 
+	}
+

@@ -1,13 +1,20 @@
-	private static Set<IFile> runAPT(
+	private static APTResult runAPT(
 			final List<AnnotationProcessorFactory> factories,
-			final ProcessorEnvImpl processorEnv) {
+			final ProcessorEnvImpl processorEnv) 
+	{
 		try {
 			if (factories.size() == 0)
-				return Collections.emptySet();
-
+			{
+				if ( DEBUG ) trace( "runAPT: leaving early because there are no factories");
+				return EMPTY_APT_RESULT;
+			}
+				
 			if ( ! processorEnv.getFile().exists() )
-				return Collections.emptySet();
-			
+			{
+				if ( DEBUG ) trace( "runAPT: leaving early because file doesn't exist");
+				return EMPTY_APT_RESULT;
+			}
+				
 			// clear out all the markers from the previous round.
 			final String markerType = processorEnv.getPhase() == ProcessorEnvImpl.Phase.RECONCILE ? ProcessorEnvImpl.RECONCILE_MARKER
 					: ProcessorEnvImpl.BUILD_MARKER;
@@ -20,9 +27,16 @@
 			}
 			final Map<String, AnnotationTypeDeclaration> annotationDecls = getAnnotationTypeDeclarations(
 					processorEnv.getAstCompilationUnit(), processorEnv);
+			
 			if (annotationDecls.isEmpty())
-				return Collections.emptySet();
+			{
+				if ( DEBUG ) trace ( "runAPT:  leaving early because annotationDecls is empty" );
+				return EMPTY_APT_RESULT;
+			}
 
+			GeneratedFileManager gfm = GeneratedFileManager.getGeneratedFileManager( processorEnv.getJavaProject().getProject() );
+			Set<IFile> lastGeneratedFiles = gfm.getGeneratedFilesForParent( processorEnv.getFile() );
+			
 			for (int i = 0, size = factories.size(); i < size; i++) {
 				final AnnotationProcessorFactory factory = (AnnotationProcessorFactory) factories
 						.get(i);
@@ -33,7 +47,10 @@
 					final AnnotationProcessor processor = factory
 							.getProcessorFor(factoryDecls, processorEnv);
 					if (processor != null)
+					{
+						if ( DEBUG ) trace( "runAPT: invoking processor " + processor.getClass().getName() );
 						processor.process();
+					}
 				}
 
 				if (annotationDecls.isEmpty())
@@ -54,15 +71,28 @@
 				}
 			}
 
-			final Set<IFile> generatedFiles = new HashSet<IFile>();
-			generatedFiles.addAll( processorEnv.getGeneratedFiles() );
+			final Set<IFile> allGeneratedFiles = new HashSet<IFile>();
+			Set<IFile> modifiedFiles = new HashSet<IFile>();
+			Map<IFile, Boolean> filesMap = processorEnv.getGeneratedFiles();
+			for (Map.Entry<IFile, Boolean> entry : filesMap.entrySet()) {
+				allGeneratedFiles.add(entry.getKey());
+				if (entry.getValue()) {
+					modifiedFiles.add(entry.getKey());
+				}
+			}
+			
+			// any files that were generated for this parent on the last
+			// run, but are no longer generated should be removed
+			Set<IFile> deletedFiles = cleanupNoLongerGeneratedFiles( processorEnv.getFile(), lastGeneratedFiles, allGeneratedFiles, gfm );
+
+			APTResult result = new APTResult( modifiedFiles, deletedFiles, processorEnv.getTypeDependencies() );
 			processorEnv.close();
-			return generatedFiles;
+			return result;
 
 			// log unclaimed annotations.
 		} catch (Throwable t) {
 			t.printStackTrace();
 		}
-		return Collections.emptySet();
+		return EMPTY_APT_RESULT;
 	}
 

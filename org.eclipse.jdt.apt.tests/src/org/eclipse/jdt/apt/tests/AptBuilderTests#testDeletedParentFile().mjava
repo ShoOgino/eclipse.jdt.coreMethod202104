@@ -1,0 +1,52 @@
+	/**
+	 * This test makes sure that we delete generated files when the parent file 
+	 * is deleted.  We also make sure that multi-parent support is working.
+	 */
+	public void testDeletedParentFile() throws Exception
+	{
+		IProject project = env.getProject( getProjectName() );
+		IPath srcRoot = getSourcePath();
+
+		String a1Code = "package p1; " + "\n"
+			+ "import org.eclipse.jdt.apt.tests.annotations.helloworld.HelloWorldAnnotation;" + "\n"
+			+ "@HelloWorldAnnotation" + "\n"
+			+ "public class A1 {}";
+		String a2Code = "package p1; " + "\n"
+			+ "import org.eclipse.jdt.apt.tests.annotations.helloworld.HelloWorldAnnotation;" + "\n"
+			+ "@HelloWorldAnnotation" + "\n"
+			+ "public class A2 {}";
+		String bCode = "package p1; " + "\n"
+			+ "public class B { generatedfilepackage.GeneratedFileTest gft; }";
+
+		IPath p1a1Path = env.addClass( srcRoot, "p1", "A1", //$NON-NLS-1$ //$NON-NLS-2$
+			a1Code );
+		IPath p1a2Path = env.addClass( srcRoot, "p1", "A2", //$NON-NLS-1$ //$NON-NLS-2$
+			a2Code );
+		IPath p1bPath = env.addClass( srcRoot, "p1", "B", //$NON-NLS-1$ //$NON-NLS-2$
+			bCode );
+		
+		fullBuild( project.getFullPath() );
+		expectingNoProblems();
+		
+		// now delete file A1 and make sure we still have no problems
+		env.removeFile( p1a1Path );
+		
+		// sleep to let the resource-change event fire
+		sleep( 1000 );
+		
+		incrementalBuild( project.getFullPath() );
+		
+		expectingNoProblems();
+		
+		// now delete file A2 and make sure we have a problem on B
+		env.removeFile( p1a2Path );
+
+		// sleep to let the resource-change event fire
+		sleep( 1000 );
+
+		incrementalBuild( project.getFullPath() );
+		expectingOnlyProblemsFor( p1bPath );
+		expectingOnlySpecificProblemFor( p1bPath, new Problem(
+			"B", "generatedfilepackage.GeneratedFileTest cannot be resolved to a type", p1bPath ) ); //$NON-NLS-1$ //$NON-NLS-2$	
+	}
+
