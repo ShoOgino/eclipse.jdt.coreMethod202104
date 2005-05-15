@@ -1,0 +1,43 @@
+	/*
+	 * Removes the marker comments "*start?*" and "*end?*" from the given contents
+	 * (where ? is either empty or a number).
+	 * Builds an AST from the resulting source.
+	 * For each of the pairs, returns the AST node that was delimited by "*start?*" and "*end?*".
+	 */
+	protected ASTNode[] buildASTs(String contents, ICompilationUnit cu, boolean reportErrors) throws JavaModelException {
+		ArrayList infos = new ArrayList();
+		MarkerInfo markerInfo;
+		int markerIndex = 0;
+		while (contents.indexOf("/*start" + ++markerIndex + "*/") != -1) {
+			markerInfo = new MarkerInfo(contents, markerIndex);
+			infos.add(markerInfo);
+			contents = markerInfo.source;
+		}
+		if (contents.indexOf("/*start*/") != -1 || infos.size() == 0) {
+			markerInfo = new MarkerInfo(contents);
+			infos.add(markerInfo);
+			contents = markerInfo.source;
+		}
+
+		cu.getBuffer().setContents(contents);
+		CompilationUnit unit = cu.reconcile(AST.JLS3, false, null, null);
+		
+		if (reportErrors) {
+			StringBuffer buffer = new StringBuffer();
+			IProblem[] problems = unit.getProblems();
+			for (int i = 0, length = problems.length; i < length; i++)
+				Util.appendProblem(buffer, problems[i], contents.toCharArray(), i+1);
+			if (buffer.length() > 0)
+				System.err.println(buffer.toString());
+		}
+
+		int length = infos.size();
+		ASTNode[] nodes = new ASTNode[length];
+		for (int i = 0; i < length; i++) {
+			MarkerInfo info = (MarkerInfo) infos.get(i);
+			nodes[i] = findNode(unit, info);
+		}
+		
+		return nodes;
+	}
+
