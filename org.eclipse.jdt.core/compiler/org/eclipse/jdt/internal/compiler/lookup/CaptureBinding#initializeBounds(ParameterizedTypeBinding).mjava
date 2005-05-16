@@ -1,0 +1,44 @@
+	/**
+	 * Initialize capture bounds using substituted supertypes
+	 * e.g. given X<U, V extends X<U, V>>,     capture(X<E,?>) = X<E,capture>, where capture extends X<E,capture>
+	 */
+	public void initializeBounds(ParameterizedTypeBinding capturedParameterizedType) {
+		TypeVariableBinding wildcardVariable = wildcard.typeVariable();
+		ReferenceBinding originalWildcardSuperclass = wildcard.superclass();
+		// prevent cyclic capture: given X<T>, capture(X<? extends T> could yield a circular type
+		ReferenceBinding substitutedWildcardSuperclass = originalWildcardSuperclass.isTypeVariable() ? originalWildcardSuperclass : (ReferenceBinding) Scope.substitute(capturedParameterizedType, originalWildcardSuperclass);
+		ReferenceBinding[] substitutedWildcardInterfaces = Scope.substitute(capturedParameterizedType, wildcard.superInterfaces());
+		
+		switch (wildcard.boundKind) {
+			case Wildcard.EXTENDS :
+				this.superclass = substitutedWildcardSuperclass;
+				TypeBinding substitutedWildcardBound = Scope.substitute(capturedParameterizedType, wildcard.bound);
+				this.firstBound =  substitutedWildcardBound;
+				if (substitutedWildcardInterfaces == NoSuperInterfaces) {
+					this.superInterfaces = NoSuperInterfaces;
+				} else {
+					this.superInterfaces = Scope.greaterLowerBound(substitutedWildcardInterfaces);
+				}
+				if ((substitutedWildcardBound.tagBits & HasTypeVariable) == 0)
+					this.tagBits &= ~HasTypeVariable;
+				break;
+			case Wildcard.UNBOUND :
+				this.superclass = substitutedWildcardSuperclass;
+				this.superInterfaces = substitutedWildcardInterfaces;
+				this.tagBits &= ~HasTypeVariable;
+				break;
+			case Wildcard.SUPER :
+				this.superclass = substitutedWildcardSuperclass;
+				substitutedWildcardBound = Scope.substitute(capturedParameterizedType, wildcard.bound);
+				if (wildcardVariable.firstBound == this.superclass 
+						|| substitutedWildcardBound == this.superclass) {
+					this.firstBound = this.superclass;
+				}
+				this.superInterfaces = substitutedWildcardInterfaces;
+				this.lowerBound = substitutedWildcardBound;
+				if ((substitutedWildcardBound.tagBits & HasTypeVariable) == 0)
+					this.tagBits &= ~HasTypeVariable;
+				break;
+		}		
+	}
+
