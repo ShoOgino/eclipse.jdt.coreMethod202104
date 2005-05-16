@@ -1,0 +1,53 @@
+	/*
+	 * Creates working copies from the given path and sources.
+	 * Resolves a dummy cu as a batch and on the first accept, create a binding with the expected key using ASTRequestor#createBindings.
+	 * Ensures that the returned binding corresponds to the expected key.
+	 */
+	private void assertBindingsCreated(String[] pathAndSources, final String[] expectedKeys) throws JavaModelException {
+		ICompilationUnit[] copies = null;
+		try {
+			copies = createWorkingCopies(pathAndSources);
+			class Requestor extends TestASTRequestor {
+				ArrayList createdBindingKeys = new ArrayList();
+				public void acceptAST(ICompilationUnit source, CompilationUnit cu) {
+					super.acceptAST(source, cu);
+					IBinding[] bindings = createBindings(expectedKeys);
+					if (bindings != null && bindings.length > 0 && bindings[0] != null)
+						this.createdBindingKeys.add(bindings[0].getKey());
+				}
+				public String getCreatedKeys() {
+					StringBuffer buffer = new StringBuffer();
+					for (int i = 0, length = this.createdBindingKeys.size(); i < length; i++) {
+						buffer.append(this.createdBindingKeys.get(i));
+						if (i < length - 1)
+							buffer.append('\n');
+					}
+					return buffer.toString();
+				}
+			};
+			Requestor requestor = new Requestor();
+			ICompilationUnit[] dummyWorkingCopies = null;
+			try {
+				dummyWorkingCopies = createWorkingCopies(new String[] {
+					"/P/Test.java",
+					"public class Test {\n" +
+					"}"
+				});
+				resolveASTs(dummyWorkingCopies, new String[] {}, requestor, getJavaProject("P"), this.owner);
+			} finally {
+				discardWorkingCopies(dummyWorkingCopies);
+			}
+			
+			String expectedKey = toString(expectedKeys);
+			String actualKey = requestor.getCreatedKeys();
+			if (!expectedKey.equals(actualKey)) {
+				BindingResolver resolver = requestBindings(pathAndSources, null);
+				assertStringsEqual("Inconsistent expected key ", expectedKeys, resolver.getBindingKeys());
+				System.out.println(Util.displayString(actualKey, 3));
+			}
+			assertEquals("Unexpected created binding", expectedKey, actualKey);
+		} finally {
+			discardWorkingCopies(copies);
+		}
+	}
+
