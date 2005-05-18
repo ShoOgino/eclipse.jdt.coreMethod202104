@@ -1,0 +1,33 @@
+	/**
+	 * @see "https://bugs.eclipse.org/bugs/show_bug.cgi?id=54776"
+	 */
+	public void testBug54776() throws JavaModelException {
+		sourceUnit = getCompilationUnit("Converter" , "src", "javadoc.testBug54776", "Test.java"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+		ASTNode result = runConversion(sourceUnit, false);
+		final CompilationUnit compilUnit = (CompilationUnit) result;
+		assumeEquals(prefix+"Wrong number of problems", 0, compilUnit.getProblems().length); //$NON-NLS-1$
+		assumeEquals(prefix+"Wrong number of comments", 2, compilUnit.getCommentList().size());
+		// get comments range
+		Comment comment = (Comment) compilUnit.getCommentList().get(0);
+		int commentStart = comment.getStartPosition();
+		int extendedLength = ((Comment) compilUnit.getCommentList().get(1)).getStartPosition()-commentStart+comment.getLength();
+		// get method invocation in field initializer
+		ASTNode node = getASTNode((CompilationUnit) result, 0);
+		assumeNotNull("We should get a non-null ast node", node);
+		assumeTrue("Not a type declaration", node.getNodeType() == ASTNode.TYPE_DECLARATION); //$NON-NLS-1$
+		TypeDeclaration typeDecl = (TypeDeclaration) node;
+		FieldDeclaration[] fields = typeDecl.getFields();
+		assumeEquals("We should have a field declaration", 1, fields.length);
+		List fragments = fields[0].fragments();
+		assumeEquals("We should have a variable fragment", 1, fragments.size());
+		VariableDeclarationFragment fragment = (VariableDeclarationFragment) fragments.get(0);
+		Expression expression = fragment.getInitializer();
+		assumeTrue("We should get an expression", expression instanceof MethodInvocation);
+		MethodInvocation methodInvocation = (MethodInvocation) expression;
+		// verify  that methodinvocation extended range includes leading and trailing comment
+		int methodStart = compilUnit.getExtendedStartPosition(methodInvocation);
+		assumeEquals("Method invocation "+methodInvocation+" does not start at the right position", commentStart, methodStart);
+		int methodLength = compilUnit.getExtendedLength(methodInvocation);
+		assumeEquals("Method invocation "+methodInvocation+" does not have the correct length", extendedLength, methodLength);
+	}
+
