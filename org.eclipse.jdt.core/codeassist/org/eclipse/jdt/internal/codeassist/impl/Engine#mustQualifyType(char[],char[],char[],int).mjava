@@ -1,0 +1,112 @@
+	protected boolean mustQualifyType(
+		char[] packageName,
+		char[] typeName,
+		char[] enclosingTypeNames,
+		int modifiers) {
+
+		// If there are no types defined into the current CU yet.
+		if (unitScope == null)
+			return true;
+		
+		if(!this.importCachesInitialized) {
+			this.initializeImportCaches();
+		}
+		
+		char[] fullyQualifiedTypeName = null;
+		
+		for (int i = 0; i < this.importCacheCount; i++) {
+			char[][] importName = this.importsCache[i];
+			if(CharOperation.equals(typeName, importName[0])) {
+				if (fullyQualifiedTypeName == null) {
+					fullyQualifiedTypeName =
+						enclosingTypeNames == null || enclosingTypeNames.length == 0
+								? CharOperation.concat(
+										packageName,
+										typeName,
+										'.')
+								: CharOperation.concat(
+										CharOperation.concat(
+											packageName,
+											enclosingTypeNames,
+											'.'),
+										typeName,
+										'.');
+				}
+				return !CharOperation.equals(fullyQualifiedTypeName, importName[1]);
+			}
+		}
+		
+		if ((enclosingTypeNames == null || enclosingTypeNames.length == 0 ) && CharOperation.equals(this.currentPackageName, packageName))
+			return false;
+		
+		char[] fullyQualifiedEnclosingTypeName = null;
+		
+		for (int i = 0; i < this.onDemandImportCacheCount; i++) {
+			ImportBinding importBinding = this.onDemandImportsCache[i];
+			Binding resolvedImport = importBinding.resolvedImport;
+			
+			char[][] importName = importBinding.compoundName;
+			char[] importFlatName = CharOperation.concatWith(importName, '.');
+			
+			boolean isFound = false;
+			// resolvedImport is a ReferenceBindng or a PackageBinding
+			if(resolvedImport instanceof ReferenceBinding) {
+				if(enclosingTypeNames != null && enclosingTypeNames.length != 0) {
+					if(fullyQualifiedEnclosingTypeName == null) {
+						fullyQualifiedEnclosingTypeName =
+							CharOperation.concat(
+									packageName,
+									enclosingTypeNames,
+									'.');
+					}
+					if(CharOperation.equals(fullyQualifiedEnclosingTypeName, importFlatName)) {
+						if(importBinding.isStatic()) {
+							isFound = (modifiers & IConstants.AccStatic) != 0;
+						} else {
+							isFound = true;
+						}
+					}
+				}
+			} else {
+				if(enclosingTypeNames == null || enclosingTypeNames.length == 0) {
+					if(CharOperation.equals(packageName, importFlatName)) {
+						if(importBinding.isStatic()) {
+							isFound = (modifiers & IConstants.AccStatic) != 0;
+						} else {
+							isFound = true;
+						}
+					}
+				}
+			}
+			
+			// find potential conflict with another import
+			if(isFound) {
+				for (int j = 0; j < this.onDemandImportCacheCount; j++) {
+					if(i != j) {
+						ImportBinding conflictingImportBinding = this.onDemandImportsCache[j];
+						if(conflictingImportBinding.resolvedImport instanceof ReferenceBinding) {
+							ReferenceBinding refBinding =
+								(ReferenceBinding) conflictingImportBinding.resolvedImport;
+							if (refBinding.getMemberType(typeName) != null) {
+								return true;
+							}
+						} else {
+							char[] conflictingImportName =
+								CharOperation.concatWith(conflictingImportBinding.compoundName, '.');
+							
+							if (this.nameEnvironment.nameLookup.findType(
+									String.valueOf(typeName),
+									String.valueOf(conflictingImportName),
+									false,
+									NameLookup.ACCEPT_ALL) != null) {
+								return true;
+							}
+						}
+					}
+				}
+				return false;
+			}
+		}
+		return true;
+	}
+

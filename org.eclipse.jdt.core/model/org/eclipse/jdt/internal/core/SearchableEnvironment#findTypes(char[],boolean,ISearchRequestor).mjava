@@ -1,0 +1,110 @@
+	/**
+	 * Find the top-level types (classes and interfaces) that are defined
+	 * in the current environment and whose name starts with the
+	 * given prefix. The prefix is a qualified name separated by periods
+	 * or a simple name (ex. java.util.V or V).
+	 *
+	 * The types found are passed to one of the following methods (if additional
+	 * information is known about the types):
+	 *    ISearchRequestor.acceptType(char[][] packageName, char[] typeName)
+	 *    ISearchRequestor.acceptClass(char[][] packageName, char[] typeName, int modifiers)
+	 *    ISearchRequestor.acceptInterface(char[][] packageName, char[] typeName, int modifiers)
+	 *
+	 * This method can not be used to find member types... member
+	 * types are found relative to their enclosing type.
+	 */
+	public void findTypes(char[] prefix, final boolean findMembers, final ISearchRequestor storage) {
+
+		/*
+			if (true){
+				findTypes(new String(prefix), storage, NameLookup.ACCEPT_CLASSES | NameLookup.ACCEPT_INTERFACES);
+				return;		
+			}
+		*/
+		try {
+			final String excludePath;
+			if (this.unitToSkip != null) {
+				if (!(this.unitToSkip instanceof IJavaElement)) {
+					// revert to model investigation
+					findTypes(
+						new String(prefix),
+						storage,
+						NameLookup.ACCEPT_ALL);
+					return;
+				}
+				excludePath = ((IJavaElement) this.unitToSkip).getPath().toString();
+			} else {
+				excludePath = null;
+			}
+			int lastDotIndex = CharOperation.lastIndexOf('.', prefix);
+			char[] qualification, simpleName;
+			if (lastDotIndex < 0) {
+				qualification = null;
+				simpleName = CharOperation.toLowerCase(prefix);
+			} else {
+				qualification = CharOperation.subarray(prefix, 0, lastDotIndex);
+				simpleName =
+					CharOperation.toLowerCase(
+						CharOperation.subarray(prefix, lastDotIndex + 1, prefix.length));
+			}
+
+			IProgressMonitor progressMonitor = new IProgressMonitor() {
+				boolean isCanceled = false;
+				public void beginTask(String name, int totalWork) {
+					// implements interface method
+				}
+				public void done() {
+					// implements interface method
+				}
+				public void internalWorked(double work) {
+					// implements interface method
+				}
+				public boolean isCanceled() {
+					return isCanceled;
+				}
+				public void setCanceled(boolean value) {
+					isCanceled = value;
+				}
+				public void setTaskName(String name) {
+					// implements interface method
+				}
+				public void subTask(String name) {
+					// implements interface method
+				}
+				public void worked(int work) {
+					// implements interface method
+				}
+			};
+			IRestrictedAccessTypeRequestor typeRequestor = new IRestrictedAccessTypeRequestor() {
+				public void acceptType(int modifiers, char[] packageName, char[] simpleTypeName, char[][] enclosingTypeNames, String path, AccessRestriction access) {
+					if (excludePath != null && excludePath.equals(path))
+						return;
+					if (!findMembers && enclosingTypeNames != null && enclosingTypeNames.length > 0)
+						return; // accept only top level types
+					storage.acceptType(packageName, simpleTypeName, enclosingTypeNames, modifiers, access);
+				}
+			};
+			try {
+				new BasicSearchEngine(this.workingCopies).searchAllTypeNames(
+					qualification,
+					simpleName,
+					SearchPattern.R_PREFIX_MATCH, // not case sensitive
+					IJavaSearchConstants.TYPE,
+					this.searchScope,
+					typeRequestor,
+					CANCEL_IF_NOT_READY_TO_SEARCH,
+					progressMonitor);
+			} catch (OperationCanceledException e) {
+				findTypes(
+					new String(prefix),
+					storage,
+					NameLookup.ACCEPT_ALL);
+			}
+		} catch (JavaModelException e) {
+			findTypes(
+				new String(prefix),
+				storage,
+				NameLookup.ACCEPT_ALL);
+		}
+	}
+

@@ -8,19 +8,45 @@
 		
 		boolean proposeType = !this.requestor.isIgnored(CompletionProposal.TYPE_REF);
 		
+		boolean proposeAllMemberTypes = !this.assistNodeIsConstructor && PROPOSE_MEMBER_TYPES;
+		
 		ObjectVector typesFound = new ObjectVector();
 		
 		if (proposeType && scope.enclosingSourceType() != null) {
-			findNestedTypes(token, scope.enclosingSourceType(), scope, typesFound);
+			findNestedTypes(token, scope.enclosingSourceType(), scope, proposeAllMemberTypes, typesFound);
 			findTypeParameters(token, scope);
 		}
 
 		if (proposeType && this.unitScope != null) {
+			ReferenceBinding outerInvocationType = scope.enclosingSourceType();
+			if(outerInvocationType != null) {
+				ReferenceBinding temp = outerInvocationType.enclosingType();
+				while(temp != null) {
+					outerInvocationType = temp;
+					temp = temp.enclosingType();
+				}
+			}
+			
 			int typeLength = token.length;
 			SourceTypeBinding[] types = this.unitScope.topLevelTypes;
 
 			for (int i = 0, length = types.length; i < length; i++) {
 				SourceTypeBinding sourceType = types[i]; 
+				
+				if(isForbidden(sourceType)) continue;
+				
+				if(proposeAllMemberTypes &&
+					sourceType != outerInvocationType &&
+					PROPOSE_MEMBER_TYPES) {
+					findSubMemberTypes(
+							token,
+							sourceType,
+							scope,
+							scope.enclosingSourceType(),
+							false,
+							false,
+							typesFound);
+				}
 				
 				if (sourceType.sourceName == CompletionParser.FAKE_TYPE_NAME) continue;
 				if (sourceType.sourceName == TypeConstants.PACKAGE_INFO_NAME) continue;
@@ -30,9 +56,17 @@
 				if (!CharOperation.prefixEquals(token, sourceType.sourceName, false))	continue;
 				
 				this.knownTypes.put(CharOperation.concat(sourceType.qualifiedPackageName(), sourceType.sourceName(), '.'), this);
-
-				if(isForbidden(sourceType)) continue;
-					
+				
+				if(PROPOSE_MEMBER_TYPES) {
+					if(this.assistNodeIsClass) {
+						if(!sourceType.isClass()) continue;
+					} else if(this.assistNodeIsInterface) {
+						if(!sourceType.isInterface() && !sourceType.isAnnotationType()) continue;
+					} else if (this.assistNodeIsAnnotation) {
+						if(!sourceType.isAnnotationType()) continue;
+					}
+				}
+				
 				int relevance = computeBaseRelevance();
 				relevance += computeRelevanceForInterestingProposal();
 				relevance += computeRelevanceForCaseMatching(token, sourceType.sourceName);
@@ -44,7 +78,7 @@
 					relevance += computeRelevanceForAnnotation();
 				} else if (sourceType.isInterface()) {
 					relevance += computeRelevanceForInterface();
-				} else {
+				} else if(sourceType.isClass()){
 					relevance += computeRelevanceForClass();
 					relevance += computeRelevanceForException(sourceType.sourceName);
 				}
@@ -68,7 +102,7 @@
 		}
 		
 		if(proposeType) {
-			this.findTypesFromStaticImports(token, scope, typesFound);
+			this.findTypesFromStaticImports(token, scope, proposeAllMemberTypes, typesFound);
 		}
 		
 		if (token.length == 0) {
@@ -87,7 +121,7 @@
 											case AssistOptions.FILTER_WARNING:
 												return;
 											case AssistOptions.FILTER_ERROR:
-												if(this.forbiddenReferenceIsError) return;
+												if(this.forbiddenReferenceIsError) continue next;
 												break;
 											
 										}
@@ -98,7 +132,7 @@
 											case AssistOptions.FILTER_WARNING:
 												return;
 											case AssistOptions.FILTER_ERROR:
-												if(this.discouragedReferenceIsError) return;
+												if(this.discouragedReferenceIsError) continue next;
 												break;
 											
 										}
@@ -118,12 +152,22 @@
 							
 							boolean isQualified = false;
 							if (!this.insideQualifiedReference && !refBinding.isMemberType()) {
-								if (mustQualifyType(packageName, typeName)) {
+								if (mustQualifyType(packageName, typeName, null, refBinding.modifiers)) {
 									if (packageName == null || packageName.length == 0)
 										if (this.unitScope != null && this.unitScope.fPackage.compoundName != CharOperation.NO_CHAR_CHAR)
 											continue next; // ignore types from the default package from outside it
 									completionName = CharOperation.concat(packageName, typeName, '.');
 									isQualified = true;
+								}
+							}
+							
+							if(PROPOSE_MEMBER_TYPES) {
+								if(this.assistNodeIsClass) {
+									if(!refBinding.isClass()) continue next;
+								} else if(this.assistNodeIsInterface) {
+									if(!refBinding.isInterface() && !refBinding.isAnnotationType()) continue next;
+								} else if (this.assistNodeIsAnnotation) {
+									if(!refBinding.isAnnotationType()) continue next;
 								}
 							}
 							
@@ -168,7 +212,18 @@
 				findKeywords(token, baseTypes);
 			}
 			if(proposeType) {
-				this.nameEnvironment.findTypes(token, this);
+				int l = typesFound.size();
+				for (int i = 0; i < l; i++) {
+					ReferenceBinding typeFound = (ReferenceBinding) typesFound.elementAt(i);
+					char[] fullyQualifiedTypeName =
+						CharOperation.concat(
+								typeFound.qualifiedPackageName(),
+								typeFound.qualifiedSourceName(), 
+								'.');
+					this.knownTypes.put(fullyQualifiedTypeName, this);
+				}
+				this.nameEnvironment.findTypes(token, proposeAllMemberTypes, this);
+				acceptTypes();
 			}
 			if(!this.requestor.isIgnored(CompletionProposal.PACKAGE_REF)) {
 				this.nameEnvironment.findPackages(token, this);

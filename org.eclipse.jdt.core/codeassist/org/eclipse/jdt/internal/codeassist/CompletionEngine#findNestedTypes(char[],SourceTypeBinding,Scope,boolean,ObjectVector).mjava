@@ -1,0 +1,92 @@
+	private void findNestedTypes(
+		char[] typeName,
+		SourceTypeBinding currentType,
+		Scope scope,
+		boolean proposeAllMemberTypes,
+		ObjectVector typesFound) {
+		if (typeName == null)
+			return;
+
+		int typeLength = typeName.length;
+
+		SourceTypeBinding nextTypeToIgnore = null;
+		while (scope != null) { // done when a COMPILATION_UNIT_SCOPE is found
+
+			switch (scope.kind) {
+
+				case Scope.METHOD_SCOPE :
+				case Scope.BLOCK_SCOPE :
+					BlockScope blockScope = (BlockScope) scope;
+
+					next : for (int i = 0, length = blockScope.subscopeCount; i < length; i++) {
+
+						if (blockScope.subscopes[i] instanceof ClassScope) {
+							SourceTypeBinding localType =
+								((ClassScope) blockScope.subscopes[i]).referenceContext.binding;
+
+							if (!localType.isAnonymousType()) {
+								if (this.isForbidden(localType))
+									continue next;
+								
+								if (typeLength > localType.sourceName.length)
+									continue next;
+								if (!CharOperation.prefixEquals(typeName, localType.sourceName, false
+									/* ignore case */
+									))
+									continue next;
+								
+								if(PROPOSE_MEMBER_TYPES) {
+									if(this.assistNodeIsClass) {
+										if(!localType.isClass()) continue next;
+									} else if(this.assistNodeIsInterface) {
+										if(!localType.isInterface() && !localType.isAnnotationType()) continue next;
+									} else if (this.assistNodeIsAnnotation) {
+										if(!localType.isAnnotationType()) continue next;
+									}
+								}
+
+								int relevance = computeBaseRelevance();
+								relevance += computeRelevanceForInterestingProposal();
+								relevance += computeRelevanceForCaseMatching(typeName, localType.sourceName);
+								relevance += computeRelevanceForExpectingType(localType);
+								relevance += computeRelevanceForException(localType.sourceName);
+								relevance += computeRelevanceForClass();
+								relevance += computeRelevanceForQualification(false);
+								relevance += computeRelevanceForRestrictions(IAccessRule.K_ACCESSIBLE); // no access restriction for nested type
+								
+								this.noProposal = false;
+								if(!this.requestor.isIgnored(CompletionProposal.TYPE_REF)) {
+									CompletionProposal proposal = this.createProposal(CompletionProposal.TYPE_REF, this.actualCompletionPosition);
+									proposal.setDeclarationSignature(localType.qualifiedPackageName());
+									proposal.setSignature(getSignature(localType));
+									proposal.setPackageName(localType.qualifiedPackageName());
+									proposal.setTypeName(localType.sourceName);
+									proposal.setCompletion(localType.sourceName);
+									proposal.setFlags(localType.modifiers);
+									proposal.setReplaceRange(this.startPosition - this.offset, this.endPosition - this.offset);
+									proposal.setRelevance(relevance);
+									this.requestor.accept(proposal);
+									if(DEBUG) {
+										this.printDebug(proposal);
+									}
+								}
+							}
+						}
+					}
+					break;
+
+				case Scope.CLASS_SCOPE :
+					SourceTypeBinding enclosingSourceType = scope.enclosingSourceType();
+					findMemberTypes(typeName, enclosingSourceType, scope, currentType, false, false, false, proposeAllMemberTypes, nextTypeToIgnore, typesFound);
+					nextTypeToIgnore = enclosingSourceType;
+					if (typeLength == 0)
+						return; // do not search outside the class scope if no prefix was provided
+					break;
+
+				case Scope.COMPILATION_UNIT_SCOPE :
+					return;
+			}
+			scope = scope.parent;
+		}
+	}
+

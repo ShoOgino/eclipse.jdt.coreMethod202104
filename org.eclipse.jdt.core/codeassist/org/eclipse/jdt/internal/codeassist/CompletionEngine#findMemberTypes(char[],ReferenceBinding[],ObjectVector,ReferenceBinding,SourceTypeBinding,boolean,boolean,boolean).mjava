@@ -1,0 +1,134 @@
+	// Helper method for findMemberTypes(char[], ReferenceBinding, Scope)
+	private void findMemberTypes(
+		char[] typeName,
+		ReferenceBinding[] memberTypes,
+		ObjectVector typesFound,
+		ReferenceBinding receiverType,
+		SourceTypeBinding invocationType,
+		boolean staticOnly,
+		boolean fromStaticImport,
+		boolean checkQualification) {
+
+		// Inherited member types which are hidden by subclasses are filtered out
+		// No visibility checks can be performed without the scope & invocationSite
+		int typeLength = typeName.length;
+		next : for (int m = memberTypes.length; --m >= 0;) {
+			ReferenceBinding memberType = memberTypes[m];
+			//		if (!wantClasses && memberType.isClass()) continue next;
+			//		if (!wantInterfaces && memberType.isInterface()) continue next;
+			
+			if (staticOnly && !memberType.isStatic()) continue next;
+			
+			if (isForbidden(memberType)) continue next;
+			
+			if (typeLength > memberType.sourceName.length)
+				continue next;
+
+			if (!CharOperation.prefixEquals(typeName, memberType.sourceName, false
+				/* ignore case */
+				))
+				continue next;
+
+			if (this.options.checkVisibility) {
+				if (invocationType != null && !memberType.canBeSeenBy(receiverType, invocationType)) {
+					continue next;
+				} else if(invocationType == null && !memberType.canBeSeenBy(this.unitScope.fPackage)) {
+					continue next;
+				}
+			}
+
+			for (int i = typesFound.size; --i >= 0;) {
+				ReferenceBinding otherType = (ReferenceBinding) typesFound.elementAt(i);
+
+				if (memberType == otherType)
+					continue next;
+
+				if (CharOperation.equals(memberType.sourceName, otherType.sourceName, true)) {
+
+					if (memberType.enclosingType().isSuperclassOf(otherType.enclosingType()))
+						continue next;
+
+					if (otherType.enclosingType().isInterface())
+						if (memberType.enclosingType()
+							.implementsInterface(otherType.enclosingType(), true))
+							continue next;
+
+					if (memberType.enclosingType().isInterface())
+						if (otherType.enclosingType()
+							.implementsInterface(memberType.enclosingType(), true))
+							continue next;
+				}
+			}
+
+			typesFound.add(memberType);
+
+			if(!this.insideQualifiedReference && PROPOSE_MEMBER_TYPES) {
+				if(this.assistNodeIsClass) {
+					if(!memberType.isClass()) continue next;
+				} else if(this.assistNodeIsInterface) {
+					if(!memberType.isInterface() && !memberType.isAnnotationType()) continue next;
+				} else if (this.assistNodeIsAnnotation) {
+					if(!memberType.isAnnotationType()) continue next;
+				}
+			}
+			
+			char[] completionName = memberType.sourceName();
+			
+			boolean isQualified = false;
+			if(checkQualification && !fromStaticImport) {
+				char[] memberPackageName = memberType.qualifiedPackageName();
+				char[] memberTypeName = memberType.sourceName();
+				char[] memberEnclosingTypeNames = memberType.enclosingType().qualifiedSourceName();
+				if (mustQualifyType(memberPackageName, memberTypeName, memberEnclosingTypeNames, memberType.modifiers)) {
+					if (memberPackageName == null || memberPackageName.length == 0)
+						if (this.unitScope != null && this.unitScope.fPackage.compoundName != CharOperation.NO_CHAR_CHAR)
+							break next; // ignore types from the default package from outside it
+					isQualified = true;
+					completionName =
+						CharOperation.concat(
+								memberPackageName,
+								CharOperation.concat(
+										memberEnclosingTypeNames,
+										memberTypeName,
+										'.'),
+								'.');
+				}
+			}
+			
+			int relevance = computeBaseRelevance();
+			relevance += computeRelevanceForInterestingProposal();
+			relevance += computeRelevanceForCaseMatching(typeName, memberType.sourceName);
+			relevance += computeRelevanceForExpectingType(memberType);
+			relevance += computeRelevanceForRestrictions(IAccessRule.K_ACCESSIBLE);
+			if(!insideQualifiedReference) {
+				relevance += computeRelevanceForQualification(isQualified);
+			}
+
+			if (memberType.isClass()) {
+				relevance += computeRelevanceForClass();
+				relevance += computeRelevanceForException(memberType.sourceName);
+			} else if(memberType.isEnum()) {
+				relevance += computeRelevanceForEnum();
+			} else if(memberType.isInterface()) {
+				relevance += computeRelevanceForInterface();
+			}
+				
+			this.noProposal = false;
+			if(!this.requestor.isIgnored(CompletionProposal.TYPE_REF)) {
+				CompletionProposal proposal = this.createProposal(CompletionProposal.TYPE_REF, this.actualCompletionPosition);
+				proposal.setDeclarationSignature(memberType.qualifiedPackageName());
+				proposal.setSignature(getSignature(memberType));
+				proposal.setPackageName(memberType.qualifiedPackageName());
+				proposal.setTypeName(memberType.qualifiedSourceName());
+				proposal.setCompletion(completionName);
+				proposal.setFlags(memberType.modifiers);
+				proposal.setReplaceRange(this.startPosition - this.offset, this.endPosition - this.offset);
+				proposal.setRelevance(relevance);
+				this.requestor.accept(proposal);
+				if(DEBUG) {
+					this.printDebug(proposal);
+				}
+			}
+		}
+	}
+
