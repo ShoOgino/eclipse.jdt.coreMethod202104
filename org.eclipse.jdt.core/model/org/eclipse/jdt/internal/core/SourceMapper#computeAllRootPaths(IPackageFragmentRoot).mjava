@@ -1,7 +1,5 @@
 	private void computeAllRootPaths(IPackageFragmentRoot root) {
-		if (this.rootPaths == null) {
-			this.rootPaths = new HashSet();
-		}
+		final HashSet tempRoots = new HashSet();
 		long time = 0;
 		if (VERBOSE) {
 			System.out.println("compute all root paths for " + root.getElementName()); //$NON-NLS-1$
@@ -23,9 +21,11 @@
 						int index = entryName.indexOf('/');
 						if (index != -1 && Util.isClassFileName(entryName)) {
 							String firstLevelPackageName = entryName.substring(0, index);
-							IStatus status = JavaConventions.validatePackageName(firstLevelPackageName);
-							if (status.isOK() || status.getSeverity() == IStatus.WARNING) {
-								firstLevelPackageNames.add(firstLevelPackageName);
+							if (!firstLevelPackageNames.contains(firstLevelPackageName)) {
+								IStatus status = JavaConventions.validatePackageName(firstLevelPackageName);
+								if (status.isOK() || status.getSeverity() == IStatus.WARNING) {
+									firstLevelPackageNames.add(firstLevelPackageName);
+								}
 							}
 						} else if (Util.isClassFileName(entryName)) {
 							containsADefaultPackage = true;
@@ -86,15 +86,15 @@
 						if (segmentCount > 1) {
 							loop: for (int i = 0, max = path.segmentCount() - 1; i < max; i++) {
 								if (firstLevelPackageNames.contains(path.segment(i))) {
-									this.rootPaths.add(path.uptoSegment(i).toString());
+									tempRoots.add(path.uptoSegment(i));
 									// don't break here as this path could contain other first level package names (see https://bugs.eclipse.org/bugs/show_bug.cgi?id=74014)
 								}
 								if (i == max - 1 && containsADefaultPackage) {
-									this.rootPaths.add(path.uptoSegment(max).toString());
+									tempRoots.add(path.uptoSegment(max));
 								}
 							}
 						} else if (containsADefaultPackage) {
-							this.rootPaths.add(""); //$NON-NLS-1$
+							tempRoots.add(new Path("")); //$NON-NLS-1$
 						}
 					}
 				}
@@ -107,26 +107,48 @@
 			Object target = JavaModel.getTarget(ResourcesPlugin.getWorkspace().getRoot(), this.sourcePath, true);
 			if (target instanceof IResource) {
 				if (target instanceof IContainer) {
-					computeRootPath((IContainer)target, firstLevelPackageNames, containsADefaultPackage);
+					computeRootPath((IContainer)target, firstLevelPackageNames, containsADefaultPackage, tempRoots);
 				}
 			} else if (target instanceof File) {
 				File file = (File)target;
 				if (file.isDirectory()) {
-					computeRootPath(file, firstLevelPackageNames, containsADefaultPackage);
+					computeRootPath(file, firstLevelPackageNames, containsADefaultPackage, tempRoots);
 				}
 			}
 		}
+		int size = tempRoots.size();
+		if (this.rootPaths != null) {
+			for (Iterator iterator = this.rootPaths.iterator(); iterator.hasNext(); ) {
+				tempRoots.add(iterator.next());
+				size++;
+			}
+			this.rootPaths.clear();
+		} else {
+			this.rootPaths = new ArrayList(size);
+		}
+		if (size != 0) {
+			ArrayList sortedRoots = new ArrayList(tempRoots);
+			Collections.sort(sortedRoots, new Comparator() {
+				public int compare(Object o1, Object o2) {
+					IPath path1 = (IPath) o1;
+					IPath path2 = (IPath) o2;
+					return path1.segmentCount() - path2.segmentCount();
+				}
+			});
+			for (Iterator iter = sortedRoots.iterator(); iter.hasNext();) {
+				IPath path = (IPath) iter.next();
+				this.rootPaths.add(path.toString());
+			}
+		}
+		this.areRootPathsComputed = true;
 		if (VERBOSE) {
-			final int size = this.rootPaths.size();
+			System.out.println("Spent " + (System.currentTimeMillis() - time) + "ms"); //$NON-NLS-1$ //$NON-NLS-2$
 			System.out.println("Found " + size + " root paths");	//$NON-NLS-1$ //$NON-NLS-2$
 			int i = 0;
 			for (Iterator iterator = this.rootPaths.iterator(); iterator.hasNext();) {
-				String rootpath = (String) iterator.next();
-				System.out.println("root[" + i + "]=" + rootpath);//$NON-NLS-1$ //$NON-NLS-2$
+				System.out.println("root[" + i + "]=" + ((String) iterator.next()));//$NON-NLS-1$ //$NON-NLS-2$
 				i++;
 			}
-			System.out.println("Spent " + (System.currentTimeMillis() - time) + "ms"); //$NON-NLS-1$ //$NON-NLS-2$
 		}
-		this.areRootPathsComputed = true;
 	}
 
