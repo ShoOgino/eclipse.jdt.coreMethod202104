@@ -1,5 +1,6 @@
 	private char[][] findMethodParameterNames(MethodBinding method, char[][] parameterTypeNames){
-		ReferenceBinding bindingType = method.declaringClass;
+		TypeBinding erasure =  method.declaringClass.erasure();
+		if(!(erasure instanceof ReferenceBinding)) return null;
 
 		char[][] parameterNames = null;
 		
@@ -9,8 +10,8 @@
 			return CharOperation.NO_CHAR_CHAR;
 		}
 		// look into the corresponding unit if it is available
-		if (bindingType instanceof SourceTypeBinding){
-			SourceTypeBinding sourceType = (SourceTypeBinding) bindingType;
+		if (erasure instanceof SourceTypeBinding){
+			SourceTypeBinding sourceType = (SourceTypeBinding) erasure;
 
 			if (sourceType.scope != null){
 				TypeDeclaration parsedType;
@@ -31,6 +32,9 @@
 		}
 		// look into the model		
 		if(parameterNames == null){
+			
+			ReferenceBinding bindingType = (ReferenceBinding)erasure;
+			
 			char[] compoundName = CharOperation.concatWith(bindingType.compoundName, '.');
 			Object type = this.typeCache.get(compoundName);
 			
@@ -48,18 +52,21 @@
 			}
 			
 			if(sourceType != null) {
-				SourceMethod[] sourceMethods = ((SourceTypeElementInfo) sourceType).getMethodHandles();
-				int len = sourceMethods.length;
-				for(int i = 0; i < len ; i++){
-					SourceMethod sourceMethod = sourceMethods[i];
-					String[] argTypeSignatures = sourceMethod.getParameterTypes();
-
-					if(argTypeSignatures != null &&
-						CharOperation.equals(method.selector,sourceMethod.getElementName().toCharArray()) &&
-						equalSignatures(parameterTypeNames, argTypeSignatures)){
+				IType typeHandle = ((SourceTypeElementInfo) sourceType).getHandle();
+				
+				String[] parameterTypeSignatures = new String[length];
+				for (int i = 0; i < length; i++) {
+					parameterTypeSignatures[i] = Signature.createTypeSignature(parameterTypeNames[i], false);
+				}
+				IMethod searchedMethod = typeHandle.getMethod(String.valueOf(method.selector), parameterTypeSignatures);
+				IMethod[] foundMethods = typeHandle.findMethods(searchedMethod);
+				
+				if(foundMethods != null) {
+					int len = foundMethods.length;
+					if(len == 1) {
 						try {
+							SourceMethod sourceMethod = (SourceMethod) foundMethods[0];
 							parameterNames = ((SourceMethodElementInfo) sourceMethod.getElementInfo()).getArgumentNames();
-							break;
 						} catch (JavaModelException e) {
 							// method doesn't exist: ignore
 						}
