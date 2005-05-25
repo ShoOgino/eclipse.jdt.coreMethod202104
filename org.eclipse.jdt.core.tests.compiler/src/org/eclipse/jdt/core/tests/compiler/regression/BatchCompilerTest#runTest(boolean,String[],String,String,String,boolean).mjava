@@ -1,0 +1,121 @@
+	/**
+	 * Worker method for runConformTest and runNegativeTest.
+	 * 
+	 * @param shouldCompileOK
+	 *            set to true if the compiler should compile the given sources
+	 *            without errors
+	 * @param testFiles
+	 *            the source files, given as a suite of file name, file content;
+	 *            file names are relative to the output directory
+	 * @param commandLine
+	 *            the command line to pass to
+	 *            {@link Main#compile(String) Main#compile}
+	 * @param expectedOutOutputString
+	 *            the expected contents of the standard output stream; pass null
+	 *            to bypass the comparison
+	 * @param expectedErrOutputString
+	 *            the expected contents of the standard error output stream;
+	 *            pass null to bypass the comparison
+	 * @param shouldFlushOutputDirectory
+	 *            pass true to get the output directory flushed before the test
+	 *            runs
+	 */
+	private void runTest(boolean shouldCompileOK, String[] testFiles, String commandLine,
+			String expectedOutOutputString,
+			String expectedErrOutputString,
+			boolean shouldFlushOutputDirectory) {
+		File outputDirectory = new File(OUTPUT_DIR);
+		if (shouldFlushOutputDirectory)
+			Util.flushDirectoryContent(outputDirectory);
+		try {
+			if (!outputDirectory.isDirectory()) {
+				outputDirectory.mkdirs();
+			}
+			PrintWriter sourceFileWriter;
+			for (int i = 0; i < testFiles.length; i += 2) {
+				String fileName = OUTPUT_DIR + File.separator + testFiles[i];
+				File file = new File(fileName), innerOutputDirectory = file
+						.getParentFile();
+				if (!innerOutputDirectory.isDirectory()) {
+					innerOutputDirectory.mkdirs();
+				}
+				sourceFileWriter = new PrintWriter(new FileOutputStream(file));
+				sourceFileWriter.write(testFiles[i + 1]);
+				sourceFileWriter.close();
+			}
+		} catch (FileNotFoundException e) {
+			e.printStackTrace();
+			throw new RuntimeException(e);
+		}
+		String printerWritersNameRoot = OUTPUT_DIR + File.separator + testName();
+		String outFileName = printerWritersNameRoot + "out.txt", 
+			   errFileName = printerWritersNameRoot + "err.txt";
+		Main batchCompiler;
+		try {
+			batchCompiler = new Main(new PrintWriter(new FileOutputStream(
+					outFileName)), new PrintWriter(new FileOutputStream(
+					errFileName)), false);
+		} catch (FileNotFoundException e) {
+			System.out.println(getClass().getName() + '#' + getName());
+			e.printStackTrace();
+			throw new RuntimeException(e);
+		}
+		boolean compileOK;
+		try {
+			compileOK = batchCompiler.compile(Main.tokenize(commandLine));
+		} catch (RuntimeException e) {
+			compileOK = false;
+			System.out.println(getClass().getName() + '#' + getName());
+			e.printStackTrace();
+			throw e;
+		}
+		String outOutputString = Util.fileContent(outFileName), 
+		       errOutputString = Util.fileContent(errFileName);
+		boolean compareOK = false;
+		if (compileOK == shouldCompileOK) {
+			compareOK = semiNormalizedComparison(expectedOutOutputString,
+					outOutputString, outputDirNormalizer)
+					&& semiNormalizedComparison(expectedErrOutputString,
+							errOutputString, outputDirNormalizer);
+		}
+		if (compileOK != shouldCompileOK || !compareOK) {
+			System.out.println(getClass().getName() + '#' + getName());
+			for (int i = 0; i < testFiles.length; i += 2) {
+				System.out.print(testFiles[i]);
+				System.out.println(" [");
+				System.out.println(testFiles[i + 1]);
+				System.out.println("]");
+			}
+		}
+		if (compileOK != shouldCompileOK)
+			System.out.println(errOutputString);
+		if (compileOK == shouldCompileOK && !compareOK) {
+			System.out.println(
+					    "------------ [START OUT] ------------\n"
+					+   "------------- Expected: -------------\n"
+					+ expectedOutOutputString
+					+ "\n------------- but was:  -------------\n"
+					+ outOutputString
+					+ "\n--------- (cut and paste:) ----------\n"
+					+ Util.displayString(outputDirNormalizer
+							.normalized(outOutputString))
+					+ "\n------------- [END OUT] -------------\n"
+					+   "------------ [START ERR] ------------\n"
+					+   "------------- Expected: -------------\n"
+					+ expectedErrOutputString
+					+ "\n------------- but was:  -------------\n"
+					+ errOutputString
+					+ "\n--------- (cut and paste:) ----------\n"
+					+ Util.displayString(outputDirNormalizer
+							.normalized(errOutputString))
+					+ "\n------------- [END ERR] -------------\n");
+		}
+		if (shouldCompileOK)
+			assertTrue("Unexpected problems: " + errOutputString, compileOK);
+		else
+			assertTrue("Unexpected success: " + errOutputString, !compileOK);
+		assertTrue("Unexpected output for invocation with arguments ["
+				+ commandLine + "]:\n--[START]--\n" + outOutputString + "\n"
+				+ errOutputString + "\n---[END]---\n", compareOK);
+	}
+
