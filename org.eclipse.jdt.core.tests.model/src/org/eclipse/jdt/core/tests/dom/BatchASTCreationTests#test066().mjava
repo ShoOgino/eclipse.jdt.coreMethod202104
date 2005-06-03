@@ -1,0 +1,49 @@
+	/*
+	 * Ensures that the compilation with a owner is used instead of a primary working copy when looking up a type.
+	 * (regression test for bug 97542 ASTParser#createASTs does not correctly resolve bindings in working copies)
+	 */
+	public void test066() throws CoreException {
+		ICompilationUnit primaryWorkingCopy = null;
+		ICompilationUnit ownedWorkingcopy = null;
+		try {
+			// primary working copy with no method foo()
+			primaryWorkingCopy = getCompilationUnit("/P/p1/X.java");
+			primaryWorkingCopy.becomeWorkingCopy(null/*no pb requestor*/, null/*no progress*/);
+			primaryWorkingCopy.getBuffer().setContents(
+				"package p1;\n" +
+				"public class X {\n" +
+				"}"
+			);
+			primaryWorkingCopy.reconcile(ICompilationUnit.NO_AST, false, null, null);
+			
+			// working copy for the test's owner with a method foo()
+			ownedWorkingcopy = getWorkingCopy(
+				"/P/p1/X.java",
+				"package p1;\n" +
+				"public class X {\n" +
+				"  void foo() {}\n" +
+				"}",
+				this.owner,
+				false/*don't compute problems*/
+			);
+			
+			// create bindings
+			assertRequestedBindingFound(
+				new String[] {
+					"/P/p1/Y.java",
+					"package p1;\n" +
+					"public class Y {\n" + 
+					"  void bar() {\n" +
+					"    /*start*/new X().foo()/*end*/;\n" +
+					"}",
+				}, 
+				"Lp1/X;.foo()V"
+			);
+		} finally {
+			if (primaryWorkingCopy != null)
+				primaryWorkingCopy.discardWorkingCopy();
+			if (ownedWorkingcopy != null)
+				ownedWorkingcopy.discardWorkingCopy();
+		}
+	}
+
