@@ -2,7 +2,7 @@
  * Add the possibleMatch to the loop
  *  ->  build compilation unit declarations, their bindings and record their results.
  */
-protected void parseAndBuildBindings(PossibleMatch possibleMatch, boolean mustResolve) {
+protected boolean parseAndBuildBindings(PossibleMatch possibleMatch, boolean mustResolve) throws CoreException {
 	if (this.progressMonitor != null && this.progressMonitor.isCanceled())
 		throw new OperationCanceledException();
 
@@ -14,9 +14,19 @@ protected void parseAndBuildBindings(PossibleMatch possibleMatch, boolean mustRe
 		CompilationResult unitResult = new CompilationResult(possibleMatch, 1, 1, this.options.maxProblemsPerUnit);
 		CompilationUnitDeclaration parsedUnit = this.parser.dietParse(possibleMatch, unitResult);
 		if (parsedUnit != null) {
-			if (mustResolve && !parsedUnit.isEmpty())
-				this.lookupEnvironment.buildTypeBindings(parsedUnit, null /*no access restriction*/);
-
+			if (!parsedUnit.isEmpty()) {
+				if (mustResolve) {
+					this.lookupEnvironment.buildTypeBindings(parsedUnit, null /*no access restriction*/);
+				}
+				if (hasAlreadyDefinedType(parsedUnit)) return false; // skip type has it is hidden so not visible
+				getMethodBodies(parsedUnit, possibleMatch.nodeSet);
+				if (this.patternLocator.mayBeGeneric && !mustResolve && possibleMatch.nodeSet.mustResolve) {
+					// special case: possible match node set force resolution although pattern does not
+					// => we need to build types for this compilation unit
+					this.lookupEnvironment.buildTypeBindings(parsedUnit, null /*no access restriction*/);
+				}
+			}
+	
 			// add the possibleMatch with its parsedUnit to matchesToProcess
 			possibleMatch.parsedUnit = parsedUnit;
 			int size = this.matchesToProcess.length;
@@ -27,5 +37,6 @@ protected void parseAndBuildBindings(PossibleMatch possibleMatch, boolean mustRe
 	} finally {
 		this.parser.nodeSet = null;
 	}
+	return true;
 }
 

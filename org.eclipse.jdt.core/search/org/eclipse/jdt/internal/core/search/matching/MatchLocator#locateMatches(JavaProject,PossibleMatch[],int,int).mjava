@@ -2,22 +2,43 @@ protected void locateMatches(JavaProject javaProject, PossibleMatch[] possibleMa
 	initialize(javaProject, length);
 
 	// create and resolve binding (equivalent to beginCompilation() in Compiler)
-	boolean mustResolve = ((InternalSearchPattern)this.pattern).mustResolve;
+	boolean mustResolvePattern = ((InternalSearchPattern)this.pattern).mustResolve;
+	boolean mustResolve = mustResolvePattern;
+	this.patternLocator.mayBeGeneric = this.options.sourceLevel >= ClassFileConstants.JDK1_5;
 	boolean bindingsWereCreated = mustResolve;
 	try {
 		for (int i = start, maxUnits = start + length; i < maxUnits; i++) {
 			PossibleMatch possibleMatch = possibleMatches[i];
 			try {
-				parseAndBuildBindings(possibleMatch, mustResolve);
-				if (!mustResolve) {
+				if (!parseAndBuildBindings(possibleMatch, mustResolvePattern)) continue;
+				// Currently we only need to resolve over pattern flag if there's potential parameterized types
+				if (this.patternLocator.mayBeGeneric) {
+					// If pattern does not resolve then rely on possible match node set resolution
+					// which may have been modified while locator was adding possible matches to it
+					if (!mustResolvePattern && !mustResolve) {
+						mustResolve = possibleMatch.nodeSet.mustResolve;
+						bindingsWereCreated = mustResolve;
+					}
+				} else {
+					// Reset matching node resolution with pattern one if there's no potential parameterized type
+					// to minimize side effect on previous search behavior
+					possibleMatch.nodeSet.mustResolve = mustResolvePattern;
+				}
+				// possible match node resolution has been merged with pattern one, so rely on it to know
+				// whether we need to process compilation unit now or later
+				if (!possibleMatch.nodeSet.mustResolve) {
 					if (this.progressMonitor != null) {
 						this.progressWorked++;
 						if ((this.progressWorked%this.progressStep)==0) this.progressMonitor.worked(this.progressStep);
 					}
 					process(possibleMatch, bindingsWereCreated);
+					if (this.numberOfMatches>0 && this.matchesToProcess[this.numberOfMatches-1] == possibleMatch) {
+						// forget last possible match as it was processed
+						this.numberOfMatches--;
+					}
 				}
 			} finally {
-				if (!mustResolve)
+				if (!possibleMatch.nodeSet.mustResolve)
 					possibleMatch.cleanUp();
 			}
 		}
