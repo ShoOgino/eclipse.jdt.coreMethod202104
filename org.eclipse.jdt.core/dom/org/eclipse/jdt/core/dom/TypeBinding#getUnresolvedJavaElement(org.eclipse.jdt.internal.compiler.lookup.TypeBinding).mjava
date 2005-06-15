@@ -1,0 +1,71 @@
+	private JavaElement getUnresolvedJavaElement(org.eclipse.jdt.internal.compiler.lookup.TypeBinding typeBinding ) {
+		if (typeBinding == null) 
+			return null;
+		switch (typeBinding.kind()) {
+			case Binding.ARRAY_TYPE :
+				typeBinding = ((ArrayBinding) typeBinding).leafComponentType();
+				return getUnresolvedJavaElement(typeBinding);
+			case Binding.BASE_TYPE :
+			case Binding.WILDCARD_TYPE :
+				return null;
+			default :
+				if (typeBinding.isCapture()) 
+					return null;
+		}
+		ReferenceBinding referenceBinding;
+		if (typeBinding.isParameterizedType() || typeBinding.isRawType())
+			referenceBinding = (ReferenceBinding) typeBinding.erasure();
+		else
+			referenceBinding = (ReferenceBinding) typeBinding;
+		char[] fileName = referenceBinding.getFileName();
+		if (Util.isClassFileName(fileName)) {
+			ClassFile classFile = (ClassFile) getClassFile(fileName);
+			if (classFile == null) return null;
+			return (JavaElement) classFile.getType();
+		}
+		if (referenceBinding.isLocalType() || referenceBinding.isAnonymousType()) {
+			// local or anonymous type
+			ICompilationUnit cu = getCompilationUnit(fileName);
+			if (cu == null) return null;
+			if (!(this.resolver instanceof DefaultBindingResolver)) return null;
+			DefaultBindingResolver bindingResolver = (DefaultBindingResolver) this.resolver;
+			ASTNode node = (ASTNode) bindingResolver.bindingsToAstNodes.get(this);
+			// must use getElementAt(...) as there is no back pointer to the defining method (scope is null after resolution has ended)
+			try {
+				return (JavaElement) cu.getElementAt(node.getStartPosition());
+			} catch (JavaModelException e) {
+				// does not exist
+				return null;
+			}
+		} else if (referenceBinding.isTypeVariable()) {
+			// type parameter
+			final String typeVariableName = new String(referenceBinding.sourceName());
+			Binding declaringElement = ((TypeVariableBinding) referenceBinding).declaringElement;
+			IBinding declaringTypeBinding = null;
+			if (declaringElement instanceof MethodBinding) {
+				declaringTypeBinding = this.resolver.getMethodBinding((MethodBinding) declaringElement);
+				IMethod declaringMethod = (IMethod) declaringTypeBinding.getJavaElement();
+				return (JavaElement) declaringMethod.getTypeParameter(typeVariableName);
+			} else {
+				declaringTypeBinding = this.resolver.getTypeBinding((org.eclipse.jdt.internal.compiler.lookup.TypeBinding) declaringElement);
+				IType declaringType = (IType) declaringTypeBinding.getJavaElement();
+				return (JavaElement) declaringType.getTypeParameter(typeVariableName);
+			}
+		} else {
+			if (fileName == null) return null; // case of a WilCardBinding that doesn't have a corresponding Java element
+			// member or top level type
+			ITypeBinding declaringTypeBinding = getDeclaringClass();
+			if (declaringTypeBinding == null) {
+				// top level type
+				ICompilationUnit cu = getCompilationUnit(fileName);
+				if (cu == null) return null;
+				return (JavaElement) cu.getType(new String(referenceBinding.sourceName()));
+			} else {
+				// member type
+				IType declaringType = (IType) declaringTypeBinding.getJavaElement();
+				if (declaringType == null) return null;
+				return (JavaElement) declaringType.getType(new String(referenceBinding.sourceName()));
+			}
+		}
+	}
+
