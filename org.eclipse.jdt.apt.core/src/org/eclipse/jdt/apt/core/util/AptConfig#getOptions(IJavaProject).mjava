@@ -1,7 +1,9 @@
-	/**
+    /**
 	 * Return the apt settings for this project, or the workspace settings
 	 * if they are not overridden by project settings.
 	 * TODO: should jproject be allowed to be NULL?
+	 * TODO: efficiently handle the case of projects that don't have per-project settings
+	 * (e.g., only cache one workspace-wide map, not a separate copy for each project).
 	 * @param jproject
 	 * @return
 	 */
@@ -11,23 +13,25 @@
 			return options;
 		}
 		// We didn't already have an options map for this project, so create one.
+		IPreferencesService service = Platform.getPreferencesService();
+		// Don't need to do this, because it's the default-default already:
+		//service.setDefaultLookupOrder(AptPlugin.PLUGIN_ID, null, lookupOrder);
 		options = new HashMap(AptPreferenceConstants.NSETTINGS);
-
-		// First load workspace-wide, then overlay per-project options if possible.
-		loadWorkspaceOptions(options);
-		if (jproject.getProject() != null) {
-			IScopeContext context = new ProjectScope(jproject.getProject());
-			final IEclipsePreferences eclipsePreferences = context.getNode(AptPlugin.PLUGIN_ID);
-			try {
-				for (String s : eclipsePreferences.keys()) {
-					options.put(s, eclipsePreferences.get(s, ""));
+		if (jproject != null) {
+			IScopeContext projContext = new ProjectScope(jproject.getProject());
+			IScopeContext[] contexts = new IScopeContext[] { projContext };
+			for (String optionName : AptPreferenceConstants.OPTION_NAMES) {
+				String val = service.getString(AptPlugin.PLUGIN_ID, optionName, null, contexts);
+				if (val != null) {
+					options.put(optionName, val);
 				}
 			}
-			catch (BackingStoreException e) {
-				// TODO
-				e.printStackTrace();
-			}
 		}
+		else {
+			// TODO: do we need to handle this case?
+			return null;
+		}
+		
 		return options;
 	}
 
