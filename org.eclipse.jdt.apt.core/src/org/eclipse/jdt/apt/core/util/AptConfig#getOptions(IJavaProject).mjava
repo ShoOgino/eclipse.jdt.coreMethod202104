@@ -1,14 +1,15 @@
     /**
 	 * Return the apt settings for this project, or the workspace settings
 	 * if they are not overridden by project settings.
-	 * TODO: should jproject be allowed to be NULL?
 	 * TODO: efficiently handle the case of projects that don't have per-project settings
 	 * (e.g., only cache one workspace-wide map, not a separate copy for each project).
 	 * @param jproject
 	 * @return
 	 */
 	private static Map getOptions(IJavaProject jproject) {
-		Map options = _optionsMaps.get(jproject);
+		IProject project = jproject.getProject();
+		assert(null != project);
+		Map options = _optionsMaps.get(project);
 		if (null != options) {
 			return options;
 		}
@@ -18,18 +19,21 @@
 		//service.setDefaultLookupOrder(AptPlugin.PLUGIN_ID, null, lookupOrder);
 		options = new HashMap(AptPreferenceConstants.NSETTINGS);
 		if (jproject != null) {
-			IScopeContext projContext = new ProjectScope(jproject.getProject());
-			IScopeContext[] contexts = new IScopeContext[] { projContext };
+			_optionsMaps.put(project, options);
+			// Load project values into the map
+			ProjectScope projScope = new ProjectScope(project);
+			IScopeContext[] contexts = new IScopeContext[] { projScope };
 			for (String optionName : AptPreferenceConstants.OPTION_NAMES) {
 				String val = service.getString(AptPlugin.PLUGIN_ID, optionName, null, contexts);
 				if (val != null) {
 					options.put(optionName, val);
 				}
 			}
-		}
-		else {
-			// TODO: do we need to handle this case?
-			return null;
+			// Add change listener for this project, so we can update the map later on
+			IEclipsePreferences projPrefs = projScope.getNode(AptPlugin.PLUGIN_ID);
+			ChangeListener listener = new ChangeListener(project);
+			projPrefs.addPreferenceChangeListener(listener);
+			((IEclipsePreferences)projPrefs.parent()).addNodeChangeListener(listener);
 		}
 		
 		return options;
