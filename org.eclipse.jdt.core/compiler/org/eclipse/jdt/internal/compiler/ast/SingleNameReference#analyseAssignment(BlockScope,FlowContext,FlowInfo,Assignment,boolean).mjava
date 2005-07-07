@@ -35,9 +35,22 @@
 			case Binding.FIELD : // assigning to a field
 				manageSyntheticAccessIfNecessary(currentScope, flowInfo, false /*write-access*/);
 	
+				FieldBinding fieldBinding = (FieldBinding) binding;
+				ReferenceBinding declaringClass = fieldBinding.declaringClass;
+				// check if accessing enum static field in initializer
+				if (declaringClass.isEnum()) {
+					MethodScope methodScope = currentScope.methodScope();
+					SourceTypeBinding sourceType = currentScope.enclosingSourceType();
+					if (fieldBinding.isStatic()
+							&& this.constant == NotAConstant
+							&& !methodScope.isStatic
+							&& (sourceType == declaringClass || sourceType.superclass == declaringClass) // enum constant body
+							&& methodScope.isInsideInitializerOrConstructor()) {
+						currentScope.problemReporter().enumStaticFieldUsedDuringInitialization(fieldBinding, this);
+					}
+				}					
 				// check if assigning a final field
-				FieldBinding fieldBinding;
-				if ((fieldBinding = (FieldBinding) binding).isFinal()) {
+				if (fieldBinding.isFinal()) {
 					// inside a context where allowed
 					if (!isCompound && fieldBinding.isBlankFinal() && currentScope.allowBlankFinalFieldAssignment(fieldBinding)) {
 						if (flowInfo.isPotentiallyAssigned(fieldBinding)) {

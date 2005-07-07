@@ -9,19 +9,28 @@
 		computeSubstitutes: {
 		    // infer from expected return type
 			if (expectedType != null) {
-			    returnType.collectSubstitutes(scope, expectedType, collectedSubstitutes, CONSTRAINT_SUPER);
+			    this.returnType.collectSubstitutes(scope, expectedType, collectedSubstitutes, CONSTRAINT_SUPER);
 			}
 		    // infer from bounds of type parameters
 			for (int i = 0; i < varLength; i++) {
 				TypeVariableBinding originalVariable = originalVariables[i];
 				TypeBinding argument = this.typeArguments[i];
+				boolean argAlreadyInferred = argument != originalVariable;
 				if (originalVariable.firstBound == originalVariable.superclass) {
-					Scope.substitute(this, originalVariable.firstBound) // substitue original bound with resolved variables
-						.collectSubstitutes(scope, argument, collectedSubstitutes, CONSTRAINT_EXTENDS);
+					TypeBinding substitutedBound = Scope.substitute(this, originalVariable.superclass);
+					argument.collectSubstitutes(scope, substitutedBound, collectedSubstitutes, CONSTRAINT_SUPER);
+					// JLS 15.12.2.8 claims reverse inference shouldn't occur, however it improves inference
+					// e.g. given: <E extends Object, S extends Collection<E>> S test1(S param)
+					//                   invocation: test1(new Vector<String>())    will infer: S=Vector<String>  and with code below: E=String
+					if (argAlreadyInferred)
+						substitutedBound.collectSubstitutes(scope, argument, collectedSubstitutes, CONSTRAINT_EXTENDS);
 				}
 				for (int j = 0, max = originalVariable.superInterfaces.length; j < max; j++) {
-					Scope.substitute(this, originalVariable.superInterfaces[j]) // substitue original bound with resolved variables
-						.collectSubstitutes(scope, argument, collectedSubstitutes, CONSTRAINT_EXTENDS);
+					TypeBinding substitutedBound = Scope.substitute(this, originalVariable.superInterfaces[j]);
+					argument.collectSubstitutes(scope, substitutedBound, collectedSubstitutes, CONSTRAINT_SUPER);
+					// JLS 15.12.2.8 claims reverse inference shouldn't occur, however it improves inference
+					if (argAlreadyInferred)
+						substitutedBound.collectSubstitutes(scope, argument, collectedSubstitutes, CONSTRAINT_EXTENDS);
 				}
 			}
 			substitutes = resolveSubstituteConstraints(scope, originalVariables, substitutes, true/*consider Ti<:Uk*/, collectedSubstitutes);
