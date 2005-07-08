@@ -10,26 +10,36 @@
 	private void loadPluginFactoryMap() {
 		assert PLUGIN_FACTORY_MAP.size() == 0 : "loadPluginFactoryMap() called more than once";
 
-		IExtensionPoint extension = Platform.getExtensionRegistry().getExtensionPoint(
-				"org.eclipse.jdt.apt.core",  //$NON-NLS-1$ - namecls of plugin that exposes this extension
+		// TODO: what follows is extremely similar to FactoryPathUtil#getAllPluginFactoryContainers().
+		// Surely there is some way to share that code?  The main difference is that there we don't 
+		// want to instantiate the actual factories, and here we do.
+		IExtensionPoint extensionPoint = Platform.getExtensionRegistry().getExtensionPoint(
+				AptPlugin.PLUGIN_ID, // name of plugin that exposes this extension point
 				"annotationProcessorFactory"); //$NON-NLS-1$ - extension id
-		IExtension[] extensions =  extension.getExtensions();
-		// for all extensions of this point...
-		for(int i = 0; i < extensions.length; i++){
-			IConfigurationElement [] configElements = extensions[i].getConfigurationElements();
-			// for all config elements named "factory"
-			for(int j = 0; j < configElements.length; j++){
-				String elementName = configElements[j].getName();
-				if (!("factory".equals(elementName))) { //$NON-NLS-1$ - name of configElement
+
+		// Iterate over all declared extensions of this extension point.  
+		// A single plugin may extend the extension point more than once, although it's not recommended.
+		for (IExtension extension : extensionPoint.getExtensions())
+		{
+			// Iterate over the children of the extension to find one named "factories".
+			for(IConfigurationElement factories : extension.getConfigurationElements())
+			{
+				if (!"factories".equals(factories.getName())) { //$NON-NLS-1$ - name of configElement 
 					continue;
 				}
-				try {
-					Object execExt = configElements[j].createExecutableExtension("class"); //$NON-NLS-1$ - attribute name
-					if (execExt instanceof AnnotationProcessorFactory){
-						PLUGIN_FACTORY_MAP.put( execExt.getClass().getName(), (AnnotationProcessorFactory)execExt );
+				// Iterate over the children of the "factories" element to find all the ones named "factory".
+				for (IConfigurationElement factory : factories.getChildren()) {
+					if (!"factory".equals(factory.getName())) {
+						continue;
 					}
-				} catch(CoreException e) {
-						e.printStackTrace();
+					try {
+						Object execExt = factory.createExecutableExtension("class"); //$NON-NLS-1$ - attribute name
+						if (execExt instanceof AnnotationProcessorFactory){
+							PLUGIN_FACTORY_MAP.put( execExt.getClass().getName(), (AnnotationProcessorFactory)execExt );
+						}
+					} catch(CoreException e) {
+							e.printStackTrace();
+					}
 				}
 			}
 		}
