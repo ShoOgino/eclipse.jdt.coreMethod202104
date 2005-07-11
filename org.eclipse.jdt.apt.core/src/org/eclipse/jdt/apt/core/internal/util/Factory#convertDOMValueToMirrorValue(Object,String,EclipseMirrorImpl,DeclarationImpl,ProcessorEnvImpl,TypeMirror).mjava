@@ -10,33 +10,44 @@
      * annotation element declaration where the default value originates
      * if <code>domValue</code> is an annotation, then <code>decl</code>
      * is the declaration that it annotates.
+     * @param expectedType the declared type of the member value.
+     * @param needBoxing <code>true</code> indicate an array should be returned. 
      */
     private static Object convertDOMValueToMirrorValue(Object domValue, 
 													   String name,	
 													   EclipseMirrorImpl parent,
 													   DeclarationImpl decl, 
-													   ProcessorEnvImpl env)
+													   ProcessorEnvImpl env,
+													   TypeMirror expectedType)
     {
         if( domValue == null ) return null;		
-        else if(domValue instanceof Boolean   ||
-				domValue instanceof Byte      ||
-				domValue instanceof Character ||
-				domValue instanceof Double    || 
-				domValue instanceof Float     ||
-				domValue instanceof Integer   ||
-				domValue instanceof Long      ||
-				domValue instanceof Short     ||
-				domValue instanceof String ) 
-			return domValue;
+        
+        final Object returnValue;
+        if( domValue instanceof Boolean   ||
+			domValue instanceof Byte      ||
+			domValue instanceof Character ||
+			domValue instanceof Double    || 
+			domValue instanceof Float     ||
+			domValue instanceof Integer   ||
+			domValue instanceof Long      ||
+			domValue instanceof Short     ||
+			domValue instanceof String ) 
+			returnValue = domValue;
+        
         else if( domValue instanceof IVariableBinding )
 		{
-			return Factory.createDeclaration((IVariableBinding)domValue, env);			
+        	returnValue = Factory.createDeclaration((IVariableBinding)domValue, env);			
 		}
         else if (domValue instanceof Object[])
 		{
 			final Object[] elements = (Object[])domValue;
 			final int len = elements.length;
             final List<AnnotationValue> annoValues = new ArrayList<AnnotationValue>(len);
+            final TypeMirror leaf; 
+            if( expectedType instanceof ArrayType )
+            	leaf = ((ArrayType)expectedType).getComponentType();
+            else
+            	leaf = expectedType; // doing our best here.
 			for( int i=0; i<len; i++ ){				
                 if( elements[i] == null ) continue;
                 // can't have multi-dimensional array.
@@ -44,7 +55,7 @@
                 else if( elements[i] instanceof Object[] )
                     return null;
 
-				Object o = convertDOMValueToMirrorValue( elements[i], name, parent, decl, env );
+				Object o = convertDOMValueToMirrorValue( elements[i], name, parent, decl, env, leaf );
 				assert( !( o instanceof IResolvedAnnotation ) ) : "Unexpected return value from convertDomValueToMirrorValue! o.getClass().getName() = " + o.getClass().getName();
 				
 				final AnnotationValue annoValue = createAnnotationValue(o, name, i, parent, env);
@@ -55,14 +66,16 @@
 		}
 		// caller should have caught this case.
         else if( domValue instanceof ITypeBinding )
-			return Factory.createTypeMirror((ITypeBinding)domValue, env);
+			returnValue = Factory.createTypeMirror((ITypeBinding)domValue, env);
 		
         else if( domValue instanceof IResolvedAnnotation )
 		{
-			return Factory.createAnnotationMirror((IResolvedAnnotation)domValue, decl, env);
+			returnValue = Factory.createAnnotationMirror((IResolvedAnnotation)domValue, decl, env);
 		}
+        else	        
+			// should never reach this point
+			throw new IllegalStateException("cannot build annotation value object from " + domValue);
         
-		// should never reach this point
-		throw new IllegalStateException("cannot build annotation value object from " + domValue);
+        return performNecessaryTypeConversion(expectedType, returnValue, name, parent, env);
     }
 
