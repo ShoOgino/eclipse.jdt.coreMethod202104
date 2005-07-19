@@ -1,0 +1,76 @@
+	private AptCompletionEventImpl buildCompletionEvent(ICompletionEvent event)
+	{
+		final ASTNode recoveredNode = event.getRecoveredASTNode();		
+		final ASTNode parent = findAnnotationOrMemberValuePair(recoveredNode);
+		if(parent == null) return null;
+		final AnnotationsImpl enclosings;
+		final String membername;
+		// the recovered node must then be the value of the value pair. 
+		if(parent instanceof MemberValuePair ){
+			final MemberValuePair pair = (MemberValuePair)parent;
+			enclosings = computeAnnotationStack(parent);			
+			// something is not right, either we didn't find an Annotaiton or
+			// the annotation is not sufficient for completion dispatch
+			if( enclosings == null ) return null;
+			if(pair.getName() == null )
+				membername = ""; //$NON-NLS-1$
+			else{
+				final String simpleName = pair.getName().getIdentifier();
+				membername = simpleName.length() == 0 ? VALUE : simpleName;	
+			}
+		}
+		else if( parent instanceof Annotation ){
+			// only complete it's a single member annotation
+			final Annotation annoNode = (Annotation)parent;
+			final IResolvedAnnotation resolved = annoNode.resolveAnnotation();
+			final ITypeBinding annoType = resolved.getAnnotationType();
+			if( annoType == null ) return null;
+			final IMethodBinding[] methods = annoType.getDeclaredMethods();
+			if( methods == null && methods.length != 1 )
+				return null;
+				
+			enclosings = computeAnnotationStack(parent);
+			// the information is not sufficient for dispatch
+			if( enclosings == null ) return null;
+			membername = VALUE;
+		}
+		else
+			return null;
+
+		final CompilationUnit unit = (CompilationUnit)recoveredNode.getRoot();
+		final CompletionEnvImpl env = new CompletionEnvImpl(unit, 
+														    event.getIFile(),
+														    event.getJavaProject());	
+		
+		final DeclarationFinder finder = new DeclarationFinder(enclosings.getOuterMost());
+		unit.accept(finder);
+		final DeclarationImpl annotated;
+		final ASTNode annotatedNode = finder.getAnnotatedNode();
+		if( annotatedNode == null )
+			annotated = null;
+		else{
+			// if it is a parameter
+			if( annotatedNode.getNodeType() == ASTNode.SINGLE_VARIABLE_DECLARATION ){
+				annotated = Factory.createParameterDeclaration((SingleVariableDeclaration)annotatedNode, env);
+			}
+			else{
+				final List<IBinding> bindings = new ArrayList<IBinding>(1);
+				BaseProcessorEnv.getBinding(annotatedNode, bindings);
+				if( bindings.isEmpty() )
+					annotated = null;
+				else
+					annotated = Factory.createDeclaration(bindings.get(0), env);
+			}
+		}	
+		enclosings.setAnnotated(annotated);
+		enclosings.setEnvironment(env);
+		
+		final AptCompletionEvent.CompletionNode srcValue = recoveredNode instanceof Expression ?
+															convertExpression((Expression)recoveredNode, annotated, env) :
+															null;
+		final AptCompletionEventImpl aptEvent = 
+			new AptCompletionEventImpl(event, membername, srcValue, enclosings);
+		
+		return aptEvent;
+	}
+
