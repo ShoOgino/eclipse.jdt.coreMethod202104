@@ -1,40 +1,56 @@
 	/**
-	 * TODO:  figure out how to create a working copy with a client-specified character set
+	 * This function generates a type "in-memory" by creating or updating a working copy with the
+	 * specified contents.   The generated-source folder must be configured correctly for this to 
+	 * work. This method takes no locks, so it is safe to call when holding fine-grained resource 
+	 * locks (e.g., during some reconcile paths).  Since this only works on an in-memory working 
+	 * copy of the type, the IFile for the generated type may not exist on disk.  Likewise, the
+	 * corresponding package directories of type-name may not exist on disk.   
 	 * 
+	 * TODO:  figure out how to create a working copy with a client-specified character se
 	 * 
-	 * @param parentCompilationUnit
-	 * @param typeName
-	 * @param contents
-	 * @param workingCopyOwner
-	 * @param problemRequestor
-	 * @param progressMonitor
-	 * @return
+	 * @param parentCompilationUnit - the parent compilation unit. 
+	 * @param typeName - the dot-separated java type name for the new type
+	 * @param contents - the contents of the new type
+	 * @param workingCopyOwner - the working copy owner.  This may be null.  If null, parentCompilationUnit.getOwner() 
+	 * will be used.  
+	 * @param problemRequestor - this may be null. 
+	 * @param progressMonitor - this may be null
+	 * 
+	 * @return The FileGenerationResult.  This will return null if the generated source folder
+	 * is not configured.
+	 * 
+	 * @see #ensureGeneratedSourceFolder(IProgressMonitor)
 	 */
 	public  FileGenerationResult generateFileDuringReconcile(
 			ICompilationUnit parentCompilationUnit, String typeName,
 			String contents, WorkingCopyOwner workingCopyOwner,
 			IProblemRequestor problemRequestor, IProgressMonitor progressMonitor ) 
-	{
-		// BUGZILLA 103183 - reconcile-path disabled until type-generation in reconcile is turned on
-		if ( true )
+	{		
+		// type-generation during reconcile only works if the generated source
+		// folder is created and added to the project's source path. 
+		if ( ! isGeneratedSourceFolderConfigured() )
 			return null;
-		
 		
 		ICompilationUnit workingCopy = null;
 		FileGenerationResult result = null;
+		IFile parentFile = (IFile)parentCompilationUnit.getResource();
 		try 
 		{
 			//
 			// get working copy (either from cache or create a new one)
 			//
-			workingCopy = getCachedWorkingCopy( parentCompilationUnit, typeName );
+			workingCopy = getCachedWorkingCopy( parentFile, typeName );
+			
+			if ( workingCopyOwner == null )
+				workingCopyOwner = parentCompilationUnit.getOwner();
 			
 			if ( workingCopy == null )
 			{
 				// create a new working copy
 				workingCopy = createNewWorkingCopy(  
-						parentCompilationUnit,  typeName, contents,  
+						parentFile,  typeName, contents,  
 						workingCopyOwner, problemRequestor,  progressMonitor);
+								
 				workingCopy.reconcile(AST.JLS3, true, workingCopyOwner,
 						progressMonitor);
 				
@@ -58,10 +74,6 @@
 		{
 			AptPlugin.log(jme, "Could not generate file for type: " + typeName); //$NON-NLS-1$
 		} 
-		catch (CoreException ce) 
-		{
-			AptPlugin.log(ce, "Could not generate file for type: " + typeName); //$NON-NLS-1$
-		}
 		return new FileGenerationResult((IFile)workingCopy.getResource(), true, false);
 	}
 
