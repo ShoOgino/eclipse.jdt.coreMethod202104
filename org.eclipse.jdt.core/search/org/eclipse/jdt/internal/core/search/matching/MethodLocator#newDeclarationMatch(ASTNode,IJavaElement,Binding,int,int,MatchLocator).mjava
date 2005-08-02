@@ -1,30 +1,32 @@
 public SearchMatch newDeclarationMatch(ASTNode reference, IJavaElement element, Binding elementBinding, int accuracy, int length, MatchLocator locator) {
 	if (elementBinding != null) {
 		MethodBinding methodBinding = (MethodBinding) elementBinding;
-		// Redo arguments verif as in this case previous filter may accept different ones
-		boolean equals = true;
-		if (this.pattern.parameterSimpleNames != null) {
-			int paramLength = this.pattern.parameterSimpleNames.length;
-			for (int i=0; equals && i<paramLength; i++) {
-				int level = resolveLevelForType(this.pattern.parameterSimpleNames[i], this.pattern.parameterQualifications[i], methodBinding.parameters[i]);
-				if (level == IMPOSSIBLE_MATCH) equals = false;
+		// If method parameters verification was not valid, then try to see if method arguments can match a method in hierarchy
+		if (this.methodDeclarationsWithInvalidParam.containsKey(reference)) {
+			// First see if this reference has already been resolved => report match if validated
+			Boolean report = (Boolean) this.methodDeclarationsWithInvalidParam.get(reference);
+			if (report != null) {
+				if (report.booleanValue()) {
+					return super.newDeclarationMatch(reference, element, elementBinding, accuracy, length, locator);
+				}
+				return null;
 			}
-		}
-		// If arguments are not equals then try to see if method arguments can match erasures in hierarchy
-		if (!equals && this.pattern.findDeclarations && this.mayBeGeneric) {
-			if (isErasureMethodOverride(methodBinding.declaringClass, methodBinding)) {
+			if (matchOverriddenMethod(methodBinding.declaringClass, methodBinding, null)) {
+				this.methodDeclarationsWithInvalidParam.put(reference, Boolean.TRUE);
 				return super.newDeclarationMatch(reference, element, elementBinding, accuracy, length, locator);
 			}
 			if (isTypeInSuperDeclaringTypeNames(methodBinding.declaringClass.compoundName)) {
 				MethodBinding patternBinding = locator.getMethodBinding(this.pattern);
 				if (patternBinding != null) {
-					patternBinding = patternBinding.original();
-					if (!isErasureMethodOverride(patternBinding.declaringClass, patternBinding)) {
+					if (!matchOverriddenMethod(patternBinding.declaringClass, patternBinding, methodBinding)) {
+						this.methodDeclarationsWithInvalidParam.put(reference, Boolean.FALSE);
 						return null;
 					}
 				}
+				this.methodDeclarationsWithInvalidParam.put(reference, Boolean.TRUE);
 				return super.newDeclarationMatch(reference, element, elementBinding, accuracy, length, locator);
 			}
+			this.methodDeclarationsWithInvalidParam.put(reference, Boolean.FALSE);
 			return null;
 		}
 	}
