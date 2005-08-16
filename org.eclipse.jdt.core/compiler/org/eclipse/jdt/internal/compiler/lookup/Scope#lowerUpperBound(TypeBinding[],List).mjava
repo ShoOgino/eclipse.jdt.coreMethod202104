@@ -31,29 +31,37 @@
 		if (length == 0) return VoidBinding;
 		int count = 0;
 		TypeBinding firstBound = null;
+		int commonDim = -1;
 		for (int i = 0; i < length; i++) {
 			TypeBinding mec = mecs[i];
 			if (mec == null) continue;
 			mec = leastContainingInvocation(mec, (Set)invocations.get(mec), lubStack);
 			if (mec == null) return null;
-			if (!mec.isInterface()) firstBound = mec;
+			int dim = mec.dimensions();
+			if (commonDim == -1) {
+				commonDim = dim;
+			} else if (dim != commonDim) { // not all types have same dimension
+				return null;
+			}
+			if (firstBound == null && !mec.leafComponentType().isInterface()) firstBound = mec.leafComponentType();
 			mecs[count++] = mec; // recompact them to the front
 		}
 		switch (count) {
 			case 0 : return VoidBinding;
 			case 1 : return mecs[0];
 			case 2 : 
-				if (mecs[1].id == T_JavaLangObject) return mecs[0];
-				if (mecs[0].id == T_JavaLangObject) return mecs[1];
+				if ((commonDim == 0 ? mecs[1].id : mecs[1].leafComponentType().id) == T_JavaLangObject) return mecs[0];
+				if ((commonDim == 0 ? mecs[0].id : mecs[0].leafComponentType().id) == T_JavaLangObject) return mecs[1];
 		}
 		TypeBinding[] otherBounds = new TypeBinding[count - 1];
 		int rank = 0;
 		for (int i = 0; i < count; i++) {
-			TypeBinding mec = mecs[i];
+			TypeBinding mec = commonDim == 0 ? mecs[i] : mecs[i].leafComponentType();
 			if (mec.isInterface()) {
 				otherBounds[rank++] = (ReferenceBinding)mec;
 			}
 		}
-		return environment().createWildcard(null, 0, firstBound, otherBounds, Wildcard.EXTENDS);
+		TypeBinding intersectionType = environment().createWildcard(null, 0, firstBound, otherBounds, Wildcard.EXTENDS);
+		return commonDim == 0 ? intersectionType : environment().createArrayType(intersectionType, commonDim);
 	}
 

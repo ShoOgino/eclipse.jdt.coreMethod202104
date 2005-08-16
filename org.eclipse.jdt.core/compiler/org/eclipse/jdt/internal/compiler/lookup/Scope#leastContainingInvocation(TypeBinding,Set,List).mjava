@@ -3,13 +3,18 @@
 		int length = invocations.size();
 		Iterator iter = invocations.iterator();
 		if (length == 1) return (TypeBinding) iter.next();
+
+		// if mec is an array type, intersect invocation leaf component types, then promote back to array
+		int dim = mec.dimensions();
+		mec = mec.leafComponentType();
+		
 		int argLength = mec.typeVariables().length;
 		if (argLength == 0) return mec; // should be caught by no invocation check
 
 		// infer proper parameterized type from invocations
 		TypeBinding[] bestArguments = new TypeBinding[argLength];
 		while (iter.hasNext()) {
-			TypeBinding invocation = (TypeBinding)iter.next();
+			TypeBinding invocation = ((TypeBinding)iter.next()).leafComponentType();
 			switch (invocation.kind()) {
 				case Binding.GENERIC_TYPE :
 					TypeVariableBinding[] invocationVariables = invocation.typeVariables();
@@ -28,9 +33,10 @@
 					}
 					break;
 				case Binding.RAW_TYPE :
-					return invocation; // raw type is taking precedence
+					return dim == 0 ? invocation : environment().createArrayType(invocation, dim); // raw type is taking precedence
 			}
 		}
-		return environment().createParameterizedType((ReferenceBinding) mec.erasure(), bestArguments, mec.enclosingType());
+		TypeBinding least = environment().createParameterizedType((ReferenceBinding) mec.erasure(), bestArguments, mec.enclosingType());
+		return dim == 0 ? least : environment().createArrayType(least, dim);
 	}
 
