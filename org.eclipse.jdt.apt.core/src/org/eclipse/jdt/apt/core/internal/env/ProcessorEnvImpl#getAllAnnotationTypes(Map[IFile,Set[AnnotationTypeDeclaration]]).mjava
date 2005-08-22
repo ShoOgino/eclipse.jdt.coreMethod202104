@@ -1,0 +1,44 @@
+    /**
+	 * Return all annotations at declaration level within all compilation unit(s)
+	 * associated with this environment.
+	 * @param file2Annotations populated by this method to map files to the annotation types
+	 *        if contains. May be null.
+	 * @return the map containing all annotation types found within this environment.
+	 */
+    public Map<String, AnnotationTypeDeclaration> getAllAnnotationTypes(
+    		final Map<IFile, Set<AnnotationTypeDeclaration>> file2Annotations) {
+    	
+    	checkValid();
+    	if( _files == null )  
+    		return getAnnotationTypesInFile();
+    	readFiles();
+    	
+		final List<Annotation> instances = new ArrayList<Annotation>();
+		final Map<String, AnnotationTypeDeclaration> decls = 
+			new HashMap<String, AnnotationTypeDeclaration>();
+		final AnnotationVisitor visitor = new AnnotationVisitor(instances);
+		for( int astIndex=0, len=_astUnits.length; astIndex<len; astIndex++ ){
+			_astUnits[astIndex].accept(visitor);
+			final Set<AnnotationTypeDeclaration> perFileAnnos = new HashSet<AnnotationTypeDeclaration>(); 
+			
+			for (int instanceIndex=0, size = instances.size(); instanceIndex < size; instanceIndex++) {
+				final Annotation instance = instances.get(instanceIndex);
+				final ITypeBinding annoType = instance.resolveTypeBinding();
+				if (annoType == null)
+					continue;
+				final TypeDeclarationImpl decl = 
+					Factory.createReferenceType(annoType, this);
+				if (decl.kind() == EclipseMirrorImpl.MirrorKind.TYPE_ANNOTATION){
+					final AnnotationTypeDeclaration annoDecl = (AnnotationTypeDeclaration)decl;
+					decls.put(annoDecl.getQualifiedName(), annoDecl);
+					perFileAnnos.add(annoDecl);
+				}
+			}
+			if( file2Annotations != null && !perFileAnnos.isEmpty() )
+				file2Annotations.put(_files[astIndex], perFileAnnos);
+			visitor.reset();
+		}
+		
+		return decls;
+	}
+

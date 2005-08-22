@@ -1,0 +1,108 @@
+	/**
+	 * mixed mode - allow batch processor to be run as well as filed based ones.
+	 * @param factories
+	 * @param processorEnv
+	 */
+	private void runAPTInMixedMode(
+			final List<AnnotationProcessorFactory> factories,
+			final ProcessorEnvImpl processorEnv)
+	{
+		final Map<IFile, Set<AnnotationTypeDeclaration>> file2AnnotationDecls = 
+			new HashMap<IFile, Set<AnnotationTypeDeclaration>>(_filesToProcess.length * 4/3 + 1);
+		final Map<String, AnnotationTypeDeclaration> annotationDecls = 
+			processorEnv.getAllAnnotationTypes(file2AnnotationDecls);	
+		
+		System.err.println(file2AnnotationDecls);
+		
+		if (annotationDecls.isEmpty())
+		{
+			if ( AptPlugin.DEBUG ) 
+				trace( "runAPT:  leaving early because annotationDecls is empty" ); //$NON-NLS-1$
+			return;
+		}
+		
+		// file based processing factory to the set of annotations that it 'claims'
+		final Map<AnnotationProcessorFactory, Set<AnnotationTypeDeclaration>> fileFactory2Annos =
+			new HashMap<AnnotationProcessorFactory, Set<AnnotationTypeDeclaration>>( factories.size() * 4/3 + 1 );
+		
+		// batch processing factory to the set of annotations that it 'claims'
+		final Map<AnnotationProcessorFactory, Set<AnnotationTypeDeclaration>> batchFactory2Annos =
+			new HashMap<AnnotationProcessorFactory, Set<AnnotationTypeDeclaration>>( factories.size() * 4/3 + 1 );		
+		
+		for( int i=0, size=factories.size(); i<size; i++ ){
+			final AnnotationProcessorFactory factory = factories.get(i);
+			Set<AnnotationTypeDeclaration> annotationTypes = getFactorySupportedAnnotations(factory, annotationDecls);
+			if( annotationTypes != null ){
+				
+				boolean batch = isBatchFactory(factory);
+				Map<AnnotationProcessorFactory, Set<AnnotationTypeDeclaration> > factory2Annos = 
+					batch ? batchFactory2Annos : fileFactory2Annos;
+				if( annotationTypes.size() == 0 ){
+					// this factory is claiming all (remaining) annotations. 
+					annotationTypes = new HashSet<AnnotationTypeDeclaration>(annotationDecls.values());
+					factory2Annos.put(factory, annotationTypes);
+					annotationDecls.clear();
+					break;
+				}
+				else{
+					factory2Annos.put(factory, annotationTypes);
+				}
+			}
+			if( annotationDecls.isEmpty() )
+				break;
+		}
+		
+		if( ! annotationDecls.isEmpty() )
+			; // TODO: (theodora) log unclaimed annotations.
+		
+		// Dispatch to the batch process factories first.
+		// Batch processors only get executed on a full/clean build.
+		if( !batchFactory2Annos.isEmpty() ){
+			processorEnv.setBatchProcessing();
+			// Once we figure out which factory claims what annotation,
+			// the order of the factory doesn't matter.
+			// But in order to make things consists between runs, will 
+			// dispatch base on factory order.
+			for( int i=0, size=factories.size(); i<size; i++ ){
+				final AnnotationProcessorFactory factory = factories.get(i);
+				final Set<AnnotationTypeDeclaration> annotationTypes = batchFactory2Annos.get(factory);
+				if( annotationTypes == null ) continue;
+				final AnnotationProcessor processor = 
+					factory.getProcessorFor(annotationTypes, processorEnv);
+				if( processor != null ){
+					if ( AptPlugin.DEBUG ) 
+						trace( "runAPT: invoking batch processor " + processor.getClass().getName() ); //$NON-NLS-1$
+                    processorEnv.setLatestProcessor(processor);
+					processor.process();
+				}
+			}
+		}
+		
+		// Now, do the file based dispatch
+		if( !fileFactory2Annos.isEmpty() ){
+			for( int fileIndex=0, numFiles=_filesToProcess.length; fileIndex<numFiles; fileIndex ++ ){
+				final Set<AnnotationTypeDeclaration> annotationTypesInFile = file2AnnotationDecls.get(_filesToProcess[fileIndex]);
+				if( annotationTypesInFile == null || annotationTypesInFile.isEmpty() )
+					continue;
+				for( int i=0, size=factories.size(); i<size; i++ ){
+					final AnnotationProcessorFactory factory = factories.get(i);
+					final Set<AnnotationTypeDeclaration> annotationTypesForFactory = fileFactory2Annos.get(factory);
+					if( annotationTypesForFactory == null || annotationTypesForFactory.isEmpty() ) 
+						continue;
+					final Set<AnnotationTypeDeclaration> intersect = setIntersect(annotationTypesInFile, annotationTypesForFactory);
+					if( intersect != null && !intersect.isEmpty() ){
+						processorEnv.setFileProcessing(_filesToProcess[fileIndex]);
+						final AnnotationProcessor processor = 
+							factory.getProcessorFor(intersect, processorEnv);
+						if( processor != null ){
+							if ( AptPlugin.DEBUG ) 
+								trace( "runAPT: invoking file-based processor " + processor.getClass().getName() ); //$NON-NLS-1$
+		                    processorEnv.setLatestProcessor(processor);
+							processor.process();
+						}
+					}
+				}
+			}
+		}
+	}
+

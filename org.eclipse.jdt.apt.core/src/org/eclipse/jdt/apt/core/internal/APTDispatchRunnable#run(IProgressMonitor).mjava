@@ -1,13 +1,9 @@
 	public void run(IProgressMonitor monitor) 
-	{
-		assert( _file == null || _compilationUnit == null ) : "Either _file should be null or _compilationUnit should be null."; //$NON-NLS-1$	
-		
+	{	
 		//
 		//  bail-out early if there aren't factories, or if there aren't any annotation instances
 		// 
-		if ( _factories == null || _factories.size() == 0 || 
-				( _compilationUnit != null && ! ScannerUtil.hasAnnotationInstance( _compilationUnit ) ) ||
-				( _file!= null && !  ScannerUtil.hasAnnotationInstance( _file ) ) )
+		if ( !shouldProcess() )
 		{
 			// tracing
 			if ( AptPlugin.DEBUG ) 
@@ -19,22 +15,24 @@
 					msg = "no annotation instances in file."; //$NON-NLS-1$
 				trace( "run():  leaving early because there are " + msg ); //$NON-NLS-1$
 			}
+
+			Set<IFile> allDeletedFiles = new HashSet<IFile>();
+			if( !_isFullBuild ){
+				for( int i=0, len = _originalFiles.length; i<len; i++ ){
+					IFile f = _originalFiles[i];
+					final Set<IFile> deletedFiles = 
+						cleanupAllGeneratedFilesForParent( f, _compilationUnit );
+					if( deletedFiles != null )
+						allDeletedFiles.addAll(deletedFiles);
+				}
+			}
 			
-			
-			IFile f;
-			if ( _file != null )
-				f = _file;
-			else
-				f = (IFile)_compilationUnit.getResource();
-			
-			Set<IFile> deletedFiles = cleanupAllGeneratedFilesForParent( f, _compilationUnit );
-			
-			if ( deletedFiles.size() == 0 )
+			if ( allDeletedFiles.size() == 0 )
 				_result =  EMPTY_APT_RESULT;
 			else
 				_result = new APTResult( Collections.<IFile>emptySet(), 
-										 deletedFiles, 
-										 Collections.<String>emptySet(),
+										 allDeletedFiles, 
+										 Collections.<IFile, Set<String>>emptyMap(),
 										 Collections.<IFile, List<IProblem>>emptyMap(), false );
 		}
 		else
@@ -49,7 +47,7 @@
 			else
 			{
 				processorEnv = ProcessorEnvImpl
-					.newProcessorEnvironmentForBuild( _file, _javaProject);
+					.newProcessorEnvironmentForBuild( _filesToProcess, _javaProject);
 			}
 			_result = runAPT(_factories, processorEnv);
 		}

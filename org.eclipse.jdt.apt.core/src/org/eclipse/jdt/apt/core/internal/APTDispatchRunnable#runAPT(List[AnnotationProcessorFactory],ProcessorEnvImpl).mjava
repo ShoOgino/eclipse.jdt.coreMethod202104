@@ -8,50 +8,27 @@
 				if ( AptPlugin.DEBUG ) trace( "runAPT: leaving early because there are no factories"); //$NON-NLS-1$
 				return EMPTY_APT_RESULT;
 			}
-				
+			// TODO: put the short circuit back in!!! (theodora)
+			/*			
 			if ( ! processorEnv.getFile().exists() )
 			{
 				if ( AptPlugin.DEBUG ) trace( "runAPT: leaving early because file doesn't exist"); //$NON-NLS-1$
 				return EMPTY_APT_RESULT;
 			}				
-		
-			final Map<String, AnnotationTypeDeclaration> annotationDecls = getAnnotationTypeDeclarations(
-					processorEnv.getAstCompilationUnit(), processorEnv);
-			
-			if (annotationDecls.isEmpty())
-			{
-				if ( AptPlugin.DEBUG ) trace( "runAPT:  leaving early because annotationDecls is empty" ); //$NON-NLS-1$
-				return EMPTY_APT_RESULT;
-			}
-
+		*/
 			GeneratedFileManager gfm = GeneratedFileManager.getGeneratedFileManager( processorEnv.getJavaProject().getProject() );
-			Set<IFile> lastGeneratedFiles = gfm.getGeneratedFilesForParent( processorEnv.getFile() );
-			
-			for (int i = 0, size = factories.size(); i < size; i++) {
-				final AnnotationProcessorFactory factory = factories.get(i);
-				Set<AnnotationTypeDeclaration> factoryDecls = getAnnotations(factory, annotationDecls);
-				boolean done = false;
-				if( factoryDecls != null ){
-					if(factoryDecls.size() == 0 ){
-						done = true;
-						factoryDecls = new HashSet(annotationDecls.values());
-					}
-				}
-				if (factoryDecls != null && factoryDecls.size() > 0) {
-					final AnnotationProcessor processor = factory
-							.getProcessorFor(factoryDecls, processorEnv);
-					if (processor != null)
-					{
-						if ( AptPlugin.DEBUG ) trace( "runAPT: invoking processor " + processor.getClass().getName() ); //$NON-NLS-1$
-                        processorEnv.setLatestProcessor(processor);
-						processor.process();
-					}
-				}
-
-				if (annotationDecls.isEmpty() || done)
-					break;
+			final Set<IFile> lastGeneratedFiles = new HashSet<IFile>();
+			for( int i=0, len=_filesToProcess.length; i<len; i++ ){
+				final Set<IFile> genFiles = gfm.getGeneratedFilesForParent( _filesToProcess[i] );
+				if( genFiles != null )
+					lastGeneratedFiles.addAll(genFiles);
 			}
-			// TODO: (theodora) log unclaimed annotations.
+			
+			if( shouldDispatchToBatchProcessor(factories, processorEnv) )
+				runAPTInMixedMode(factories, processorEnv);
+			else
+				runAPTInFileBasedMode(factories, processorEnv);
+			
 
 			// notify the processor listeners
 			final Set<AnnotationProcessorListener> listeners = processorEnv
@@ -80,10 +57,17 @@
 			// run, but are no longer generated should be removed
 			
 			// BUGZILLA 103183 - reconcile-path disabled until type-generation in reconcile is turned on
-			Set<IFile> deletedFiles = cleanupNoLongerGeneratedFiles( processorEnv.getFile(), processorEnv.getCompilationUnit(), lastGeneratedFiles, allGeneratedFiles, gfm );
+			Set<IFile> allDeletedFiles = new HashSet<IFile>();
+			for( int i=0, len=_filesToProcess.length; i<len; i++ ){
+				final Set<IFile> deletedFiles = 
+					cleanupNoLongerGeneratedFiles( _filesToProcess[i], processorEnv.getCompilationUnit(), lastGeneratedFiles, allGeneratedFiles, gfm );
+				if(deletedFiles != null )
+					allDeletedFiles.addAll(deletedFiles);		
+			}
+			
 			
 			APTResult result = new APTResult( modifiedFiles, 
-											  deletedFiles, 
+											  allDeletedFiles, 
 											  processorEnv.getTypeDependencies(), 
 											  processorEnv.getProblems(), processorEnv.getSourcePathChanged() );
 			processorEnv.close();
@@ -91,7 +75,7 @@
 
 			// log unclaimed annotations.
 		} catch (Throwable t) {
-			AptPlugin.log(t, "Unexpected failure running APT " + _file); //$NON-NLS-1$
+			AptPlugin.log(t, "Unexpected failure running APT " + getFileNameForPrint()); //$NON-NLS-1$
 		}
 		return EMPTY_APT_RESULT;
 	}
