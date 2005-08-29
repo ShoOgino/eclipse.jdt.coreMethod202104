@@ -1,0 +1,52 @@
+	/**
+	 * @param executable must be a constructor, method or annotation element.
+	 * @return the list thrown types of the executable. 
+	 */
+	static Collection<ReferenceType> getThrownTypes(
+			final EclipseDeclarationImpl executable,
+			final BaseProcessorEnv env)
+	{
+		if(executable == null || executable.kind() == MirrorKind.ANNOTATION_ELEMENT)
+			return Collections.emptyList();
+		if( executable.kind() != MirrorKind.METHOD && executable.kind() != MirrorKind.CONSTRUCTOR)
+			throw new IllegalArgumentException("Executable is not a method " +  //$NON-NLS-1$
+					executable.getClass().getName());
+		if( executable.isFromSource()){
+			// We always need to look into the ast to make sure the complete list of
+			// parameters are returned since parameters with unresolved type will not 
+			// show up in the method binding
+			final org.eclipse.jdt.core.dom.MethodDeclaration methodAstNode = 
+				(org.eclipse.jdt.core.dom.MethodDeclaration)executable.getAstNode();
+	    	@SuppressWarnings("unchecked") //$NON-NLS-1$
+	    	final List<Name> exceptions = methodAstNode.thrownExceptions();
+	    	if(exceptions == null || exceptions.size() == 0 )
+	    		return Collections.emptyList();
+	    	final List<ReferenceType> results = new ArrayList<ReferenceType>(4);
+	    	for(Name exception : exceptions ){
+	    		final ITypeBinding eType = exception.resolveTypeBinding();
+	    		final ReferenceType refType;
+	    		if( eType == null )
+	    			refType = Factory.createErrorClassType(exception.toString());
+	    		else
+	    			refType = Factory.createReferenceType(eType, env);
+	    		results.add(refType);
+	    	}
+	    	
+	    	return results;
+		}
+		else{
+			if( !executable.isBindingBased() )
+				throw new IllegalStateException("binary executable without binding."); //$NON-NLS-1$
+			final ExecutableDeclarationImpl impl = (ExecutableDeclarationImpl)executable;
+			final IMethodBinding methodBinding = impl.getDeclarationBinding();			
+	        final ITypeBinding[] exceptions = methodBinding.getExceptionTypes();
+	        final List<ReferenceType> results = new ArrayList<ReferenceType>(4);
+	        for( ITypeBinding exception : exceptions ){
+	            final TypeDeclaration mirrorDecl = Factory.createReferenceType(exception, env);
+	            if( mirrorDecl != null)
+	                results.add((ReferenceType)mirrorDecl);
+	        }
+	        return results;
+		}
+	}
+
