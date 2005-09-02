@@ -18,13 +18,26 @@
 		else
 			referenceBinding = (ReferenceBinding) typeBinding;
 		char[] fileName = referenceBinding.getFileName();
-		if (Util.isClassFileName(fileName)) {
-			ClassFile classFile = (ClassFile) getClassFile(fileName);
-			if (classFile == null) return null;
-			return (JavaElement) classFile.getType();
-		}
 		if (referenceBinding.isLocalType() || referenceBinding.isAnonymousType()) {
 			// local or anonymous type
+			if (Util.isClassFileName(fileName)) {
+				int jarSeparator = CharOperation.indexOf(IDependent.JAR_FILE_ENTRY_SEPARATOR, fileName);
+				int lastSlash = CharOperation.lastIndexOf('/', fileName);
+				if (lastSlash == -1) 
+					lastSlash = CharOperation.lastIndexOf(File.separatorChar, fileName);
+				if (lastSlash <= jarSeparator) // if jarSeparator == -1 and there is no slash, lastSlash should be 0
+					lastSlash = jarSeparator+1;
+				IPackageFragment pkg = getPackageFragment(fileName, lastSlash, jarSeparator);
+				char[] constantPoolName = referenceBinding.constantPoolName();
+				if (constantPoolName == null) {
+					ClassFile classFile = (ClassFile) getClassFile(fileName);
+					return classFile == null ? null : (JavaElement) classFile.getType();
+				}
+				lastSlash = CharOperation.lastIndexOf('/', constantPoolName);
+				char[] classFileName = CharOperation.subarray(constantPoolName, lastSlash+1, constantPoolName.length);
+				ClassFile classFile = (ClassFile) pkg.getClassFile(new String(classFileName) + SuffixConstants.SUFFIX_STRING_class);
+				return (JavaElement) classFile.getType();
+			}
 			ICompilationUnit cu = getCompilationUnit(fileName);
 			if (cu == null) return null;
 			// must use getElementAt(...) as there is no back pointer to the defining method (scope is null after resolution has ended)
@@ -55,6 +68,11 @@
 			ITypeBinding declaringTypeBinding = getDeclaringClass();
 			if (declaringTypeBinding == null) {
 				// top level type
+				if (Util.isClassFileName(fileName)) {
+					ClassFile classFile = (ClassFile) getClassFile(fileName);
+					if (classFile == null) return null;
+					return (JavaElement) classFile.getType();
+				}
 				ICompilationUnit cu = getCompilationUnit(fileName);
 				if (cu == null) return null;
 				return (JavaElement) cu.getType(new String(referenceBinding.sourceName()));
