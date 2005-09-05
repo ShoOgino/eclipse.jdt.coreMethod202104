@@ -1,0 +1,181 @@
+	public static IClasspathEntry elementDecode(Element element, IJavaProject project, Map unknownElements) {
+	
+		IPath projectPath = project.getProject().getFullPath();
+		NamedNodeMap attributes = element.getAttributes();
+		NodeList children = element.getChildNodes();
+		boolean[] foundChildren = new boolean[children.getLength()];
+		String kindAttr = removeAttribute(TAG_KIND, attributes);
+		String pathAttr = removeAttribute(TAG_PATH, attributes);
+
+		// ensure path is absolute
+		IPath path = new Path(pathAttr); 		
+		int kind = kindFromString(kindAttr);
+		if (kind != IClasspathEntry.CPE_VARIABLE && kind != IClasspathEntry.CPE_CONTAINER && !path.isAbsolute()) {
+			path = projectPath.append(path);
+		}
+		// source attachment info (optional)
+		IPath sourceAttachmentPath = 
+			element.hasAttribute(TAG_SOURCEPATH)	
+			? new Path(removeAttribute(TAG_SOURCEPATH, attributes))
+			: null;
+		if (kind != IClasspathEntry.CPE_VARIABLE && sourceAttachmentPath != null && !sourceAttachmentPath.isAbsolute()) {
+			sourceAttachmentPath = projectPath.append(sourceAttachmentPath);
+		}
+		IPath sourceAttachmentRootPath = 
+			element.hasAttribute(TAG_ROOTPATH)
+			? new Path(removeAttribute(TAG_ROOTPATH, attributes))
+			: null;
+		
+		// exported flag (optional)
+		boolean isExported = removeAttribute(TAG_EXPORTED, attributes).equals("true"); //$NON-NLS-1$
+
+		// inclusion patterns (optional)
+		IPath[] inclusionPatterns = decodePatterns(attributes, TAG_INCLUDING);
+		if (inclusionPatterns == null) inclusionPatterns = INCLUDE_ALL;
+		
+		// exclusion patterns (optional)
+		IPath[] exclusionPatterns = decodePatterns(attributes, TAG_EXCLUDING);
+		if (exclusionPatterns == null) exclusionPatterns = EXCLUDE_NONE;
+		
+		// access rules (optional)
+		NodeList attributeList = getChildAttributes(TAG_ACCESS_RULES, children, foundChildren);
+		IAccessRule[] accessRules = decodeAccessRules(attributeList);
+		
+		// backward compatibility
+		if (accessRules == null) {
+			accessRules = getAccessRules(inclusionPatterns, exclusionPatterns);
+		}
+
+		// combine access rules (optional)
+		boolean combineAccessRestrictions = !removeAttribute(TAG_COMBINE_ACCESS_RULES, attributes).equals("false"); //$NON-NLS-1$
+		
+		// extra attributes (optional)
+		attributeList = getChildAttributes(TAG_ATTRIBUTES, children, foundChildren);
+		IClasspathAttribute[] extraAttributes = decodeExtraAttributes(attributeList);
+		
+		// custom output location
+		IPath outputLocation = element.hasAttribute(TAG_OUTPUT) ? projectPath.append(removeAttribute(TAG_OUTPUT, attributes)) : null;
+		
+		String[] unknownAttributes = null;
+		ArrayList unknownChildren = null;
+
+		if (unknownElements != null) {
+			// unknown attributes
+			int unknownAttributeLength = attributes.getLength();
+			if (unknownAttributeLength != 0) {
+				unknownAttributes = new String[unknownAttributeLength*2];
+				for (int i = 0; i < unknownAttributeLength; i++) {
+					Node attribute = attributes.item(i);
+					unknownAttributes[i*2] = attribute.getNodeName();
+					unknownAttributes[i*2 + 1] = attribute.getNodeValue();
+				}
+			}
+			
+			// unknown children
+			for (int i = 0, length = foundChildren.length; i < length; i++) {
+				if (!foundChildren[i]) {
+					Node node = children.item(i);
+					if (node.getNodeType() != Node.ELEMENT_NODE) continue;
+					if (unknownChildren == null)
+						unknownChildren = new ArrayList();
+					StringBuffer buffer = new StringBuffer();
+					decodeUnknownNode(node, buffer, project);
+					unknownChildren.add(buffer.toString());
+				}
+			}
+		}
+		
+		// recreate the CP entry
+		IClasspathEntry entry = null;
+		switch (kind) {
+
+			case IClasspathEntry.CPE_PROJECT :
+				entry = new ClasspathEntry(
+				IPackageFragmentRoot.K_SOURCE,
+				IClasspathEntry.CPE_PROJECT,
+				path,
+				ClasspathEntry.INCLUDE_ALL, // inclusion patterns
+				ClasspathEntry.EXCLUDE_NONE, // exclusion patterns
+				null, // source attachment
+				null, // source attachment root
+				null, // specific output folder
+				isExported,
+				accessRules,
+				combineAccessRestrictions,
+				extraAttributes);
+				break;				
+			case IClasspathEntry.CPE_LIBRARY :
+				entry = JavaCore.newLibraryEntry(
+												path,
+												sourceAttachmentPath,
+												sourceAttachmentRootPath,
+												accessRules,
+												extraAttributes,
+												isExported);
+				break;
+			case IClasspathEntry.CPE_SOURCE :
+				// must be an entry in this project or specify another project
+				String projSegment = path.segment(0);
+				if (projSegment != null && projSegment.equals(project.getElementName())) { // this project
+					entry = JavaCore.newSourceEntry(path, inclusionPatterns, exclusionPatterns, outputLocation, extraAttributes);
+				} else { 
+					if (path.segmentCount() == 1) {
+						// another project
+						entry = JavaCore.newProjectEntry(
+												path, 
+												accessRules,
+												combineAccessRestrictions,
+												extraAttributes,
+												isExported);
+					} else {
+						// an invalid source folder
+						entry = JavaCore.newSourceEntry(path, inclusionPatterns, exclusionPatterns, outputLocation, extraAttributes);
+					}
+				}
+				break;
+			case IClasspathEntry.CPE_VARIABLE :
+				entry = JavaCore.newVariableEntry(
+						path,
+						sourceAttachmentPath,
+						sourceAttachmentRootPath, 
+						accessRules,
+						extraAttributes,
+						isExported);
+				break;
+			case IClasspathEntry.CPE_CONTAINER :
+				entry = JavaCore.newContainerEntry(
+						path,
+						accessRules,
+						extraAttributes,
+						isExported);
+				break;
+			case ClasspathEntry.K_OUTPUT :
+				if (!path.isAbsolute()) return null;
+				entry = new ClasspathEntry(
+						ClasspathEntry.K_OUTPUT,
+						IClasspathEntry.CPE_LIBRARY,
+						path,
+						INCLUDE_ALL, 
+						EXCLUDE_NONE, 
+						null, // source attachment
+						null, // source attachment root
+						null, // custom output location
+						false,
+						null, // no access rules
+						false, // no accessible files to combine
+						NO_EXTRA_ATTRIBUTES);
+				break;
+			default :
+				throw new Assert.AssertionFailedException(Messages.bind(Messages.classpath_unknownKind, kindAttr)); 
+		}
+		
+		if (unknownAttributes != null || unknownChildren != null) {
+			UnknownXmlElements unknownXmlElements = new UnknownXmlElements();
+			unknownXmlElements.attributes = unknownAttributes;
+			unknownXmlElements.children = unknownChildren;
+			unknownElements.put(path, unknownXmlElements);
+		}
+		
+		return entry;
+	}
+
