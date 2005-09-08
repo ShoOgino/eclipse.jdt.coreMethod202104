@@ -1,0 +1,61 @@
+	private final void addOptimizedReplaceEdit(int offset, int length, String replacement) {
+		if (this.editsIndex > 0) {
+			// try to merge last two edits
+			final OptimizedReplaceEdit previous = this.edits[this.editsIndex-1];
+			final int previousOffset = previous.offset;
+			final int previousLength = previous.length;
+			final int endOffsetOfPreviousEdit = previousOffset + previousLength;
+			final int replacementLength = replacement.length();
+			final String previousReplacement = previous.replacement;
+			final int previousReplacementLength = previousReplacement.length();
+			if (previousOffset == offset && previousLength == length && (replacementLength == 0 || previousReplacementLength == 0)) {
+				if (this.currentAlignment != null) {
+					final Location2 location = this.currentAlignment.location;
+					if (location.editsIndex == this.editsIndex) {
+						location.editsIndex--;
+						location.textEdit = previous;
+					}
+				}
+				this.editsIndex--;
+				return;
+			}
+			if (endOffsetOfPreviousEdit == offset) {
+				if (length != 0) {
+					if (replacementLength != 0) {
+						this.edits[this.editsIndex - 1] = new OptimizedReplaceEdit(previousOffset, previousLength + length, previousReplacement + replacement);
+					} else if (previousLength + length == previousReplacementLength) {
+						// check the characters. If they are identical, we can get rid of the previous edit
+						boolean canBeRemoved = true;
+						loop: for (int i = previousOffset; i < previousOffset + previousReplacementLength; i++) {
+							if (scanner.source[i] != previousReplacement.charAt(i - previousOffset)) {
+								this.edits[this.editsIndex - 1] = new OptimizedReplaceEdit(previousOffset, previousReplacementLength, previousReplacement);
+								canBeRemoved = false;
+								break loop;
+							}
+						}
+						if (canBeRemoved) {
+							if (this.currentAlignment != null) {
+								final Location2 location = this.currentAlignment.location;
+								if (location.editsIndex == this.editsIndex) {
+									location.editsIndex--;
+									location.textEdit = previous;
+								}
+							}
+							this.editsIndex--;
+						}
+					} else {
+						this.edits[this.editsIndex - 1] = new OptimizedReplaceEdit(previousOffset, previousLength + length, previousReplacement);
+					}
+				} else {
+					if (replacementLength != 0) {
+						this.edits[this.editsIndex - 1] = new OptimizedReplaceEdit(previousOffset, previousLength, previousReplacement + replacement);
+					}
+				}
+			} else {
+				this.edits[this.editsIndex++] = new OptimizedReplaceEdit(offset, length, replacement);
+			}
+		} else {
+			this.edits[this.editsIndex++] = new OptimizedReplaceEdit(offset, length, replacement);
+		}
+	}
+

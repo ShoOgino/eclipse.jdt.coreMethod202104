@@ -1,0 +1,146 @@
+	public boolean visit(EnumDeclaration node) {
+        /*
+         * Print comments to get proper line number
+         */
+        this.scribe.printComment();
+        final int line = this.scribe.line; 
+        
+        final List modifiers = node.modifiers();
+        if (modifiers.size() != 0) {
+        	this.scribe.printModifiers(modifiers, this);
+        	this.scribe.space();
+        }
+        	
+		this.scribe.printNextToken(TerminalTokens.TokenNameenum, true); 
+
+		this.scribe.printNextToken(TerminalTokens.TokenNameIdentifier, true); 
+
+		/* 
+		 * Super Interfaces 
+		 */
+		final List superInterfaces = node.superInterfaceTypes();
+		final int superInterfacesLength = superInterfaces.size();
+		if (superInterfacesLength != 0) {
+			Alignment2 interfaceAlignment =this.scribe.createAlignment(
+					"superInterfaces",//$NON-NLS-1$
+					this.preferences.alignment_for_superinterfaces_in_enum_declaration,
+					superInterfacesLength+1,  // implements token is first fragment
+					this.scribe.scanner.currentPosition);
+			this.scribe.enterAlignment(interfaceAlignment);
+			boolean ok = false;
+			do {
+				try {
+					this.scribe.alignFragment(interfaceAlignment, 0);
+					this.scribe.printNextToken(TerminalTokens.TokenNameimplements, true);
+					for (int i = 0; i < superInterfacesLength; i++) {
+						if (i > 0) {
+							this.scribe.printNextToken(TerminalTokens.TokenNameCOMMA, this.preferences.insert_space_before_comma_in_superinterfaces);
+							this.scribe.printTrailingComment();
+							this.scribe.alignFragment(interfaceAlignment, i+1);
+							if (this.preferences.insert_space_after_comma_in_superinterfaces) {
+								this.scribe.space();
+							}
+							((Type) superInterfaces.get(i)).accept(this);
+						} else {
+							this.scribe.alignFragment(interfaceAlignment, i+1);
+							this.scribe.space();
+							((Type) superInterfaces.get(i)).accept(this);
+						}
+					}
+					ok = true;
+				} catch (AlignmentException e) {
+					this.scribe.redoAlignment(e);
+				}
+			} while (!ok);
+			this.scribe.exitAlignment(interfaceAlignment, true);
+		}
+		
+		final String bracePosition = this.preferences.brace_position_for_enum_declaration;
+
+        formatLeftCurlyBrace(line, bracePosition);
+		formatTypeOpeningBrace(bracePosition, this.preferences.insert_space_before_opening_brace_in_enum_declaration, node.bodyDeclarations().size() != 0, node);
+		
+		final boolean indent_body_declarations_compare_to_header = this.preferences.indent_body_declarations_compare_to_enum_declaration_header;
+		if (indent_body_declarations_compare_to_header) {
+			this.scribe.indent();
+		}
+		
+		final List enumConstants = node.enumConstants();
+		final int enumConstantsLength = enumConstants.size();
+		if (enumConstantsLength != 0) {
+			if (enumConstantsLength > 1) {
+				Alignment2 enumConstantsAlignment = this.scribe.createAlignment(
+						"enumConstants",//$NON-NLS-1$
+						this.preferences.alignment_for_enum_constants,
+						enumConstantsLength,
+						this.scribe.scanner.currentPosition,
+						0, // we don't want to indent enum constants when splitting to a new line
+						false);
+				this.scribe.enterAlignment(enumConstantsAlignment);
+				boolean ok = false;
+				do {
+					try {
+						for (int i = 0; i < enumConstantsLength; i++) {
+							this.scribe.alignFragment(enumConstantsAlignment, i);
+							final EnumConstantDeclaration enumConstantDeclaration = ((EnumConstantDeclaration) enumConstants.get(i));
+							enumConstantDeclaration.accept(this);
+							if (isNextToken(TerminalTokens.TokenNameCOMMA)) {
+								this.scribe.printNextToken(TerminalTokens.TokenNameCOMMA, this.preferences.insert_space_before_comma_in_enum_declarations);
+								if (this.preferences.insert_space_after_comma_in_enum_declarations) {
+									this.scribe.space();
+								}
+								this.scribe.printTrailingComment();
+								if (enumConstantDeclaration.getAnonymousClassDeclaration() != null) {
+									this.scribe.printNewLine();
+								}
+							}
+						}
+						ok = true;
+					} catch (AlignmentException e) {
+						this.scribe.redoAlignment(e);
+					}
+				} while (!ok);
+				this.scribe.exitAlignment(enumConstantsAlignment, true);
+			} else {
+				final EnumConstantDeclaration enumConstantDeclaration = ((EnumConstantDeclaration) enumConstants.get(0));
+				enumConstantDeclaration.accept(this);
+				if (isNextToken(TerminalTokens.TokenNameCOMMA)) {
+					this.scribe.printNextToken(TerminalTokens.TokenNameCOMMA, this.preferences.insert_space_before_comma_in_enum_declarations);
+					if (this.preferences.insert_space_after_comma_in_enum_declarations) {
+						this.scribe.space();
+					}
+					this.scribe.printTrailingComment();
+					if (enumConstantDeclaration.getAnonymousClassDeclaration() != null) {
+						this.scribe.printNewLine();
+					}
+				}
+			}
+		}
+		if (isNextToken(TerminalTokens.TokenNameSEMICOLON)) {
+			this.scribe.printNextToken(TerminalTokens.TokenNameSEMICOLON, this.preferences.insert_space_before_semicolon);
+			this.scribe.printTrailingComment();
+		}
+		if (enumConstantsLength != 0) {
+			this.scribe.printNewLine();	
+		}
+
+		formatTypeMembers(node.bodyDeclarations());
+		
+		if (indent_body_declarations_compare_to_header) {
+			this.scribe.unIndent();
+		}
+		
+		if (this.preferences.insert_new_line_in_empty_enum_declaration) {
+			this.scribe.printNewLine();
+		}
+		this.scribe.printNextToken(TerminalTokens.TokenNameRBRACE);
+		this.scribe.printTrailingComment();
+		if (bracePosition.equals(DefaultCodeFormatterConstants.NEXT_LINE_SHIFTED)) {
+			this.scribe.unIndent();
+		}
+		if (hasComments()) {
+			this.scribe.printNewLine();
+		}
+		return false;
+	}	
+
