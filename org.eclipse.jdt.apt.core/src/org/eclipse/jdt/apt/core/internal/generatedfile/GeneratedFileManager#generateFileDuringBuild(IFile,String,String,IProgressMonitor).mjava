@@ -1,0 +1,115 @@
+	/**
+	 * Invoked when a file is generated during a build.  The generated file and intermediate 
+	 * directories will be created if they don't  exist.  This method takes file-system locks, 
+	 * and assumes that the calling method has at some point acquired a workspace-level 
+	 * resource lock.
+	 * 
+	 * @param parentFile the parent of the type being generated
+	 * @param typeName the dot-separated java type name of the type being generated
+	 * @param contents the java code contents of the new type .
+	 * @param progressMonitor a progres monitor.  This may be null.
+	 * @param charsetName the character set to use when creating the new file.  This can be null 
+	 * or the empty string, in which case the platform default encoding will be used.
+	 *  
+	 * @return - the newly created IFile along with whether it was modified
+	 * 
+	 * @throws CoreException
+	 * @throws UnsupportedEncodingException
+	 */
+	public FileGenerationResult generateFileDuringBuild(
+			IFile parentFile,
+			String typeName, 
+			String contents, 
+			IProgressMonitor progressMonitor)
+	throws CoreException
+	{
+		try{
+			boolean updatededSourcePath = ensureGeneratedSourceFolder( progressMonitor );
+			final IFolder genFolder = getGeneratedSourceFolder();
+			IPackageFragmentRoot genFragRoot = null;
+			IPackageFragmentRoot[] roots = _javaProject.getAllPackageFragmentRoots();
+			for (IPackageFragmentRoot root : roots) {
+				if( genFolder.equals(root.getResource()) ){
+					genFragRoot = root;
+					break;
+				}
+			}
+			if( genFragRoot == null ){
+				throw new IllegalStateException("failed to locate package fragment root for " + genFolder.getName()); //$NON-NLS-1$
+			}
+			if( typeName.indexOf('/') != -1 )
+				typeName = typeName.replace('/', '.');
+			int separatorIndex = typeName.lastIndexOf('.');			
+			final String typeSimpleName;
+			final String pkgName;
+			if( separatorIndex == -1 ){
+				pkgName = ""; //$NON-NLS-1$
+				typeSimpleName = typeName;
+			}
+			else{
+				pkgName = typeName.substring(0, separatorIndex);
+				typeSimpleName = typeName.substring(separatorIndex + 1, typeName.length());
+			}
+			IPackageFragment pkgFrag = genFragRoot.createPackageFragment(pkgName, true, progressMonitor);
+			if( pkgFrag == null ){
+				IStatus status = AptPlugin.createStatus(
+						new IllegalStateException("failed to locate package '" + pkgName + "'"),  //$NON-NLS-1$ //$NON-NLS-2$
+						"Failure generating file");  //$NON-NLS-1$
+				throw new CoreException(status);
+			}			
+			final String cuName = typeSimpleName + ".java"; //$NON-NLS-1$
+			
+			ICompilationUnit unit = pkgFrag.getCompilationUnit(cuName);
+			boolean contentsDiffer = true;
+			
+			if( unit.exists() ){
+				InputStream oldData = null;
+				InputStream is = null;
+				try {
+					is = new ByteArrayInputStream( contents.getBytes() );
+					oldData = new BufferedInputStream( ((IFile)unit.getResource() ).getContents());
+					contentsDiffer = !compareStreams(oldData, is);
+				}
+				catch (CoreException ce) {
+					// Do nothing. Assume the new content is different
+				}
+				finally {
+					is.reset();
+					if (oldData != null) {
+						try {
+							oldData.close();
+						} 
+						catch (IOException ioe) 
+						{}
+					}
+				}
+			}
+			
+			if( contentsDiffer )
+				unit = pkgFrag.createCompilationUnit(cuName, contents, true, progressMonitor);
+			
+			if( unit == null ) {
+				IStatus status = AptPlugin.createStatus(new IllegalStateException("Unable to create unit for " + cuName), "Failure generating file"); //$NON-NLS-1$ //$NON-NLS-2$
+				throw new CoreException(status);
+			}
+			else{
+				final IFile file = (IFile)unit.getResource();
+				file.setDerived( true );
+				// We used to also make the file read-only. This is a bad idea,
+				// as refactorings then fail in the future, which is worse
+				// than allowing a user to modify a generated file.
+				
+				// during a batch build
+				if( parentFile != null )
+					addEntryToFileMaps( parentFile, file );
+				return new FileGenerationResult(file, contentsDiffer, updatededSourcePath);
+			}
+			
+		}
+		catch(Exception e){
+			AptPlugin.log(e, "failed to generate type " + typeName); //$NON-NLS-1$
+		}
+		IStatus status = AptPlugin.createStatus(new IllegalStateException("Failed to generate type " + typeName), "Failure generating file"); //$NON-NLS-1$ //$NON-NLS-2$
+		throw new CoreException(status);
+	}	
+

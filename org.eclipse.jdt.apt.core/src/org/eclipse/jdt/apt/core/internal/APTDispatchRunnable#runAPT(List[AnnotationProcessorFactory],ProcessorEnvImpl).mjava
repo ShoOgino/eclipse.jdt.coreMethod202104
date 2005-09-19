@@ -2,88 +2,48 @@
 			final List<AnnotationProcessorFactory> factories,
 			final ProcessorEnvImpl processorEnv) 
 	{
-		try {
-			if (factories.size() == 0)
-			{
-				if ( AptPlugin.DEBUG ) 
-					trace( "runAPT: leaving early because there are no factories", //$NON-NLS-1$ 
-							processorEnv );
-				return EMPTY_APT_RESULT;
-			}
-			// TODO: put the short circuit back in!!! (theodora)
-			/*			
-			if ( ! processorEnv.getFile().exists() )
-			{
-				if ( AptPlugin.DEBUG ) trace( "runAPT: leaving early because file doesn't exist"); //$NON-NLS-1$
-				return EMPTY_APT_RESULT;
-			}				
-		*/
-			GeneratedFileManager gfm = GeneratedFileManager.getGeneratedFileManager( processorEnv.getJavaProject().getProject() );
-			final Set<IFile> lastGeneratedFiles = new HashSet<IFile>();
-			for( int i=0, len=_filesToProcess.length; i<len; i++ ){
-				final Set<IFile> genFiles = gfm.getGeneratedFilesForParent( _filesToProcess[i] );
-				if( genFiles != null )
-					lastGeneratedFiles.addAll(genFiles);
-			}
-			
-			if( shouldDispatchToBatchProcessor(factories, processorEnv) )
-				runAPTInMixedMode(factories, processorEnv);
-			else
-				runAPTInFileBasedMode(factories, processorEnv);
-			
-
-			// notify the processor listeners
-			final Set<AnnotationProcessorListener> listeners = processorEnv
-					.getProcessorListeners();
-			for (AnnotationProcessorListener listener : listeners) {
-				EclipseRoundCompleteEvent event = null;
-				if (listener instanceof RoundCompleteListener) {
-					if (event == null)
-						event = new EclipseRoundCompleteEvent(processorEnv);
-					final RoundCompleteListener rcListener = (RoundCompleteListener) listener;
-					rcListener.roundComplete(event);
+		final List<IFile> filesWithMissingType = new ArrayList<IFile>();
+		final List<char[]> sourceForFiles = new ArrayList<char[]>();
+		final APTResult result = runAPT(factories, processorEnv, filesWithMissingType, sourceForFiles);
+	
+		//APTResult lastResult = result;
+		if( processorEnv.getPhase() == Phase.BUILD )
+		{	
+			boolean generatedTypes = result.hasGeneratedTypes();
+			while( generatedTypes && !filesWithMissingType.isEmpty() ){
+				// compile all generated files and try to satisfy the missing generated types.
+				//recompileGeneratedFiles(result.getNewFiles());
+				
+				final int numFiles = filesWithMissingType.size();
+				assert numFiles == sourceForFiles.size() :
+					"size mismatch"; //$NON-NLS-1$			
+				// we are about to re-process the file, wipe out the problems and
+				// type dependencies recorded from the previous run.
+				for( IFile file :  filesWithMissingType ){
+					result.removeDependenciesFrom(file);
+					result.removeProblemsFrom(file);
 				}
-			}
-
-			final Set<IFile> allGeneratedFiles = new HashSet<IFile>();
-			Set<IFile> modifiedFiles = new HashSet<IFile>();
-			Map<IFile, Boolean> filesMap = processorEnv.getGeneratedFiles();
-			for (Map.Entry<IFile, Boolean> entry : filesMap.entrySet()) {
-				allGeneratedFiles.add(entry.getKey());
-				if (entry.getValue()) {
-					modifiedFiles.add(entry.getKey());
+				
+				final IFile[] files = new IFile[numFiles];
+				final char[][] sources = new char[numFiles][];
+				for(int i=0; i<numFiles; i++ ){
+					files[i] = filesWithMissingType.get(i);
+					sources[i] = sourceForFiles.get(i);
 				}
-			}
-			
-			// any files that were generated for this parent on the last
-			// run, but are no longer generated should be removed
-			
-			// BUGZILLA 103183 - reconcile-path disabled until type-generation in reconcile is turned on
-			Set<IFile> allDeletedFiles = new HashSet<IFile>();
-			for( int i=0, len=_filesToProcess.length; i<len; i++ ){
-				final Set<IFile> deletedFiles = cleanupNoLongerGeneratedFiles( 
-							_filesToProcess[i], 
-							processorEnv.getCompilationUnit(), 
-							lastGeneratedFiles, 
-							allGeneratedFiles, 
-							gfm,
-							processorEnv);
-				if(deletedFiles != null )
-					allDeletedFiles.addAll(deletedFiles);		
-			}
-			
-			
-			APTResult result = new APTResult( modifiedFiles, 
-											  allDeletedFiles, 
-											  processorEnv.getTypeDependencies(), 
-											  processorEnv.getProblems(), processorEnv.getSourcePathChanged() );
-			processorEnv.close();
-			return result;
+				ProcessorEnvImpl newEnv = ProcessorEnvImpl.newProcessorEnvironmentForBuild(
+						files, sources, processorEnv.getJavaProject() );
 
-			// log unclaimed annotations.
-		} catch (Throwable t) {
-			AptPlugin.log(t, "Unexpected failure running APT " + getFileNamesForPrinting(processorEnv)); //$NON-NLS-1$
+				filesWithMissingType.clear();
+				sourceForFiles.clear();
+				APTResult newResult = runAPT(factories, newEnv, filesWithMissingType, sourceForFiles);
+				// Only have generated types if there are *new* generated files
+				generatedTypes = hasNewFiles(result, newResult);
+				
+				result.merge(newResult);
+				newEnv.close();
+			}
 		}
-		return EMPTY_APT_RESULT;
+	
+		return result;
 	}
 

@@ -1,0 +1,95 @@
+	private APTResult runAPT(
+			final List<AnnotationProcessorFactory> factories,
+			final ProcessorEnvImpl processorEnv,
+			final List<IFile> filesWithMissingType,
+			final List<char[]> sourceForFiles) 
+	{
+		try {
+			if (factories.size() == 0)
+			{
+				if ( AptPlugin.DEBUG ) 
+					trace( "runAPT: leaving early because there are no factories", //$NON-NLS-1$ 
+							processorEnv );
+				return EMPTY_APT_RESULT;
+			}
+			// TODO: put the short circuit back in!!! (theodora)
+			/*			
+			if ( ! processorEnv.getFile().exists() )
+			{
+				if ( AptPlugin.DEBUG ) trace( "runAPT: leaving early because file doesn't exist"); //$NON-NLS-1$
+				return EMPTY_APT_RESULT;
+			}				
+			*/
+			final IFile[] files = processorEnv.getFiles();
+			GeneratedFileManager gfm = GeneratedFileManager.getGeneratedFileManager( processorEnv.getJavaProject().getProject() );
+			final Set<IFile> lastGeneratedFiles = new HashSet<IFile>();
+			for( int i=0, len=files.length; i<len; i++ ){
+				final Set<IFile> genFiles = gfm.getGeneratedFilesForParent( files[i] );
+				if( genFiles != null )
+					lastGeneratedFiles.addAll(genFiles);
+			}
+			
+			
+			boolean mixedModeDispatch = shouldDispatchToBatchProcessor(factories, processorEnv);
+			if( mixedModeDispatch )
+				runAPTInMixedMode(factories, processorEnv, filesWithMissingType, sourceForFiles);
+			else
+				runAPTInFileBasedMode(factories, processorEnv, filesWithMissingType, sourceForFiles);
+			
+
+			// notify the processor listeners
+			final Set<AnnotationProcessorListener> listeners = processorEnv
+					.getProcessorListeners();
+			for (AnnotationProcessorListener listener : listeners) {
+				EclipseRoundCompleteEvent event = null;
+				if (listener instanceof RoundCompleteListener) {
+					if (event == null)
+						event = new EclipseRoundCompleteEvent(processorEnv);
+					final RoundCompleteListener rcListener = (RoundCompleteListener) listener;
+					rcListener.roundComplete(event);
+				}
+			}
+
+			final Set<IFile> allGeneratedFiles = new HashSet<IFile>();
+			Set<IFile> modifiedFiles = new HashSet<IFile>();
+			Map<IFile, Boolean> filesMap = processorEnv.getGeneratedFiles();
+			for (Map.Entry<IFile, Boolean> entry : filesMap.entrySet()) {
+				allGeneratedFiles.add(entry.getKey());
+				if (entry.getValue()) {
+					modifiedFiles.add(entry.getKey());
+				}
+			}
+			
+			// any files that were generated for this parent on the last
+			// run, but are no longer generated should be removed
+			
+			// BUGZILLA 103183 - reconcile-path disabled until type-generation in reconcile is turned on
+			Set<IFile> allDeletedFiles = new HashSet<IFile>();
+			for( int i=0, len=files.length; i<len; i++ ){
+				final Set<IFile> deletedFiles = cleanupNoLongerGeneratedFiles( 
+							files[i], 
+							processorEnv.getCompilationUnit(), 
+							lastGeneratedFiles, 
+							allGeneratedFiles, 
+							gfm,
+							processorEnv);
+				if(deletedFiles != null )
+					allDeletedFiles.addAll(deletedFiles);		
+			}		
+			
+			APTResult result = new APTResult( modifiedFiles, 
+											  allDeletedFiles, 
+											  processorEnv.getTypeDependencies(), 
+											  processorEnv.getProblems(), 
+											  processorEnv.getSourcePathChanged(),
+											  processorEnv.hasGeneratedClassFiles() || processorEnv.hasGeneratedSourceFiles());
+			processorEnv.close();
+			return result;
+
+			// log unclaimed annotations.
+		} catch (Throwable t) {
+			AptPlugin.log(t, "Unexpected failure running APT " + getFileNamesForPrinting(processorEnv)); //$NON-NLS-1$
+		}
+		return EMPTY_APT_RESULT;
+	}
+
