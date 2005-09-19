@@ -1,0 +1,94 @@
+	protected final MethodBinding mostSpecificMethodBinding(MethodBinding[] visible, int visibleSize, TypeBinding[] argumentTypes, InvocationSite invocationSite, ReferenceBinding receiverType) {
+		int[] compatibilityLevels = new int[visibleSize];
+		for (int i = 0; i < visibleSize; i++)
+			compatibilityLevels[i] = parameterCompatibilityLevel(visible[i], argumentTypes);
+		byte[] skipValues = new byte[visibleSize]; // tagged with -1 if method cannot be best match
+
+		for (int level = 0, max = VARARGS_COMPATIBLE; level <= max; level++) {
+			nextVisible : for (int i = 0; i < visibleSize; i++) {
+				if (compatibilityLevels[i] != level || skipValues[i] == -1) continue nextVisible; // skip this method for now
+				MethodBinding original = visible[i].original();
+				MethodBinding method = visible[i].tiebreakMethod();
+				for (int j = 0; j < visibleSize; j++) {
+					if (i == j || compatibilityLevels[j] != level) continue;
+					max = level; // do not examine further categories
+					MethodBinding original2 = visible[j].original();
+					if (original == original2)
+						continue; // parameterized superclasses & interfaces may be walked twice from different paths
+
+					MethodBinding method2 = visible[j].tiebreakMethod();
+					if (!isMoreSpecificMethod(method, method2)) {
+						if (!isMoreSpecificMethod(method2, method))
+							skipValues[j] = -1; // no point checking method2 either
+						continue nextVisible; // method2 is a better match
+					}
+
+					if (method.areParametersEqual(method2)) {
+						if (method.isStatic() && method2.isStatic()) {
+							// if you knew that method overrode method2, it would help
+							ReferenceBinding declaringClass = (ReferenceBinding) method.declaringClass.erasure();
+							ReferenceBinding superType = declaringClass.findSuperTypeWithSameErasure(method2.declaringClass.erasure());
+							if (superType == null)
+								continue nextVisible; // static methods from unrelated types
+						}
+						if (original == method && original2 == method2)
+							continue; // no need to check further
+						if (!method.isAbstract() && method2.isAbstract())
+							continue; // 15.12.2, concrete method beats abstract method
+						if (method.declaringClass == method2.declaringClass)
+							continue nextVisible; // duplicates thru substitution
+
+						if (method.hasSubstitutedParameters() && method.isAbstract() == method2.isAbstract() && receiverType != null) {
+							// class A<T> { void foo(T t) {} }
+							// class B<T, S> extends A<S> { void foo(T t) {} }
+							receiverType = receiverType instanceof CaptureBinding ? receiverType : (ReferenceBinding) receiverType.erasure();
+							ReferenceBinding superType = receiverType.findSuperTypeWithSameErasure(method.declaringClass.erasure());
+							if (original.declaringClass == superType || superType == null) {
+								method = original;
+							} else {
+								// must find inherited method with the same substituted variables
+								MethodBinding[] superMethods = superType.getMethods(method.selector);
+								for (int m = 0, l = superMethods.length; m < l; m++) {
+									if (superMethods[m].original() == original) {
+										method = superMethods[m];
+										break;
+									}
+								}
+							}
+							superType = receiverType.findSuperTypeWithSameErasure(method2.declaringClass.erasure());
+							if (original2.declaringClass == superType || superType == null) {
+								method2 = original2;
+							} else {
+								// must find inherited method with the same substituted variables
+								MethodBinding[] superMethods = superType.getMethods(method2.selector);
+								for (int m = 0, l = superMethods.length; m < l; m++) {
+									if (superMethods[m].original() == original2) {
+										method2 = superMethods[m];
+										break;
+									}
+								}
+							}
+							if (method.typeVariables != NoTypeVariables)
+								method2 = method.computeSubstitutedMethod(method2, environment());
+							if (method2 == null || !method.areParametersEqual(method2)) {
+								skipValues[j] = -1;
+								continue nextVisible; // dup thru substitution, not overridden... cannot find possible match
+							}
+							// method overrides method2, accept it
+						} else if (!original.areTypeVariableErasuresEqual(original2)) {
+							if (original.typeVariables != NoTypeVariables) {
+								skipValues[j] = -1;
+								continue nextVisible; // method is not better since variables are not equal
+							}
+							continue nextVisible; // method2 is better match than method
+						}
+					}
+				}
+				method = visible[i]; // instead of the tieBreakMethod
+				compilationUnitScope().recordTypeReferences(method.thrownExceptions);
+				return method;
+			}
+		}
+		return new ProblemMethodBinding(visible[0].selector, visible[0].parameters, Ambiguous);
+	}	
+
