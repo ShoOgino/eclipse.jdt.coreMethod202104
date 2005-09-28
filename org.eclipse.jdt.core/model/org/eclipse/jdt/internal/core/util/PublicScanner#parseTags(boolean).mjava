@@ -1,44 +1,75 @@
 protected void parseTags(boolean hasLineComment) {
-	final NLSLine line = this.currentLine;
 	if (!hasLineComment) {
-		if (line.size() == 0) return; // nothing to do
 		if (this.nonNLSStrings == null) this.nonNLSStrings = new HashSet();
-		this.nonNLSStrings.addAll(line.elements);
+		this.nonNLSStrings.addAll(this.currentLine.elements);
 	} else {
-		char[] s = getCurrentTokenSource();
-		int pos = CharOperation.indexOf(TAG_PREFIX, s, true);
+		int position = 0;
+		if (this.linePtr >= 0) {
+			position = this.lineEnds[this.linePtr] + 1; 
+		}
+		while (Character.isWhitespace(this.source[position])) {
+			position++;
+		}
+		if (getCurrentTokenStartPosition() == position) {
+			// the whole line is commented out
+			return;
+		}
+		final NLSLine line = this.currentLine;
+		char[] s = null;
+		int sourceEnd = this.currentPosition;
+		int sourceStart = this.startPosition;
+		int sourceDelta = 0;
+		if (this.withoutUnicodePtr != 0) {
+			// 0 is used as a fast test flag so the real first char is in position 1
+			System.arraycopy(
+				this.withoutUnicodeBuffer, 
+				1, 
+				s = new char[this.withoutUnicodePtr], 
+				0, 
+				this.withoutUnicodePtr);
+			sourceEnd = this.withoutUnicodePtr;
+			sourceStart = 1;
+			sourceDelta = this.getCurrentTokenStartPosition();
+		} else {
+			s = this.source;
+		}
+		int pos = CharOperation.indexOf(TAG_PREFIX, s, true, sourceStart, sourceEnd);
+		final int lineSize = line.size();
 		if (pos != -1) {
-			if (this.unnecessaryNONNLSTags == null) this.unnecessaryNONNLSTags = new HashSet();
+			if (this.unnecessaryNLSTags == null) this.unnecessaryNLSTags = new HashSet();
 			while (pos != -1) {
 				int start = pos + TAG_PREFIX_LENGTH;
-				int end = CharOperation.indexOf(TAG_POSTFIX, s, start);
+				int end = CharOperation.indexOf(TAG_POSTFIX, s, start, sourceEnd);
 				if (end != -1) {
 					String index = new String(CharOperation.subarray(s, start, end));
-					int i = 0;
 					try {
-						i = Integer.parseInt(index) - 1; // Tags are one based not zero based.
-					} catch (NumberFormatException e) {
-						i = -1; // we don't want to consider this as a valid NLS tag
-					}
-					if (line != null && line.exists(i)) {
-						line.set(i, null);
-						final NLSTag tag = new NLSTag(pos + this.getCurrentTokenStartPosition(), this.getCurrentTokenStartPosition() + end, NLSTag.USED);
-						if (!this.unnecessaryNONNLSTags.add(tag)) {
-							this.unnecessaryNONNLSTags.remove(tag);
-							this.unnecessaryNONNLSTags.add(tag);
+						final int i = Integer.parseInt(index) - 1; // Tags are one based not zero based.
+						if (i >= 0 && i < lineSize) {
+							if (line.get(i) == null) {
+								this.unnecessaryNLSTags.add(new NLSTag(pos + sourceDelta, end + sourceDelta));
+							} else {
+								line.set(i, null);
+								final NLSTag tag = new NLSTag(pos + sourceDelta , end + sourceDelta, NLSTag.USED);
+								if (!this.unnecessaryNLSTags.add(tag)) {
+									this.unnecessaryNLSTags.remove(tag);
+									this.unnecessaryNLSTags.add(tag);
+								}
+							}
+						} else {
+							this.unnecessaryNLSTags.add(new NLSTag(pos + sourceDelta, end + sourceDelta));
 						}
-					} else {
-						this.unnecessaryNONNLSTags.add(new NLSTag(pos + this.getCurrentTokenStartPosition(), this.getCurrentTokenStartPosition() + end));
+					} catch (NumberFormatException e) {
+						this.unnecessaryNLSTags.add(new NLSTag(pos + this.getCurrentTokenStartPosition(), this.getCurrentTokenStartPosition() + end));
 					}
 				}
 				pos = CharOperation.indexOf(TAG_PREFIX, s, true, start);
 			}
 		}
 	
-		if (line.size() != 0) {
+		if (line.remainingElementsSize != 0) {
 			if (this.nonNLSStrings == null) this.nonNLSStrings = new HashSet();
 			for (Iterator iterator = line.iterator(); iterator.hasNext(); ) {
-				StringLiteral literal = (StringLiteral) iterator.next();
+				final StringLiteral literal = (StringLiteral) iterator.next();
 				if (literal != null) {
 					this.nonNLSStrings.add(literal);
 				}
