@@ -1,0 +1,60 @@
+	/**
+	 * Bug 110576: [encoding] Rename CU looses encoding for file which charset is determined by contents
+	 * @see "http://bugs.eclipse.org/bugs/show_bug.cgi?id=110576"
+	 */
+	public void testBug110576() throws JavaModelException, CoreException {
+
+		String os = System.getProperty("osgi.os");
+		if (!"win32".equals(os)) {
+			System.out.println("Bug 110576 is not tested under "+os+" os...");
+			return;
+		}
+
+		// Verify file UTF-8 BOM encoding
+		IFile file = (IFile) this.encodingProject.findMember("src/testBug110576/Test.java");
+		verifyUtf8BOM(file);
+
+		String fileName = file.getName();
+		ICompilationUnit testCU = getCompilationUnit(file.getFullPath().toString());
+		createFolder("/Encoding/src/tmp");
+		IPackageFragment tmpPackage = getPackageFragment("Encoding", "src", "tmp");
+		
+		try {
+			// Copy file
+			testCU.copy(tmpPackage, null, null, false, null);
+			ICompilationUnit copiedCU = tmpPackage.getCompilationUnit(fileName);
+			IFile copiedFile = (IFile) copiedCU.getUnderlyingResource();
+			verifyUtf8BOM(copiedFile);
+	
+			// Get source and compare with file contents
+			compareContents(copiedCU, "UTF-8", true/*BOM*/);
+
+			// Rename file
+			copiedCU.rename("TestUTF8.java", false, null);
+			ICompilationUnit renamedCU = tmpPackage.getCompilationUnit("TestUTF8.java");
+			IFile renamedFile = (IFile) renamedCU.getUnderlyingResource();
+			verifyUtf8BOM(renamedFile);
+			fileName = renamedFile.getName();
+			
+			// Compare contents again
+			compareContents(renamedCU, "UTF-8", true/*BOM*/);
+
+			// Move file
+			createFolder("/Encoding/src/tmp/sub");
+			IPackageFragment subPackage = getPackageFragment("Encoding", "src", "tmp.sub");
+			renamedCU.move(subPackage, null, null, false, null);
+			ICompilationUnit movedCU = subPackage.getCompilationUnit(fileName);
+			IFile movedFile = (IFile) movedCU.getUnderlyingResource();
+			verifyUtf8BOM(movedFile);
+	
+			// Get source and compare with file contents
+			compareContents(movedCU, "UTF-8", true/*BOM*/);
+		}
+		finally {
+			// Delete temporary folder
+			//renamedFile.move(this.utf8File.getFullPath(), false, null);
+			//assertEquals("Moved file should keep encoding", encoding, this.utf8File.getCharset());
+			deleteFolder("/Encoding/src/tmp");
+		}
+	}
+
