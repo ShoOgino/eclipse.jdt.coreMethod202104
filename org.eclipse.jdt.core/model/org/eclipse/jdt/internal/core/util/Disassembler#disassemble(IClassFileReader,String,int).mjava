@@ -11,8 +11,15 @@
 	 */
 	public String disassemble(IClassFileReader classFileReader, String lineSeparator, int mode) {
 		if (classFileReader == null) return EMPTY_OUTPUT;
+		char[] className = classFileReader.getClassName();
+		if (className == null) {
+			// incomplete initialization. We cannot go further.
+			return EMPTY_OUTPUT;
+		}
+		CharOperation.replace(className, '/', '.');
+		final int classNameLength = className.length;
+
 		StringBuffer buffer = new StringBuffer();
-	
 		ISourceAttribute sourceAttribute = classFileReader.getSourceFileAttribute();
 		IClassFileAttribute classFileAttribute = Util.getAttribute(classFileReader, IAttributeNamesConstants.SIGNATURE);
 		ISignatureAttribute signatureAttribute = (ISignatureAttribute) classFileAttribute;
@@ -54,12 +61,16 @@
 				writeNewLine(buffer, lineSeparator, 0);
 			}
 		}
-		char[] className = classFileReader.getClassName();
-		if (className == null) {
-			// incomplete initialization. We cannot go further.
-			return buffer.toString();
-		}
+		final int lastDotIndexInClassName = CharOperation.lastIndexOf('.', className);
 		
+		if (checkMode(mode, WORKING_COPY) && lastDotIndexInClassName != -1) { 
+			// we print a package declaration
+			buffer.append("package ");//$NON-NLS-1$
+			buffer.append(className, 0, lastDotIndexInClassName);
+			buffer.append(';');
+			writeNewLine(buffer, lineSeparator, 0);
+		}
+
 		IInnerClassesAttribute innerClassesAttribute = classFileReader.getInnerClassesAttribute();
 		IClassFileAttribute runtimeVisibleAnnotationsAttribute = Util.getAttribute(classFileReader, IAttributeNamesConstants.RUNTIME_VISIBLE_ANNOTATIONS);
 		IClassFileAttribute runtimeInvisibleAnnotationsAttribute = Util.getAttribute(classFileReader, IAttributeNamesConstants.RUNTIME_INVISIBLE_ANNOTATIONS);
@@ -108,8 +119,15 @@
 			}
 			buffer.append("interface "); //$NON-NLS-1$
 		}
-		CharOperation.replace(className, '/', '.');
-		buffer.append(className);
+		
+		if (checkMode(mode, WORKING_COPY)) {
+			// we print the simple class name
+			final int start = lastDotIndexInClassName + 1;
+			buffer.append(className, start, classNameLength - start);
+			className = CharOperation.subarray(className, start, classNameLength);
+		} else {
+			buffer.append(className);
+		}
 		
 		char[] superclassName = classFileReader.getSuperclassName();
 		if (superclassName != null) {
@@ -137,7 +155,7 @@
 		if (checkMode(mode, SYSTEM)) {
 			disassemble(classFileReader.getConstantPool(), buffer, lineSeparator, 1);
 		}
-		disassembleTypeMembers(classFileReader, buffer, lineSeparator, 1, mode);
+		disassembleTypeMembers(classFileReader, className, buffer, lineSeparator, 1, mode);
 		if (checkMode(mode, SYSTEM | DETAILED)) {
 			IClassFileAttribute[] attributes = classFileReader.getAttributes();
 			length = attributes.length;
