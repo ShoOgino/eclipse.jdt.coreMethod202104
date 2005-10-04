@@ -1,0 +1,65 @@
+	/**
+	 * Performs type search in a source package.
+	 */
+	protected void seekTypesInSourcePackage(
+			String name, 
+			IPackageFragment pkg, 
+			int firstDot, 
+			boolean partialMatch, 
+			String topLevelTypeName, 
+			int acceptFlags,
+			IJavaElementRequestor requestor) {
+		
+		long start = -1;
+		if (VERBOSE)
+			start = System.currentTimeMillis();
+		try {
+			if (!partialMatch) {
+				try {
+					ICompilationUnit[] compilationUnits = pkg.getCompilationUnits();
+					for (int i = 0, length = compilationUnits.length; i < length; i++) {
+						if (requestor.isCanceled())
+							return;
+						ICompilationUnit cu = compilationUnits[i];
+						String cuName = cu.getElementName();
+						int lastDot = cuName.lastIndexOf('.');
+						if (!topLevelTypeName.equals(cuName.substring(0, lastDot))) 
+							continue;
+						IType type = cu.getType(topLevelTypeName);
+						type = getMemberType(type, name, firstDot);
+						if (acceptType(type, acceptFlags, true/*a source type*/)) { // accept type checks for existence
+							requestor.acceptType(type);
+							break;  // since an exact match was requested, no other matching type can exist
+						}
+					}
+				} catch (JavaModelException e) {
+					// package doesn't exist -> ignore
+				}
+			} else {
+				try {
+					String cuPrefix = firstDot == -1 ? name : name.substring(0, firstDot);
+					ICompilationUnit[] compilationUnits = pkg.getCompilationUnits();
+					for (int i = 0, length = compilationUnits.length; i < length; i++) {
+						if (requestor.isCanceled())
+							return;
+						ICompilationUnit cu = compilationUnits[i];
+						if (!cu.getElementName().toLowerCase().startsWith(cuPrefix))
+							continue;
+						try {
+							IType[] types = cu.getTypes();
+							for (int j = 0, typeLength = types.length; j < typeLength; j++)
+								seekTypesInTopLevelType(name, firstDot, types[j], requestor, acceptFlags);
+						} catch (JavaModelException e) {
+							// cu doesn't exist -> ignore
+						}
+					}
+				} catch (JavaModelException e) {
+					// package doesn't exist -> ignore
+				}
+			}
+		} finally {
+			if (VERBOSE)
+				this.timeSpentInSeekTypesInSourcePackage += System.currentTimeMillis()-start;
+		}
+	}
+

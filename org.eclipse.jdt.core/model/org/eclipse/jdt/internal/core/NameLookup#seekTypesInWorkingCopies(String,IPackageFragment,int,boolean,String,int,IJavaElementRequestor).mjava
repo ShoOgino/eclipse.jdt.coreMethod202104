@@ -1,0 +1,58 @@
+	/*
+	 * Seeks the type with the given name in the map of types with precedence (coming from working copies)
+	 * Return whether a type has been found.
+	 */
+	protected boolean seekTypesInWorkingCopies(
+			String name, 
+			IPackageFragment pkg, 
+			int firstDot, 
+			boolean partialMatch, 
+			String topLevelTypeName, 
+			int acceptFlags,
+			IJavaElementRequestor requestor) {
+
+		if (!partialMatch) {
+			HashMap typeMap = (HashMap) (this.typesInWorkingCopies == null ? null : this.typesInWorkingCopies.get(pkg));
+			if (typeMap != null) {
+				Object object = typeMap.get(topLevelTypeName);
+				if (object instanceof IType) {
+					IType type = getMemberType((IType) object, name, firstDot);
+					if (acceptType(type, acceptFlags, true/*a source type*/)) {
+						requestor.acceptType(type);
+						return true; // don't continue with compilation unit
+					}
+				} else if (object instanceof IType[]) {
+					if (object == NO_TYPES) return true; // all types where deleted -> type is hidden
+					IType[] topLevelTypes = (IType[]) object;
+					for (int i = 0, length = topLevelTypes.length; i < length; i++) {
+						if (requestor.isCanceled())
+							return false;
+						IType type = getMemberType(topLevelTypes[i], name, firstDot);
+						if (acceptType(type, acceptFlags, true/*a source type*/)) {
+							requestor.acceptType(type);
+							return true; // return the first one
+						}
+					}
+				}
+			}
+		} else {
+			HashMap typeMap = (HashMap) (this.typesInWorkingCopies == null ? null : this.typesInWorkingCopies.get(pkg));
+			if (typeMap != null) {
+				Iterator iterator = typeMap.values().iterator();
+				while (iterator.hasNext()) {
+					if (requestor.isCanceled())
+						return false;
+					Object object = iterator.next();
+					if (object instanceof IType) {
+						seekTypesInTopLevelType(name, firstDot, (IType) object, requestor, acceptFlags);
+					} else if (object instanceof IType[]) {
+						IType[] topLevelTypes = (IType[]) object;
+						for (int i = 0, length = topLevelTypes.length; i < length; i++)
+							seekTypesInTopLevelType(name, firstDot, topLevelTypes[i], requestor, acceptFlags);
+					}
+				}
+			}
+		}
+		return false;
+	}
+

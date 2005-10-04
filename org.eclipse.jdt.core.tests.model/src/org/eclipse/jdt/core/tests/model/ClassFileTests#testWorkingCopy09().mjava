@@ -1,0 +1,35 @@
+/*
+ * Ensures that types in a class file are hidden if the class file working copy is empty.
+ */
+public void testWorkingCopy09() throws CoreException {
+	IClassFile classFile = this.jarRoot.getPackageFragment("workingcopy").getClassFile("X.class");
+	WorkingCopyOwner owner = new WorkingCopyOwner() {};
+	this.workingCopy = classFile.becomeWorkingCopy(null/*no problem requestor*/, owner, null/*no progress*/);
+	this.workingCopy.getBuffer().setContents(	"");
+	this.workingCopy.makeConsistent(null);
+	
+	ICompilationUnit cu = getCompilationUnit("/P/Y.java");
+	ICompilationUnit copy = null;
+	try {
+		ProblemRequestor problemRequestor = new ProblemRequestor();
+		copy = cu.getWorkingCopy(owner, problemRequestor, null/*no prpgress*/);
+		copy.getBuffer().setContents(
+			"public class Y {\n" +
+			"  workingcopy.X x;\n" +
+			"}"
+		);
+		problemRequestor.problems = new StringBuffer();
+		copy.reconcile(ICompilationUnit.NO_AST, false/*don't force problems*/, owner, null/*no progress*/);
+		assertProblems(
+			"Unexpected problems", 
+			"----------\n" + 
+			"1. ERROR in /P/Y.java\n" + 
+			"workingcopy.X cannot be resolved to a type\n" + 
+			"----------\n",
+			problemRequestor);
+	} finally {
+		if (copy != null)
+			copy.discardWorkingCopy();
+	}
+}
+
