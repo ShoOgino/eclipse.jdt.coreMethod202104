@@ -18,12 +18,13 @@
 		}
 		CharOperation.replace(className, '/', '.');
 		final int classNameLength = className.length;
+		final int accessFlags = classFileReader.getAccessFlags();
+		final boolean isEnum = (accessFlags & IModifierConstants.ACC_ENUM) != 0;
 
 		StringBuffer buffer = new StringBuffer();
 		ISourceAttribute sourceAttribute = classFileReader.getSourceFileAttribute();
 		IClassFileAttribute classFileAttribute = Util.getAttribute(classFileReader, IAttributeNamesConstants.SIGNATURE);
 		ISignatureAttribute signatureAttribute = (ISignatureAttribute) classFileAttribute;
-		final int accessFlags = classFileReader.getAccessFlags();
 		if (checkMode(mode, SYSTEM | DETAILED)) {
 			int minorVersion = classFileReader.getMinorVersion();
 			int majorVersion = classFileReader.getMajorVersion();
@@ -87,29 +88,33 @@
 			}
 		}
 		boolean decoded = false;
-		if (innerClassesAttribute != null) {
-			// search the right entry
-			IInnerClassesAttributeEntry[] entries = innerClassesAttribute.getInnerClassAttributesEntries();
-			for (int i = 0, max = entries.length; i < max ; i++) {
-				IInnerClassesAttributeEntry entry = entries[i];
-				char[] innerClassName = entry.getInnerClassName();
-				if (innerClassName != null) {
-					if (CharOperation.equals(classFileReader.getClassName(), innerClassName)) {
-						decodeModifiersForInnerClasses(buffer, entry.getAccessFlags());
-						decoded = true;
+		if (isEnum && checkMode(mode, WORKING_COPY)) {
+			decodeModifiersForType(buffer, accessFlags & IModifierConstants.ACC_PUBLIC);
+		} else {
+			if (innerClassesAttribute != null) {
+				// search the right entry
+				IInnerClassesAttributeEntry[] entries = innerClassesAttribute.getInnerClassAttributesEntries();
+				for (int i = 0, max = entries.length; i < max ; i++) {
+					IInnerClassesAttributeEntry entry = entries[i];
+					char[] innerClassName = entry.getInnerClassName();
+					if (innerClassName != null) {
+						if (CharOperation.equals(classFileReader.getClassName(), innerClassName)) {
+							decodeModifiersForInnerClasses(buffer, entry.getAccessFlags());
+							decoded = true;
+						}
 					}
 				}
 			}
-		}
-		if (!decoded) {
-			decodeModifiersForType(buffer, accessFlags);
-			if (isSynthetic(classFileReader)) {
-				buffer.append("synthetic"); //$NON-NLS-1$
-				buffer.append(Messages.disassembler_space); 
+			if (!decoded) {
+				decodeModifiersForType(buffer, accessFlags);
+				if (isSynthetic(classFileReader)) {
+					buffer.append("synthetic"); //$NON-NLS-1$
+					buffer.append(Messages.disassembler_space); 
+				}
 			}
 		}
 		
-		if ((accessFlags & IModifierConstants.ACC_ENUM) != 0) {
+		if (isEnum) {
 			buffer.append("enum "); //$NON-NLS-1$
 		} else if (classFileReader.isClass()) {
 			buffer.append("class "); //$NON-NLS-1$
@@ -135,7 +140,7 @@
 		char[] superclassName = classFileReader.getSuperclassName();
 		if (superclassName != null) {
 			CharOperation.replace(superclassName, '/', '.');
-			if (!isJavaLangObject(superclassName)) {
+			if (!isJavaLangObject(superclassName) && !isEnum) {
 				buffer.append(" extends "); //$NON-NLS-1$
 				buffer.append(returnClassName(superclassName, '.', mode));
 			}
@@ -160,7 +165,7 @@
 		if (checkMode(mode, SYSTEM)) {
 			disassemble(classFileReader.getConstantPool(), buffer, lineSeparator, 1);
 		}
-		disassembleTypeMembers(classFileReader, className, buffer, lineSeparator, 1, mode);
+		disassembleTypeMembers(classFileReader, className, buffer, lineSeparator, 1, mode, isEnum);
 		if (checkMode(mode, SYSTEM | DETAILED)) {
 			IClassFileAttribute[] attributes = classFileReader.getAttributes();
 			length = attributes.length;

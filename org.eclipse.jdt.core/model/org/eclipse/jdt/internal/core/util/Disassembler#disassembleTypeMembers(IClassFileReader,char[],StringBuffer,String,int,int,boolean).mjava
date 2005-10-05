@@ -1,0 +1,72 @@
+	private void disassembleTypeMembers(IClassFileReader classFileReader, char[] className, StringBuffer buffer, String lineSeparator, int tabNumber, int mode, boolean isEnum) {
+		IFieldInfo[] fields = classFileReader.getFieldInfos();
+		if (isEnum && checkMode(mode, WORKING_COPY)) {
+			int index = 0;
+			final int fieldsLength = fields.length;
+			IMethodInfo[] methods = classFileReader.getMethodInfos();
+			char[][] constructorArguments = getConstructorArgumentsForEnum(methods);
+			enumConstantLoop: for (; index < fieldsLength; index++) {
+				final IFieldInfo fieldInfo = fields[index];
+				final int accessFlags = fieldInfo.getAccessFlags();
+				if ((accessFlags & IModifierConstants.ACC_ENUM) != 0) {
+					writeNewLine(buffer, lineSeparator, tabNumber);
+					disassembleEnumConstants(fields[index], buffer, lineSeparator, tabNumber, constructorArguments);
+				} else {
+					break enumConstantLoop;
+				}
+			}
+			buffer.append(';');
+			boolean foundSyntheticField = false;
+			fieldLoop: for (; index < fieldsLength; index++) {
+				if (!foundSyntheticField && CharOperation.equals(TypeConstants.SYNTHETIC_ENUM_VALUES, fields[index].getName())) {
+					foundSyntheticField = true;
+					continue fieldLoop;
+				}
+				writeNewLine(buffer, lineSeparator, tabNumber);
+				disassemble(fields[index], buffer, lineSeparator, tabNumber, mode);
+			}
+			methodLoop: for (int i = 0, max = methods.length; i < max; i++) {
+				final IMethodInfo methodInfo = methods[i];
+				if (CharOperation.equals(methodInfo.getName(), TypeConstants.VALUES)) {
+					final char[] descriptor = methodInfo.getDescriptor();
+					CharOperation.replace(descriptor, '/', '.');
+					if (Signature.getParameterCount(descriptor) == 0) {
+						if (CharOperation.equals(returnClassName(Signature.getReturnType(descriptor), '.', mode),
+								CharOperation.concat(new char[] {'[', 'L'}, className, new char[] {';'}))) {
+							continue methodLoop;
+						}
+					}
+				} else if (CharOperation.equals(methodInfo.getName(), TypeConstants.VALUEOF)) {
+					final char[] descriptor = methodInfo.getDescriptor();
+					CharOperation.replace(descriptor, '/', '.');
+					final char[][] parameterTypes = Signature.getParameterTypes(descriptor);
+					if (parameterTypes.length == 1
+							&& CharOperation.equals(parameterTypes[0], "Ljava.lang.String;".toCharArray())) { //$NON-NLS-1$
+						if (CharOperation.equals(returnClassName(Signature.getReturnType(descriptor), '.', mode),
+								CharOperation.concat('L', className, ';'))) {
+							continue methodLoop;
+						}
+					}
+				} else if (methodInfo.isClinit()) {
+					continue methodLoop;
+				} else if (methodInfo.isConstructor()) {
+					writeNewLine(buffer, lineSeparator, tabNumber);
+					disassembleEnumConstructor(classFileReader, className, methodInfo, buffer, lineSeparator, tabNumber, mode);
+				} else {
+					writeNewLine(buffer, lineSeparator, tabNumber);
+					disassemble(classFileReader, className, methodInfo, buffer, lineSeparator, tabNumber, mode);
+				}
+			}
+		} else {
+			for (int i = 0, max = fields.length; i < max; i++) {
+				writeNewLine(buffer, lineSeparator, tabNumber);
+				disassemble(fields[i], buffer, lineSeparator, tabNumber, mode);
+			}
+			IMethodInfo[] methods = classFileReader.getMethodInfos();
+			for (int i = 0, max = methods.length; i < max; i++) {
+				writeNewLine(buffer, lineSeparator, tabNumber);
+				disassemble(classFileReader, className, methods[i], buffer, lineSeparator, tabNumber, mode);
+			}
+		}
+	}
+

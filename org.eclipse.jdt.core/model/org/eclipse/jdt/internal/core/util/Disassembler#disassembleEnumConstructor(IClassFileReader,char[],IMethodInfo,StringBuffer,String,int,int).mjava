@@ -1,0 +1,79 @@
+	private void disassembleEnumConstructor(IClassFileReader classFileReader, char[] className, IMethodInfo methodInfo, StringBuffer buffer, String lineSeparator, int tabNumber, int mode) {
+		writeNewLine(buffer, lineSeparator, tabNumber);
+		final ICodeAttribute codeAttribute = methodInfo.getCodeAttribute();
+		char[] methodDescriptor = methodInfo.getDescriptor();
+		final IClassFileAttribute runtimeVisibleAnnotationsAttribute = Util.getAttribute(methodInfo, IAttributeNamesConstants.RUNTIME_VISIBLE_ANNOTATIONS);
+		final IClassFileAttribute runtimeInvisibleAnnotationsAttribute = Util.getAttribute(methodInfo, IAttributeNamesConstants.RUNTIME_INVISIBLE_ANNOTATIONS);
+		// disassemble compact version of annotations
+		if (runtimeInvisibleAnnotationsAttribute != null) {
+			disassembleAsModifier((IRuntimeInvisibleAnnotationsAttribute) runtimeInvisibleAnnotationsAttribute, buffer, lineSeparator, tabNumber + 1);
+			writeNewLine(buffer, lineSeparator, tabNumber);
+		}
+		if (runtimeVisibleAnnotationsAttribute != null) {
+			disassembleAsModifier((IRuntimeVisibleAnnotationsAttribute) runtimeVisibleAnnotationsAttribute, buffer, lineSeparator, tabNumber + 1);
+			writeNewLine(buffer, lineSeparator, tabNumber);
+		}
+		final int accessFlags = methodInfo.getAccessFlags();
+		decodeModifiersForMethod(buffer, accessFlags & IModifierConstants.ACC_PRIVATE);
+		CharOperation.replace(methodDescriptor, '/', '.');
+		final boolean isVarArgs = (accessFlags & IModifierConstants.ACC_VARARGS) != 0;
+		final char[] signature = Signature.toCharArray(methodDescriptor, returnClassName(className, '.', COMPACT), getParameterNames(methodDescriptor, codeAttribute, accessFlags) , !checkMode(mode, COMPACT), false, isVarArgs);
+		int index = CharOperation.indexOf(',', signature);
+		index = CharOperation.indexOf(',', signature, index + 1);
+		buffer.append(signature, 0, CharOperation.indexOf('(', signature) + 1);
+		buffer.append(signature, index + 2, signature.length - index - 2);
+		IExceptionAttribute exceptionAttribute = methodInfo.getExceptionAttribute();
+		if (exceptionAttribute != null) {
+			buffer.append(" throws "); //$NON-NLS-1$
+			char[][] exceptionNames = exceptionAttribute.getExceptionNames();
+			int length = exceptionNames.length;
+			for (int i = 0; i < length - 1; i++) {
+				char[] exceptionName = exceptionNames[i];
+				CharOperation.replace(exceptionName, '/', '.');
+				buffer
+					.append(returnClassName(exceptionName, '.', mode))
+					.append(Messages.disassembler_comma)
+					.append(Messages.disassembler_space); 
+			}
+			char[] exceptionName = exceptionNames[length - 1];
+			CharOperation.replace(exceptionName, '/', '.');
+			buffer.append(returnClassName(exceptionName, '.', mode));
+		}
+		if (((accessFlags & IModifierConstants.ACC_NATIVE) == 0)
+				&& ((accessFlags & IModifierConstants.ACC_ABSTRACT) == 0)) {
+			buffer.append(" {"); //$NON-NLS-1$
+			final char[] returnType = Signature.getReturnType(methodDescriptor);
+			if (returnType.length == 1) {
+				switch(returnType[0]) {
+					case 'V' :
+						writeNewLine(buffer, lineSeparator, tabNumber);							
+						break;
+					case 'I' :
+					case 'B' :
+					case 'J' :
+					case 'D' :
+					case 'F' :
+					case 'S' :
+					case 'C' :
+						writeNewLine(buffer, lineSeparator, tabNumber + 1);
+						buffer.append("return 0;"); //$NON-NLS-1$
+						writeNewLine(buffer, lineSeparator, tabNumber);							
+						break;
+					default :
+						// boolean
+						writeNewLine(buffer, lineSeparator, tabNumber + 1);
+						buffer.append("return false;"); //$NON-NLS-1$
+						writeNewLine(buffer, lineSeparator, tabNumber);							
+				}
+			} else {
+				// object
+				writeNewLine(buffer, lineSeparator, tabNumber + 1);
+				buffer.append("return null;"); //$NON-NLS-1$
+				writeNewLine(buffer, lineSeparator, tabNumber);							
+			}
+			buffer.append('}');
+		} else {
+			buffer.append(';');
+		}
+	}
+
