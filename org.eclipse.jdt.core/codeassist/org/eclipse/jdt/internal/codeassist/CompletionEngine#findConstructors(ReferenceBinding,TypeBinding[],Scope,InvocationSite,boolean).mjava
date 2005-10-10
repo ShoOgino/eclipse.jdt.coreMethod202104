@@ -26,7 +26,7 @@
 					if (minArgLength > paramLength)
 						continue next;
 					for (int a = minArgLength; --a >= 0;)
-						if (argTypes[a] != null) // can be null if it could not be resolved properly
+						if (argTypes[a] != null && argTypes[a].isValidBinding()) // can be null if it could not be resolved properly
 							if (!argTypes[a].isCompatibleWith(constructor.parameters[a]))
 								continue next;
 	
@@ -82,9 +82,58 @@
 						int relevance = computeBaseRelevance();
 						relevance += computeRelevanceForInterestingProposal();
 						relevance += computeRelevanceForRestrictions(IAccessRule.K_ACCESSIBLE);
+
+						// Special case for completion in javadoc
+						if (this.assistNodeInJavadoc > 0) {
+							Expression receiver = null;
+							char[] selector = null;
+							if (invocationSite instanceof CompletionOnJavadocAllocationExpression) {
+								CompletionOnJavadocAllocationExpression alloc = (CompletionOnJavadocAllocationExpression) invocationSite;
+								receiver = alloc.type;
+							} else if (invocationSite instanceof CompletionOnJavadocFieldReference) {
+								CompletionOnJavadocFieldReference fieldRef = (CompletionOnJavadocFieldReference) invocationSite;
+								receiver = fieldRef.receiver;
+//								 if (fieldRef.completeTypeWithDefaultContructor()) relevance--;
+							}
+							StringBuffer javadocCompletion = new StringBuffer();
+							if (receiver.isThis()) {
+								selector = (((JavadocImplicitTypeReference)receiver).token);
+								if ((this.assistNodeInJavadoc & CompletionOnJavadoc.TEXT) != 0) {
+									javadocCompletion.append('#');
+//									javadocCompletion.append(((JavadocImplicitTypeReference)receiver).token);
+								}
+							} else if (receiver instanceof JavadocSingleTypeReference) {
+								JavadocSingleTypeReference typeRef = (JavadocSingleTypeReference) receiver;
+								selector = typeRef.token;
+								if ((this.assistNodeInJavadoc & CompletionOnJavadoc.TEXT) != 0) {
+									javadocCompletion.append(typeRef.token);
+									javadocCompletion.append('#');
+								}
+							} else if (receiver instanceof JavadocQualifiedTypeReference) {
+								JavadocQualifiedTypeReference typeRef = (JavadocQualifiedTypeReference) receiver;
+								selector = typeRef.tokens[typeRef.tokens.length-1];
+								if ((this.assistNodeInJavadoc & CompletionOnJavadoc.TEXT) != 0) {
+									javadocCompletion.append(CharOperation.concatWith(typeRef.tokens, '.'));
+									javadocCompletion.append('#');
+								}
+							}
+							// Append parameters types
+							javadocCompletion.append(selector);
+							javadocCompletion.append('(');
+							if (constructor.parameters != null) {
+								for (int p=0, ln=constructor.parameters.length; p<ln; p++) {
+									if (p>0) javadocCompletion.append(", "); //$NON-NLS-1$
+									TypeBinding argTypeBinding = constructor.parameters[p];
+									createType(argTypeBinding.erasure(), javadocCompletion);
+								}
+							}
+							javadocCompletion.append(')');
+							completion = javadocCompletion.toString().toCharArray();
+						} 
 						
+						// Create standard proposal
 						this.noProposal = false;
-						if(!this.requestor.isIgnored(CompletionProposal.METHOD_REF)) {
+						if(!this.requestor.isIgnored(CompletionProposal.METHOD_REF) && (this.assistNodeInJavadoc & CompletionOnJavadoc.ONLY_INLINE_TAG) == 0) {
 							CompletionProposal proposal = this.createProposal(CompletionProposal.METHOD_REF, this.actualCompletionPosition);
 							proposal.setDeclarationSignature(getSignature(currentType));
 							proposal.setSignature(getSignature(constructor));
@@ -102,8 +151,38 @@
 							proposal.setIsContructor(true);
 							proposal.setCompletion(completion);
 							proposal.setFlags(constructor.modifiers);
-							proposal.setReplaceRange(this.endPosition - this.offset, this.endPosition - this.offset);
+							int start = (this.assistNodeInJavadoc > 0) ? this.startPosition : this.endPosition;
+							proposal.setReplaceRange(start - this.offset, this.endPosition - this.offset);
 							proposal.setRelevance(relevance);
+							if(parameterNames != null) proposal.setParameterNames(parameterNames);
+							this.requestor.accept(proposal);
+							if(DEBUG) {
+								this.printDebug(proposal);
+							}
+						}
+						if ((this.assistNodeInJavadoc & CompletionOnJavadoc.TEXT) != 0 && !this.requestor.isIgnored(CompletionProposal.JAVADOC_METHOD_REF)) {
+							char[] javadocCompletion = inlineTagCompletion(completion, JavadocTagConstants.TAG_LINK);
+							CompletionProposal proposal = this.createProposal(CompletionProposal.JAVADOC_METHOD_REF, this.actualCompletionPosition);
+							proposal.setDeclarationSignature(getSignature(currentType));
+							proposal.setSignature(getSignature(constructor));
+							MethodBinding original = constructor.original();
+							if(original != constructor) {
+								proposal.setOriginalSignature(getSignature(original));
+							}
+							proposal.setDeclarationPackageName(currentType.qualifiedPackageName());
+							proposal.setDeclarationTypeName(currentType.qualifiedSourceName());
+							proposal.setParameterPackageNames(parameterPackageNames);
+							proposal.setParameterTypeNames(parameterTypeNames);
+							//proposal.setPackageName(null);
+							//proposal.setTypeName(null);
+							proposal.setName(currentType.sourceName());
+							proposal.setIsContructor(true);
+							proposal.setCompletion(javadocCompletion);
+							proposal.setFlags(constructor.modifiers);
+							int start = (this.assistNodeInJavadoc > 0) ? this.startPosition : this.endPosition;
+							if ((this.assistNodeInJavadoc & CompletionOnJavadoc.REPLACE_TAG) != 0) start = this.javadocTagPosition;
+							proposal.setReplaceRange(start - this.offset, this.endPosition - this.offset);
+							proposal.setRelevance(relevance+R_INLINE_TAG);
 							if(parameterNames != null) proposal.setParameterNames(parameterNames);
 							this.requestor.accept(proposal);
 							if(DEBUG) {

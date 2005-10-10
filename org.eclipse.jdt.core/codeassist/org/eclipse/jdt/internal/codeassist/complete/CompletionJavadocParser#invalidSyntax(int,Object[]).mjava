@@ -1,0 +1,73 @@
+	/* 
+	 * Entry point for javadoc recovery.
+	 */
+	protected Object invalidSyntax(int context, Object[] infos) throws InvalidInputException {
+		switch (context) {
+			case INVALID_QUALIFIED_NAME:
+				int idLength = this.identifierLengthStack[this.identifierLengthPtr--];
+				char[][] tokens = new char[idLength][];
+				int startPtr = this.identifierPtr-idLength+1;
+				System.arraycopy(this.identifierStack, startPtr, tokens, 0, idLength);
+				long[] positions = new long[idLength+1];
+				System.arraycopy(this.identifierPositionStack, startPtr, positions, 0, idLength);
+				positions[idLength] = (((long)this.tokenPreviousPosition)<<32) + this.tokenPreviousPosition;
+				this.completionNode = new CompletionOnJavadocQualifiedTypeReference(tokens, CharOperation.NO_CHAR, positions, this.tagSourceStart, this.tagSourceEnd);
+				this.identifierPtr -= idLength;
+		
+				if (CompletionEngine.DEBUG) {
+					System.out.println("	completion partial qualified type="+completionNode); //$NON-NLS-1$
+				}
+				break;
+			case INVALID_ARGUMENTS:
+				if (infos.length == 3 && (this.cursorLocation+1) <= this.index) {
+					Object receiver = infos[0];
+					List arguments = (List) infos[1];
+					Object argument = infos[2];
+					if (this.completionNode != null && !this.pushText) {
+						this.completionNode.addCompletionFlags(CompletionOnJavadoc.BASE_TYPES);
+						if (this.completionNode instanceof CompletionOnJavadocSingleTypeReference) {
+							char[] token = ((CompletionOnJavadocSingleTypeReference)this.completionNode).token;
+							if (token != null && token.length > 0) {
+								return this.completionNode;
+							}
+						} else {
+							return this.completionNode;
+						}
+					}
+					arguments.add(argument);
+					Object methodRef = createMethodReference(receiver, arguments);
+					if (methodRef instanceof JavadocMessageSend) {
+						JavadocMessageSend msgSend = (JavadocMessageSend) methodRef;
+						msgSend.sourceEnd = this.tokenPreviousPosition-1;
+						this.completionNode = new CompletionOnJavadocMessageSend(msgSend, this.memberStart);
+					} else if (methodRef instanceof JavadocAllocationExpression) {
+						JavadocAllocationExpression allocExp = (JavadocAllocationExpression) methodRef;
+						allocExp.sourceEnd = this.tokenPreviousPosition-1;
+						this.completionNode = new CompletionOnJavadocAllocationExpression(allocExp, this.memberStart);
+					}
+					if (CompletionEngine.DEBUG) {
+						System.out.println("	completion method="+completionNode); //$NON-NLS-1$
+					}
+				}
+				break;
+			case INVALID_NO_ARGUMENT:
+				if ((this.cursorLocation+1) <= this.index) {
+					Object ref = infos[0];
+					if (ref instanceof JavadocMessageSend) {
+						JavadocMessageSend msgSend = (JavadocMessageSend) ref;
+						msgSend.sourceEnd = this.tokenPreviousPosition-1;
+						this.completionNode = new CompletionOnJavadocMessageSend(msgSend, this.memberStart);
+					} else if (ref instanceof JavadocAllocationExpression) {
+						JavadocAllocationExpression alloc = (JavadocAllocationExpression) ref;
+						alloc.sourceEnd = this.tokenPreviousPosition-1;
+						this.completionNode = new CompletionOnJavadocAllocationExpression(alloc, this.memberStart);
+					}
+					if (CompletionEngine.DEBUG) {
+						System.out.println("	completion method="+completionNode); //$NON-NLS-1$
+					}
+				}
+				break;
+		}
+		return this.completionNode;
+	}
+

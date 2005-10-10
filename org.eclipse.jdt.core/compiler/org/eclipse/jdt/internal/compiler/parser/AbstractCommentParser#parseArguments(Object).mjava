@@ -9,12 +9,17 @@
 		char[] argName = null;
 		List arguments = new ArrayList(10);
 		int start = this.scanner.getCurrentTokenStartPosition();
+		Object typeRef = null;
+		int dim = 0;
+		boolean isVarargs = false;
+		long[] dimPositions = new long[20]; // assume that there won't be more than 20 dimensions...
+		char[] name = null;
+		long argNamePos = -1;
 		
 		// Parse arguments declaration if method reference
 		nextArg : while (this.index < this.scanner.eofPosition) {
 
 			// Read argument type reference
-			Object typeRef;
 			try {
 				typeRef = parseQualifiedName(false);
 				if (this.abort) return null; // May be aborted by specialized parser
@@ -39,15 +44,21 @@
 					}
 					this.lineStarted = true;
 					return createMethodReference(receiver, null);
+				} else if (this.kind == COMPLETION_PARSER) {
+					Object methodRef = createMethodReference(receiver, arguments);
+					return invalidSyntax(INVALID_NO_ARGUMENT, new Object[] { methodRef });
 				}
 				break nextArg;
+			}
+			if (this.kind == COMPLETION_PARSER && this.index >= this.scanner.eofPosition) {
+				Object argument = createArgumentReference(null, 0, false, typeRef, null, 0);
+				return invalidSyntax(INVALID_ARGUMENTS, new Object[] { receiver, arguments, argument });
 			}
 			iToken++;
 
 			// Read possible additional type info
-			int dim = 0;
-			boolean isVarargs = false;
-			long[] dimPositions = new long[20]; // assume that there won't be more than 20 dimensions...
+			dim = 0;
+			isVarargs = false;
 			if (readToken() == TerminalTokens.TokenNameLBRACKET) {
 				// array declaration
 				int dimStart = this.scanner.getCurrentTokenStartPosition();
@@ -68,7 +79,7 @@
 			}
 
 			// Read argument name
-			long argNamePos = -1;
+			argNamePos = -1;
 			if (readToken() == TerminalTokens.TokenNameIdentifier) {
 				consumeToken();
 				if (firstArg) { // verify position
@@ -100,7 +111,7 @@
 
 			// Read separator or end arguments declaration
 			int token = readToken();
-			char[] name = argName == null ? new char[0] : argName;
+			name = argName == null ? CharOperation.NO_CHAR : argName;
 			if (token == TerminalTokens.TokenNameCOMMA) {
 				// Create new argument
 				Object argument = createArgumentReference(name, dim, isVarargs, typeRef, dimPositions, argNamePos);
@@ -122,6 +133,9 @@
 				arguments.add(argument);
 				consumeToken();
 				return createMethodReference(receiver, arguments);
+			} else if (this.kind == COMPLETION_PARSER) {
+				Object argument = createArgumentReference(name, dim, isVarargs, typeRef, dimPositions, argNamePos);
+				return invalidSyntax(INVALID_ARGUMENTS, new Object[] { receiver, arguments, argument });
 			} else {
 				break nextArg;
 			}

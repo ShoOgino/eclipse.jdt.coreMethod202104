@@ -16,7 +16,6 @@
 		// Inherited fields which are hidden by subclasses are filtered out
 		// No visibility checks can be performed without the scope & invocationSite
 		
-		int fieldLength = fieldName.length;
 		next : for (int f = fields.length; --f >= 0;) {			
 			FieldBinding field = fields[f];
 
@@ -24,9 +23,10 @@
 
 			if (onlyStaticFields && !field.isStatic()) continue next;
 
-			if (fieldLength > field.name.length) continue next;
-
-			if (!CharOperation.prefixEquals(fieldName, field.name, false /* ignore case */))	continue next;
+			if (fieldName != null) {
+				if (fieldName.length > field.name.length) continue next;
+				if (!CharOperation.prefixEquals(fieldName, field.name, false /* ignore case */))	continue next;
+			}
 
 			if (this.options.checkVisibility
 				&& !field.canBeSeenBy(receiverType, invocationSite, scope))	continue next;
@@ -85,16 +85,37 @@
 				completion = CharOperation.concat(prefix,completion,'.');
 			}
 
+			// Special case for javadoc completion
+			if (this.assistNodeInJavadoc > 0) {
+				if (invocationSite instanceof CompletionOnJavadocFieldReference) {
+					CompletionOnJavadocFieldReference fieldRef = (CompletionOnJavadocFieldReference) invocationSite;
+					if (fieldRef.receiver.isThis()) {
+						if (fieldRef.completeInText()) {
+							completion = CharOperation.concat(new char[] { '#' }, field.name);
+						}
+					} else if (fieldRef.completeInText()) {
+						if (fieldRef.receiver instanceof JavadocSingleTypeReference) {
+							JavadocSingleTypeReference typeRef = (JavadocSingleTypeReference) fieldRef.receiver;
+							completion = CharOperation.concat(typeRef.token, field.name, '#');
+						} else if (fieldRef.receiver instanceof JavadocQualifiedTypeReference) {
+							JavadocQualifiedTypeReference typeRef = (JavadocQualifiedTypeReference) fieldRef.receiver;
+							completion = CharOperation.concat(CharOperation.concatWith(typeRef.tokens, '.'), field.name, '#');
+						}
+					}
+				}
+			}
+
 			int relevance = computeBaseRelevance();
 			relevance += computeRelevanceForInterestingProposal(field);
-			relevance += computeRelevanceForCaseMatching(fieldName, field.name);
+			if (fieldName != null) relevance += computeRelevanceForCaseMatching(fieldName, field.name);
 			relevance += computeRelevanceForExpectingType(field.type);
 			relevance += computeRelevanceForStatic(onlyStaticFields, field.isStatic());
 			relevance += computeRelevanceForQualification(prefixRequired);
 			relevance += computeRelevanceForRestrictions(IAccessRule.K_ACCESSIBLE);
 			
 			this.noProposal = false;
-			if(!this.requestor.isIgnored(CompletionProposal.FIELD_REF)) {
+			// Standard proposal
+			if (!this.requestor.isIgnored(CompletionProposal.FIELD_REF) && (this.assistNodeInJavadoc & CompletionOnJavadoc.ONLY_INLINE_TAG) == 0) {
 				CompletionProposal proposal = this.createProposal(CompletionProposal.FIELD_REF, this.actualCompletionPosition);
 				proposal.setDeclarationSignature(getSignature(field.declaringClass));
 				proposal.setSignature(getSignature(field.type));
@@ -110,6 +131,48 @@
 				this.requestor.accept(proposal);
 				if(DEBUG) {
 					this.printDebug(proposal);
+				}
+			}
+
+			// Javadoc completions
+			if ((this.assistNodeInJavadoc & CompletionOnJavadoc.TEXT) != 0 && !this.requestor.isIgnored(CompletionProposal.JAVADOC_FIELD_REF)) {
+				char[] javadocCompletion = inlineTagCompletion(completion, JavadocTagConstants.TAG_LINK);
+				CompletionProposal proposal = this.createProposal(CompletionProposal.JAVADOC_FIELD_REF, this.actualCompletionPosition);
+				proposal.setDeclarationSignature(getSignature(field.declaringClass));
+				proposal.setSignature(getSignature(field.type));
+				proposal.setDeclarationPackageName(field.declaringClass.qualifiedPackageName());
+				proposal.setDeclarationTypeName(field.declaringClass.qualifiedSourceName());
+				proposal.setPackageName(field.type.qualifiedPackageName());
+				proposal.setTypeName(field.type.qualifiedSourceName()); 
+				proposal.setName(field.name);
+				proposal.setCompletion(javadocCompletion);
+				proposal.setFlags(field.modifiers);
+				int start = (this.assistNodeInJavadoc & CompletionOnJavadoc.REPLACE_TAG) != 0 ? this.javadocTagPosition : this.startPosition;
+				proposal.setReplaceRange(start - this.offset, this.endPosition - this.offset);
+				proposal.setRelevance(relevance+R_INLINE_TAG);
+				this.requestor.accept(proposal);
+				if(DEBUG) {
+					this.printDebug(proposal);
+				}
+				// Javadoc value completion for static fields
+				if (field.isStatic() && !this.requestor.isIgnored(CompletionProposal.JAVADOC_VALUE_REF)) {
+					javadocCompletion = inlineTagCompletion(completion, JavadocTagConstants.TAG_VALUE);
+					CompletionProposal valueProposal = this.createProposal(CompletionProposal.JAVADOC_VALUE_REF, this.actualCompletionPosition);
+					valueProposal.setDeclarationSignature(getSignature(field.declaringClass));
+					valueProposal.setSignature(getSignature(field.type));
+					valueProposal.setDeclarationPackageName(field.declaringClass.qualifiedPackageName());
+					valueProposal.setDeclarationTypeName(field.declaringClass.qualifiedSourceName());
+					valueProposal.setPackageName(field.type.qualifiedPackageName());
+					valueProposal.setTypeName(field.type.qualifiedSourceName()); 
+					valueProposal.setName(field.name);
+					valueProposal.setCompletion(javadocCompletion);
+					valueProposal.setFlags(field.modifiers);
+					valueProposal.setReplaceRange(start - this.offset, this.endPosition - this.offset);
+					valueProposal.setRelevance(relevance+R_VALUE_TAG);
+					this.requestor.accept(valueProposal);
+					if(DEBUG) {
+						this.printDebug(valueProposal);
+					}
 				}
 			}
 		}

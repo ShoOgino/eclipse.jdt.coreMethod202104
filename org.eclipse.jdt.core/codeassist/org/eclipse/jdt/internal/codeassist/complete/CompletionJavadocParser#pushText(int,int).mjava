@@ -1,0 +1,153 @@
+	/**
+	 * Push text. If it includes completion location, then rescan line to see if there's a possible
+	 * reference under the cursor location.
+	 *
+	 * @see org.eclipse.jdt.internal.compiler.parser.AbstractCommentParser#pushText(int, int)
+	 */
+	protected void pushText(int start, int end) {
+		if (start <= this.cursorLocation && this.cursorLocation <= end) {
+			this.scanner.resetTo(start, end);
+			boolean tokenizeWhiteSpace = this.scanner.tokenizeWhiteSpace;
+			this.scanner.tokenizeWhiteSpace = true;
+			try {
+				Object typeRef = null;
+				this.pushText = true;
+
+				// Get reference tokens
+				nextToken : while (!this.scanner.atEnd() && this.completionNode == null && !this.abort) {
+					int token = readTokenSafely();
+					switch (token) {
+						case TerminalTokens.TokenNameStringLiteral :
+							int strStart = 0, strEnd = 0;
+							if ((strStart=this.scanner.getCurrentTokenStartPosition()+1) <= this.cursorLocation &&
+								this.cursorLocation <= (strEnd=this.scanner.getCurrentTokenEndPosition()-1))
+							{
+								this.scanner.resetTo(strStart, strEnd);
+							}
+							consumeToken();
+							break;
+						case TerminalTokens.TokenNameERROR :
+							if (this.scanner.currentCharacter == '#') { // @see ...#member
+								consumeToken();
+								Object member = null;
+								try {
+									this.scanner.tokenizeWhiteSpace = false;
+									member = parseMember(typeRef);
+								} catch (InvalidInputException e) {
+									consumeToken();
+								}
+								this.scanner.tokenizeWhiteSpace = true;
+								if (this.completionNode != null) {
+									int flags = CompletionOnJavadoc.TEXT|CompletionOnJavadoc.ONLY_INLINE_TAG;
+									if (member instanceof JavadocMessageSend) {
+										JavadocMessageSend msgSend = (JavadocMessageSend) member;
+										this.completionNode = new CompletionOnJavadocMessageSend(msgSend, this.memberStart, flags);
+										if (CompletionEngine.DEBUG) {
+											System.out.println("	new completion method="+completionNode); //$NON-NLS-1$
+										}
+									} else if (member instanceof JavadocAllocationExpression) {
+										JavadocAllocationExpression alloc = (JavadocAllocationExpression) member;
+										this.completionNode = new CompletionOnJavadocAllocationExpression(alloc, this.memberStart, flags);
+										if (CompletionEngine.DEBUG) {
+											System.out.println("	new completion method="+completionNode); //$NON-NLS-1$
+										}
+									} else {
+										this.completionNode.addCompletionFlags(flags);
+									}
+								}
+							}
+							break;
+						case TerminalTokens.TokenNameIdentifier :
+								try {
+									this.scanner.tokenizeWhiteSpace = false;
+									typeRef = parseQualifiedName(true);
+								} catch (InvalidInputException e) {
+									consumeToken();
+								}
+								this.scanner.tokenizeWhiteSpace = true;
+							break;
+						case TerminalTokens.TokenNameAT:
+							consumeToken();
+							try {
+								this.scanner.tokenizeWhiteSpace = false;
+								int startPosition = this.scanner.getCurrentTokenStartPosition();
+								parseTag(startPosition);
+								if (this.completionNode != null) {
+									if (this.inlineTagStarted) {
+										/* May be to replace invalid @value tag inside text?
+										if (this.completionNode instanceof CompletionOnJavadocSingleTypeReference) {
+											CompletionOnJavadocSingleTypeReference singleTypeReference = (CompletionOnJavadocSingleTypeReference) this.completionNode;
+											singleTypeReference.tagSourceStart = startPosition;
+											switch (this.tagValue) {
+												case TAG_VALUE_VALUE:
+//													singleTypeReference.completionFlags |= ONLY_INLINE_TAG;
+													if (this.sourceLevel < ClassFileConstants.JDK1_5) singleTypeReference.completionFlags |= REPLACE_TAG;
+													break;
+											}
+										} else if (this.completionNode instanceof CompletionOnJavadocQualifiedTypeReference) {
+											CompletionOnJavadocQualifiedTypeReference qualifiedTypeRef = (CompletionOnJavadocQualifiedTypeReference) this.completionNode;
+											qualifiedTypeRef.tagSourceStart = startPosition;
+											switch (this.tagValue) {
+												case TAG_VALUE_VALUE:
+													singleTypeReference.completionFlags |= ONLY_INLINE_TAG;
+													if (this.sourceLevel < ClassFileConstants.JDK1_5) qualifiedTypeRef.completionFlags |= REPLACE_TAG;
+													break;
+											}
+										}
+//										*/
+									} else {
+										/* May be to replace non-inline tag inside text?
+										if (this.completionNode instanceof CompletionOnJavadocSingleTypeReference) {
+											CompletionOnJavadocSingleTypeReference singleTypeReference = (CompletionOnJavadocSingleTypeReference) this.completionNode;
+											singleTypeReference.tagSourceStart = startPosition;
+											switch (this.tagValue) {
+												case TAG_LINK_VALUE:
+												case TAG_LINKPLAIN_VALUE:
+													singleTypeReference.completionFlags |= ONLY_INLINE_TAG;
+												case TAG_SEE_VALUE:
+													singleTypeReference.completionFlags |= REPLACE_TAG;
+													break;
+											}
+										} else if (this.completionNode instanceof CompletionOnJavadocQualifiedTypeReference) {
+											CompletionOnJavadocQualifiedTypeReference qualifiedTypeRef = (CompletionOnJavadocQualifiedTypeReference) this.completionNode;
+											qualifiedTypeRef.tagSourceStart = startPosition;
+											switch (this.tagValue) {
+												case TAG_LINK_VALUE:
+												case TAG_LINKPLAIN_VALUE:
+													qualifiedTypeRef.completionFlags |= ONLY_INLINE_TAG;
+												case TAG_SEE_VALUE:
+													qualifiedTypeRef.completionFlags |= REPLACE_TAG;
+													break;
+											}
+										}
+//										*/
+									}
+								}
+							} catch (InvalidInputException e) {
+								consumeToken();
+							}
+							this.scanner.tokenizeWhiteSpace = true;
+							break;
+						default :
+							consumeToken();
+							typeRef = null;
+							break;
+					}
+				}
+			}
+			finally {
+				this.scanner.tokenizeWhiteSpace = tokenizeWhiteSpace;
+				this.pushText = false;
+			}
+
+			// Reset position to avoid missing tokens when new line was encountered
+			this.index = end;
+			this.scanner.currentPosition = end;
+			consumeToken();
+
+			if (this.completionNode != null) {
+				this.completionNode.addCompletionFlags(CompletionOnJavadoc.TEXT);
+			}
+		}
+	}
+

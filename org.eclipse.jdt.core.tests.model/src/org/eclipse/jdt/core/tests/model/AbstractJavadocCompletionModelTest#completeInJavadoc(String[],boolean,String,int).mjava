@@ -1,0 +1,55 @@
+	protected void completeInJavadoc(String[] sources, boolean showPositions, String completeBehind, int occurencePosition) throws JavaModelException {
+		assertNotNull("We should have sources!!!", sources);
+		assertTrue("Invalid number of sources!!!",  sources.length%2==0);
+
+		// Build working copy(ies)
+		int length = sources.length / 2;
+		this.workingCopies = new ICompilationUnit[length];
+		for (int i=0; i<length; i++) {
+			this.workingCopies[i] = getWorkingCopy(sources[i*2], sources[i*2+1]);
+			if (WRITE_DIR != null) 	writeFiles(sources);
+		}
+		
+		// Wait for indexes
+		waitUntilIndexesReady();
+		
+		// Complete
+		this.requestor = new CompletionTestsRequestor2(true, false, showPositions);
+		String source = this.workingCopies[0].getSource();
+		this.replacedText = completeBehind;
+		this.completionStart = -1;
+		int cursorPos = this.replacedText.length();
+		if (occurencePosition < -10) { // case where we want to specify directly the cursor location relatively to completion start
+			this.completionStart = source.indexOf(this.replacedText);
+			cursorPos = -occurencePosition - 10;
+		} else if (occurencePosition < 0) {
+			this.completionStart = source.lastIndexOf(this.replacedText);
+			int max = -occurencePosition;
+			for (int i=1; i<max; i++) {
+				this.completionStart = source.lastIndexOf(this.replacedText, this.completionStart);
+			}
+		} else {
+			this.completionStart = source.indexOf(this.replacedText);
+			int shift = this.replacedText.length();
+			for (int i=1; i<occurencePosition && this.completionStart>0; i++) {
+				this.completionStart = source.indexOf(this.replacedText, this.completionStart+shift);
+			}
+		}
+		assertTrue("We should have found "+occurencePosition+" occurence(s) of '"+this.replacedText+"' in:\n"+source, this.completionStart>0);
+		this.cursorLocation =  this.completionStart + cursorPos;
+		this.workingCopies[0].codeComplete(this.cursorLocation, requestor, this.wcOwner);
+		assertNoProblem(sources[0]);
+
+		// Store replacement info
+		if (occurencePosition == 0) { // special case for completion on empty token...
+			this.completionStart = this.cursorLocation;
+		}
+		int endPosition = this.cursorLocation;
+		if (!Character.isWhitespace(source.charAt(this.cursorLocation))) {
+			do {
+				endPosition++;
+			} while (!Character.isWhitespace(source.charAt(endPosition)));
+		}
+		this.positions = "["+this.completionStart+", "+endPosition+"], ";
+	}
+

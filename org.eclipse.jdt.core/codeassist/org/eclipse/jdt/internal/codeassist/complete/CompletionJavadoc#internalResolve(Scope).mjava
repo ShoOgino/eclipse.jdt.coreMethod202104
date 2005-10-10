@@ -1,0 +1,59 @@
+	/**
+	 * Resolve selected node if not null and throw exception to let clients know
+	 * that it has been found.
+	 * 
+	 * @throws CompletionNodeFound
+	 */
+	private void internalResolve(Scope scope) {
+		if (this.completionNode != null) {
+			if (this.completionNode instanceof CompletionOnJavadocTag) {
+				((CompletionOnJavadocTag)this.completionNode).filterPossibleTags(scope);
+			} else {
+				boolean resolve = true;
+				if (this.completionNode instanceof CompletionOnJavadocParamNameReference) {
+					resolve = ((CompletionOnJavadocParamNameReference)this.completionNode).token != null;
+				} else if (this.completionNode instanceof CompletionOnJavadocTypeParamReference) {
+					resolve = ((CompletionOnJavadocTypeParamReference)this.completionNode).token != null;
+				}
+				if (resolve) {
+					switch (scope.kind) {
+						case Scope.CLASS_SCOPE:
+							this.completionNode.resolveType((ClassScope)scope);
+							break;
+						case Scope.METHOD_SCOPE:
+							this.completionNode.resolveType((MethodScope) scope);
+							break;
+					}
+				}
+				if (this.completionNode instanceof CompletionOnJavadocParamNameReference) {
+					CompletionOnJavadocParamNameReference paramNameReference = (CompletionOnJavadocParamNameReference) this.completionNode;
+					if (scope.kind == Scope.METHOD_SCOPE) {
+						paramNameReference.missingParams = missingParamTags(paramNameReference.binding, (MethodScope)scope);
+					}
+					if (paramNameReference.token == null) {
+						paramNameReference.missingTypeParams = missingTypeParameterTags(paramNameReference.binding, scope);
+					}
+				} else if (this.completionNode instanceof CompletionOnJavadocTypeParamReference) {
+					CompletionOnJavadocTypeParamReference typeParamReference = (CompletionOnJavadocTypeParamReference) this.completionNode;
+					typeParamReference.missingParams = missingTypeParameterTags(typeParamReference.resolvedType, scope);
+				}
+			}
+			Binding qualifiedBinding = null;
+			if (this.completionNode instanceof CompletionOnJavadocQualifiedTypeReference) {
+				CompletionOnJavadocQualifiedTypeReference typeRef = (CompletionOnJavadocQualifiedTypeReference) this.completionNode;
+				if (typeRef.packageBinding == null) {
+					qualifiedBinding = typeRef.resolvedType;
+				} else {
+					qualifiedBinding = typeRef.packageBinding;
+				}
+			} else if (this.completionNode instanceof CompletionOnJavadocMessageSend) {
+				CompletionOnJavadocMessageSend msg = (CompletionOnJavadocMessageSend) this.completionNode;
+				if (!msg.receiver.isThis()) qualifiedBinding = msg.receiver.resolvedType;
+			} else if (this.completionNode instanceof CompletionOnJavadocAllocationExpression) {
+				CompletionOnJavadocAllocationExpression alloc = (CompletionOnJavadocAllocationExpression) this.completionNode;
+				qualifiedBinding = alloc.type.resolvedType;
+			}
+			throw new CompletionNodeFound(this.completionNode, qualifiedBinding, scope);
+		}
+	}
+
