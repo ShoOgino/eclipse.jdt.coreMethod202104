@@ -5,23 +5,31 @@ void checkForNameClash(MethodBinding currentMethod, MethodBinding inheritedMetho
 	//		abstract class AA<E extends Comparable> { abstract void test(E element); }
 	//		class A extends AA<Integer> { public void test(Integer i) {} }
 	//		public class B extends A { public void test(Comparable i) {} }
-	// AND
 	//		interface I<E extends Comparable> { void test(E element); }
 	//		class A implements I<Integer> { public void test(Integer i) {} }
 	//		public class B extends A { public void test(Comparable i) {} }
-	// AND
+
 	//		abstract class Y implements EqualityComparable<Integer>, Equivalent<String> {
 	//			public boolean equalTo(Integer other) { return true; }
 	//		}
 	//		interface Equivalent<T> { boolean equalTo(T other); }
 	//		interface EqualityComparable<T> { boolean equalTo(T other); }
-	// AND
+
 	//		class Y implements EqualityComparable, Equivalent<String>{
 	//			public boolean equalTo(String other) { return true; }
 	//			public boolean equalTo(Object other) { return true; }
 	//		}
 	//		interface Equivalent<T> { boolean equalTo(T other); }
 	//		interface EqualityComparable { boolean equalTo(Object other); }
+
+	//		class A<T extends Number> { void m(T t) {} }
+	//		class B<S extends Integer> extends A<S> { void m(S t) {}}
+	//		class D extends B<Integer> { void m(Number t) {}    void m(Integer t) {} }
+
+	//		inheritedMethods does not include I.test since A has a valid implementation
+	//		interface I<E extends Comparable<E>> { void test(E element); }
+	//		class A implements I<Integer> { public void test(Integer i) {} }
+	//		class B extends A { public void test(Comparable i) {} }
 
 	if (currentMethod.declaringClass.isInterface()) return;
 
@@ -39,12 +47,19 @@ void checkForNameClash(MethodBinding currentMethod, MethodBinding inheritedMetho
 		ReferenceBinding[][] interfacesToVisit = new ReferenceBinding[3][];
 		int lastPosition = -1;
 		ReferenceBinding[] itsInterfaces = null;
-		ReferenceBinding superType = this.type.superclass;
+		ReferenceBinding superType = inheritedMethod.declaringClass;
+		if ((itsInterfaces = superType.superInterfaces()) != NoSuperInterfaces) {
+			if (++lastPosition == interfacesToVisit.length)
+				System.arraycopy(interfacesToVisit, 0, interfacesToVisit = new ReferenceBinding[lastPosition * 2][], 0, lastPosition);
+			interfacesToVisit[lastPosition] = itsInterfaces;
+		}
+		superType = superType.superclass(); // now start with its superclass
 		while (superType != null && superType.isValidBinding()) {
 			MethodBinding[] methods = superType.getMethods(currentMethod.selector);
 			for (int m = 0, n = methods.length; m < n; m++)
-				if (!areMethodsEqual(currentMethod, methods[m]) && detectNameClash(currentMethod, methods[m]))
-					return;
+				if (currentMethod.parameters.length == methods[m].parameters.length)
+					if (!areMethodsEqual(currentMethod, methods[m]) && detectNameClash(currentMethod, methods[m]))
+						return;
 			if ((itsInterfaces = superType.superInterfaces()) != NoSuperInterfaces) {
 				if (++lastPosition == interfacesToVisit.length)
 					System.arraycopy(interfacesToVisit, 0, interfacesToVisit = new ReferenceBinding[lastPosition * 2][], 0, lastPosition);
@@ -60,8 +75,9 @@ void checkForNameClash(MethodBinding currentMethod, MethodBinding inheritedMetho
 				if (superType.isValidBinding()) {
 					MethodBinding[] methods = superType.getMethods(currentMethod.selector);
 					for (int m = 0, n = methods.length; m < n; m++)
-						if (!areMethodsEqual(currentMethod, methods[m]) && detectNameClash(currentMethod, methods[m]))
-							return;
+						if (currentMethod.parameters.length == methods[m].parameters.length)
+							if (!areMethodsEqual(currentMethod, methods[m]) && detectNameClash(currentMethod, methods[m]))
+								return;
 					if ((itsInterfaces = superType.superInterfaces()) != NoSuperInterfaces) {
 						if (++lastPosition == interfacesToVisit.length)
 							System.arraycopy(interfacesToVisit, 0, interfacesToVisit = new ReferenceBinding[lastPosition * 2][], 0, lastPosition);

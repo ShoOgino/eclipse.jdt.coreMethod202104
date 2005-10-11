@@ -1,21 +1,3 @@
-/*
-For each inherited method identifier (message pattern - vm signature minus the return type)
-	if current method exists
-		if current's vm signature does not match an inherited signature then complain 
-		else compare current's exceptions & visibility against each inherited method
-	else
-		if inherited methods = 1
-			if inherited is abstract && type is NOT an interface or abstract, complain
-		else
-			if vm signatures do not match complain
-			else
-				find the concrete implementation amongst the abstract methods (can only be 1)
-				if one exists then
-					it must be a public instance method
-					compare concrete's exceptions against each abstract method
-				else
-					complain about missing implementation only if type is NOT an interface or abstract
-*/
 void checkMethods() {
 	boolean mustImplementAbstractMethods = mustImplementAbstractMethods();
 	boolean skipInheritedMethods = mustImplementAbstractMethods && canSkipInheritedMethods(); // have a single concrete superclass so only check overridden methods
@@ -36,15 +18,18 @@ void checkMethods() {
 
 		int index = -1;
 		MethodBinding[] matchingInherited = new MethodBinding[inherited.length];
+		byte[] foundMatch = new byte[inherited.length];
 		if (current != null) {
 			for (int i = 0, length1 = current.length; i < length1; i++) {
 				MethodBinding currentMethod = current[i];
 				for (int j = 0, length2 = inherited.length; j < length2; j++) {
 					MethodBinding inheritedMethod = computeSubstituteMethod(inherited[j], currentMethod);
 					if (inheritedMethod != null) {
-						if (areMethodsEqual(currentMethod, inheritedMethod)) {
+						if (foundMatch[j] == 0 && areMethodsEqual(currentMethod, inheritedMethod)) {
 							matchingInherited[++index] = inheritedMethod;
-							inherited[j] = null; // do not want to find it again
+							foundMatch[j] = 1; // cannot null out inherited methods
+						} else {
+							checkForNameClash(currentMethod, inheritedMethod);
 						}
 					}
 				}
@@ -56,28 +41,31 @@ void checkMethods() {
 		}
 
 		for (int i = 0, length = inherited.length; i < length; i++) {
-			MethodBinding inheritedMethod = inherited[i];
-			if (inheritedMethod == null) continue;
+			if (foundMatch[i] == 1) continue;
 
+			MethodBinding inheritedMethod = inherited[i];
 			matchingInherited[++index] = inheritedMethod;
 			for (int j = i + 1; j < length; j++) {
 				MethodBinding otherInheritedMethod = inherited[j];
-				if (canSkipInheritedMethods(inheritedMethod, otherInheritedMethod))
+				if (foundMatch[j] == 1 || canSkipInheritedMethods(inheritedMethod, otherInheritedMethod))
 					continue;
 				otherInheritedMethod = computeSubstituteMethod(otherInheritedMethod, inheritedMethod);
 				if (otherInheritedMethod != null) {
 					if (areMethodsEqual(inheritedMethod, otherInheritedMethod)) {
 						matchingInherited[++index] = otherInheritedMethod;
-						inherited[j] = null; // do not want to find it again
+						foundMatch[j] = 1; // cannot null out inherited methods
+					} else {
+						checkForInheritedNameClash(inheritedMethod, otherInheritedMethod);
 					}
 				}
 			}
 			if (index == -1) continue;
+
 			if (index > 0)
 				checkInheritedMethods(matchingInherited, index + 1); // pass in the length of matching
-			else if (mustImplementAbstractMethods && matchingInherited[0].isAbstract())
+			else if (mustImplementAbstractMethods && index == 0 && matchingInherited[0].isAbstract())
 				checkAbstractMethod(matchingInherited[0]);
-			while (index >= 0) matchingInherited[index--] = null; // clear the contents of the matching methods
+			while (index >= 0) matchingInherited[index--] = null; // clear the previous contents of the matching methods
 		}
 	}
 }
