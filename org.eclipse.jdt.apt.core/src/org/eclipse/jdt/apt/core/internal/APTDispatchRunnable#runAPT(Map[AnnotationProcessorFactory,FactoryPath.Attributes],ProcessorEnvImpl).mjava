@@ -1,21 +1,22 @@
 	private APTResult runAPT(
-			final List<AnnotationProcessorFactory> factories,
+			final Map<AnnotationProcessorFactory, FactoryPath.Attributes> factories,
 			final ProcessorEnvImpl processorEnv) 
 	{
 		final List<IFile> filesWithMissingType = new ArrayList<IFile>();
-		final List<char[]> sourceForFiles = new ArrayList<char[]>();
-		final APTResult result = runAPT(factories, processorEnv, filesWithMissingType, sourceForFiles);
+		final List<ICompilationUnit> unitsForFiles = new ArrayList<ICompilationUnit>();
+		final APTResult result = runAPT(factories, processorEnv, filesWithMissingType, unitsForFiles, 0);
 	
 		//APTResult lastResult = result;
 		if( processorEnv.getPhase() == Phase.BUILD )
 		{	
 			boolean generatedTypes = result.hasGeneratedTypes();
+			int round = 1;
 			while( generatedTypes && !filesWithMissingType.isEmpty() ){
 				// compile all generated files and try to satisfy the missing generated types.
 				//recompileGeneratedFiles(result.getNewFiles());
 				
 				final int numFiles = filesWithMissingType.size();
-				assert numFiles == sourceForFiles.size() :
+				assert numFiles == unitsForFiles.size() :
 					"size mismatch"; //$NON-NLS-1$			
 				// we are about to re-process the file, wipe out the problems and
 				// type dependencies recorded from the previous run.
@@ -25,17 +26,17 @@
 				}
 				
 				final IFile[] files = new IFile[numFiles];
-				final char[][] sources = new char[numFiles][];
+				final ICompilationUnit[] units = new ICompilationUnit[numFiles];
 				for(int i=0; i<numFiles; i++ ){
 					files[i] = filesWithMissingType.get(i);
-					sources[i] = sourceForFiles.get(i);
+					units[i] = unitsForFiles.get(i);
 				}
 				ProcessorEnvImpl newEnv = ProcessorEnvImpl.newProcessorEnvironmentForBuild(
-						files, sources, processorEnv.getJavaProject() );
+						files, units, processorEnv.getJavaProject() );
 
 				filesWithMissingType.clear();
-				sourceForFiles.clear();
-				APTResult newResult = runAPT(factories, newEnv, filesWithMissingType, sourceForFiles);
+				unitsForFiles.clear();
+				APTResult newResult = runAPT(factories, newEnv, filesWithMissingType, unitsForFiles, round++);
 				// Only have generated types if there are *new* generated files
 				generatedTypes = hasNewFiles(result, newResult);
 				
