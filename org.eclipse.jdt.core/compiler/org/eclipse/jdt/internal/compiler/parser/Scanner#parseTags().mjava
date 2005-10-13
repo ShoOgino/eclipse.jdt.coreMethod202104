@@ -1,0 +1,62 @@
+private void parseTags() {
+	int position = 0;
+	final int currentStartPosition = this.startPosition;
+	final int currentLinePtr = this.linePtr;
+	if (currentLinePtr >= 0) {
+		position = this.lineEnds[currentLinePtr] + 1; 
+	}
+	while (Character.isWhitespace(this.source[position])) {
+		position++;
+	}
+	if (currentStartPosition == position) {
+		// the whole line is commented out
+		return;
+	}
+	char[] s = null;
+	int sourceEnd = this.currentPosition;
+	int sourceStart = currentStartPosition;
+	int sourceDelta = 0;
+	if (this.withoutUnicodePtr != 0) {
+		// 0 is used as a fast test flag so the real first char is in position 1
+		System.arraycopy(
+			this.withoutUnicodeBuffer, 
+			1, 
+			s = new char[this.withoutUnicodePtr], 
+			0, 
+			this.withoutUnicodePtr);
+		sourceEnd = this.withoutUnicodePtr;
+		sourceStart = 1;
+		sourceDelta = currentStartPosition;
+	} else {
+		s = this.source;
+	}
+	int pos = CharOperation.indexOf(TAG_PREFIX, s, true, sourceStart, sourceEnd);
+	if (pos != -1) {
+		if (this.nlsTags == null) {
+			this.nlsTags = new NLSTag[10];
+			this.nlsTagsPtr = 0;
+		}
+		while (pos != -1) {
+			int start = pos + TAG_PREFIX_LENGTH;
+			int end = CharOperation.indexOf(TAG_POSTFIX, s, start, sourceEnd);
+			if (end != -1) {
+				NLSTag currentTag = null;
+				final int currentLine = currentLinePtr + 1;
+				try {
+					currentTag = new NLSTag(pos + sourceDelta, end + sourceDelta, currentLine, extractInt(s, start, end));
+				} catch (NumberFormatException e) {
+					currentTag = new NLSTag(pos + currentStartPosition, currentStartPosition + end, currentLine, -1);
+				}
+				if (this.nlsTagsPtr == this.nlsTags.length) {
+					// resize
+					System.arraycopy(this.nlsTags, 0, (this.nlsTags = new NLSTag[this.nlsTagsPtr + 10]), 0, this.nlsTagsPtr);
+				}
+				this.nlsTags[this.nlsTagsPtr++] = currentTag;
+			} else {
+				end = start;
+			}
+			pos = CharOperation.indexOf(TAG_PREFIX, s, true, end, sourceEnd);
+		}
+	}
+}
+
