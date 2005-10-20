@@ -7,14 +7,29 @@
 	{
 		Map<AnnotationProcessorFactory, FactoryPath.Attributes> factoriesAndAttrs = 
 			new LinkedHashMap<AnnotationProcessorFactory, FactoryPath.Attributes>(containers.size() * 4 / 3 + 1);
-		ClassLoader classLoader = _createClassLoader( containers );
+		
+		// Need to use the cached classloader if we have one
+		ClassLoader iterativeClassLoader = _project2IterativeClassloaders.get(project);
+		if (iterativeClassLoader == null) {
+			iterativeClassLoader = _createIterativeClassLoader(containers);
+			_project2IterativeClassloaders.put(project, iterativeClassLoader);
+		}
+		
+		ClassLoader batchClassLoader = _createBatchClassLoader(containers, iterativeClassLoader);
 		
 		for ( Map.Entry<FactoryContainer, FactoryPath.Attributes> entry : containers.entrySet() )
 		{
 			try {
 				final FactoryContainer fc = entry.getKey();
-				List<AnnotationProcessorFactory> f = loadFactoryClasses( fc, classLoader );
-				for ( AnnotationProcessorFactory apf : f )
+				final FactoryPath.Attributes attr = entry.getValue();
+				List<AnnotationProcessorFactory> factories;
+				if (attr.runInBatchMode()) {
+					factories = loadFactoryClasses(fc, batchClassLoader);
+				}
+				else {
+					factories = loadFactoryClasses(fc, iterativeClassLoader);
+				}
+				for ( AnnotationProcessorFactory apf : factories )
 					factoriesAndAttrs.put( apf, entry.getValue() );
 			}
 			catch (FileNotFoundException fnfe) {
