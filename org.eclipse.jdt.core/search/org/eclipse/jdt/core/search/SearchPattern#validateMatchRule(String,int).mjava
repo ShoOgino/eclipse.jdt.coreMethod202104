@@ -1,0 +1,100 @@
+/**
+ * Validate compatibility between given string pattern and match rule.
+ *<br>
+ * Optimized (ie. returned match rule is modified) combinations are:
+ * <ul>
+ * 	<li>{@link #R_PATTERN_MATCH} without any '*' or '?' in string pattern:
+ * 		pattern match bit is unset,
+ * 	</li>
+ * 	<li>{@link #R_PATTERN_MATCH} and {@link #R_PREFIX_MATCH}  bits simultaneously set:
+ * 		prefix match bit is unset,
+ * 	</li>
+ * 	<li>{@link #R_PATTERN_MATCH} and {@link #R_CAMELCASE_MATCH}  bits simultaneously set:
+ * 		camel case match bit is unset,
+ * 	</li>
+ * 	<li>{@link #R_CAMELCASE_MATCH} with invalid combination of uppercase and lowercase characters:
+ * 		camel case match bit is unset and replaced with prefix match pattern,
+ * 	</li>
+ * 	<li>{@link #R_CAMELCASE_MATCH} combined with {@link #R_PREFIX_MATCH} and {@link #R_CASE_SENSITIVE}
+ * 		bits is reduced to only {@link #R_CAMELCASE_MATCH} as Camel Case search is already prefix and case sensitive,
+ * 	</li>
+ * </ul>
+ *<br>
+ * Rejected (ie. returned match rule -1) combinations are:
+ * <ul>
+ * 	<li>{@link #R_REGEXP_MATCH} with any other match mode bit set,
+ * 	</li>
+ * </ul>
+ *
+ * @param stringPattern The string pattern
+ * @param matchRule The match rule
+ * @return Optimized valid match rule or -1 if an incompatibility was detected.
+ */
+public static int validateMatchRule(String stringPattern, int matchRule) {
+
+	// Verify Regexp match rule
+	if ((matchRule & R_REGEXP_MATCH) != 0) {
+		if ((matchRule & R_PATTERN_MATCH) != 0 || (matchRule & R_PREFIX_MATCH) != 0 || (matchRule & R_CAMELCASE_MATCH) != 0) {
+			return -1;
+		}
+	}
+
+	// Verify Pattern match rule
+	if ((matchRule & R_PATTERN_MATCH) != 0) {
+		if ((matchRule & R_PREFIX_MATCH) != 0) {
+			matchRule &= ~R_PREFIX_MATCH;
+		}
+		int starIndex = stringPattern.indexOf('*');
+		int questionIndex = stringPattern.indexOf('?');
+		if (starIndex < 0 && questionIndex < 0) {
+			// No need to have pattern match
+			matchRule &= ~R_PATTERN_MATCH;
+		} else {
+			// Remove Camel Case match when there's '*' or '?' characters
+			if ((matchRule & R_CAMELCASE_MATCH) != 0) {
+				matchRule &= ~R_CAMELCASE_MATCH;
+			}
+		}
+	}
+
+	// Verify Camel Case match rule
+	if ((matchRule & R_CAMELCASE_MATCH) != 0) {
+		// Verify sting pattern validity
+		int length = stringPattern.length();
+		boolean validCamelCase = false;
+		if (length > 1) {
+			int idx = 0;
+			char ch = stringPattern.charAt(idx++);
+			if (Character.isJavaIdentifierStart(ch)) {
+				ch = stringPattern.charAt(idx++);
+				if (Character.isUpperCase(ch)) {
+					while (idx<length && Character.isUpperCase(stringPattern.charAt(idx))) {
+						idx++;
+					}
+					while (idx<length && (!Character.isUpperCase(ch=stringPattern.charAt(idx)) && Character.isJavaIdentifierPart(ch))) {
+						idx++;
+					}
+					validCamelCase = idx == length;
+				}
+			}
+		}
+		// Verify bits compatibility
+		if (validCamelCase) {
+			if ((matchRule & R_PREFIX_MATCH) != 0) {
+				if ((matchRule & R_CASE_SENSITIVE) != 0) {
+					// This is equivalent to Camel Case match rule
+					matchRule &= ~R_PREFIX_MATCH;
+					matchRule &= ~R_CASE_SENSITIVE;
+				}
+			}
+		} else {
+			matchRule &= ~R_CAMELCASE_MATCH;
+			if ((matchRule & R_PREFIX_MATCH) == 0) {
+				matchRule |= R_PREFIX_MATCH;
+				matchRule |= R_CASE_SENSITIVE;
+			}
+		}
+	}
+	return matchRule;
+}
+

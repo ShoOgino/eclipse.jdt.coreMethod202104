@@ -1,148 +1,148 @@
-	/**
-	 * Field pattern are formed by [declaringType.]name[ type]
-	 * e.g. java.lang.String.serialVersionUID long
-	 *		field*
-	 */
-	private static SearchPattern createFieldPattern(String patternString, int limitTo, int matchRule) {
-		
-		Scanner scanner = new Scanner(false /*comment*/, true /*whitespace*/, false /*nls*/, ClassFileConstants.JDK1_3/*sourceLevel*/, null /*taskTags*/, null/*taskPriorities*/, true/*taskCaseSensitive*/); 
-		scanner.setSource(patternString.toCharArray());
-		final int InsideDeclaringPart = 1;
-		final int InsideType = 2;
-		int lastToken = -1;
-		
-		String declaringType = null, fieldName = null;
-		String type = null;
-		int mode = InsideDeclaringPart;
-		int token;
+/**
+ * Field pattern are formed by [declaringType.]name[ type]
+ * e.g. java.lang.String.serialVersionUID long
+ *		field*
+ */
+private static SearchPattern createFieldPattern(String patternString, int limitTo, int matchRule) {
+	
+	Scanner scanner = new Scanner(false /*comment*/, true /*whitespace*/, false /*nls*/, ClassFileConstants.JDK1_3/*sourceLevel*/, null /*taskTags*/, null/*taskPriorities*/, true/*taskCaseSensitive*/); 
+	scanner.setSource(patternString.toCharArray());
+	final int InsideDeclaringPart = 1;
+	final int InsideType = 2;
+	int lastToken = -1;
+	
+	String declaringType = null, fieldName = null;
+	String type = null;
+	int mode = InsideDeclaringPart;
+	int token;
+	try {
+		token = scanner.getNextToken();
+	} catch (InvalidInputException e) {
+		return null;
+	}
+	while (token != TerminalTokens.TokenNameEOF) {
+		switch(mode) {
+			// read declaring type and fieldName
+			case InsideDeclaringPart :
+				switch (token) {
+					case TerminalTokens.TokenNameDOT:
+						if (declaringType == null) {
+							if (fieldName == null) return null;
+							declaringType = fieldName;
+						} else {
+							String tokenSource = scanner.getCurrentTokenString();
+							declaringType += tokenSource + fieldName;
+						}
+						fieldName = null;
+						break;
+					case TerminalTokens.TokenNameWHITESPACE:
+						if (!(TerminalTokens.TokenNameWHITESPACE == lastToken || TerminalTokens.TokenNameDOT == lastToken))
+							mode = InsideType;
+						break;
+					default: // all other tokens are considered identifiers (see bug 21763 Problem in Java search [search])
+						if (fieldName == null)
+							fieldName = scanner.getCurrentTokenString();
+						else
+							fieldName += scanner.getCurrentTokenString();
+				}
+				break;
+			// read type 
+			case InsideType:
+				switch (token) {
+					case TerminalTokens.TokenNameWHITESPACE:
+						break;
+					default: // all other tokens are considered identifiers (see bug 21763 Problem in Java search [search])
+						if (type == null)
+							type = scanner.getCurrentTokenString();
+						else
+							type += scanner.getCurrentTokenString();
+				}
+				break;
+		}
+		lastToken = token;
 		try {
 			token = scanner.getNextToken();
 		} catch (InvalidInputException e) {
 			return null;
 		}
-		while (token != TerminalTokens.TokenNameEOF) {
-			switch(mode) {
-				// read declaring type and fieldName
-				case InsideDeclaringPart :
-					switch (token) {
-						case TerminalTokens.TokenNameDOT:
-							if (declaringType == null) {
-								if (fieldName == null) return null;
-								declaringType = fieldName;
-							} else {
-								String tokenSource = scanner.getCurrentTokenString();
-								declaringType += tokenSource + fieldName;
-							}
-							fieldName = null;
-							break;
-						case TerminalTokens.TokenNameWHITESPACE:
-							if (!(TerminalTokens.TokenNameWHITESPACE == lastToken || TerminalTokens.TokenNameDOT == lastToken))
-								mode = InsideType;
-							break;
-						default: // all other tokens are considered identifiers (see bug 21763 Problem in Java search [search])
-							if (fieldName == null)
-								fieldName = scanner.getCurrentTokenString();
-							else
-								fieldName += scanner.getCurrentTokenString();
-					}
-					break;
-				// read type 
-				case InsideType:
-					switch (token) {
-						case TerminalTokens.TokenNameWHITESPACE:
-							break;
-						default: // all other tokens are considered identifiers (see bug 21763 Problem in Java search [search])
-							if (type == null)
-								type = scanner.getCurrentTokenString();
-							else
-								type += scanner.getCurrentTokenString();
-					}
-					break;
-			}
-			lastToken = token;
-			try {
-				token = scanner.getNextToken();
-			} catch (InvalidInputException e) {
-				return null;
-			}
-		}
-		if (fieldName == null) return null;
-	
-		char[] fieldNameChars = fieldName.toCharArray();
-		if (fieldNameChars.length == 1 && fieldNameChars[0] == '*') fieldNameChars = null;
-			
-		char[] declaringTypeQualification = null, declaringTypeSimpleName = null;
-		char[] typeQualification = null, typeSimpleName = null;
-	
-		// extract declaring type infos
-		if (declaringType != null) {
-			char[] declaringTypePart = declaringType.toCharArray();
-			int lastDotPosition = CharOperation.lastIndexOf('.', declaringTypePart);
-			if (lastDotPosition >= 0) {
-				declaringTypeQualification = CharOperation.subarray(declaringTypePart, 0, lastDotPosition);
-				if (declaringTypeQualification.length == 1 && declaringTypeQualification[0] == '*')
-					declaringTypeQualification = null;
-				declaringTypeSimpleName = CharOperation.subarray(declaringTypePart, lastDotPosition+1, declaringTypePart.length);
-			} else {
-				declaringTypeQualification = null;
-				declaringTypeSimpleName = declaringTypePart;
-			}
-			if (declaringTypeSimpleName.length == 1 && declaringTypeSimpleName[0] == '*')
-				declaringTypeSimpleName = null;
-		}
-		// extract type infos
-		if (type != null) {
-			char[] typePart = type.toCharArray();
-			int lastDotPosition = CharOperation.lastIndexOf('.', typePart);
-			if (lastDotPosition >= 0) {
-				typeQualification = CharOperation.subarray(typePart, 0, lastDotPosition);
-				if (typeQualification.length == 1 && typeQualification[0] == '*') {
-					typeQualification = null;
-				} else {
-					// prefix with a '*' as the full qualification could be bigger (because of an import)
-					typeQualification = CharOperation.concat(IIndexConstants.ONE_STAR, typeQualification);
-				}
-				typeSimpleName = CharOperation.subarray(typePart, lastDotPosition+1, typePart.length);
-			} else {
-				typeQualification = null;
-				typeSimpleName = typePart;
-			}
-			if (typeSimpleName.length == 1 && typeSimpleName[0] == '*')
-				typeSimpleName = null;
-		}
-		// Create field pattern
-		boolean findDeclarations = false;
-		boolean readAccess = false;
-		boolean writeAccess = false;
-		switch (limitTo) {
-			case IJavaSearchConstants.DECLARATIONS :
-				findDeclarations = true;
-				break;
-			case IJavaSearchConstants.REFERENCES :
-				readAccess = true;
-				writeAccess = true;
-				break;
-			case IJavaSearchConstants.READ_ACCESSES :
-				readAccess = true;
-				break;
-			case IJavaSearchConstants.WRITE_ACCESSES :
-				writeAccess = true;
-				break;
-			case IJavaSearchConstants.ALL_OCCURRENCES :
-				findDeclarations = true;
-				readAccess = true;
-				writeAccess = true;
-				break;
-		}
-		return new FieldPattern(
-				findDeclarations,
-				readAccess,
-				writeAccess,
-				fieldNameChars,
-				declaringTypeQualification,
-				declaringTypeSimpleName,
-				typeQualification,
-				typeSimpleName,
-				matchRule);
 	}
+	if (fieldName == null) return null;
+
+	char[] fieldNameChars = fieldName.toCharArray();
+	if (fieldNameChars.length == 1 && fieldNameChars[0] == '*') fieldNameChars = null;
+		
+	char[] declaringTypeQualification = null, declaringTypeSimpleName = null;
+	char[] typeQualification = null, typeSimpleName = null;
+
+	// extract declaring type infos
+	if (declaringType != null) {
+		char[] declaringTypePart = declaringType.toCharArray();
+		int lastDotPosition = CharOperation.lastIndexOf('.', declaringTypePart);
+		if (lastDotPosition >= 0) {
+			declaringTypeQualification = CharOperation.subarray(declaringTypePart, 0, lastDotPosition);
+			if (declaringTypeQualification.length == 1 && declaringTypeQualification[0] == '*')
+				declaringTypeQualification = null;
+			declaringTypeSimpleName = CharOperation.subarray(declaringTypePart, lastDotPosition+1, declaringTypePart.length);
+		} else {
+			declaringTypeQualification = null;
+			declaringTypeSimpleName = declaringTypePart;
+		}
+		if (declaringTypeSimpleName.length == 1 && declaringTypeSimpleName[0] == '*')
+			declaringTypeSimpleName = null;
+	}
+	// extract type infos
+	if (type != null) {
+		char[] typePart = type.toCharArray();
+		int lastDotPosition = CharOperation.lastIndexOf('.', typePart);
+		if (lastDotPosition >= 0) {
+			typeQualification = CharOperation.subarray(typePart, 0, lastDotPosition);
+			if (typeQualification.length == 1 && typeQualification[0] == '*') {
+				typeQualification = null;
+			} else {
+				// prefix with a '*' as the full qualification could be bigger (because of an import)
+				typeQualification = CharOperation.concat(IIndexConstants.ONE_STAR, typeQualification);
+			}
+			typeSimpleName = CharOperation.subarray(typePart, lastDotPosition+1, typePart.length);
+		} else {
+			typeQualification = null;
+			typeSimpleName = typePart;
+		}
+		if (typeSimpleName.length == 1 && typeSimpleName[0] == '*')
+			typeSimpleName = null;
+	}
+	// Create field pattern
+	boolean findDeclarations = false;
+	boolean readAccess = false;
+	boolean writeAccess = false;
+	switch (limitTo) {
+		case IJavaSearchConstants.DECLARATIONS :
+			findDeclarations = true;
+			break;
+		case IJavaSearchConstants.REFERENCES :
+			readAccess = true;
+			writeAccess = true;
+			break;
+		case IJavaSearchConstants.READ_ACCESSES :
+			readAccess = true;
+			break;
+		case IJavaSearchConstants.WRITE_ACCESSES :
+			writeAccess = true;
+			break;
+		case IJavaSearchConstants.ALL_OCCURRENCES :
+			findDeclarations = true;
+			readAccess = true;
+			writeAccess = true;
+			break;
+	}
+	return new FieldPattern(
+			findDeclarations,
+			readAccess,
+			writeAccess,
+			fieldNameChars,
+			declaringTypeQualification,
+			declaringTypeSimpleName,
+			typeQualification,
+			typeSimpleName,
+			matchRule);
+}
 

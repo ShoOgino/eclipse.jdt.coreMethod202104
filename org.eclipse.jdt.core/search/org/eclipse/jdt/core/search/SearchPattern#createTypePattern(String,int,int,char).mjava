@@ -1,108 +1,108 @@
-	/**
-	 * Type pattern are formed by [qualification '.']type [typeArguments].
-	 * e.g. java.lang.Object
-	 *		Runnable
-	 *		List&lt;String&gt;
-	 *
-	 * @since 3.1
-	 *		Type arguments can be specified to search references to parameterized types.
-	 * 	and look as follow: '&lt;' { [ '?' {'extends'|'super'} ] type ( ',' [ '?' {'extends'|'super'} ] type )* | '?' } '&gt;'
-	 * 	Please note that:
-	 * 		- '*' is not valid inside type arguments definition &lt;&gt;
-	 * 		- '?' is treated as a wildcard when it is inside &lt;&gt; (ie. it must be put on first position of the type argument)
-	 */
-	private static SearchPattern createTypePattern(String patternString, int limitTo, int matchRule, char indexSuffix) {
-		
-		Scanner scanner = new Scanner(false /*comment*/, true /*whitespace*/, false /*nls*/, ClassFileConstants.JDK1_3/*sourceLevel*/, null /*taskTags*/, null/*taskPriorities*/, true/*taskCaseSensitive*/); 
-		scanner.setSource(patternString.toCharArray());
-		String type = null;
-		int token;
+/**
+ * Type pattern are formed by [qualification '.']type [typeArguments].
+ * e.g. java.lang.Object
+ *		Runnable
+ *		List&lt;String&gt;
+ *
+ * @since 3.1
+ *		Type arguments can be specified to search references to parameterized types.
+ * 	and look as follow: '&lt;' { [ '?' {'extends'|'super'} ] type ( ',' [ '?' {'extends'|'super'} ] type )* | '?' } '&gt;'
+ * 	Please note that:
+ * 		- '*' is not valid inside type arguments definition &lt;&gt;
+ * 		- '?' is treated as a wildcard when it is inside &lt;&gt; (ie. it must be put on first position of the type argument)
+ */
+private static SearchPattern createTypePattern(String patternString, int limitTo, int matchRule, char indexSuffix) {
+	
+	Scanner scanner = new Scanner(false /*comment*/, true /*whitespace*/, false /*nls*/, ClassFileConstants.JDK1_3/*sourceLevel*/, null /*taskTags*/, null/*taskPriorities*/, true/*taskCaseSensitive*/); 
+	scanner.setSource(patternString.toCharArray());
+	String type = null;
+	int token;
+	try {
+		token = scanner.getNextToken();
+	} catch (InvalidInputException e) {
+		return null;
+	}
+	int argCount = 0;
+	while (token != TerminalTokens.TokenNameEOF) {
+		if (argCount == 0) {
+			switch (token) {
+				case TerminalTokens.TokenNameWHITESPACE:
+					break;
+				case TerminalTokens.TokenNameLESS:
+					argCount++;
+					// fall through default case to add token to type
+				default: // all other tokens are considered identifiers (see bug 21763 Problem in Java search [search])
+					if (type == null)
+						type = scanner.getCurrentTokenString();
+					else
+						type += scanner.getCurrentTokenString();
+			}
+		} else {
+			switch (token) {
+				case TerminalTokens.TokenNameGREATER:
+				case TerminalTokens.TokenNameRIGHT_SHIFT:
+				case TerminalTokens.TokenNameUNSIGNED_RIGHT_SHIFT:
+					argCount--;
+					break;
+				case TerminalTokens.TokenNameLESS:
+					argCount++;
+					break;
+			}
+			if (type == null) return null; // invalid syntax
+			type += scanner.getCurrentTokenString();
+		}
 		try {
 			token = scanner.getNextToken();
 		} catch (InvalidInputException e) {
 			return null;
 		}
-		int argCount = 0;
-		while (token != TerminalTokens.TokenNameEOF) {
-			if (argCount == 0) {
-				switch (token) {
-					case TerminalTokens.TokenNameWHITESPACE:
-						break;
-					case TerminalTokens.TokenNameLESS:
-						argCount++;
-						// fall through default case to add token to type
-					default: // all other tokens are considered identifiers (see bug 21763 Problem in Java search [search])
-						if (type == null)
-							type = scanner.getCurrentTokenString();
-						else
-							type += scanner.getCurrentTokenString();
-				}
-			} else {
-				switch (token) {
-					case TerminalTokens.TokenNameGREATER:
-					case TerminalTokens.TokenNameRIGHT_SHIFT:
-					case TerminalTokens.TokenNameUNSIGNED_RIGHT_SHIFT:
-						argCount--;
-						break;
-					case TerminalTokens.TokenNameLESS:
-						argCount++;
-						break;
-				}
-				if (type == null) return null; // invalid syntax
-				type += scanner.getCurrentTokenString();
-			}
-			try {
-				token = scanner.getNextToken();
-			} catch (InvalidInputException e) {
-				return null;
-			}
-		}
-		if (type == null) return null;
-		String typeSignature = null;
-		char[] qualificationChars = null, typeChars = null;
-	
-		// extract declaring type infos
-		if (type != null) {
-			// get type part and signature
-			char[] typePart = null;
-			try {
-				typeSignature = Signature.createTypeSignature(type, false);
-				if (typeSignature.indexOf(Signature.C_GENERIC_START) < 0) {
-					typePart = type.toCharArray();
-				} else {
-					typePart = Signature.toCharArray(Signature.getTypeErasure(typeSignature.toCharArray()));
-				}
-			}
-			catch (IllegalArgumentException iae) {
-				// string is not a valid type syntax
-				return null;
-			}
-			// get qualification name
-			int lastDotPosition = CharOperation.lastIndexOf('.', typePart);
-			if (lastDotPosition >= 0) {
-				qualificationChars = CharOperation.subarray(typePart, 0, lastDotPosition);
-				if (qualificationChars.length == 1 && qualificationChars[0] == '*')
-					qualificationChars = null;
-				typeChars = CharOperation.subarray(typePart, lastDotPosition+1, typePart.length);
-			} else {
-				qualificationChars = null;
-				typeChars = typePart;
-			}
-			if (typeChars.length == 1 && typeChars[0] == '*')
-				typeChars = null;
-		}
-		switch (limitTo) {
-			case IJavaSearchConstants.DECLARATIONS : // cannot search for explicit member types
-				return new QualifiedTypeDeclarationPattern(qualificationChars, typeChars, indexSuffix, matchRule);
-			case IJavaSearchConstants.REFERENCES :
-				return new TypeReferencePattern(qualificationChars, typeChars, typeSignature, matchRule);
-			case IJavaSearchConstants.IMPLEMENTORS : 
-				return new SuperTypeReferencePattern(qualificationChars, typeChars, SuperTypeReferencePattern.ONLY_SUPER_INTERFACES, matchRule);
-			case IJavaSearchConstants.ALL_OCCURRENCES :
-				return new OrPattern(
-					new QualifiedTypeDeclarationPattern(qualificationChars, typeChars, indexSuffix, matchRule),// cannot search for explicit member types
-					new TypeReferencePattern(qualificationChars, typeChars, matchRule));
-		}
-		return null;
 	}
+	if (type == null) return null;
+	String typeSignature = null;
+	char[] qualificationChars = null, typeChars = null;
+
+	// extract declaring type infos
+	if (type != null) {
+		// get type part and signature
+		char[] typePart = null;
+		try {
+			typeSignature = Signature.createTypeSignature(type, false);
+			if (typeSignature.indexOf(Signature.C_GENERIC_START) < 0) {
+				typePart = type.toCharArray();
+			} else {
+				typePart = Signature.toCharArray(Signature.getTypeErasure(typeSignature.toCharArray()));
+			}
+		}
+		catch (IllegalArgumentException iae) {
+			// string is not a valid type syntax
+			return null;
+		}
+		// get qualification name
+		int lastDotPosition = CharOperation.lastIndexOf('.', typePart);
+		if (lastDotPosition >= 0) {
+			qualificationChars = CharOperation.subarray(typePart, 0, lastDotPosition);
+			if (qualificationChars.length == 1 && qualificationChars[0] == '*')
+				qualificationChars = null;
+			typeChars = CharOperation.subarray(typePart, lastDotPosition+1, typePart.length);
+		} else {
+			qualificationChars = null;
+			typeChars = typePart;
+		}
+		if (typeChars.length == 1 && typeChars[0] == '*')
+			typeChars = null;
+	}
+	switch (limitTo) {
+		case IJavaSearchConstants.DECLARATIONS : // cannot search for explicit member types
+			return new QualifiedTypeDeclarationPattern(qualificationChars, typeChars, indexSuffix, matchRule);
+		case IJavaSearchConstants.REFERENCES :
+			return new TypeReferencePattern(qualificationChars, typeChars, typeSignature, matchRule);
+		case IJavaSearchConstants.IMPLEMENTORS : 
+			return new SuperTypeReferencePattern(qualificationChars, typeChars, SuperTypeReferencePattern.ONLY_SUPER_INTERFACES, matchRule);
+		case IJavaSearchConstants.ALL_OCCURRENCES :
+			return new OrPattern(
+				new QualifiedTypeDeclarationPattern(qualificationChars, typeChars, indexSuffix, matchRule),// cannot search for explicit member types
+				new TypeReferencePattern(qualificationChars, typeChars, matchRule));
+	}
+	return null;
+}
 
