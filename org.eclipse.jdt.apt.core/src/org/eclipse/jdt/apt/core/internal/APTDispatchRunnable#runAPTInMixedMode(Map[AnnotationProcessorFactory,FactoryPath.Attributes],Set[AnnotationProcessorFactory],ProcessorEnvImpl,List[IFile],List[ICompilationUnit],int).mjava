@@ -4,16 +4,19 @@
 	 * @param processorEnv
 	 * @param filesWithMissingType at return contains files (<code>IFile</code>) that has 
 	 * missing types.
+	 * @param currentRoundDispatchedBatchFactories output parameter. At return contains the 
+	 * set of batch factories that has been dispatched.
 	 * @param sourceForFilesWithMissingType at return contains source (<code>char[]</code>)
 	 * for files that has missing types. Parallel to entries in <code>filesWithMissingType</code> 
-	 * @param round the current round number, 0-based.
+	 * @param internalRound the current round number, 0-based.
 	 */
 	private void runAPTInMixedMode(
 			final Map<AnnotationProcessorFactory, FactoryPath.Attributes> factories,
+			final Set<AnnotationProcessorFactory> currentRoundDispatchedBatchFactories,
 			final ProcessorEnvImpl processorEnv,
 			final List<IFile> filesWithMissingType,
 			final List<ICompilationUnit> unitsForFilesWithMissingType,
-			final int round)
+			final int internalRound)
 	{
 		final IFile[] files = processorEnv.getFiles();
 		final Map<IFile, Set<AnnotationTypeDeclaration>> file2AnnotationDecls = 
@@ -21,7 +24,7 @@
 		final Map<String, AnnotationTypeDeclaration> annotationDecls = 
 			processorEnv.getAllAnnotationTypes(file2AnnotationDecls);
 		
-		if (annotationDecls.isEmpty())
+		if (annotationDecls.isEmpty() && _dispatchedBatchFactories.isEmpty() )
 		{
 			if ( AptPlugin.DEBUG ) 
 				trace( "runAPT:  leaving early because annotationDecls is empty", //$NON-NLS-1$
@@ -29,6 +32,9 @@
 			return;
 		}
 		
+		if( AptPlugin.DEBUG )
+			trace( "annotations found " + annotationDecls.keySet(), processorEnv); //$NON-NLS-1$
+
 		// file based processing factory to the set of annotations that it 'claims'
 		final Map<AnnotationProcessorFactory, Set<AnnotationTypeDeclaration>> fileFactory2Annos =
 			new HashMap<AnnotationProcessorFactory, Set<AnnotationTypeDeclaration>>( factories.size() * 4/3 + 1 );
@@ -67,23 +73,38 @@
 		
 		// Dispatch to the batch process factories first.
 		// Batch processors only get executed on a full/clean build and only get called once
-		// within one round APT dispatch.
-		if( !batchFactory2Annos.isEmpty() && round == 0){
+		// within one round APT dispatch.		
+		if( internalRound == 0 ){
+			if( !batchFactory2Annos.isEmpty()){
+				processorEnv.setBatchProcessing();
+				// Once we figure out which factory claims what annotation,
+				// the order of the factory doesn't matter.
+				// But in order to make things consists between runs, will 
+				// dispatch base on factory order.
+				for(AnnotationProcessorFactory factory : factories.keySet() ){			
+					final Set<AnnotationTypeDeclaration> annotationTypes = batchFactory2Annos.get(factory);
+					if( annotationTypes == null ) continue;
+					final AnnotationProcessor processor = 
+						factory.getProcessorFor(annotationTypes, processorEnv);
+					if( processor != null ){
+						if ( AptPlugin.DEBUG ) 
+							trace( "runAPT: invoking batch processor " + processor.getClass().getName(), //$NON-NLS-1$
+									processorEnv);
+						currentRoundDispatchedBatchFactories.add(factory);
+						processor.process();
+					}
+				}			
+			}
 			processorEnv.setBatchProcessing();
-			// Once we figure out which factory claims what annotation,
-			// the order of the factory doesn't matter.
-			// But in order to make things consists between runs, will 
-			// dispatch base on factory order.
-			for(AnnotationProcessorFactory factory : factories.keySet() ){			
-				final Set<AnnotationTypeDeclaration> annotationTypes = batchFactory2Annos.get(factory);
-				if( annotationTypes == null ) continue;
+			for( AnnotationProcessorFactory prevRoundFactory : _dispatchedBatchFactories ){
+				if(currentRoundDispatchedBatchFactories.contains(prevRoundFactory))
+					continue;
 				final AnnotationProcessor processor = 
-					factory.getProcessorFor(annotationTypes, processorEnv);
+					prevRoundFactory.getProcessorFor(Collections.<AnnotationTypeDeclaration>emptySet(), processorEnv);
 				if( processor != null ){
 					if ( AptPlugin.DEBUG ) 
 						trace( "runAPT: invoking batch processor " + processor.getClass().getName(), //$NON-NLS-1$
-								processorEnv); 
-                    processorEnv.setLatestProcessor(processor);
+								processorEnv);
 					processor.process();
 				}
 			}
@@ -108,7 +129,6 @@
 							if ( AptPlugin.DEBUG ) 
 								trace( "runAPT: invoking file-based processor " + processor.getClass().getName(), //$NON-NLS-1$
 										processorEnv );
-		                    processorEnv.setLatestProcessor(processor);
 							processor.process();
 						}
 					}
