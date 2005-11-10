@@ -6,39 +6,50 @@
 	 *  and it will take a java model lock if the project's source paths need to be updated.
 	 *  Care should be taken when calling this method to ensure that locking behavior is correct.    
 	 *  
-	 *  @param progressMonitor the progress monitor.  This can be null. 
+	 *  <em>
+	 *  The only time that it is save to call this method is either we are explicitly fixing the 
+	 *  classpath during a <code>ICompilationParitcipant.BROKEN_CLASSPATH_BUILD_FAILURE_EVENT</code> 
+	 *  or during a resource change event. Since resource change event only occur before or after a build 
+	 *  but never during one, the classpath will be updated at the correct time.
+	 *  </em> 
 	 *  
-	 *  @return true if the generatedSourceFolder is added to the project's classpath entries,
-	 *  false if it is not added to the project's classpath entries.  
+	 *  
+	 *  @param progressMonitor the progress monitor.  This can be null. 
 	 *  
 	 *  @see #getGeneratedSourceFolder()
 	 *  @see #isGeneratedSourceFolderConfigured()
 	 */
-	public boolean ensureGeneratedSourceFolder( IProgressMonitor progressMonitor )
-		throws CoreException
-	{
+	public boolean ensureGeneratedSourceFolder( IProgressMonitor progressMonitor ){
 		synchronized( this )
 		{
 			if ( _generatedSourceFolder != null )
 				return false;
 		}
-		
-		// don't take any locks in while creating the folder, since we are doing file-system operations
+		// don't take any locks while creating the folder, since we are doing file-system operations
 		IFolder srcFolder = getGeneratedSourceFolder();
-		srcFolder.refreshLocal( IResource.DEPTH_INFINITE, progressMonitor );
-		if (!srcFolder.exists()) {
-			FileSystemUtil.makeDerivedParentFolders(srcFolder);
-		}
+		try{ 
+			srcFolder.refreshLocal( IResource.DEPTH_INFINITE, progressMonitor );
+			if (!srcFolder.exists()) {
+				FileSystemUtil.makeDerivedParentFolders(srcFolder);
+			}
+				
+			//
+			// make sure __generated_src dir is on the cp if not already
+			//
+			updateProjectClasspath( _javaProject, srcFolder, progressMonitor );
 			
-		//
-		// make sure __generated_src dir is on the cp if not already
-		//
-		boolean addedToSourcePath = updateProjectClasspath( _javaProject, srcFolder, progressMonitor );
+			if(AptPlugin.DEBUG)
+				AptPlugin.trace("Added directory " + srcFolder.getName() + " and updated classpath" ); //$NON-NLS-1$ //$NON-NLS-2$
+		}
+		catch(CoreException e){						
+			e.printStackTrace();
+			AptPlugin.log(e, "Failed to create generated source directory"); //$NON-NLS-1$
+		}
 		
 		synchronized ( this )
 		{
 			_generatedSourceFolder = srcFolder;
-			return addedToSourcePath;
+			return true;
 		}
 	}
 
