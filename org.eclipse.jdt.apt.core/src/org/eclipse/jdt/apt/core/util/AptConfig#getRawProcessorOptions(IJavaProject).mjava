@@ -8,26 +8,52 @@
      * method returns only the options that are persisted to the preference
      * store and that are displayed in the configuration GUI.
      * 
-     * The implementation of this at present relies on persisting all the options
-     * in one string that is the equivalent of the apt command line, e.g.,
-     * "-Afoo=bar -Aquux=baz", and then parsing the string into a map in this
-     * routine. 
-     * 
      * @param jproj a project, or null to query the workspace-wide setting.
      * @return a mutable, possibly empty, map of (key, value) pairs.  
      * The value part of a pair may be null (equivalent to "-Akey").
      * The value part can contain spaces, if it is quoted: -Afoo="bar baz".
      */
 	public static Map<String, String> getRawProcessorOptions(IJavaProject jproj) {
-		Map<String, String> options;
-		String allOptions = getString(jproj, AptPreferenceConstants.APT_PROCESSOROPTIONS);
-    	if (null == allOptions) {
-    		options = new HashMap<String, String>();
-    	}
-    	else {
-    		ProcessorOptionsParser op = new ProcessorOptionsParser(allOptions);
-    		options = op.parse();
-    	}
+		Map<String, String> options = new HashMap<String, String>();
+		
+	    // TODO: this code is needed only for backwards compatibility with
+	    // settings files previous to 2005.11.13.  At some point it should be
+	    // removed.
+		// If an old-style setting exists, add it into the mix for backward
+		// compatibility.
+		options.putAll(getOldStyleRawProcessorOptions(jproj));
+		
+		// Fall back from project to workspace scope on an all-or-nothing basis,
+		// not value by value.  (Never fall back to default scope; there are no
+		// default processor options.)
+		IScopeContext[] contexts;
+		if (jproj != null) {
+			contexts = new IScopeContext[] { 
+					new ProjectScope(jproj.getProject()), new InstanceScope() };
+		}
+		else {
+			contexts = new IScopeContext[] { new InstanceScope() };
+		}
+		for (IScopeContext context : contexts) {
+			IEclipsePreferences prefs = context.getNode(AptPlugin.PLUGIN_ID);
+			if (prefs != null) {
+				try {
+					IEclipsePreferences procOptionsNode = context.getNode(
+							AptPlugin.PLUGIN_ID + "/" + AptPreferenceConstants.APT_PROCESSOROPTIONS); //$NON-NLS-1$
+					if (procOptionsNode != null) {
+						for (String key : procOptionsNode.keys()) {
+							String nonNullVal = procOptionsNode.get(key, null);
+							String val = AptPreferenceConstants.APT_NULLVALUE.equals(nonNullVal) ?
+									null : nonNullVal;
+							options.put(key, val);
+						}
+					}
+				} catch (BackingStoreException e) {
+					AptPlugin.log(e, "Unable to load annotation processor options"); //$NON-NLS-1$
+				}
+				break;
+			}
+		}
 		return options;
 	}
 
