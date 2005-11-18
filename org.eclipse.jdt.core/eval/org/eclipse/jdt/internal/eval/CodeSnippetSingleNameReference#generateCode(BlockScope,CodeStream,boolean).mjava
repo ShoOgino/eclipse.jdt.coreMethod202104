@@ -1,69 +1,71 @@
 public void generateCode(BlockScope currentScope, CodeStream codeStream, boolean valueRequired) {
 	int pc = codeStream.position;
-	if (this.constant != NotAConstant) {
+	if (this.constant != Constant.NotAConstant) {
 		if (valueRequired) {
 			codeStream.generateConstant(this.constant, this.implicitConversion);
 		}
 	} else {
 		switch (this.bits & RestrictiveFlagMASK) {
 			case Binding.FIELD : // reading a field
-				FieldBinding fieldBinding;
-				if (valueRequired) {
-					if (!(fieldBinding = (FieldBinding) this.codegenBinding).isConstantValue()) { // directly use inlined value for constant fields
-						if (fieldBinding.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
-							 // directly use inlined value for constant fields
-							boolean isStatic;
-							if (!(isStatic = fieldBinding.isStatic())) {
-								if ((this.bits & DepthMASK) != 0) {
-									ReferenceBinding targetType = currentScope.enclosingSourceType().enclosingTypeAt((this.bits & DepthMASK) >> DepthSHIFT);
-									Object[] emulationPath = currentScope.getEmulationPath(targetType, true /*only exact match*/, false/*consider enclosing arg*/);
-									codeStream.generateOuterAccess(emulationPath, this, targetType, currentScope);
-								} else {
-									generateReceiver(codeStream);
-								}
-							}
-							// managing private access							
-							if (isStatic) {
-								codeStream.getstatic(fieldBinding);
+				if (!valueRequired) 
+					break;
+				FieldBinding fieldBinding = (FieldBinding) this.codegenBinding;
+				Constant fieldConstant = fieldBinding.constant();
+				if (fieldConstant == Constant.NotAConstant) { // directly use inlined value for constant fields
+					if (fieldBinding.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
+						 // directly use inlined value for constant fields
+						boolean isStatic;
+						if (!(isStatic = fieldBinding.isStatic())) {
+							if ((this.bits & DepthMASK) != 0) {
+								ReferenceBinding targetType = currentScope.enclosingSourceType().enclosingTypeAt((this.bits & DepthMASK) >> DepthSHIFT);
+								Object[] emulationPath = currentScope.getEmulationPath(targetType, true /*only exact match*/, false/*consider enclosing arg*/);
+								codeStream.generateOuterAccess(emulationPath, this, targetType, currentScope);
 							} else {
-								codeStream.getfield(fieldBinding);
+								generateReceiver(codeStream);
+							}
+						}
+						// managing private access							
+						if (isStatic) {
+							codeStream.getstatic(fieldBinding);
+						} else {
+							codeStream.getfield(fieldBinding);
+						}
+					} else {
+						// managing private access
+						if (!fieldBinding.isStatic()) {
+							if ((this.bits & DepthMASK) != 0) {
+								// internal error, per construction we should have found it
+								// not yet supported
+								currentScope.problemReporter().needImplementation();
+							} else {
+								generateReceiver(codeStream);
 							}
 						} else {
-							// managing private access
-							if (!fieldBinding.isStatic()) {
-								if ((this.bits & DepthMASK) != 0) {
-									// internal error, per construction we should have found it
-									// not yet supported
-									currentScope.problemReporter().needImplementation();
-								} else {
-									generateReceiver(codeStream);
-								}
-							} else {
-								codeStream.aconst_null();
-							}
-							((CodeSnippetCodeStream)codeStream).generateEmulatedReadAccessForField(fieldBinding);
+							codeStream.aconst_null();
 						}
-						if (this.genericCast != null) codeStream.checkcast(this.genericCast);		
-						codeStream.generateImplicitConversion(this.implicitConversion);
-					} else { // directly use the inlined value
-						codeStream.generateConstant(fieldBinding.constant(), this.implicitConversion);
+						((CodeSnippetCodeStream)codeStream).generateEmulatedReadAccessForField(fieldBinding);
 					}
+					if (this.genericCast != null) codeStream.checkcast(this.genericCast);		
+					codeStream.generateImplicitConversion(this.implicitConversion);
+				} else { // directly use the inlined value
+					codeStream.generateConstant(fieldConstant, this.implicitConversion);
 				}
 				break;
 			case Binding.LOCAL : // reading a local
 				LocalVariableBinding localBinding = (LocalVariableBinding) this.codegenBinding;
-				if (valueRequired) {
-					// outer local?
-					if ((this.bits & DepthMASK) != 0) {
-						// outer local can be reached either through a synthetic arg or a synthetic field
-						VariableBinding[] path = currentScope.getEmulationPath(localBinding);
-						codeStream.generateOuterAccess(path, this, localBinding, currentScope);
-					} else {
-						// regular local variable read
-						codeStream.load(localBinding);
-					}
-					codeStream.generateImplicitConversion(this.implicitConversion);
+				if (!valueRequired)
+					break;
+				// outer local?
+				if ((this.bits & DepthMASK) != 0) {
+					// outer local can be reached either through a synthetic arg or a synthetic field
+					VariableBinding[] path = currentScope.getEmulationPath(localBinding);
+					codeStream.generateOuterAccess(path, this, localBinding, currentScope);
+				} else {
+					// regular local variable read
+					codeStream.load(localBinding);
 				}
+				codeStream.generateImplicitConversion(this.implicitConversion);
+				break;
 		}
 	}
 	codeStream.recordPositionsFrom(pc, this.sourceStart);
