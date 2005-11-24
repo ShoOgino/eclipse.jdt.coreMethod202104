@@ -2,7 +2,7 @@
  * Visit the given field declaration and report the nodes that match exactly the
  * search pattern (ie. the ones in the matching nodes set)
  */
-protected void reportMatching(FieldDeclaration field, TypeDeclaration type, IJavaElement parent, int accuracy, boolean typeInHierarchy, MatchingNodeSet nodeSet) throws CoreException {
+protected void reportMatching(FieldDeclaration field, TypeDeclaration type, IJavaElement parent, IJavaElement[] otherElements, int accuracy, boolean typeInHierarchy, MatchingNodeSet nodeSet) throws CoreException {
 	IJavaElement enclosingElement = null;
 	if (accuracy > -1) {
 		enclosingElement = createHandle(field, type, parent);
@@ -34,17 +34,39 @@ protected void reportMatching(FieldDeclaration field, TypeDeclaration type, IJav
 	}
 
 	if (typeInHierarchy) {
-		// limit scan to end part position for multiple fields declaration (see bug 73112)
-		int end = field.endPart2Position==0 ? field.declarationSourceEnd : field.endPart2Position;
-		ASTNode[] nodes = nodeSet.matchingNodes(field.declarationSourceStart, end);
+		// Look at field declaration
+		if (field.endPart1Position != 0) { // not necessary if field is an initializer
+			ASTNode[] nodes = nodeSet.matchingNodes(field.declarationSourceStart, field.endPart1Position);
+			if (nodes != null) {
+				if ((this.matchContainer & PatternLocator.FIELD_CONTAINER) == 0) {
+					for (int i = 0, l = nodes.length; i < l; i++)
+						nodeSet.matchingNodes.removeKey(nodes[i]);
+				} else {
+					if (enclosingElement == null)
+						enclosingElement = createHandle(field, type, parent);
+					if (encloses(enclosingElement)) {
+						for (int i = 0, l = nodes.length; i < l; i++) {
+							ASTNode node = nodes[i];
+							Integer level = (Integer) nodeSet.matchingNodes.removeKey(node);
+							this.patternLocator.matchReportReference(node, enclosingElement, null, otherElements, field.binding, level.intValue(), this);
+						}
+					}
+				}
+			}
+		}
+
+		// Look in initializer
+		int fieldEnd = field.endPart2Position == 0 ? field.declarationSourceEnd : field.endPart2Position;
+		ASTNode[] nodes = nodeSet.matchingNodes(field.sourceStart, fieldEnd);
 		if (nodes != null) {
 			if ((this.matchContainer & PatternLocator.FIELD_CONTAINER) == 0) {
 				for (int i = 0, l = nodes.length; i < l; i++)
 					nodeSet.matchingNodes.removeKey(nodes[i]);
 			} else {
-				if (enclosingElement == null)
+				if (enclosingElement == null) {
 					enclosingElement = createHandle(field, type, parent);
-				if (encloses(enclosingElement))
+				}
+				if (encloses(enclosingElement)) {
 					for (int i = 0, l = nodes.length; i < l; i++) {
 						ASTNode node = nodes[i];
 						Integer level = (Integer) nodeSet.matchingNodes.removeKey(node);
@@ -55,8 +77,15 @@ protected void reportMatching(FieldDeclaration field, TypeDeclaration type, IJav
 								node = field;
 							}
 						}
-						this.patternLocator.matchReportReference(node, enclosingElement, field.binding, level.intValue(), this);
+						// Set block scope for initializer in case there would have other local and other elements to report
+						BlockScope blockScope = null;
+						if (field.getKind() == AbstractVariableDeclaration.INITIALIZER) {
+							Block block = ((Initializer)field).block;
+							if (block != null) blockScope = block.scope;
+						}
+						this.patternLocator.matchReportReference(node, enclosingElement, field.binding, blockScope, level.intValue(), this);
 					}
+				}
 			}
 		}
 	}
