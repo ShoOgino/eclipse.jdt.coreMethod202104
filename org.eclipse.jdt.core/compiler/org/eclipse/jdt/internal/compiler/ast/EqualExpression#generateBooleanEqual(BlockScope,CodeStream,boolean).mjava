@@ -1,0 +1,148 @@
+	/**
+	 * Boolean generation for == with boolean operands
+	 *
+	 * Note this code does not optimize conditional constants !!!!
+	 */
+	public void generateBooleanEqual(BlockScope currentScope, CodeStream codeStream, boolean valueRequired) {
+	
+		// optimized cases: <something equivalent to true> == x, <something equivalent to false> == x, 
+		// optimized cases: <something equivalent to false> != x, <something equivalent to true> != x, 
+		boolean isEqualOperator = ((this.bits & OperatorMASK) >> OperatorSHIFT) == EQUAL_EQUAL;
+		Constant cst = left.optimizedBooleanConstant();
+		if (cst != Constant.NotAConstant) {
+			Constant rightCst = right.optimizedBooleanConstant();
+			if (rightCst != Constant.NotAConstant) {
+				// <something equivalent to true> == <something equivalent to true>, <something equivalent to false> != <something equivalent to true>
+				// <something equivalent to true> == <something equivalent to false>, <something equivalent to false> != <something equivalent to false>
+				left.generateCode(currentScope, codeStream, false);
+				right.generateCode(currentScope, codeStream, false);
+				if (valueRequired) {
+					boolean leftBool = cst.booleanValue();
+					boolean rightBool = rightCst.booleanValue();
+					if (isEqualOperator) {
+						if (leftBool == rightBool) {
+							codeStream.iconst_1();
+						} else {
+							codeStream.iconst_0();
+						}
+					} else {
+						if (leftBool != rightBool) {
+							codeStream.iconst_1();
+						} else {
+							codeStream.iconst_0();
+						}
+					}
+				}
+			} else if (cst.booleanValue() == isEqualOperator) {
+				// <something equivalent to true> == x, <something equivalent to false> != x
+				left.generateCode(currentScope, codeStream, false);
+				right.generateCode(currentScope, codeStream, valueRequired);
+			} else {
+				// <something equivalent to false> == x, <something equivalent to true> != x
+				if (valueRequired) {
+					Label falseLabel = new Label(codeStream);
+					left.generateCode(currentScope, codeStream, false);
+					right.generateOptimizedBoolean(currentScope, codeStream, null, falseLabel, valueRequired);
+					// comparison is TRUE 
+					codeStream.iconst_0();
+					if ((bits & IsReturnedValue) != 0){
+						codeStream.generateImplicitConversion(this.implicitConversion);
+						codeStream.generateReturnBytecode(this);
+						// comparison is FALSE
+						falseLabel.place();
+						codeStream.iconst_1();
+					} else {
+						Label endLabel = new Label(codeStream);
+						codeStream.goto_(endLabel);
+						codeStream.decrStackSize(1);
+						// comparison is FALSE
+						falseLabel.place();
+						codeStream.iconst_1();
+						endLabel.place();
+					}
+				} else {
+					left.generateCode(currentScope, codeStream, false);
+					right.generateCode(currentScope, codeStream, false);
+				}
+//				left.generateCode(currentScope, codeStream, false);
+//				right.generateCode(currentScope, codeStream, valueRequired);
+//				if (valueRequired) {
+//					codeStream.iconst_1();
+//					codeStream.ixor(); // negate
+//				}
+			}
+			return;
+		} 
+		cst = right.optimizedBooleanConstant();
+		if (cst != Constant.NotAConstant) {
+			if (cst.booleanValue() == isEqualOperator) {
+				// x == <something equivalent to true>, x != <something equivalent to false>
+				left.generateCode(currentScope, codeStream, valueRequired);
+				right.generateCode(currentScope, codeStream, false);
+			} else {
+				// x == <something equivalent to false>, x != <something equivalent to true>
+				if (valueRequired) {
+					Label falseLabel = new Label(codeStream);
+					left.generateOptimizedBoolean(currentScope, codeStream, null, falseLabel, valueRequired);
+					right.generateCode(currentScope, codeStream, false);
+					// comparison is TRUE 
+					codeStream.iconst_0();
+					if ((bits & IsReturnedValue) != 0){
+						codeStream.generateImplicitConversion(this.implicitConversion);
+						codeStream.generateReturnBytecode(this);
+						// comparison is FALSE
+						falseLabel.place();
+						codeStream.iconst_1();
+					} else {
+						Label endLabel = new Label(codeStream);
+						codeStream.goto_(endLabel);
+						codeStream.decrStackSize(1);
+						// comparison is FALSE
+						falseLabel.place();
+						codeStream.iconst_1();
+						endLabel.place();
+					}
+				} else {
+					left.generateCode(currentScope, codeStream, false);
+					right.generateCode(currentScope, codeStream, false);
+				}
+//				left.generateCode(currentScope, codeStream, valueRequired);
+//				right.generateCode(currentScope, codeStream, false);
+//				if (valueRequired) {
+//					codeStream.iconst_1();
+//					codeStream.ixor(); // negate
+//				}
+			}
+			return;
+		} 
+		// default case
+		left.generateCode(currentScope, codeStream, valueRequired);
+		right.generateCode(currentScope, codeStream, valueRequired);
+
+		if (valueRequired) {
+			if (isEqualOperator) {
+				Label falseLabel;
+				codeStream.if_icmpne(falseLabel = new Label(codeStream));
+				// comparison is TRUE 
+				codeStream.iconst_1();
+				if ((bits & IsReturnedValue) != 0){
+					codeStream.generateImplicitConversion(this.implicitConversion);
+					codeStream.generateReturnBytecode(this);
+					// comparison is FALSE
+					falseLabel.place();
+					codeStream.iconst_0();
+				} else {
+					Label endLabel = new Label(codeStream);
+					codeStream.goto_(endLabel);
+					codeStream.decrStackSize(1);
+					// comparison is FALSE
+					falseLabel.place();
+					codeStream.iconst_0();
+					endLabel.place();
+				}
+			} else {
+				codeStream.ixor();				
+			}
+		}
+	}
+

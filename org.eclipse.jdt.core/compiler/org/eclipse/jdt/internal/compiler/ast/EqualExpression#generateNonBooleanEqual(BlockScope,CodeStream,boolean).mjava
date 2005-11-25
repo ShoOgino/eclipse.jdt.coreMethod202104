@@ -1,0 +1,209 @@
+	/**
+	 * Boolean generation for == with non-boolean operands
+	 *
+	 */
+	public void generateNonBooleanEqual(BlockScope currentScope, CodeStream codeStream, boolean valueRequired) {
+	
+		boolean isEqualOperator = ((this.bits & OperatorMASK) >> OperatorSHIFT) == EQUAL_EQUAL;
+		if (((left.implicitConversion & IMPLICIT_CONVERSION_MASK) >> 4) == T_int) {
+			Constant cst;
+			if ((cst = left.constant) != Constant.NotAConstant && cst.intValue() == 0) {
+				// optimized case: 0 == x, 0 != x
+				right.generateCode(currentScope, codeStream, valueRequired);
+				if (valueRequired) {
+					Label falseLabel = new Label(codeStream);
+					if (isEqualOperator) {
+						codeStream.ifne(falseLabel);
+					} else {
+						codeStream.ifeq(falseLabel);
+					}
+					// comparison is TRUE 
+					codeStream.iconst_1();
+					if ((bits & IsReturnedValue) != 0){
+						codeStream.generateImplicitConversion(this.implicitConversion);
+						codeStream.generateReturnBytecode(this);
+						// comparison is FALSE
+						falseLabel.place();
+						codeStream.iconst_0();
+					} else {
+						Label endLabel = new Label(codeStream);
+						codeStream.goto_(endLabel);
+						codeStream.decrStackSize(1);
+						// comparison is FALSE
+						falseLabel.place();
+						codeStream.iconst_0();
+						endLabel.place();
+					}
+				}				
+				return;
+			}
+			if ((cst = right.constant) != Constant.NotAConstant && cst.intValue() == 0) {
+				// optimized case: x == 0, x != 0
+				left.generateCode(currentScope, codeStream, valueRequired);
+				if (valueRequired) {
+					Label falseLabel = new Label(codeStream);
+					if (isEqualOperator) {
+						codeStream.ifne(falseLabel);
+					} else {
+						codeStream.ifeq(falseLabel);
+					}
+					// comparison is TRUE 
+					codeStream.iconst_1();
+					if ((bits & IsReturnedValue) != 0){
+						codeStream.generateImplicitConversion(this.implicitConversion);
+						codeStream.generateReturnBytecode(this);
+						// comparison is FALSE
+						falseLabel.place();
+						codeStream.iconst_0();
+					} else {
+						Label endLabel = new Label(codeStream);
+						codeStream.goto_(endLabel);
+						codeStream.decrStackSize(1);
+						// comparison is FALSE
+						falseLabel.place();
+						codeStream.iconst_0();
+						endLabel.place();
+					}
+				}				
+				return;
+			}			
+		}
+
+		// null cases
+		if (right instanceof NullLiteral) {
+			if (left instanceof NullLiteral) {
+				// null == null, null != null
+				if (valueRequired) {
+					if (isEqualOperator) {
+						codeStream.iconst_1();
+					} else {
+						codeStream.iconst_0();
+					}
+				}
+			} else {
+				// x == null, x != null
+				left.generateCode(currentScope, codeStream, valueRequired);
+				if (valueRequired) {
+					Label falseLabel = new Label(codeStream);
+					if (isEqualOperator) {
+						codeStream.ifnonnull(falseLabel);
+					} else {
+						codeStream.ifnull(falseLabel);
+					}
+					// comparison is TRUE 
+					codeStream.iconst_1();
+					if ((bits & IsReturnedValue) != 0){
+						codeStream.generateImplicitConversion(this.implicitConversion);
+						codeStream.generateReturnBytecode(this);
+						// comparison is FALSE
+						falseLabel.place();
+						codeStream.iconst_0();
+					} else {
+						Label endLabel = new Label(codeStream);
+						codeStream.goto_(endLabel);
+						codeStream.decrStackSize(1);
+						// comparison is FALSE
+						falseLabel.place();
+						codeStream.iconst_0();
+						endLabel.place();
+					}
+				}
+			}
+			return;
+		} else if (left instanceof NullLiteral) {
+			// null = x, null != x
+			right.generateCode(currentScope, codeStream, valueRequired);
+			if (valueRequired) {
+				Label falseLabel = new Label(codeStream);
+				if (isEqualOperator) {
+					codeStream.ifnonnull(falseLabel);
+				} else {
+					codeStream.ifnull(falseLabel);
+				}
+				// comparison is TRUE 
+				codeStream.iconst_1();
+				if ((bits & IsReturnedValue) != 0){
+					codeStream.generateImplicitConversion(this.implicitConversion);
+					codeStream.generateReturnBytecode(this);
+					// comparison is FALSE
+					falseLabel.place();
+					codeStream.iconst_0();
+				} else {
+					Label endLabel = new Label(codeStream);
+					codeStream.goto_(endLabel);
+					codeStream.decrStackSize(1);
+					// comparison is FALSE
+					falseLabel.place();
+					codeStream.iconst_0();
+					endLabel.place();
+				}
+			}				
+			return;
+		}
+	
+		// default case
+		left.generateCode(currentScope, codeStream, valueRequired);
+		right.generateCode(currentScope, codeStream, valueRequired);
+		if (valueRequired) {
+			Label falseLabel = new Label(codeStream);
+			if (isEqualOperator) {
+				switch ((left.implicitConversion & IMPLICIT_CONVERSION_MASK) >> 4) { // operand runtime type
+					case T_int :
+						codeStream.if_icmpne(falseLabel);
+						break;
+					case T_float :
+						codeStream.fcmpl();
+						codeStream.ifne(falseLabel);
+						break;
+					case T_long :
+						codeStream.lcmp();
+						codeStream.ifne(falseLabel);
+						break;
+					case T_double :
+						codeStream.dcmpl();
+						codeStream.ifne(falseLabel);
+						break;
+					default :
+						codeStream.if_acmpne(falseLabel);
+				}
+			} else {
+				switch ((left.implicitConversion & IMPLICIT_CONVERSION_MASK) >> 4) { // operand runtime type
+					case T_int :
+						codeStream.if_icmpeq(falseLabel);
+						break;
+					case T_float :
+						codeStream.fcmpl();
+						codeStream.ifeq(falseLabel);
+						break;
+					case T_long :
+						codeStream.lcmp();
+						codeStream.ifeq(falseLabel);
+						break;
+					case T_double :
+						codeStream.dcmpl();
+						codeStream.ifeq(falseLabel);
+						break;
+					default :
+						codeStream.if_acmpeq(falseLabel);
+				}				
+			}
+			// comparison is TRUE 
+			codeStream.iconst_1();
+			if ((bits & IsReturnedValue) != 0){
+				codeStream.generateImplicitConversion(this.implicitConversion);
+				codeStream.generateReturnBytecode(this);
+				// comparison is FALSE
+				falseLabel.place();
+				codeStream.iconst_0();
+			} else {
+				Label endLabel = new Label(codeStream);
+				codeStream.goto_(endLabel);
+				codeStream.decrStackSize(1);
+				// comparison is FALSE
+				falseLabel.place();
+				codeStream.iconst_0();
+				endLabel.place();
+			}			
+		}
+	}
+
