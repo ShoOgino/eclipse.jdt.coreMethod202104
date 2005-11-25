@@ -1,0 +1,67 @@
+	/**
+	 * check the compiler arguments.
+	 * Extract from files specified using @, lines marked with ADAPTER_PREFIX
+	 * These lines specify information that needs to be interpreted by us.
+	 * @param args
+	 */
+	private void checkCompilerArgs(String[] args) {
+		for (int i = 0; i < args.length; i++) {
+			if (args[i].charAt(0) == '@') {
+				try {
+					char[] content = Util.getFileCharContent(new File(args[i].substring(1)), null);
+					int offset = 0;
+					int prefixLength = ADAPTER_PREFIX.length;
+					while ((offset = CharOperation.indexOf(ADAPTER_PREFIX, content, true, offset)) > -1) {
+						int start = offset + prefixLength;
+						int end = CharOperation.indexOf('\n', content, start);
+						if (end == -1)
+							end = content.length;
+						while (CharOperation.isWhitespace(content[end])) {
+							end--;
+						}
+						
+						// end is inclusive, but in the API end is exclusive 
+						CharOperation.replace(content, SEPARATOR_CHARS, File.separatorChar, start, end + 1);
+						if (CharOperation.equals(ADAPTER_ENCODING, content, start, start + ADAPTER_ENCODING.length)) {
+							// file or folder level custom encoding
+							start += ADAPTER_ENCODING.length;
+							int encodeStart = CharOperation.lastIndexOf('[', content, start, end);
+							if (start < encodeStart && encodeStart < end) {
+								boolean isFile = CharOperation.equals(SuffixConstants.SUFFIX_java, content, encodeStart - 5, encodeStart, false);
+
+								String str = String.valueOf(content, start, encodeStart - start);
+								String enc = String.valueOf(content, encodeStart, end - encodeStart + 1);
+								if (isFile) {
+									if (fileEncodings == null)
+										fileEncodings = new HashMap();
+									//use File to translate the string into a path with the correct File.seperator
+									fileEncodings.put(str, enc);
+								} else {
+									if (dirEncodings == null)
+										dirEncodings = new HashMap();
+									dirEncodings.put(str, enc);
+								}
+							}
+						} else if (CharOperation.equals(ADAPTER_ACCESS, content, start, start + ADAPTER_ACCESS.length)) {
+							// access rules for the classpath
+							start += ADAPTER_ACCESS.length;
+							int accessStart = CharOperation.indexOf('[', content, start, end);
+							if (start < accessStart && accessStart < end) {
+								String path = String.valueOf(content, start, accessStart - start);
+								String access = String.valueOf(content, accessStart, end - accessStart + 1);
+								if (accessRules == null)
+									accessRules = new ArrayList();
+								accessRules.add(path);
+								accessRules.add(access);
+							}
+						}
+						offset = end;
+					}
+				} catch (IOException e) {
+					//ignore
+				}
+			}
+		}
+
+	}
+
