@@ -1,0 +1,50 @@
+	public void testReconcileMultipleProject() throws CoreException {
+		ICompilationUnit workingCopy = null;
+		try {
+			// Create first project
+			createJavaProject("P1", new String[] {""}, new String[] {"JCL_LIB"}, "bin");
+			createFolder("/P1/test");
+			createFile(
+				"/P1/test/Foo.java", 
+				"package test;\n" +
+				"class Secondary{ void foo() {} }\n"
+			);
+			createFile(
+				"/P1/test/Test1.java", 
+				"package test;\n" +
+				"public class Test1 {\n" + 
+				"	public static void main(String[] args) {\n" + 
+				"		new Secondary().foo();\n" + 
+				"	}\n" + 
+				"}\n"
+			);
+
+			// Create second project
+			createJavaProject("P2", new String[] {""}, new String[] {"JCL_LIB"}, new String[] { "/P1" }, "bin");
+			String source2 = 
+				"package test;\n" +
+				"public class Test2 {\n" + 
+				"	public static void main(String[] args) {\n" + 
+				"		new Secondary().foo();\n" + 
+				"	}\n" + 
+				"}\n";
+			createFolder("/P2/test");
+			createFile(
+				"/P2/test/Test2.java", 
+				source2
+			);
+			ProblemRequestor problemRequestor =  new ProblemRequestor();
+			workingCopy = getCompilationUnit("/P2/test/Test2.java").getWorkingCopy(new WorkingCopyOwner() {}, problemRequestor, null);
+			problemRequestor.initialize(source2.toCharArray());
+			workingCopy.getBuffer().setContents(source2);
+			workingCopy.reconcile(AST.JLS3, true, null, null);
+			if (problemRequestor.problemCount > 0) {
+				assertEquals("Working copy should NOT have any problem!", "", problemRequestor.problems.toString());
+			}
+		} finally {
+			if (workingCopy != null) workingCopy.discardWorkingCopy();
+			deleteProject("P1");
+			deleteProject("P2");
+		}
+	}
+

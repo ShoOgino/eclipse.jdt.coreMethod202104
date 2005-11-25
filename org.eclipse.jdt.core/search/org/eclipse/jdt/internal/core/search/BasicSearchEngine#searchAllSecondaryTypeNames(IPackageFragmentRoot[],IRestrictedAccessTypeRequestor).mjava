@@ -1,0 +1,82 @@
+	/**
+	 * Searches for all top-level types and member types in the given scope.
+	 * The search can be selecting specific types (given a package or a type name
+	 * prefix and match modes). 
+	 * 
+	 */
+	public void searchAllSecondaryTypeNames(IPackageFragmentRoot[] sourceFolders, final IRestrictedAccessTypeRequestor nameRequestor)  throws JavaModelException {
+
+		if (VERBOSE) {
+			Util.verbose("BasicSearchEngine.searchAllSecondaryTypeNames(char[], char[], int, int, IJavaSearchScope, IRestrictedAccessTypeRequestor, int, IProgressMonitor)"); //$NON-NLS-1$
+			StringBuffer buffer = new StringBuffer(" -> source folders: "); //$NON-NLS-1$
+			int length = sourceFolders.length;
+			for (int i=0; i<length; i++) {
+				if (i==0) {
+					buffer.append('[');
+				} else {
+					buffer.append(',');
+				}
+				buffer.append(sourceFolders[i].getElementName());
+			}
+			buffer.append(']');
+			Util.verbose(buffer.toString());
+		}
+
+		IndexManager indexManager = JavaModelManager.getJavaModelManager().getIndexManager();
+		final TypeDeclarationPattern pattern = new SecondaryTypeDeclarationPattern();
+		
+		final HashSet workingCopyPaths = new HashSet();
+		ICompilationUnit[] copies = getWorkingCopies();
+		if (copies != null) {
+			for (int i = 0, length = copies.length; i < length; i++) {
+				ICompilationUnit workingCopy = copies[i];
+				workingCopyPaths.add(workingCopy.getPath().toString());
+			}
+		}
+
+		IndexQueryRequestor searchRequestor = new IndexQueryRequestor(){
+			public boolean acceptIndexMatch(String documentPath, SearchPattern indexRecord, SearchParticipant participant, AccessRuleSet access) {
+				TypeDeclarationPattern record = (TypeDeclarationPattern)indexRecord;
+				if (record.secondary) {
+					AccessRestriction accessRestriction = null;
+					if (record.enclosingTypeNames != IIndexConstants.ONE_ZERO_CHAR  // filter out local and anonymous classes
+							&& !workingCopyPaths.contains(documentPath)) { // filter out working copies
+						if (access != null) {
+							// Compute document relative path
+							int pkgLength = (record.pkg==null || record.pkg.length==0) ? 0 : record.pkg.length+1;
+							int nameLength = record.simpleName==null ? 0 : record.simpleName.length;
+							char[] path = new char[pkgLength+nameLength];
+							int pos = 0;
+							if (pkgLength > 0) {
+								System.arraycopy(record.pkg, 0, path, pos, pkgLength-1);
+								CharOperation.replace(path, '.', '/');
+								path[pkgLength-1] = '/';
+								pos += pkgLength;
+							}
+							if (nameLength > 0) {
+								System.arraycopy(record.simpleName, 0, path, pos, nameLength);
+								pos += nameLength;
+							}
+							// Update access restriction if path is not empty
+							if (pos > 0) {
+								accessRestriction = access.getViolatedRestriction(path);
+							}
+						}
+						nameRequestor.acceptType(record.modifiers, record.pkg, record.simpleName, record.enclosingTypeNames, documentPath, accessRestriction);
+					}
+				}
+				return true;
+			}
+		};
+	
+		// add type names from indexes
+		indexManager.performConcurrentJob(
+			new PatternSearchJob(
+				pattern, 
+				getDefaultSearchParticipant(), // Java search only
+				createJavaSearchScope(sourceFolders), 
+				searchRequestor),
+			IJavaSearchConstants.WAIT_UNTIL_READY_TO_SEARCH,
+			null);	
+	}
+
