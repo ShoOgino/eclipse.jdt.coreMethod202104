@@ -1,0 +1,28 @@
+protected void deleteGeneratedFiles(IFile[] deletedGeneratedFiles) {
+	// delete generated files and recompile any affected source files
+	try {
+		for (int j = deletedGeneratedFiles.length; --j >= 0;) {
+			SourceFile sourceFile = findSourceFile(deletedGeneratedFiles[j]);
+			if (sourceFile == null) continue;
+			String typeLocator = sourceFile.typeLocator();
+			int mdSegmentCount = sourceFile.sourceLocation.sourceFolder.getFullPath().segmentCount();
+			IPath typePath = sourceFile.resource.getFullPath().removeFirstSegments(mdSegmentCount).removeFileExtension();
+			char[][] definedTypeNames = newState.getDefinedTypeNamesFor(typeLocator);
+			if (definedTypeNames == null) { // defined a single type matching typePath
+				removeClassFile(typePath, sourceFile.sourceLocation.binaryFolder);
+			} else {
+				addDependentsOf(typePath, true); // add dependents of the source file since it may be involved in a name collision
+				if (definedTypeNames.length > 0) { // skip it if it failed to successfully define a type
+					IPath packagePath = typePath.removeLastSegments(1);
+					for (int d = 0, l = definedTypeNames.length; d < l; d++)
+						removeClassFile(packagePath.append(new String(definedTypeNames[d])), sourceFile.sourceLocation.binaryFolder);
+				}
+			}
+			this.newState.removeLocator(typeLocator);
+		}
+	} catch (CoreException e) {
+		// must continue with compile loop so just log the CoreException
+		e.printStackTrace();
+	}
+}
+
