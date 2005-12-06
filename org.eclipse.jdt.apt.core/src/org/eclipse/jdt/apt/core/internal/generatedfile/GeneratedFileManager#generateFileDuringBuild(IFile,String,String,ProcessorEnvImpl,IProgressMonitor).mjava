@@ -25,30 +25,7 @@
 	throws CoreException
 	{
 		try{
-			final boolean sourcepathUpdated = ensureGeneratedSourceFolder(progressMonitor);
 			
-			final IFolder genFolder = getGeneratedSourceFolder();
-			IPackageFragmentRoot genFragRoot = null;
-			IPackageFragmentRoot[] roots = _javaProject.getAllPackageFragmentRoots();
-			for (IPackageFragmentRoot root : roots) {
-				if( genFolder.equals(root.getResource()) ){
-					genFragRoot = root;
-					break;
-				}
-			}
-			if( genFragRoot == null ){
-				StringBuilder sb = new StringBuilder();
-				
-				sb.append("*** start of classpath ***\n"); //$NON-NLS-1$
-				IClasspathEntry[] cp = _javaProject.getRawClasspath();
-				for (IClasspathEntry c : cp) {
-					sb.append(c).append("\n"); //$NON-NLS-1$
-				}
-				sb.append("*** end of classpath ***"); //$NON-NLS-1$
-				
-				throw new IllegalStateException("failed to locate package fragment root for " +  //$NON-NLS-1$
-						genFolder.getName() + ". classpath:\n" + sb.toString()); //$NON-NLS-1$ 
-			}
 			if( typeName.indexOf('/') != -1 )
 				typeName = typeName.replace('/', '.');
 			int separatorIndex = typeName.lastIndexOf('.');			
@@ -66,8 +43,9 @@
 			// NOTE: Do NOT ever create any type of resource (files, folders) through the
 			// resource API. The resource change event will not go out until the build
 			// is completed. Instead always go through the JavaModel. -theodora
-			final Set<IContainer> newFolders = getNewPackageFolders(pkgName, genFolder);
-			IPackageFragment pkgFrag = genFragRoot.createPackageFragment(pkgName, true, progressMonitor);
+			IFolder genSrcFolder = (IFolder)_generatedPackageFragmentRoot.getResource();
+			final Set<IContainer> newFolders = getNewPackageFolders(pkgName, genSrcFolder);
+			IPackageFragment pkgFrag = _generatedPackageFragmentRoot.createPackageFragment(pkgName, true, progressMonitor);
 			if( pkgFrag == null ){
 				throw new IllegalStateException("failed to locate package '" + pkgName + "'");  //$NON-NLS-1$ //$NON-NLS-2$
 			}			
@@ -126,8 +104,14 @@
 						AptPlugin.trace("generated " + typeName ); //$NON-NLS-1$
 					newUnit.save(progressMonitor, true);
 				}
-			}			
-			file.setDerived(true);
+			}
+			
+			// Mark the file as derived. Note that certain user actions may have
+			// deleted this file before we get here, so if the file doesn't exist,
+			// marking it derived throws a ResourceException
+			if (file.exists()) {
+				file.setDerived(true);
+			}
 			// We used to also make the file read-only. This is a bad idea,
 			// as refactorings then fail in the future, which is worse
 			// than allowing a user to modify a generated file.
@@ -136,7 +120,7 @@
 			if( parentFile != null ){
 				addEntryToFileMaps( parentFile, file );
 			}
-			return new FileGenerationResult(file, contentsDiffer, sourcepathUpdated);
+			return new FileGenerationResult(file, contentsDiffer);
 		}
 		catch(Throwable e){
 			AptPlugin.log(e, "(2)failed to generate type " + typeName); //$NON-NLS-1$

@@ -15,11 +15,13 @@
 	 *  
 	 *  
 	 *  @param progressMonitor the progress monitor.  This can be null. 
+	 *  @return <code>true</code> iff the any resource or classpath has been modified. 
+	 *  return <code>false</code> otherwise.
 	 *  
 	 *  @see #getGeneratedSourceFolder()
 	 *  @see #isGeneratedSourceFolderConfigured()
 	 */
-	public boolean ensureGeneratedSourceFolder( IProgressMonitor progressMonitor ){
+	public boolean ensureGeneratedSourceFolder(){
 		
 		boolean reset = false;
 		IFolder curSrcFolder = null;
@@ -33,8 +35,30 @@
 					curSrcFolder = _generatedSourceFolder;
 					_generatedSourceFolder = null;
 				}
-				else {
-					if (_javaProject.isOnClasspath(_generatedSourceFolder))
+				else {					
+					try{
+						_generatedSourceFolder.refreshLocal( IResource.DEPTH_INFINITE, null );
+					}
+					catch(CoreException ce){
+						AptPlugin.log(ce, "Failure during refreshLocal on " + srcFolderPath); //$NON-NLS-1$
+
+					}
+					
+					// if the folder doesn't exists, there is no point examining the classpath
+					boolean isConsistent = false;
+					if (_generatedSourceFolder.exists()) {
+						try {
+							IJavaProject jp = _aptProject.getJavaProject();
+							IClasspathEntry[] cp = jp.getRawClasspath();
+							IPath path = _generatedSourceFolder.getFullPath();
+							isConsistent = isProjectClassPathUpToDate(jp, cp, path, null);
+						}
+						catch (JavaModelException jme) {
+							AptPlugin.log(jme, "Failure examining the classpath"); //$NON-NLS-1$
+						}
+					}
+					
+					if(isConsistent)
 						return false;
 				}
 			}
@@ -45,7 +69,7 @@
 			if( reset ){
 				// the generated source folder and the generated source folder name is not
 				// lining up.
-				removeFromProjectClasspath(_javaProject, curSrcFolder, progressMonitor );
+				removeFromProjectClasspath(_aptProject.getJavaProject(), curSrcFolder, null );
 				if ( curSrcFolder.exists() ){
 					if( AptPlugin.DEBUG )
 						AptPlugin.trace("deleting gen src dir " + curSrcFolder.getName() ); //$NON-NLS-1$
@@ -55,8 +79,7 @@
 				
 			// don't take any locks while creating the folder, since we are doing file-system operations
 			srcFolder = getGeneratedSourceFolder();
-		 
-			srcFolder.refreshLocal( IResource.DEPTH_INFINITE, progressMonitor );
+			srcFolder.refreshLocal( IResource.DEPTH_INFINITE, null );
 			if (!srcFolder.exists()) {
 				FileSystemUtil.makeDerivedParentFolders(srcFolder);
 			}
@@ -64,7 +87,7 @@
 			//
 			// make sure __generated_src dir is on the cp if not already
 			//
-			updateProjectClasspath( _javaProject, srcFolder, progressMonitor );
+			updateProjectClasspath( _aptProject.getJavaProject(), srcFolder, null );
 			
 			if(AptPlugin.DEBUG)
 				AptPlugin.trace("Added directory " + srcFolder.getName() + " and updated classpath" ); //$NON-NLS-1$ //$NON-NLS-2$
@@ -72,6 +95,7 @@
 		catch(CoreException e){						
 			e.printStackTrace();
 			AptPlugin.log(e, "Failed to create generated source directory"); //$NON-NLS-1$
+			return false;
 		}
 		
 		synchronized ( this )
