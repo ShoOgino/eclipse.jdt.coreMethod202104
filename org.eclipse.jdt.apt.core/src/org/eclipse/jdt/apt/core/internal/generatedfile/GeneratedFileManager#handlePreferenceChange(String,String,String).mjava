@@ -1,0 +1,69 @@
+	/**
+	 * Update the classpath and generated source folder in response to a change
+	 * in a preference.
+	 * <p>
+	 * This used to be called within a preference change listener.  However, we
+	 * sometimes get preference change events within jobs that hold locks that
+	 * are incompatible with changing the classpath.  Instead, we now call this
+	 * method directly from AptConfig and from the APT config UI code whenever
+	 * the preference has changed.  Programmatic preference changes, such as those
+	 * that take place when syncing to a changed settings file, do not directly
+	 * cause the classpath or GSF to be updated.  This is fine, because changes
+	 * like that should simultaneously update both the preferences and the classpath
+	 * (except in the case of syncing to a broken project, which we don't want to
+	 * fix anyhow).  The GSF will still get created on disk during the prebuild
+	 * notification.
+	 * @param key the preference that is changing, e.g., AptPreferenceConstants.APT_GENSRCDIR
+	 * @param oldValue the previous value, or null if unknown
+	 * @param newValue the new value, which must not be null
+	 */
+	public void handlePreferenceChange(String key, String oldValue, String newValue) 
+	{
+		if (newValue == null) {
+			// Null is used to indicate this preference has
+			// been removed, as the project has been deleted.
+			// We do nothing
+			return;
+		}
+		if (newValue.equals(oldValue)) {
+			// No-op -- same config
+			return;
+		}
+		
+		if (AptPreferenceConstants.APT_GENSRCDIR.equals(key)) {
+			final boolean aptEnabled = AptConfig.isEnabled(_aptProject.getJavaProject());
+			if( AptPlugin.DEBUG )
+				AptPlugin.trace("configure generated source directory new value = " +  //$NON-NLS-1$
+						newValue + 
+						" old value = "  + oldValue + //$NON-NLS-1$
+						" APT is enabled = " + aptEnabled); //$NON-NLS-1$
+			// If APT is enabled, 
+			// clean up the old cp entry, delete the old folder, 
+			// create the new one and update the classpath.
+			if( aptEnabled )
+				configureGeneratedSourceFolder( newValue, oldValue );
+			else
+				setGeneratedSourceFolderName(newValue);
+		}
+		else if(AptPreferenceConstants.APT_ENABLED.equals(key) ){
+			if( AptPlugin.DEBUG ){
+				AptPlugin.trace("Got preference change event for " + AptPreferenceConstants.APT_ENABLED ); //$NON-NLS-1$
+			}
+			
+			final boolean isEnabling = Boolean.parseBoolean(newValue);
+			if( AptPlugin.DEBUG ){
+				if( isEnabling )
+					AptPlugin.trace("enabling APT for " + _aptProject.getJavaProject().getElementName()); //$NON-NLS-1$
+				else
+					AptPlugin.trace("diabling APT " + _aptProject.getJavaProject().getElementName()); //$NON-NLS-1$
+			}
+			if( isEnabling )
+				configureGeneratedSourceFolder();
+			else{
+				final IFolder srcFolder = getGeneratedSourceFolder();
+				projectClean(true);
+				resetGeneratedSrcFolder(srcFolder, false);
+			}
+		}
+	}
+
