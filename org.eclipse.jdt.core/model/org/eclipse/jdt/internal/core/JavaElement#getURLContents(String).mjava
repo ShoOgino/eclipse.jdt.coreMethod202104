@@ -1,0 +1,74 @@
+	/*
+	 * We don't use getContentEncoding() on the URL connection, because it might leave open streams behind.
+	 * See https://bugs.eclipse.org/bugs/show_bug.cgi?id=117890 
+	 * 
+	 */
+	protected String getURLContents(String docUrlValue) throws JavaModelException {
+		InputStream stream = null;
+		JarURLConnection connection2 = null;
+		try {
+			URL docUrl = new URL(docUrlValue);
+			URLConnection connection = docUrl.openConnection();
+			if (connection instanceof JarURLConnection) {
+				connection2 = (JarURLConnection) connection;
+			}
+			stream = new BufferedInputStream(connection.getInputStream());
+			String encoding = connection.getContentEncoding();
+			byte[] contents = org.eclipse.jdt.internal.compiler.util.Util.getInputStreamAsByteArray(stream, connection.getContentLength());
+			if (encoding == null) {
+				int index = getIndexOf(contents, CONTENT_TYPE, 0);
+				if (index != -1) {
+					index = getIndexOf(contents, CONTENT, index);
+					if (index != -1) {
+						int offset = index + CONTENT.length;
+						int index2 = getIndexOf(contents, CLOSING_DOUBLE_QUOTE, offset);
+						if (index2 != -1) {
+							final int charsetIndex = getIndexOf(contents, CHARSET, offset);
+							if (charsetIndex != -1) {
+								int start = charsetIndex + CHARSET.length;
+								encoding = new String(contents, start, index2 - start, "UTF-8"); //$NON-NLS-1$
+							}
+						}
+					}
+				}
+			}
+			try {
+				if (encoding == null) {
+					encoding = this.getJavaProject().getProject().getDefaultCharset();
+				}
+			} catch (CoreException e) {
+				// ignore
+			}
+			if (contents != null) {
+				if (encoding != null) {
+					return new String(contents, encoding);
+				} else {
+					// platform encoding is used
+					return new String(contents);
+				}
+			}			
+ 		} catch (MalformedURLException e) {
+ 			throw new JavaModelException(new JavaModelStatus(IJavaModelStatusConstants.CANNOT_RETRIEVE_ATTACHED_JAVADOC, this));
+		} catch (FileNotFoundException e) {
+			// ignore. see bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=120559
+		} catch(IOException e) {
+			throw new JavaModelException(new JavaModelStatus(IJavaModelStatusConstants.CANNOT_RETRIEVE_ATTACHED_JAVADOC, this));
+		} finally {
+			if (stream != null) {
+				try {
+					stream.close();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+			}
+			if (connection2 != null) {
+				try {
+					connection2.getJarFile().close();
+				} catch(IOException e) {
+					e.printStackTrace();
+				}
+ 			}
+		}
+		return null;
+	}
+
