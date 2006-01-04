@@ -6,19 +6,10 @@
 	 *  and it will take a java model lock if the project's source paths need to be updated.
 	 *  Care should be taken when calling this method to ensure that locking behavior is correct.    
 	 *  
-	 *  <em>
-	 *  The only time that it is save to call this method is either we are explicitly fixing the 
-	 *  classpath during a <code>ICompilationParitcipant.BROKEN_CLASSPATH_BUILD_FAILURE_EVENT</code> 
-	 *  or during a resource change event. Since resource change event only occur before or after a build 
-	 *  but never during one, the classpath will be updated at the correct time.
-	 *  </em> 
-	 *  
-	 *  
-	 *  @param progressMonitor the progress monitor.  This can be null. 
 	 *  @return <code>true</code> iff the any resource or classpath has been modified. 
 	 *  return <code>false</code> otherwise.
 	 *  
-	 *  @see #getGeneratedSourceFolder()
+	 *  @see #getFolder()
 	 *  @see #isGeneratedSourceFolderConfigured()
 	 */
 	private boolean ensureGeneratedSourceFolder(){
@@ -26,51 +17,53 @@
 		boolean reset = false;
 		IFolder curSrcFolder = null;
 	
+		// Determine current state of affairs, with respect to
+		// folder, folder name, and classpath.
 		synchronized( this )
 		{
 			if( _generatedSourceFolder != null ){
 				final IPath srcFolderPath = _generatedSourceFolder.getProjectRelativePath();
 				
 				if( !_generatedSourceFolderName.equals( srcFolderPath.toString()) ){
+					// Folder name has been changed!  Save the current folder so we can clear it out later.
 					reset = true;
 					curSrcFolder = _generatedSourceFolder;
 					_generatedSourceFolder = null;
 				}
-				else {					
+				else {
+					// Folder name and folder are in sync.  Check that folder is on classpath.
+					
+					// If the folder doesn't exist on disk, there is no point examining the classpath.
 					try{
 						_generatedSourceFolder.refreshLocal( IResource.DEPTH_INFINITE, null );
 					}
 					catch(CoreException ce){
 						AptPlugin.log(ce, "Failure during refreshLocal on " + srcFolderPath); //$NON-NLS-1$
-
 					}
-					
-					// if the folder doesn't exists, there is no point examining the classpath
-					boolean isConsistent = false;
-					if (_generatedSourceFolder.exists()) {
-						try {
-							IJavaProject jp = _aptProject.getJavaProject();
-							IClasspathEntry[] cp = jp.getRawClasspath();
-							IPath path = _generatedSourceFolder.getFullPath();
-							isConsistent = isProjectClassPathUpToDate(jp, cp, path, null);
-						}
-						catch (JavaModelException jme) {
-							AptPlugin.log(jme, "Failure examining the classpath"); //$NON-NLS-1$
-						}
-					}
-					
-					if(isConsistent)
+					if (!_generatedSourceFolder.exists()) {
 						return false;
+					}
+					
+					try {
+						IJavaProject jp = _aptProject.getJavaProject();
+						IClasspathEntry[] cp = jp.getRawClasspath();
+						IPath path = _generatedSourceFolder.getFullPath();
+						if (ClasspathUtil.isProjectClassPathUpToDate(jp, cp, path, null)) {
+							return false;
+						}
+					}
+					catch (JavaModelException jme) {
+						AptPlugin.log(jme, "Failure examining the classpath"); //$NON-NLS-1$
+					}
 				}
 			}
-	
 		}
+		
 		IFolder srcFolder = null;
 		try{
 			if( reset ){
-				// the generated source folder and the generated source folder name is not
-				// lining up.
-				removeFromProjectClasspath(_aptProject.getJavaProject(), curSrcFolder, null );
+				// Folder name was out of sync with folder.  Delete the old folder and classpath entry.
+				ClasspathUtil.removeFromProjectClasspath(_aptProject.getJavaProject(), curSrcFolder, null );
 				if ( curSrcFolder.exists() ){
 					if( AptPlugin.DEBUG )
 						AptPlugin.trace("deleting gen src dir " + curSrcFolder.getName() ); //$NON-NLS-1$
@@ -79,7 +72,7 @@
 			}
 				
 			// don't take any locks while creating the folder, since we are doing file-system operations
-			srcFolder = getGeneratedSourceFolder();
+			srcFolder = getFolder();
 			srcFolder.refreshLocal( IResource.DEPTH_INFINITE, null );
 			if (!srcFolder.exists()) {
 				FileSystemUtil.makeDerivedParentFolders(srcFolder);
@@ -88,7 +81,7 @@
 			//
 			// make sure __generated_src dir is on the cp if not already
 			//
-			updateProjectClasspath( _aptProject.getJavaProject(), srcFolder, null );
+			ClasspathUtil.updateProjectClasspath( _aptProject.getJavaProject(), srcFolder, null );
 			
 			if(AptPlugin.DEBUG)
 				AptPlugin.trace("Added directory " + srcFolder.getName() + " and updated classpath" ); //$NON-NLS-1$ //$NON-NLS-2$
