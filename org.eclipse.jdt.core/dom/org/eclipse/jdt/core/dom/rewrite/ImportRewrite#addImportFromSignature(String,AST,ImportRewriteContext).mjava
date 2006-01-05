@@ -1,0 +1,71 @@
+	/**
+	 * Adds a new import to the rewriter's record and returns a {@link Type} node that can be used
+	 * in the code as a reference to the type. The type binding can be an array binding, type variable or wildcard.
+	 * If the binding is a generic type, the type parameters are ignored. For parameterized types, also the type
+	 * arguments are processed and imports added if necessary. Anonymous types inside type arguments are normalized to their base type, wildcard
+	 * of wildcards are ignored.
+	 * 	<p>
+ 	 * No imports are added for types that are already known. If a import for a type is recorded to be removed, this record is discarded instead.
+	 * </p>
+	 * <p>
+	 * The content of the compilation unit itself is actually not modified
+	 * in any way by this method; rather, the rewriter just records that a new import has been added.
+	 * </p>
+	 * @param typeSig the signature of the type to be added.
+	 * @param ast the AST to create the returned type for.
+	 * @param context an optional context that knows about types visible in the current scope or <code>null</code>
+	 * to use the default context only using the available imports.
+	 * @return returns a type to which the type binding can be assigned to. The returned type contains is unqualified
+	 * when an import could be added or was already known. It is fully qualified, if an import conflict prevented the import.
+	 */
+	public Type addImportFromSignature(String typeSig, AST ast, ImportRewriteContext context) {	
+		if (typeSig == null || typeSig.length() == 0) {
+			throw new IllegalArgumentException("Invalid type signature: empty or null"); //$NON-NLS-1$
+		}
+		int sigKind= Signature.getTypeSignatureKind(typeSig);
+		switch (sigKind) {
+			case Signature.BASE_TYPE_SIGNATURE:
+				return ast.newPrimitiveType(PrimitiveType.toCode(Signature.toString(typeSig)));
+			case Signature.ARRAY_TYPE_SIGNATURE:
+				Type elementType= addImportFromSignature(Signature.getElementType(typeSig), ast, context);
+				return ast.newArrayType(elementType, Signature.getArrayCount(typeSig));
+			case Signature.CLASS_TYPE_SIGNATURE:
+				String erasureSig= Signature.getTypeErasure(typeSig);
+
+				String erasureName= Signature.toString(erasureSig);
+				if (erasureSig.charAt(0) == Signature.C_RESOLVED) {
+					erasureName= internalAddImport(erasureName, context);
+				}
+				Type baseType= ast.newSimpleType(ast.newName(erasureName));
+				String[] typeArguments= Signature.getTypeArguments(typeSig);
+				if (typeArguments.length > 0) {
+					ParameterizedType type= ast.newParameterizedType(baseType);
+					List argNodes= type.typeArguments();
+					for (int i= 0; i < typeArguments.length; i++) {
+						String curr= typeArguments[i];
+						if (containsNestedCapture(curr)) { // see bug 103044
+							argNodes.add(ast.newWildcardType());
+						} else {
+							argNodes.add(addImportFromSignature(curr, ast, context));
+						}
+					}
+					return type;
+				}
+				return baseType;
+			case Signature.TYPE_VARIABLE_SIGNATURE:
+				return ast.newSimpleType(ast.newSimpleName(Signature.toString(typeSig)));
+			case Signature.WILDCARD_TYPE_SIGNATURE:
+				WildcardType wildcardType= ast.newWildcardType();
+				char ch= typeSig.charAt(0);
+				if (ch != Signature.C_STAR) {
+					Type bound= addImportFromSignature(typeSig.substring(1), ast, context);
+					wildcardType.setBound(bound, ch == Signature.C_EXTENDS);
+				}
+				return wildcardType;
+			case Signature.CAPTURE_TYPE_SIGNATURE:
+				return addImportFromSignature(typeSig.substring(1), ast, context);
+			default:
+				throw new IllegalArgumentException("Unknown type signature kind: " + typeSig); //$NON-NLS-1$
+		}
+	}
+

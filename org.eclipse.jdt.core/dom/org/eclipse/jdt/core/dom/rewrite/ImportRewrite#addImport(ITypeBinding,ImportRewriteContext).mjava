@@ -1,0 +1,77 @@
+	/**
+	 * Adds a new import to the rewriter's record and returns a type reference that can be used
+	 * in the code. The type binding can be an array binding, type variable or wildcard.
+	 * If the binding is a generic type, the type parameters are ignored. For parameterized types, also the type
+	 * arguments are processed and imports added if necessary. Anonymous types inside type arguments are normalized to their base type, wildcard
+	 * of wildcards are ignored.
+	 * 	<p>
+ 	 * No imports are added for types that are already known. If a import for a type is recorded to be removed, this record is discarded instead.
+	 * </p>
+	 * <p>
+	 * The content of the compilation unit itself is actually not modified
+	 * in any way by this method; rather, the rewriter just records that a new import has been added.
+	 * </p>
+	 * @param binding the signature of the type to be added.
+	 * @param context an optional context that knows about types visible in the current scope or <code>null</code>
+	 * to use the default context only using the available imports.
+	 * @return returns a type to which the type binding can be assigned to. The returned type contains is unqualified
+	 * when an import could be added or was already known. It is fully qualified, if an import conflict prevented the import.
+	 */
+	public String addImport(ITypeBinding binding, ImportRewriteContext context) {
+		if (binding.isPrimitive() || binding.isTypeVariable()) {
+			return binding.getName();
+		}
+		
+		ITypeBinding normalizedBinding= normalizeTypeBinding(binding);
+		if (normalizedBinding == null) {
+			return "invalid"; //$NON-NLS-1$
+		}
+		if (normalizedBinding.isWildcardType()) {
+			StringBuffer res= new StringBuffer("?"); //$NON-NLS-1$
+			ITypeBinding bound= normalizedBinding.getBound();
+			if (bound != null && !bound.isWildcardType() && !bound.isCapture()) { // bug 95942
+				if (normalizedBinding.isUpperbound()) {
+					res.append(" extends "); //$NON-NLS-1$
+				} else {
+					res.append(" super "); //$NON-NLS-1$
+				}
+				res.append(addImport(bound, context));
+			}
+			return res.toString();
+		}
+		
+		if (normalizedBinding.isArray()) {
+			StringBuffer res= new StringBuffer(addImport(normalizedBinding.getElementType(), context));
+			for (int i= normalizedBinding.getDimensions(); i > 0; i--) {
+				res.append("[]"); //$NON-NLS-1$
+			}
+			return res.toString();
+		}
+	
+		String qualifiedName= getRawQualifiedName(normalizedBinding);
+		if (qualifiedName.length() > 0) {
+			String str= internalAddImport(qualifiedName, context);
+			
+			ITypeBinding[] typeArguments= normalizedBinding.getTypeArguments();
+			if (typeArguments.length > 0) {
+				StringBuffer res= new StringBuffer(str);
+				res.append('<');
+				for (int i= 0; i < typeArguments.length; i++) {
+					if (i > 0) {
+						res.append(','); 
+					}
+					ITypeBinding curr= typeArguments[i];
+					if (containsNestedCapture(curr, false)) { // see bug 103044
+						res.append('?');
+					} else {
+						res.append(addImport(curr, context));
+					}
+				}
+				res.append('>');
+				return res.toString();
+			}
+			return str;
+		}
+		return getRawName(normalizedBinding);
+	}
+

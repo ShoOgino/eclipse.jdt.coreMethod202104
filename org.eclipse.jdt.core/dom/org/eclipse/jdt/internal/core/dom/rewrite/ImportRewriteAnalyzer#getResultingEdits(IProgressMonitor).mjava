@@ -1,0 +1,102 @@
+	public MultiTextEdit getResultingEdits(IProgressMonitor monitor) throws JavaModelException {
+		if (monitor == null) {
+			monitor= new NullProgressMonitor();
+		}
+		try {	
+			int importsStart=  this.replaceRange.getOffset();
+			int importsLen= this.replaceRange.getLength();
+					
+			String lineDelim= this.compilationUnit.findRecommendedLineSeparator();
+			IBuffer buffer= this.compilationUnit.getBuffer();
+			
+			boolean useSpaceBetween= useSpaceBetweenGroups();
+						
+			int currPos= importsStart;
+			MultiTextEdit resEdit= new MultiTextEdit();
+			
+			if ((this.flags & F_NEEDS_LEADING_DELIM) != 0) {
+				// new import container
+				resEdit.addChild(new InsertEdit(currPos, lineDelim));
+			}
+			
+			PackageEntry lastPackage= null;
+			
+			Set onDemandConflicts= null;
+			if (this.findAmbiguousImports) {
+				onDemandConflicts= evaluateStarImportConflicts(monitor);
+			}
+			
+			ArrayList stringsToInsert= new ArrayList();
+			
+			int nPackageEntries= this.packageEntries.size();
+			for (int i= 0; i < nPackageEntries; i++) {
+				PackageEntry pack= (PackageEntry) this.packageEntries.get(i);
+				int nImports= pack.getNumberOfImports();
+	
+				if (this.filterImplicitImports && !pack.isStatic() && isImplicitImport(pack.getName(), this.compilationUnit)) {
+					pack.removeAllNew(onDemandConflicts);
+					nImports= pack.getNumberOfImports();
+				}
+				if (nImports == 0) {
+					continue;
+				}
+				
+				if (useSpaceBetween) {
+					// add a space between two different groups by looking at the two adjacent imports
+					if (lastPackage != null && !pack.isComment() && !pack.isSameGroup(lastPackage)) {
+						ImportDeclEntry last= lastPackage.getImportAt(lastPackage.getNumberOfImports() - 1);
+						ImportDeclEntry first= pack.getImportAt(0);
+						if (!lastPackage.isComment() && (last.isNew() || first.isNew())) {
+							stringsToInsert.add(lineDelim);
+						}
+					}
+				}
+				lastPackage= pack;
+				
+				boolean isStatic= pack.isStatic();
+				
+				boolean doStarImport= pack.hasStarImport(this.importOnDemandThreshold, onDemandConflicts);
+				if (doStarImport && (pack.find("*") == null)) { //$NON-NLS-1$
+					String starImportString= pack.getName() + ".*"; //$NON-NLS-1$
+					String str= getNewImportString(starImportString, isStatic, lineDelim);
+					stringsToInsert.add(str);
+				}
+				
+				for (int k= 0; k < nImports; k++) {
+					ImportDeclEntry currDecl= pack.getImportAt(k);
+					IRegion region= currDecl.getSourceRange();
+					
+					if (region == null) { // new entry
+						if (!doStarImport || currDecl.isOnDemand() || (onDemandConflicts != null && onDemandConflicts.contains(currDecl.getSimpleName()))) {
+							String str= getNewImportString(currDecl.getElementName(), isStatic, lineDelim);
+							stringsToInsert.add(str);
+						}
+					} else {
+						if (!doStarImport || currDecl.isOnDemand() || onDemandConflicts == null || onDemandConflicts.contains(currDecl.getSimpleName())) {
+							int offset= region.getOffset();
+							removeAndInsertNew(buffer, currPos, offset, stringsToInsert, resEdit);
+							stringsToInsert.clear();
+							currPos= offset + region.getLength();
+						}
+					}
+				}
+			}
+			
+			int end= importsStart + importsLen;
+			removeAndInsertNew(buffer, currPos, end, stringsToInsert, resEdit);
+			
+			if (importsLen == 0) {
+				if (!this.importsCreated.isEmpty() || !this.staticImportsCreated.isEmpty()) { // new import container
+					if ((this.flags & F_NEEDS_TRAILING_DELIM) != 0) {
+						resEdit.addChild(new InsertEdit(currPos, lineDelim));
+					}
+				} else {
+					return new MultiTextEdit(); // no changes
+				}
+			}
+			return resEdit;
+		} finally {
+			monitor.done();
+		}
+	}
+

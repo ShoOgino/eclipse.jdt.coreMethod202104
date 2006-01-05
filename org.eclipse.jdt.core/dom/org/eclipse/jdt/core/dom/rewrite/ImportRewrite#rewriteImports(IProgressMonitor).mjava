@@ -1,0 +1,65 @@
+	/**
+	 * Converts all modifications recorded by this rewriter into an object representing the corresponding text
+	 * edits to the source code of the rewrite's compilation unit. The compilation unit itself is not modified.
+	 * <p>
+	 * Calling this methods does not discard the modifications on record. Subsequence modifications are added
+	 * to the ones already on record. If this method is called again later, the resulting text edit object will accurately
+	 * reflect the net cumulative affect of all those changes.
+	 * </p>
+	 * @param monitor the progress monitor or <code>null</code>
+	 * @return text edit object describing the changes to the document corresponding to the changes
+	 * recorded by this rewriter
+	 * @throws CoreException the exception is thrown if the rewrite fails.
+	 */
+	public final TextEdit rewriteImports(IProgressMonitor monitor) throws CoreException {
+		if (monitor == null) {
+			monitor= new NullProgressMonitor();
+		}
+		
+		monitor.beginTask(Messages.bind(Messages.importRewrite_processDescription), 2);
+		try {
+			if (!hasRecordedChanges()) {
+				this.createdImports= new String[0];
+				this.createdStaticImports= new String[0];
+				return new MultiTextEdit();
+			}
+			
+			CompilationUnit usedAstRoot= this.astRoot;
+			if (usedAstRoot == null) {
+				ASTParser parser= ASTParser.newParser(AST.JLS3);
+				parser.setSource(this.compilationUnit);
+				parser.setFocalPosition(0); // reduced AST
+				parser.setResolveBindings(false);
+				usedAstRoot= (CompilationUnit) parser.createAST(new SubProgressMonitor(monitor, 1));
+			}
+			
+			IJavaProject project= this.compilationUnit.getJavaProject();
+			String[] order= getImportOrderPreference(project);
+			int threshold= getImportNumberThreshold(project);
+			
+			ImportRewriteAnalyzer computer= new ImportRewriteAnalyzer(this.compilationUnit, usedAstRoot, order, threshold, this.restoreExistingImports);
+			computer.setFilterImplicitImports(this.filterImplicitImports);
+			
+			if (this.addedImports != null) {
+				for (int i= 0; i < this.addedImports.size(); i++) {
+					String curr= (String) this.addedImports.get(i);
+					computer.addImport(curr.substring(1), STATIC_PREFIX == curr.charAt(0));
+				}
+			}
+			
+			if (this.removedImports != null) {
+				for (int i= 0; i < this.removedImports.size(); i++) {
+					String curr= (String) this.removedImports.get(i);
+					computer.removeImport(curr.substring(1), STATIC_PREFIX == curr.charAt(0));
+				}
+			}
+				
+			TextEdit result= computer.getResultingEdits(new SubProgressMonitor(monitor, 1));
+			this.createdImports= computer.getCreatedImports();
+			this.createdStaticImports= computer.getCreatedStaticImports();
+			return result;
+		} finally {
+			monitor.done();
+		}
+	}
+

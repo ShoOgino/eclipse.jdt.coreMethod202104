@@ -1,0 +1,60 @@
+	private Set evaluateStarImportConflicts(IProgressMonitor monitor) throws JavaModelException {
+		//long start= System.currentTimeMillis();
+		
+		final HashSet/*String*/ onDemandConflicts= new HashSet();
+		
+		IJavaSearchScope scope= SearchEngine.createJavaSearchScope(new IJavaElement[] { this.compilationUnit.getJavaProject() });
+
+		ArrayList/*<char[][]>*/  starImportPackages= new ArrayList();
+		ArrayList/*<char[][]>*/ simpleTypeNames= new ArrayList();
+		int nPackageEntries= this.packageEntries.size();
+		for (int i= 0; i < nPackageEntries; i++) {
+			PackageEntry pack= (PackageEntry) this.packageEntries.get(i);
+			if (!pack.isStatic() && pack.hasStarImport(this.importOnDemandThreshold, null)) {
+				starImportPackages.add(pack.getName().toCharArray());
+				for (int k= 0; k < pack.getNumberOfImports(); k++) {
+					ImportDeclEntry curr= pack.getImportAt(k);
+					if (!curr.isOnDemand() && !curr.isComment()) {
+						simpleTypeNames.add(curr.getSimpleName().toCharArray());
+					}
+				}
+			}
+		}
+		if (starImportPackages.isEmpty()) {
+			return null;
+		}
+		
+		starImportPackages.add(this.compilationUnit.getParent().getElementName().toCharArray());
+		starImportPackages.add(JAVA_LANG.toCharArray());
+		
+		char[][] allPackages= (char[][]) starImportPackages.toArray(new char[starImportPackages.size()][]);
+		char[][] allTypes= (char[][]) simpleTypeNames.toArray(new char[simpleTypeNames.size()][]);
+		
+		TypeNameRequestor requestor= new TypeNameRequestor() {
+			HashMap foundTypes= new HashMap();
+			
+			private String getTypeContainerName(char[] packageName, char[][] enclosingTypeNames) {
+				StringBuffer buf= new StringBuffer();
+				buf.append(packageName);
+				for (int i= 0; i < enclosingTypeNames.length; i++) {
+					if (buf.length() > 0)
+						buf.append('.');
+					buf.append(enclosingTypeNames[i]);
+				}
+				return buf.toString();
+			}
+			
+			public void acceptType(int modifiers, char[] packageName, char[] simpleTypeName, char[][] enclosingTypeNames, String path) {
+				String name= new String(simpleTypeName);
+				String containerName= getTypeContainerName(packageName, enclosingTypeNames);
+				
+				String oldContainer= (String) this.foundTypes.put(name, containerName);
+				if (oldContainer != null && !oldContainer.equals(containerName)) {
+					onDemandConflicts.add(name);
+				}
+			}
+		};
+		new SearchEngine().searchAllTypeNames(allPackages, allTypes, scope, requestor, IJavaSearchConstants.WAIT_UNTIL_READY_TO_SEARCH, monitor);
+		return onDemandConflicts;
+	}
+

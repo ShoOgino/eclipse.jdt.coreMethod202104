@@ -1,0 +1,73 @@
+	/**
+	 * Adds a new import to the rewriter's record and returns a {@link Type} that can be used
+	 * in the code. The type binding can be an array binding, type variable or wildcard.
+	 * If the binding is a generic type, the type parameters are ignored. For parameterized types, also the type
+	 * arguments are processed and imports added if necessary. Anonymous types inside type arguments are normalized to their base type, wildcard
+	 * of wildcards are ignored. 
+	 * 	<p>
+ 	 * No imports are added for types that are already known. If a import for a type is recorded to be removed, this record is discarded instead.
+	 * </p>
+	 * <p>
+	 * The content of the compilation unit itself is actually not modified
+	 * in any way by this method; rather, the rewriter just records that a new import has been added.
+	 * </p>
+	 * @param binding the signature of the type to be added.
+	 * @param ast the AST to create the returned type for.
+	 * @param context an optional context that knows about types visible in the current scope or <code>null</code>
+	 * to use the default context only using the available imports.
+	 * @return returns a type to which the type binding can be assigned to. The returned type contains is unqualified
+	 * when an import could be added or was already known. It is fully qualified, if an import conflict prevented the import.
+	 */
+	public Type addImport(ITypeBinding binding, AST ast, ImportRewriteContext context) {
+		if (binding.isPrimitive()) {
+			return ast.newPrimitiveType(PrimitiveType.toCode(binding.getName()));
+		}
+		
+		ITypeBinding normalizedBinding= normalizeTypeBinding(binding);
+		if (normalizedBinding == null) {
+			return ast.newSimpleType(ast.newSimpleName("invalid")); //$NON-NLS-1$
+		}
+		
+		if (normalizedBinding.isTypeVariable()) {
+			// no import
+			return ast.newSimpleType(ast.newSimpleName(binding.getName()));
+		}
+		if (normalizedBinding.isWildcardType()) {
+			WildcardType wcType= ast.newWildcardType();
+			ITypeBinding bound= normalizedBinding.getBound();
+			if (bound != null && !bound.isWildcardType() && !bound.isCapture()) { // bug 96942
+				Type boundType= addImport(bound, ast, context);
+				wcType.setBound(boundType, normalizedBinding.isUpperbound());
+			}
+			return wcType;
+		}
+		
+		if (normalizedBinding.isArray()) {
+			Type elementType= addImport(normalizedBinding.getElementType(), ast, context);
+			return ast.newArrayType(elementType, normalizedBinding.getDimensions());
+		}
+		
+		String qualifiedName= getRawQualifiedName(normalizedBinding);
+		if (qualifiedName.length() > 0) {
+			String res= internalAddImport(qualifiedName, context);
+			
+			ITypeBinding[] typeArguments= normalizedBinding.getTypeArguments();
+			if (typeArguments.length > 0) {
+				Type erasureType= ast.newSimpleType(ast.newName(res));
+				ParameterizedType paramType= ast.newParameterizedType(erasureType);
+				List arguments= paramType.typeArguments();
+				for (int i= 0; i < typeArguments.length; i++) {
+					ITypeBinding curr= typeArguments[i];
+					if (containsNestedCapture(curr, false)) { // see bug 103044
+						arguments.add(ast.newWildcardType());
+					} else {
+						arguments.add(addImport(curr, ast, context));
+					}
+				}
+				return paramType;
+			}
+			return ast.newSimpleType(ast.newName(res));
+		}
+		return ast.newSimpleType(ast.newName(getRawName(normalizedBinding)));
+	}
+
