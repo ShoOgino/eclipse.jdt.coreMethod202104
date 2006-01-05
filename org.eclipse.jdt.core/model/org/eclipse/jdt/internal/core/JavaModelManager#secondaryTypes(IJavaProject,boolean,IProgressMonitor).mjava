@@ -1,0 +1,68 @@
+	/**
+	 * Get all secondary types for a project and store result in per project info cache.
+	 * 
+	 * This cache is an Hashtable<String, HashMap<String, IType>>:
+	 * 	- key: package name
+	 * 	- value:
+	 * 		+ key: type name
+	 * 		+ value: java model handle for the secondary type
+	 * Hashtable was used to protect callers from possible concurrent access.
+	 * 
+	 * Note that this map may have a specific entry which key is {@link #INDEXED_SECONDARY_TYPES }
+	 * and value is a map containing all secondary types created during indexing.
+	 * When this key is in cache and indexing is finished, returned map is merged
+	 * with the value of this special key. If indexing is not finished and caller does
+	 * not wait for the end of indexing, returned map is the current secondary
+	 * types cache content which may be invalid...
+	 * 
+	 * @param project Project we want get secondary types from
+	 * @return HashMap Table of secondary type names->path for given project
+	 */
+	public Map secondaryTypes(IJavaProject project, boolean waitForIndexes, IProgressMonitor monitor) throws JavaModelException {
+		if (VERBOSE) {
+			StringBuffer buffer = new StringBuffer("JavaModelManager.secondaryTypes("); //$NON-NLS-1$
+			buffer.append(project.getElementName());
+			buffer.append(',');
+			buffer.append(waitForIndexes);
+			buffer.append(')');
+			Util.verbose(buffer.toString());
+		}
+
+		// Return cache if not empty and there's no new secondary types created during indexing
+		final PerProjectInfo projectInfo = getPerProjectInfoCheckExistence(project.getProject());
+		Map indexingSecondaryCache = projectInfo.secondaryTypes == null ? null : (Map) projectInfo.secondaryTypes.get(INDEXED_SECONDARY_TYPES);
+		if (projectInfo.secondaryTypes != null && indexingSecondaryCache == null) {
+			return projectInfo.secondaryTypes;
+		}
+
+		// Perform search request only if secondary types cache is not initialized yet (this will happen only once!)
+		if (projectInfo.secondaryTypes == null) {
+			return secondaryTypesSearching(project, waitForIndexes, monitor, projectInfo);
+		}
+
+		// New secondary types have been created while indexing secondary types cache
+		// => need to know whether the indexing is finished or not
+		boolean indexing = this.indexManager.awaitingJobsCount() > 0;
+		if (indexing) {
+			if (!waitForIndexes)  {
+				// Indexing is running but caller cannot wait => return current cache
+				return projectInfo.secondaryTypes;
+			}
+
+			// Wait for the end of indexing or a cancel
+			while (this.indexManager.awaitingJobsCount() > 0) {
+				if (monitor != null && monitor.isCanceled()) {
+					return projectInfo.secondaryTypes;
+				}
+				try {
+					Thread.sleep(10);
+				} catch (InterruptedException e) {
+					return projectInfo.secondaryTypes;
+				}
+			}
+		}
+
+		// Indexing is finished => merge caches and return result
+		return secondaryTypesMerging(projectInfo.secondaryTypes);
+	}
+

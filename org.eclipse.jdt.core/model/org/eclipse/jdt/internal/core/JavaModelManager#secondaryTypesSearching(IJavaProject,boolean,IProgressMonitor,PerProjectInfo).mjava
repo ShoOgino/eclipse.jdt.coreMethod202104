@@ -1,0 +1,75 @@
+	/*
+	 * Perform search request to get all secondary types of a given project.
+	 * If not waiting for indexes and indexing is running, will return types found in current built indexes...
+	 */
+	private Map secondaryTypesSearching(IJavaProject project, boolean waitForIndexes, IProgressMonitor monitor, final PerProjectInfo projectInfo) throws JavaModelException {
+		if (VERBOSE || BasicSearchEngine.VERBOSE) {
+			StringBuffer buffer = new StringBuffer("JavaModelManager.secondaryTypesSearch("); //$NON-NLS-1$
+			buffer.append(project.getElementName());
+			buffer.append(',');
+			buffer.append(waitForIndexes);
+			buffer.append(')');
+			Util.verbose(buffer.toString());
+		}
+
+		final Hashtable secondaryTypes = new Hashtable(3);
+		IRestrictedAccessTypeRequestor nameRequestor = new IRestrictedAccessTypeRequestor() {
+			public void acceptType(int modifiers, char[] packageName, char[] simpleTypeName, char[][] enclosingTypeNames, String path, AccessRestriction access) {
+				String key = packageName==null ? "" : new String(packageName); //$NON-NLS-1$
+				HashMap types = (HashMap) secondaryTypes.get(key);
+				if (types == null) types = new HashMap(3);
+				types.put(new String(simpleTypeName), path);
+				secondaryTypes.put(key, types);
+			}
+		};
+
+		// Build scope using prereq projects but only source folders
+		IPackageFragmentRoot[] allRoots = project.getAllPackageFragmentRoots();
+		int length = allRoots.length, size = 0;
+		IPackageFragmentRoot[] allSourceFolders = new IPackageFragmentRoot[length];
+		for (int i=0; i<length; i++) {
+			if (allRoots[i].getKind() == IPackageFragmentRoot.K_SOURCE) {
+				allSourceFolders[size++] = allRoots[i];
+			}
+		}
+		if (size < length) {
+			System.arraycopy(allSourceFolders, 0, allSourceFolders = new IPackageFragmentRoot[size], 0, size);
+		}
+
+		// Search all secondary types on scope
+		new BasicSearchEngine().searchAllSecondaryTypeNames(allSourceFolders, nameRequestor, waitForIndexes, monitor);
+
+		// Build types from paths
+		Iterator packages = secondaryTypes.keySet().iterator();
+		while (packages.hasNext()) {
+			String packName = (String) packages.next();
+			HashMap types = (HashMap) secondaryTypes.get(packName);
+			Iterator names = types.keySet().iterator();
+			while (names.hasNext()) {
+				String typeName = (String) names.next();
+				String path = (String) types.get(typeName);
+				if (org.eclipse.jdt.internal.core.util.Util.isJavaLikeFileName(path)) {
+					IFile file = ResourcesPlugin.getWorkspace().getRoot().getFile(new Path(path));
+					ICompilationUnit unit = JavaModelManager.createCompilationUnitFrom(file, null);
+					IType type = unit.getType(typeName);
+					types.put(typeName, type); // replace stored path with type itself
+				}
+			}
+		}
+
+		// Store result in per project info cache if still null or there's still an indexing cache (may have been set by another thread...)
+		if (projectInfo.secondaryTypes == null || projectInfo.secondaryTypes.get(INDEXED_SECONDARY_TYPES) != null) {
+			projectInfo.secondaryTypes = secondaryTypes;
+			if (VERBOSE || BasicSearchEngine.VERBOSE) {
+				System.out.print(Thread.currentThread() + "	-> secondary paths stored in cache: ");  //$NON-NLS-1$
+				System.out.println();
+				Iterator keys = secondaryTypes.keySet().iterator();
+				while (keys.hasNext()) {
+					String qualifiedName = (String) keys.next();
+					Util.verbose("		- "+qualifiedName+'-'+secondaryTypes.get(qualifiedName) ); //$NON-NLS-1$
+				}
+			}
+		}
+		return projectInfo.secondaryTypes;
+	}
+

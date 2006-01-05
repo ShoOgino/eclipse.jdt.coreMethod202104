@@ -1,0 +1,77 @@
+	/**
+	 * Add a secondary type in temporary indexing cache for a project got from given path.
+	 * 
+	 * Current secondary types cache is not modified as we want to wait that indexing
+	 * was finished before taking new secondary types into account.
+	 * 
+	 * Indexing cache is a specific entry in secondary types cache which key is
+	 * {@link #INDEXED_SECONDARY_TYPES } and value a map with same structure than
+	 * secondary types cache itself.
+	 * 
+	 * @see #secondaryTypes(IJavaProject, boolean, IProgressMonitor)
+	 */
+	public void secondaryTypeAdding(String path, char[] key) {
+		if (VERBOSE) {
+			StringBuffer buffer = new StringBuffer("JavaModelManager.addSecondaryType("); //$NON-NLS-1$
+			buffer.append(path);
+			buffer.append(',');
+			buffer.append('[');
+			buffer.append(new String(key));
+			buffer.append(']');
+			buffer.append(')');
+			Util.verbose(buffer.toString());
+		}
+		IWorkspaceRoot wRoot = ResourcesPlugin.getWorkspace().getRoot();
+		IResource resource = wRoot.findMember(path);
+		if (resource != null) {
+			if (org.eclipse.jdt.internal.core.util.Util.isJavaLikeFileName(path) && resource.getType() == IResource.FILE) {
+				IProject project = resource.getProject();
+				try {
+					PerProjectInfo projectInfo = getPerProjectInfoCheckExistence(project);
+					// Get or create map to cache secondary types while indexing (can be not synchronized as indexing insure a non-concurrent usage)
+					HashMap indexedSecondaryTypes = null;
+					if (projectInfo.secondaryTypes == null) {
+						projectInfo.secondaryTypes = new Hashtable(3);
+						indexedSecondaryTypes = new HashMap(3);
+						projectInfo.secondaryTypes.put(INDEXED_SECONDARY_TYPES, indexedSecondaryTypes);
+					} else {
+						indexedSecondaryTypes = (HashMap) projectInfo.secondaryTypes.get(INDEXED_SECONDARY_TYPES);
+						if (indexedSecondaryTypes == null) {
+							indexedSecondaryTypes = new HashMap(3);
+							projectInfo.secondaryTypes.put(INDEXED_SECONDARY_TYPES, indexedSecondaryTypes);
+						}
+					}
+					// Store the secondary type in temporary cache (these are just handles => no problem to create it now...)
+					HashMap allTypes = (HashMap) indexedSecondaryTypes.get(resource);
+					if (allTypes == null) {
+						allTypes = new HashMap(3);
+						indexedSecondaryTypes.put(resource, allTypes);
+					}
+					ICompilationUnit unit = JavaModelManager.createCompilationUnitFrom((IFile)resource, null);
+					if (unit != null) {
+						char[][] names = CharOperation.splitOn('/', key);
+						String typeName = new String(names[0]);
+						String packName = new String(names[1]);
+						HashMap packageTypes = (HashMap) allTypes.get(packName);
+						if (packageTypes == null) {
+							packageTypes = new HashMap(3);
+							allTypes.put(packName, packageTypes);
+						}
+						packageTypes.put(typeName, unit.getType(typeName));
+					}
+					if (VERBOSE) {
+						Util.verbose("	- indexing cache:"); //$NON-NLS-1$
+						Iterator keys = indexedSecondaryTypes.keySet().iterator();
+						while (keys.hasNext()) {
+							IFile file = (IFile) keys.next();
+							Util.verbose("		+ "+file.getFullPath()+':'+indexedSecondaryTypes.get(file) ); //$NON-NLS-1$
+						}
+					}
+				}
+				catch (JavaModelException jme) {
+					// do nothing
+				}
+			}
+		}
+	}
+
