@@ -90,35 +90,39 @@
 		DataInputStream in = null;
 		try {
 			in = new DataInputStream(new BufferedInputStream(new FileInputStream(file)));
-			if (VARIABLES_AND_CONTAINERS_FILE_VERSION == in.readInt()) {
-				
-				// variables
-				int size = in.readInt();
-				while (size-- > 0) {
-					String varName = in.readUTF();
-					String pathString = in.readUTF();
-					if (CP_ENTRY_IGNORE.equals(pathString))
-						continue;
-					IPath varPath = Path.fromPortableString(pathString);
-					this.variables.put(varName, varPath);
-					this.previousSessionVariables.put(varName, varPath);
-				}
-				
-				// containers
-				IJavaModel model = getJavaModel();
-				int projectSize = in.readInt();
-				while (projectSize-- > 0) {
-					String projectName = in.readUTF();
-					IJavaProject project = model.getJavaProject(projectName);
-					int containerSize = in.readInt();
-					while (containerSize-- > 0) {
-						IPath containerPath = Path.fromPortableString(in.readUTF());
-						int length = in.readInt();
-						byte[] containerString = new byte[length];
-						in.readFully(containerString);
-						recreatePersistedContainer(project, containerPath, new String(containerString), true/*add to container values*/);
+			switch (in.readInt()) {
+				case 2 :
+					new VariablesAndContainersLoadHelper(in).load();
+					break;
+				case 1 : // backward compatibility, load old format
+					// variables
+					int size = in.readInt();
+					while (size-- > 0) {
+						String varName = in.readUTF();
+						String pathString = in.readUTF();
+						if (CP_ENTRY_IGNORE.equals(pathString))
+							continue;
+						IPath varPath = Path.fromPortableString(pathString);
+						this.variables.put(varName, varPath);
+						this.previousSessionVariables.put(varName, varPath);
 					}
-				}
+					
+					// containers
+					IJavaModel model = getJavaModel();
+					int projectSize = in.readInt();
+					while (projectSize-- > 0) {
+						String projectName = in.readUTF();
+						IJavaProject project = model.getJavaProject(projectName);
+						int containerSize = in.readInt();
+						while (containerSize-- > 0) {
+							IPath containerPath = Path.fromPortableString(in.readUTF());
+							int length = in.readInt();
+							byte[] containerString = new byte[length];
+							in.readFully(containerString);
+							recreatePersistedContainer(project, containerPath, new String(containerString), true/*add to container values*/);
+						}
+					}
+					break;
 			}
 		} catch (IOException e) {
 			if (file.exists())
