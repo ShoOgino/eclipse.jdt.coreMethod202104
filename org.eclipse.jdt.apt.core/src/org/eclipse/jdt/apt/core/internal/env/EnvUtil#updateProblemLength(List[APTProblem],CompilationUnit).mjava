@@ -1,0 +1,64 @@
+	/**
+     * Handling the following 2 cases
+     * 1) For IProblems that does not have a starting and ending offset, 
+     * place the problem at the class name. 
+     * 
+     * 2) For IProblems that does not have an ending offset, place the ending
+     * offset at the end of the tightest ast node. 
+     * We will only walk the ast once to determine the ending 
+     * offsets of all the problems that do not have the information set. 
+     */
+    static void updateProblemLength(List<APTProblem> problems, CompilationUnit astUnit)
+    {	
+    	// for those problems that doesn't have an ending offset, figure it out by
+    	// traversing the ast.
+    	// we do it once just before we post the marker so we only have to walk the ast 
+    	// once.
+    	int count = 0;
+    	for(IProblem problem : problems ){
+    		int[] classNameRange = null;
+			if( problem.getSourceStart() < 0 ){
+				if( classNameRange == null )
+					classNameRange = getClassNameRange(astUnit);
+				problem.setSourceStart(classNameRange[0]);
+				problem.setSourceEnd(classNameRange[1]);
+				problem.setSourceLineNumber(classNameRange[2]);
+			}
+			if( problem.getSourceEnd() < 0 ){
+				count ++;
+			}
+    	}
+    		
+		if( count > 0 ){
+			if( astUnit != null ){
+				final int[] startingOffsets = new int[count];
+		    	int index = 0;
+    			for( IProblem problem : problems ){
+    				if( problem.getSourceEnd() < 0 )
+    					startingOffsets[index++] = problem.getSourceStart();
+    			}
+    			
+    			final EndingOffsetFinder lfinder = new EndingOffsetFinder(startingOffsets);
+    			
+    			astUnit.accept( lfinder );
+    	    	
+    	    	for(IProblem problem : problems ){
+    				if( problem.getSourceEnd() < 0 ){
+    					int startingOffset = problem.getSourceStart();
+    					int endingOffset = lfinder.getEndingOffset(startingOffset);
+    	    			if( endingOffset == 0 )
+    	    				endingOffset = startingOffset;
+    	    			problem.setSourceEnd(endingOffset-1);
+    				}
+    			}
+			}
+			else{
+    			for(IProblem problem : problems){
+    				// set the -1 source end to be the same as the source start.
+    				if( problem.getSourceEnd() < problem.getSourceStart() )
+    					problem.setSourceEnd(problem.getSourceStart());
+    			}
+    		}
+		}	
+    }
+
