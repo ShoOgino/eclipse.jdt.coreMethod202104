@@ -14,7 +14,7 @@ public ClassFileReader(byte[] classFileBytes, char[] fileName, boolean fullyInit
 	// in 3 passes.  All non-primitive constant pool members that usually refer to other members
 	// by index are tweaked to have their value in inst vars, this minor cost at read-time makes
 	// all subsequent uses of the constant pool element faster.
-	super(classFileBytes, 0);
+	super(classFileBytes, null, 0);
 	this.classFileName = fileName;
 	int readOffset = 10;
 	try {
@@ -101,28 +101,29 @@ public ClassFileReader(byte[] classFileBytes, char[] fileName, boolean fullyInit
 				readOffset += 2;
 			}
 		}
-		// Read the this.fields, use exception handlers to catch bad format
+		// Read the fields, use exception handlers to catch bad format
 		this.fieldsCount = u2At(readOffset);
 		readOffset += 2;
 		if (this.fieldsCount != 0) {
 			FieldInfo field;
 			this.fields = new FieldInfo[this.fieldsCount];
 			for (int i = 0; i < this.fieldsCount; i++) {
-				field = new FieldInfo(reference, this.constantPoolOffsets, readOffset);
+				field = FieldInfo.createField(reference, this.constantPoolOffsets, readOffset);
 				this.fields[i] = field;
 				readOffset += field.sizeInBytes();
 			}
 		}
-		// Read the this.methods
+		// Read the methods
 		this.methodsCount = u2At(readOffset);
 		readOffset += 2;
 		if (this.methodsCount != 0) {
 			this.methods = new MethodInfo[this.methodsCount];
-			MethodInfo method;
+			boolean isAnnotationType = (this.accessFlags & ClassFileConstants.AccAnnotation) != 0;
 			for (int i = 0; i < this.methodsCount; i++) {
-				method = new MethodInfo(reference, this.constantPoolOffsets, readOffset);
-				this.methods[i] = method;
-				readOffset += method.sizeInBytes();
+				this.methods[i] = isAnnotationType
+					? AnnotationMethodInfo.createAnnotationMethod(reference, this.constantPoolOffsets, readOffset)
+					: MethodInfo.createMethod(reference, this.constantPoolOffsets, readOffset);
+				readOffset += this.methods[i].sizeInBytes();
 			}
 		}
 
@@ -185,9 +186,10 @@ public ClassFileReader(byte[] classFileBytes, char[] fileName, boolean fullyInit
 					}
 					break;
 				case 'R' :
-					if (CharOperation.equals(attributeName, AttributeNamesConstants.RuntimeVisibleAnnotationsName)
-							|| CharOperation.equals(attributeName, AttributeNamesConstants.RuntimeInvisibleAnnotationsName)) {
-						decodeStandardAnnotations(readOffset);
+					if (CharOperation.equals(attributeName, AttributeNamesConstants.RuntimeVisibleAnnotationsName)) {
+						decodeAnnotations(readOffset, true);
+					} else if (CharOperation.equals(attributeName, AttributeNamesConstants.RuntimeInvisibleAnnotationsName)) {
+						decodeAnnotations(readOffset, false);
 					}
 					break;
 			}

@@ -1,16 +1,55 @@
 protected CompilationParticipantResult[] notifyParticipants(SourceFile[] unitsAboutToCompile) {
+	CompilationParticipantResult[] results = new CompilationParticipantResult[unitsAboutToCompile.length];
+	for (int i = unitsAboutToCompile.length; --i >= 0;)
+		results[i] = new CompilationParticipantResult(unitsAboutToCompile[i]);
+
 	// TODO (kent) do we expect to have more than one participant?
 	// and if so should we pass the generated files from the each processor to the others to process?
-	CompilationParticipantResult[] results = null;
-	for (int i = 0, l = this.javaBuilder.participants == null ? 0 : this.javaBuilder.participants.length; i < l; i++) {
-		if (!this.javaBuilder.participants[i].isAnnotationProcessor()) {
-			if (results == null) {
-				results = new CompilationParticipantResult[unitsAboutToCompile.length];
-				for (int j = unitsAboutToCompile.length; --j >= 0;)
-					results[j] = new CompilationParticipantResult(unitsAboutToCompile[j]);
+	// and what happens if some participants do not expect to be called with only a few files, after seeing 'all' the files?
+	for (int i = 0, l = this.javaBuilder.participants.length; i < l; i++)
+		this.javaBuilder.participants[i].buildStarting(results, this instanceof BatchImageBuilder);
+
+	SimpleSet uniqueFiles = null;
+	CompilationParticipantResult[] toAdd = null;
+	int added = 0;
+	for (int i = results.length; --i >= 0;) {
+		CompilationParticipantResult result = results[i];
+		if (result == null) continue;
+
+		IFile[] deletedGeneratedFiles = result.deletedFiles;
+		if (deletedGeneratedFiles != null)
+			deleteGeneratedFiles(deletedGeneratedFiles);
+
+		IFile[] addedGeneratedFiles = result.addedFiles;
+		if (addedGeneratedFiles != null) {
+			for (int j = addedGeneratedFiles.length; --j >= 0;) {
+				SourceFile sourceFile = findSourceFile(addedGeneratedFiles[j]);
+				if (sourceFile == null) continue;
+				if (uniqueFiles == null) {
+					uniqueFiles = new SimpleSet(unitsAboutToCompile.length + 3);
+					for (int f = unitsAboutToCompile.length; --f >= 0;)
+						uniqueFiles.add(unitsAboutToCompile[f]);
+				}
+				if (!uniqueFiles.includes(sourceFile))
+					uniqueFiles.add(sourceFile);
+					CompilationParticipantResult newResult = new CompilationParticipantResult(sourceFile);
+					// is there enough room to add all the addedGeneratedFiles.length ?
+					if (toAdd == null) {
+						toAdd = new CompilationParticipantResult[addedGeneratedFiles.length];
+					} else {
+						int length = toAdd.length;
+						if (added == length)
+							System.arraycopy(toAdd, 0, toAdd = new CompilationParticipantResult[length + addedGeneratedFiles.length], 0, length);
+					}
+					toAdd[added++] = newResult;
 			}
-			this.javaBuilder.participants[i].buildStarting(results);
 		}
+	}
+
+	if (added >0 ) {
+		int length = results.length;
+		System.arraycopy(results, 0, results = new CompilationParticipantResult[length + added], 0 , length);
+		System.arraycopy(toAdd, 0, results, length, added);
 	}
 	return results;
 }
