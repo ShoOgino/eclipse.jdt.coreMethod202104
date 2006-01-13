@@ -3,13 +3,19 @@
 */
 public void place() { // Currently lacking wide support.
 	if (CodeStream.DEBUG) System.out.println("\t\t\t\t<place at: "+codeStream.position+" - "+ this); //$NON-NLS-1$ //$NON-NLS-2$
+//	if ((this.tagBits & USED) == 0 && this.forwardReferenceCount == 0) {
+//		return;
+//	}
 
 	if (position == POS_NOT_SET) {
-		position = codeStream.position;
+		if ((this.tagBits & USED) != 0 || this.forwardReferenceCount != 0) {
+			this.position = codeStream.getPosition();
+		} else {
+			this.position = codeStream.position;
+		}
 		codeStream.addLabel(this);
 		int oldPosition = position;
 		boolean isOptimizedBranch = false;
-		// TURNED OFF since fail on 1F4IRD9
 		if (forwardReferenceCount != 0) {
 			isOptimizedBranch = (forwardReferences[forwardReferenceCount - 1] + 2 == position) && (codeStream.bCodeStream[codeStream.classFileOffset - 3] == Opcodes.OPC_goto);
 			if (isOptimizedBranch) {
@@ -51,54 +57,13 @@ public void place() { // Currently lacking wide support.
 			}
 		}
 		for (int i = 0; i < forwardReferenceCount; i++) {
-			int offset = position - forwardReferences[i] + 1;
-			if (Math.abs(offset) > 0x7FFF && !this.codeStream.wideMode) {
-				throw new AbortMethod(CodeStream.RESTART_IN_WIDE_MODE, null);
-			}
-			if (this.codeStream.wideMode) {
-				if ((this.tagBits & WIDE) != 0) {
-					codeStream.writeSignedWord(forwardReferences[i], offset);
-				} else {
-					codeStream.writeSignedShort(forwardReferences[i], offset);
-				}
-			} else {
-				codeStream.writeSignedShort(forwardReferences[i], offset);
-			}
+			codeStream.writePosition(this, forwardReferences[i]);
 		}
 		// For all labels placed at that position we check if we need to rewrite the jump
 		// offset. It is the case each time a label had a forward reference to the current position.
 		// Like we change the current position, we have to change the jump offset. See 1F4IRD9 for more details.
 		if (isOptimizedBranch) {
-			for (int i = 0; i < codeStream.countLabels; i++) {
-				Label label = codeStream.labels[i];
-				if (oldPosition == label.position) {
-					label.position = position;
-					if (label instanceof CaseLabel) {
-						int offset = position - ((CaseLabel) label).instructionPosition;
-						for (int j = 0; j < label.forwardReferenceCount; j++) {
-							int forwardPosition = label.forwardReferences[j];
-							codeStream.writeSignedWord(forwardPosition, offset);
-						}
-					} else {
-						for (int j = 0; j < label.forwardReferenceCount; j++) {
-							int forwardPosition = label.forwardReferences[j];
-							int offset = position - forwardPosition + 1;
-							if (Math.abs(offset) > 0x7FFF && !this.codeStream.wideMode) {
-								throw new AbortMethod(CodeStream.RESTART_IN_WIDE_MODE, null);
-							}
-							if (this.codeStream.wideMode) {
-								if ((this.tagBits & WIDE) != 0) {
-									codeStream.writeSignedWord(forwardPosition, offset);
-								} else {
-									codeStream.writeSignedShort(forwardPosition, offset);
-								}
-							} else {
-								codeStream.writeSignedShort(forwardPosition, offset);
-							}
-						}
-					}
-				}
-			}
+			this.codeStream.optimizeBranch(oldPosition, this);
 		}
 	}
 }
