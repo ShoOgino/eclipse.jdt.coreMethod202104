@@ -1,0 +1,89 @@
+/*
+ * Missing access restriction violation error on generic type.
+ * https://bugs.eclipse.org/bugs/show_bug.cgi?id=122995
+ */
+public void test006() throws CoreException {
+	ICompilationUnit x = null, y =  null;
+	try {
+		WorkingCopyOwner owner = new WorkingCopyOwner(){};
+		IJavaProject p1 = createJavaProject(
+			"P1", 
+			new String[] {"src"}, 
+			new String[] {"JCL_LIB"}, 
+			"bin");
+		p1.setOption("org.eclipse.jdt.core.compiler.compliance", "1.5");
+		p1.setOption("org.eclipse.jdt.core.compiler.source", "1.5");
+		p1.setOption("org.eclipse.jdt.core.compiler.targetPlatform", "1.5");
+		this.problemRequestor = new ProblemRequestor();
+		x = getWorkingCopy(
+			"/P1/src/p/X.java",
+			"package p;\n" +
+			"public class X<T> {\n" +
+			"	T m;\n" +
+			"}",
+			owner,
+			this.problemRequestor);	
+		assertProblems(
+			"Unexpected problems", 
+			"----------\n" + 
+			"----------\n"
+		);
+		IJavaProject p2 = createJavaProject(
+				"P2", 
+				new String[] {"src"}, 
+				new String[] {"JCL_LIB"}, 
+				"bin");
+		p2.setOption("org.eclipse.jdt.core.compiler.compliance", "1.5");
+		p2.setOption("org.eclipse.jdt.core.compiler.source", "1.5");
+		p2.setOption("org.eclipse.jdt.core.compiler.targetPlatform", "1.5");
+		IClasspathEntry[] classpath = p2.getRawClasspath();
+		int length = classpath.length;
+		System.arraycopy(classpath, 0, classpath = new IClasspathEntry[length+1], 0, length);
+		classpath[length] = createSourceEntry("P2", "/P1", "-p/X");
+		p2.setRawClasspath(classpath, null);
+		String src =
+			"package p;\n" +
+			"public class Y {\n" +
+			"	X x1;\n" +
+			"	X<String> x2 = new X<String>();\n" +
+			"}";
+		this.problemRequestor = new ProblemRequestor(src);
+		y = getWorkingCopy(			
+			"/P2/src/p/Y.java", 
+			src,
+			owner,
+			this.problemRequestor);
+		assertProblems(
+			"Unexpected problems value", 
+			"----------\n" + 
+			"1. ERROR in /P2/src/p/Y.java (at line 3)\n" + 
+			"	X x1;\n" + 
+			"	^\n" + 
+			"Access restriction: The type X<T> is not accessible due to restriction on required project P1\n" + 
+			"----------\n" + 
+			"2. ERROR in /P2/src/p/Y.java (at line 4)\n" + 
+			"	X<String> x2 = new X<String>();\n" + 
+			"	^\n" + 
+			"Access restriction: The type X<String> is not accessible due to restriction on required project P1\n" + 
+			"----------\n" + 
+			"3. ERROR in /P2/src/p/Y.java (at line 4)\n" + 
+			"	X<String> x2 = new X<String>();\n" + 
+			"	               ^^^^^^^^^^^^^^^\n" + 
+			"Access restriction: The constructor X<String>() is not accessible due to restriction on required project P1\n" + 
+			"----------\n" + 
+			"4. ERROR in /P2/src/p/Y.java (at line 4)\n" + 
+			"	X<String> x2 = new X<String>();\n" + 
+			"	                   ^\n" + 
+			"Access restriction: The type X<String> is not accessible due to restriction on required project P1\n" + 
+			"----------\n");
+	} finally {
+		if (x != null) {
+			x.discardWorkingCopy();
+		}
+		if (y != null) {
+			y.discardWorkingCopy();
+		}
+		deleteProjects(new String[] {"P1", "P2"});
+	}
+}
+
