@@ -29,9 +29,19 @@
 		}
 		int errorEnd = lexStream.end(rightToken);
 		
+		int addedToken = -1;
+		if(recoveryScanner != null) {
+			if (nameIndex >= 0) {
+				addedToken = Parser.reverse_index[nameIndex];
+			}
+		}
+		
 		switch(msgCode) {
 			case MISPLACED_CODE:
-				problemReporter().parseErrorMisplacedConstruct(
+				if(recoveryScanner != null) {
+					recoveryScanner.removeTokens(errorStart, errorEnd);
+				}
+				if(this.reportProblem) problemReporter().parseErrorMisplacedConstruct(
 					errorStart, 
 					errorEnd); 
 				break;
@@ -40,42 +50,109 @@
 				errorStart = lexStream.start(rightToken);
 			
 	            StringBuffer buf = new StringBuffer();
+	            
+	            int[] addedTokens = null;
+	            int addedTokenCount = 0;
+	            if(this.recoveryScanner != null) {
+	            	addedTokens = new int[Parser.scope_rhs.length - Parser.scope_suffix[- nameIndex]];
+	            }
+	            
 	            for (int i = Parser.scope_suffix[- nameIndex]; Parser.scope_rhs[i] != 0; i++) {
+	                
 	                buf.append(Parser.readableName[Parser.scope_rhs[i]]);
 	                if (Parser.scope_rhs[i+1] != 0)
 	                     buf.append(' ');
+	                
+	                if(addedTokens != null) {
+	                	int tmpAddedToken = Parser.reverse_index[Parser.scope_rhs[i]];
+		                if (tmpAddedToken > -1) {
+		                	int length = addedTokens.length;
+		                	if(addedTokenCount == length) {
+		                		System.arraycopy(addedTokens, 0, addedTokens = new int[length * 2], 0, length);
+		                	}
+		                	addedTokens[addedTokenCount++] = tmpAddedToken;
+		                } else {
+		                	int[] template = getNTermTemplate(-tmpAddedToken);
+		                	if(template != null) {
+			                	for (int j = 0; j < template.length; j++) {
+									int length = addedTokens.length;
+		                			if(addedTokenCount == length) {
+				                		System.arraycopy(addedTokens, 0, addedTokens = new int[length * 2], 0, length);
+				                	}
+		                			addedTokens[addedTokenCount++] = template[j];
+								}
+		                	} else {
+			                	addedTokenCount = 0;
+			                	addedTokens = null;
+		                	}
+		                }
+	                }
+	            }
+	            if(addedTokenCount > 0) {
+	            	System.arraycopy(addedTokens, 0, addedTokens = new int[addedTokenCount], 0, addedTokenCount);
+	            	int completedToken = -1;
+	            	if(scopeNameIndex != 0) {
+	            		completedToken = -Parser.reverse_index[scopeNameIndex];
+	            	}
+	            	this.recoveryScanner.insertTokens(addedTokens, completedToken, errorEnd);
 	            }
 	            if (scopeNameIndex != 0) {
-	                problemReporter().parseErrorInsertToComplete(
+	                if(this.reportProblem) problemReporter().parseErrorInsertToComplete(
 						errorStart, 
 						errorEnd,
 						buf.toString(),
 						Parser.readableName[scopeNameIndex]);
 	            } else {
-	            	problemReporter().parseErrorInsertToCompletePhrase(
+	            	if(this.reportProblem) problemReporter().parseErrorInsertToCompletePhrase(
 						errorStart, 
 						errorEnd,
 						buf.toString()); 
 	            }
 	            break;
 			case MERGE_CODE:
-				problemReporter().parseErrorMergeTokens(
+				if(recoveryScanner != null) {
+					if(addedToken > -1) {
+						recoveryScanner.replaceTokens(addedToken, errorStart, errorEnd);
+					} else {
+						int[] template = getNTermTemplate(-addedToken);
+						if(template != null) {
+							recoveryScanner.replaceTokens(template, errorStart, errorEnd);
+						}
+					}
+				}
+				if(this.reportProblem) problemReporter().parseErrorMergeTokens(
 					errorStart, 
 					errorEnd,
 					name);
 				break;
 			case DELETION_CODE:
-				problemReporter().parseErrorDeleteTokens(
+				if(recoveryScanner != null) {
+					recoveryScanner.removeTokens(errorStart, errorEnd);
+				}
+				if(this.reportProblem) problemReporter().parseErrorDeleteTokens(
 					errorStart, 
 					errorEnd);
 				break;
 			default:
 				if (name.length() == 0) {
-					problemReporter().parseErrorNoSuggestionForTokens(
+					if(recoveryScanner != null) {
+						recoveryScanner.removeTokens(errorStart, errorEnd);
+					}
+					if(this.reportProblem) problemReporter().parseErrorNoSuggestionForTokens(
 						errorStart, 
 						errorEnd);
 				} else {
-					problemReporter().parseErrorReplaceTokens(
+					if(recoveryScanner != null) {
+						if(addedToken > -1) {
+							recoveryScanner.replaceTokens(addedToken, errorStart, errorEnd);
+						} else {
+							int[] template = getNTermTemplate(-addedToken);
+							if(template != null) {
+								recoveryScanner.replaceTokens(template, errorStart, errorEnd);
+							}
+						}
+					}
+					if(this.reportProblem) problemReporter().parseErrorReplaceTokens(
 						errorStart, 
 						errorEnd,
 						name);

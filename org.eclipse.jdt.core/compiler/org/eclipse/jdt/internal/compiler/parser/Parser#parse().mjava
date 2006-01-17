@@ -7,6 +7,7 @@ called in order to remember (when needed) the consumed token */
 protected void parse() {
 	if (DEBUG) System.out.println("-- ENTER INSIDE PARSE METHOD --");  //$NON-NLS-1$
 	boolean isDietParse = this.diet;
+	boolean jumpOverTypeAfterReduce = false;
 	int oldFirstToken = getFirstToken();
 	this.hasError = false;
 	
@@ -55,7 +56,10 @@ protected void parse() {
 				}
 				this.lastCheckPoint = this.scanner.currentPosition;
 				this.restartRecovery = true;
-			}					
+			}				
+			if(this.statementRecoveryActivated) {
+				jumpOverTypeAfterReduce = true;
+			}
 			act -= ERROR_ACTION;
 			
 		} else {
@@ -72,6 +76,9 @@ protected void parse() {
 					this.lastCheckPoint = this.scanner.currentPosition;
 					this.restartRecovery = true;
 				}					
+				if(this.statementRecoveryActivated) {
+					this.jumpOverType();
+				}
 				continue ProcessTerminals;
 			}
 			break ProcessTerminals;
@@ -82,6 +89,12 @@ protected void parse() {
 			consumeRule(act);
 			this.stateStackTop -= (rhs[act] - 1);
 			act = ntAction(this.stack[this.stateStackTop], lhs[act]);
+			if(this.statementRecoveryActivated && act > NUM_RULES) {
+				if(jumpOverTypeAfterReduce) {
+					this.jumpOverType();
+					jumpOverTypeAfterReduce = false;
+				}
+			}
 		} while (act <= NUM_RULES);
 	}
 	endParse(act);
@@ -90,10 +103,41 @@ protected void parse() {
 	if (tags != null) {
 		this.compilationUnit.nlsTags = tags;
 	}
+	
 	this.scanner.checkNonExternalizedStringLiterals = false;
-	if (this.reportSyntaxErrorIsRequired && this.hasError) {
-		reportSyntaxErrors(isDietParse, oldFirstToken);
-	}	
+	if (this.reportSyntaxErrorIsRequired && this.hasError && !this.statementRecoveryActivated) {
+		if(!this.options.performStatementsRecovery) {
+			reportSyntaxErrors(isDietParse, oldFirstToken);
+		} else {
+			RecoveryScannerData data = this.referenceContext.compilationResult().recoveryScannerData;
+			
+			if(this.recoveryScanner == null) {
+				this.recoveryScanner = new RecoveryScanner(this.scanner, data);
+			} else {
+				this.recoveryScanner.setData(data);
+			}
+			
+			this.recoveryScanner.setSource(scanner.source);
+			this.recoveryScanner.lineEnds = this.scanner.lineEnds;
+			this.recoveryScanner.linePtr = this.scanner.linePtr;
+			
+			reportSyntaxErrors(isDietParse, oldFirstToken);
+			
+			if(data == null) {
+				this.referenceContext.compilationResult().recoveryScannerData =
+					this.recoveryScanner.getData();
+			}
+			
+			if (this.methodRecoveryActivated) {
+				this.methodRecoveryActivated = false;
+				this.recoverStatements();
+				this.methodRecoveryActivated = true;
+
+				this.lastAct = ERROR_ACTION;
+			}
+		}
+	}
+	
 	if (DEBUG) System.out.println("-- EXIT FROM PARSE METHOD --");  //$NON-NLS-1$
 }
 
