@@ -57,7 +57,7 @@
 		}
 		
 		if( ! annotationDecls.isEmpty() )
-			; // TODO: (theodora) log unclaimed annotations.
+			; // TODO: (theodora) log unclaimed annotations? 
 		
 		// Dispatch to the batch process factories first.
 		// Batch processors only get executed on a full/clean build
@@ -86,8 +86,7 @@
 				}
 			}	
 			// We have to dispatch to factories even though we may not have discovered any annotations.
-			// This is a documented APT behavior that we have to observe. 
-			// TODO: where do we put the results in the case?
+			// This is a documented APT behavior that we have to observe.
 			for( AnnotationProcessorFactory prevRoundFactory : _dispatchedBatchFactories ){
 				if(_currentDispatchBatchFactories.contains(prevRoundFactory))
 					continue;
@@ -101,14 +100,29 @@
 				}
 			}
 			
-			// Currently, we are putting everything in the first file with annotations.
-			// TODO: is this the correct thing to do? 
-			// what about the case where there are no files with annotations? 
-			// where to put the result? 
-			if( cpResults.length >  0 ){
+			// Currently, we are putting everything in the first file annotations.
+			// TODO: Is this correct?
+			// Why is it ok (today):
+			// 1) Problems are reported as IMarkers and not IProblem thru the 
+			// ICompilationParticipantResult API. 
+			// 2) jdt is currently not doing anything about the parent->generated file relation
+			//    so it doesn't matter which ICompilationParticipantResult we attach the 
+			//    creation/modification/deletion of generated files. -theodora
+			ICompilationParticipantResult firstResult = null; 
+			if( cpResults.length > 0 )
+				firstResult = cpResults[0];
+			else{
+				final ICompilationParticipantResult[] others = processorEnv.getFilesWithoutAnnotation();
+				if(others != null && others.length > 0 )
+					firstResult = others[0];
+			}
+			
+			// If there are no files to be built, apt will not be involved.
+			assert firstResult != null : "don't know where to report results"; //$NON-NLS-1$
+			if(firstResult != null ){
 				final GeneratedFileManager gfm = _aptProject.getGeneratedFileManager();
 				reportResult(
-						cpResults[0],  // just put it all in 
+						firstResult,  // just put it all in 
 						lastGeneratedFiles.get(null), 
 						processorEnv.getAllGeneratedFiles(),
 						processorEnv.getModifiedGeneratedFiles(), 
@@ -116,8 +130,8 @@
 						processorEnv.getTypeDependencies(),  // this is empty in batch mode.
 						gfm, 
 						processorEnv);
-				processorEnv.completedBatchProcessing();
 			}
+			processorEnv.completedBatchProcessing();
 		}
 		
 		// Now, do the file based dispatch

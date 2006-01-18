@@ -1,0 +1,88 @@
+	public void processAnnotations(ICompilationParticipantResult[] allfiles) {	
+		// This should not happen. There should always be file that that needs 
+		// building when 
+		final int total = allfiles == null ? 0 : allfiles.length;
+		if( total == 0 )
+			return;
+
+		final IProject project = allfiles[0].getFile().getProject();
+		final IJavaProject javaProject = JavaCore.create(project);
+		// Don't dispatch on pre-1.5 project. They cannot legally have annotations
+		String javaVersion = javaProject.getOption("org.eclipse.jdt.core.compiler.source", true); //$NON-NLS-1$		
+		// Check for 1.3 or 1.4, as we don't want this to break in the future when 1.6
+		// is a possibility
+		if ("1.3".equals(javaVersion) || "1.4".equals(javaVersion)) { //$NON-NLS-1$ //$NON-NLS-2$
+			return;
+		}
+		
+		if ( _isBatch && _buildRound == 0 ) {
+			AnnotationProcessorFactoryLoader.getLoader().resetBatchProcessors(javaProject);
+			_previousRoundsBatchFactories.clear();
+		}
+		
+		try {
+		
+			// split up the list of files with annotations from those that don't
+			// also exclude files that has already been processed.
+			int annoFileCount = 0;
+			int noAnnoFileCount = 0;
+			for( int i=0; i<total; i++ ){
+				if( _buildRound > 0 && _processedFiles.contains( allfiles[i].getFile() )){
+					continue;
+				}
+				if( allfiles[i].hasAnnotations() )
+					annoFileCount ++;
+				else
+					noAnnoFileCount ++;
+			}
+			// apt has already processed all files
+			// files that are reported at this point is triggered by
+			// dependencies introduced by type creation. 
+			if( annoFileCount == 0 && noAnnoFileCount == 0 )
+				return;
+			
+			ICompilationParticipantResult[] withAnnotation = null;
+			ICompilationParticipantResult[] withoutAnnotation = null;
+			
+			if( annoFileCount != 0 )
+				withAnnotation = new ICompilationParticipantResult[annoFileCount];
+			if(noAnnoFileCount != 0 )
+				withoutAnnotation = new ICompilationParticipantResult[noAnnoFileCount];
+			int wIndex = 0; // index for 'withAnnotation' array
+			int woIndex = 0; // index of 'withoutAnnotation' array
+			for( int i=0; i<total; i++ ){		
+				if( _processedFiles.contains( allfiles[i].getFile() ) )
+					continue;
+				if( allfiles[i].hasAnnotations() )
+					withAnnotation[wIndex ++] = allfiles[i];
+				else
+					withoutAnnotation[woIndex ++] = allfiles[i];
+			}
+			
+			for( ICompilationParticipantResult file : allfiles )
+				_processedFiles.add(file.getFile());
+		
+			Map<AnnotationProcessorFactory, FactoryPath.Attributes> factories =
+				AnnotationProcessorFactoryLoader.getLoader().getFactoriesAndAttributesForProject(javaProject);
+			
+			AptProject aptProject = AptPlugin.getAptProject(javaProject);			
+			Set<AnnotationProcessorFactory> dispatchedBatchFactories = 
+				APTDispatchRunnable.runAPTDuringBuild(
+						withAnnotation, 
+						withoutAnnotation,
+						aptProject, 
+						factories, 
+						_previousRoundsBatchFactories, 
+						_isBatch);
+			_previousRoundsBatchFactories.addAll(dispatchedBatchFactories);
+		}
+		finally {
+			if (_isBatch) {
+				// In order to keep from locking jars, we explicitly close any batch-based
+				// classloaders we opened
+				AnnotationProcessorFactoryLoader.getLoader().closeBatchClassLoader();
+			}
+			_buildRound ++;
+		}
+	}
+
