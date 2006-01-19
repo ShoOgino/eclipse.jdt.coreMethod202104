@@ -1,5 +1,9 @@
 	/**
-	 * Creates an annotation jar containing annotations and processors
+	 * Looks for the apt.jar that is defined in the build.properties 
+	 * and available when the plugin is built deployed. 
+	 * (currently when the plugin is built using releng the /bin directory classes are not available)
+	 * 
+	 * else it creates an annotation jar containing annotations and processors
 	 * from the "external.annotations" package, and adds it to the project.
 	 * Classes will be found under [project]/binext, and manifest will be
 	 * drawn from [project]/srcext/META-INF.  
@@ -13,18 +17,42 @@
 			IJavaProject project  )
 		throws IOException, JavaModelException
 	{
+		// create temporary file
 		File jarFile = File.createTempFile("org.eclipse.jdt.apt.tests.TestUtil", ".jar");  //$NON-NLS-1$//$NON-NLS-2$
 		String classesJarPath = jarFile.getAbsolutePath();
-		FileFilter classFilter = new PackageFileFilter(
-				EXTANNOTATIONS_PKG, getPluginExtClassesDir());
-		FileFilter manifestFilter = new PackageFileFilter(
-				"META-INF", getPluginExtSrcDir()); //$NON-NLS-1$
-		Map<File, FileFilter> files = new HashMap<File, FileFilter>(2);
-		files.put(new File( getPluginExtClassesDir() ), classFilter);
-		files.put(new File( getPluginExtSrcDir() ), manifestFilter);
-		zip( classesJarPath, files );
+		
+		File extBinDir = getFileInPlugin( AptTestsPlugin.getDefault(), new Path("/binext")); 
+		if(null != extBinDir) {
+			
+			//create zip file in temp file location
+			FileFilter classFilter = new PackageFileFilter(
+					EXTANNOTATIONS_PKG, getPluginExtClassesDir());
+			FileFilter manifestFilter = new PackageFileFilter(
+					"META-INF", getPluginExtSrcDir()); //$NON-NLS-1$
+			Map<File, FileFilter> files = new HashMap<File, FileFilter>(2);
+			files.put(new File( getPluginExtClassesDir() ), classFilter);
+			files.put(new File( getPluginExtSrcDir() ), manifestFilter);
+			zip( classesJarPath, files );
+			
+		} else {
+		
+			File extJarFile = getFileInPlugin( AptTestsPlugin.getDefault(), new Path("/aptext.jar")); 
+			if(null != extJarFile) {
+				
+				// move extapt.jar to classesJarPath file
+				moveFile(extJarFile, classesJarPath);
+			
+			} else {
+				
+				throw new FileNotFoundException("Could not find aptext.jar file in org.eclipse.jdt.apt.tests plugin");
+			}
+			
+		}
+		
 		addLibraryEntry( project, new Path(classesJarPath), null /*srcAttachmentPath*/, 
-			null /*srcAttachmentPathRoot*/, true );
-		return new File(classesJarPath);
+				null /*srcAttachmentPathRoot*/, true );
+		
+		return jarFile;
+		
 	}
 
