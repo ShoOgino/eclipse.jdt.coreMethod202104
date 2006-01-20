@@ -1,0 +1,49 @@
+	public void testResolvedMethod() throws JavaModelException {
+		IPath projectPath = env.addProject("Project", "1.5"); //$NON-NLS-1$ //$NON-NLS-2$
+		env.addExternalJars(projectPath, Util.getJavaClassLibs());
+		env.removePackageFragmentRoot(projectPath, ""); //$NON-NLS-1$
+		IPath root = env.addPackageFragmentRoot(projectPath, "src"); //$NON-NLS-1$
+		env.setOutputFolder(projectPath, "bin"); //$NON-NLS-1$
+
+		env.addClass(root, "", "Try", //$NON-NLS-1$ //$NON-NLS-2$
+			"@SuppressWarnings(\"all\")\n" + //$NON-NLS-1$
+			"public class Try {}" //$NON-NLS-1$
+			);
+
+		// install compilationParticipant
+		new BuildTestParticipant() {
+			public boolean isAnnotationProcessor() {
+				return true;
+			}
+			public void processAnnotations(ICompilationParticipantResult[] files) {
+				for (int i = 0, total = files.length; i < total; i++) {
+					IFile file = files[i].getFile();
+					// Traversing the members of test.ClassWithNestedAnnotation through a reference in EntryPoint.java
+					if (!"Try.java".equals(file.getName())) continue; //$NON-NLS-1$
+
+					List problems = new ArrayList();
+					CompilationUnit unit = buildCompilationUnit(files[i]);
+					List types = unit.types();
+					for (int t = 0, l = types.size(); t < l; t++) {
+						AbstractTypeDeclaration typeDecl = (AbstractTypeDeclaration) types.get(t);
+						ITypeBinding typeBinding = typeDecl.resolveBinding();
+						if (typeBinding == null) continue;
+						typeBinding = typeBinding.getAnnotations()[0].getAnnotationType();
+						IResolvedAnnotation targetValue = typeBinding.getAnnotations()[0];
+						IMethodBinding method = targetValue.getDeclaredMemberValuePairs()[0].getMethodBinding();
+						if (!"value".equals(method.getName()))
+							problems.add(new ParticipantProblem("method " + method.getName() + " not found", file.getName()));
+					}
+					if (!problems.isEmpty()) {
+						IProblem[] problemArray = new IProblem[problems.size()];
+						problemArray = (IProblem[]) problems.toArray(problemArray);
+						files[i].recordNewProblems(problemArray);
+					}
+				}
+			}
+		};
+
+		fullBuild(projectPath);
+		expectingNoProblems();
+	}
+
