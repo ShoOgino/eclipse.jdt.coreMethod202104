@@ -1,48 +1,61 @@
 	public FlowInfo analyseCode(BlockScope currentScope, FlowContext flowContext, FlowInfo flowInfo) {
+		FlowInfo result;
 		if (((bits & OperatorMASK) >> OperatorSHIFT) == EQUAL_EQUAL) {
 			if ((left.constant != Constant.NotAConstant) && (left.constant.typeID() == T_boolean)) {
 				if (left.constant.booleanValue()) { //  true == anything
 					//  this is equivalent to the right argument inits 
-					return right.analyseCode(currentScope, flowContext, flowInfo);
+					result = right.analyseCode(currentScope, flowContext, flowInfo);
 				} else { // false == anything
 					//  this is equivalent to the right argument inits negated
-					return right.analyseCode(currentScope, flowContext, flowInfo).asNegatedCondition();
+					result = right.analyseCode(currentScope, flowContext, flowInfo).asNegatedCondition();
 				}
-			}
-			if ((right.constant != Constant.NotAConstant) && (right.constant.typeID() == T_boolean)) {
+			} 
+			else if ((right.constant != Constant.NotAConstant) && (right.constant.typeID() == T_boolean)) {
 				if (right.constant.booleanValue()) { //  anything == true
-					//  this is equivalent to the right argument inits 
-					return left.analyseCode(currentScope, flowContext, flowInfo);
+					//  this is equivalent to the left argument inits 
+					result = left.analyseCode(currentScope, flowContext, flowInfo);
 				} else { // anything == false
 					//  this is equivalent to the right argument inits negated
-					return left.analyseCode(currentScope, flowContext, flowInfo).asNegatedCondition();
+					result = left.analyseCode(currentScope, flowContext, flowInfo).asNegatedCondition();
 				}
+			} 
+			else {
+				result = right.analyseCode(
+					currentScope, flowContext, 
+					left.analyseCode(currentScope, flowContext, flowInfo).unconditionalInits()).unconditionalInits();
 			}
-			return right.analyseCode(
-				currentScope, flowContext, 
-				left.analyseCode(currentScope, flowContext, flowInfo).unconditionalInits()).unconditionalInits();
 		} else { //NOT_EQUAL :
 			if ((left.constant != Constant.NotAConstant) && (left.constant.typeID() == T_boolean)) {
 				if (!left.constant.booleanValue()) { //  false != anything
 					//  this is equivalent to the right argument inits 
-					return right.analyseCode(currentScope, flowContext, flowInfo);
+					result = right.analyseCode(currentScope, flowContext, flowInfo);
 				} else { // true != anything
 					//  this is equivalent to the right argument inits negated
-					return right.analyseCode(currentScope, flowContext, flowInfo).asNegatedCondition();
+					result = right.analyseCode(currentScope, flowContext, flowInfo).asNegatedCondition();
 				}
 			}
-			if ((right.constant != Constant.NotAConstant) && (right.constant.typeID() == T_boolean)) {
+			else if ((right.constant != Constant.NotAConstant) && (right.constant.typeID() == T_boolean)) {
 				if (!right.constant.booleanValue()) { //  anything != false
 					//  this is equivalent to the right argument inits 
-					return left.analyseCode(currentScope, flowContext, flowInfo);
+					result = left.analyseCode(currentScope, flowContext, flowInfo);
 				} else { // anything != true
 					//  this is equivalent to the right argument inits negated
-					return left.analyseCode(currentScope, flowContext, flowInfo).asNegatedCondition();
+					result = left.analyseCode(currentScope, flowContext, flowInfo).asNegatedCondition();
 				}
+			} 
+			else {
+				result = right.analyseCode(
+					currentScope, flowContext, 
+					left.analyseCode(currentScope, flowContext, flowInfo).unconditionalInits()).
+					/* unneeded since we flatten it: asNegatedCondition(). */
+					unconditionalInits();
 			}
-			return right.analyseCode(
-				currentScope, flowContext, 
-				left.analyseCode(currentScope, flowContext, flowInfo).unconditionalInits()).asNegatedCondition().unconditionalInits();
 		}
+		if (result instanceof UnconditionalFlowInfo && 
+				(result.tagBits & FlowInfo.UNREACHABLE) == 0) { // the flow info is flat
+			result = FlowInfo.conditional(result, result.copy());
+		}
+	  checkNullComparison(currentScope, flowContext, result, result.initsWhenTrue(), result.initsWhenFalse());
+	  return result;
 	}
 

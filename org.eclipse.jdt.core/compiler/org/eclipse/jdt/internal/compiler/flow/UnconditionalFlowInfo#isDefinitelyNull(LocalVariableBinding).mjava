@@ -1,12 +1,35 @@
-	/**
-	 * Check status of definite null assignment for a local.
-	 */
-	final public boolean isDefinitelyNull(LocalVariableBinding local) {
-		
-		// Dependant of CodeStream.isDefinitelyAssigned(..)
-		// We do not want to complain in unreachable code
-		if ((this.reachMode & UNREACHABLE) != 0)
-			return false;
-		return isDefinitelyNull(local.id + maxFieldCount);
+final public boolean isDefinitelyNull(LocalVariableBinding local) {
+	// do not want to complain in unreachable code
+	if ((this.tagBits & UNREACHABLE) != 0 || 
+			(this.tagBits & NULL_FLAG_MASK) == 0 || 
+			(local.type.tagBits & TagBits.IsBaseType) != 0) {
+		return false;
 	}
+	int position = local.id + this.maxFieldCount;
+	long mask;
+	if (position < BitCacheSize) { // use bits
+		return 
+			(this.nullAssignmentStatusBit2 & (mask = 1L << position)) != 0 ?
+			(this.nullAssignmentStatusBit1 & mask) == 0 :
+			(this.nullAssignmentStatusBit1 & 
+				this.nullAssignmentValueBit1 & mask) != 0 &&
+			(this.nullAssignmentValueBit2 & mask) == 0; 
+	}
+	// use extra vector
+	if (this.extra == null) {
+		return false; // if vector not yet allocated, then not initialized
+	}
+	int vectorIndex;
+	if ((vectorIndex = (position / BitCacheSize) - 1) >= 
+			this.extra[0].length) {
+		return false; // if not enough room in vector, then not initialized
+	}
+	return
+		(this.extra[3][vectorIndex] & 
+			(mask = 1L << (position % BitCacheSize))) != 0 ?
+		(this.extra[2][vectorIndex] & mask) == 0 :
+		(this.extra[2][vectorIndex] & 
+			this.extra[4][vectorIndex] & mask) != 0 &&
+		(this.extra[5][vectorIndex] & mask) == 0;
+}
 

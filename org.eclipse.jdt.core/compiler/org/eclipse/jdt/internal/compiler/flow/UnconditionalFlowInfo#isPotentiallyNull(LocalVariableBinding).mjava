@@ -1,0 +1,40 @@
+// REVIEW should rename this -- what we do is that we ask if there is a reasonable
+// REVIEW	expectation that the variable be null at this point; which means that
+// REVIEW	we add the protected null case, to augment diagnostics, but we do not
+// REVIEW	really check that someone deliberately has assigned to null on a given 
+// REVIEW	path
+final public boolean isPotentiallyNull(LocalVariableBinding local) {
+	if ((this.tagBits & NULL_FLAG_MASK) == 0 || 
+			(local.type.tagBits & TagBits.IsBaseType) != 0) {
+		return false;
+	}
+	int position;
+	long mask;
+	if ((position = local.id + this.maxFieldCount) < BitCacheSize) {
+		// use bits
+		return
+			(this.nullAssignmentStatusBit2 & (mask = 1L << position)) != 0 ?
+			(this.nullAssignmentStatusBit1 & mask) == 0 : // protected null
+			(this.nullAssignmentValueBit1 & mask) != 0 && // null bit set and
+				((this.nullAssignmentStatusBit1 & mask) == 0 || // (potential or
+				 (this.nullAssignmentValueBit2 & mask) == 0); 
+											// assigned, but not unknown)
+	}
+	// use extra vector
+	if (this.extra == null) {
+		return false; // if vector not yet allocated, then not initialized
+	}
+	int vectorIndex;
+	if ((vectorIndex = (position / BitCacheSize) - 1) >= 
+			this.extra[0].length) {
+		return false; // if not enough room in vector, then not initialized
+	}
+	return 
+		(this.extra[3][vectorIndex] & 
+			(mask = 1L << (position % BitCacheSize))) != 0 ?
+		(this.extra[2][vectorIndex] & mask) == 0 :
+		(this.extra[4][vectorIndex] & mask) != 0 && 
+			((this.extra[2][vectorIndex] & mask) == 0 || 
+			 (this.extra[5][vectorIndex] & mask) == 0); 
+}
+
