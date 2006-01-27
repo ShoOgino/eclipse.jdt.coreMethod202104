@@ -1,0 +1,92 @@
+	private Object _getReflectionValue(final Object domValue, final Class expectedType)
+		throws IllegalAccessException, NoSuchFieldException
+	{
+		if( expectedType == null || domValue == null )
+			return null;
+	
+	    if( domValue instanceof IVariableBinding )
+		{
+			final IVariableBinding varBinding = (IVariableBinding)domValue;
+	        final ITypeBinding declaringClass = varBinding.getDeclaringClass();
+	        if( declaringClass != null ){
+	        	final Field returnedField = expectedType.getField( varBinding.getName() );
+	        	return returnedField == null ? null : returnedField.get(null);
+	        }
+	        return null;
+		}
+	    else if (domValue instanceof Object[])
+		{
+			final Object[] elements = (Object[])domValue;
+			assert expectedType.isArray();
+	        final Class componentType = expectedType.getComponentType();
+	        final int length = elements.length;
+	        final Object array = Array.newInstance(componentType, length);
+	
+	        for( int i=0; i<length; i++ ){                
+	            final Object returnObj = 
+	            	getReflectionValueWithTypeConversion( elements[i], componentType );	        
+	            // fill in the array.
+	            // If it is an array of some primitive type, we will need to unwrap it.
+	            if( componentType.isPrimitive() ){
+	                if( componentType == boolean.class ){
+	                    final Boolean bool = (Boolean)returnObj;
+	                    Array.setBoolean( array, i, bool.booleanValue());
+	                }
+	                else if( componentType == byte.class ){
+	                    final Byte b = (Byte)returnObj;
+	                    Array.setByte( array, i, b.byteValue() );
+	                }
+	                else if( componentType == char.class ){
+	                    final Character c = (Character)returnObj;
+	                    Array.setChar( array, i, c.charValue() );
+	                }
+	                else if( componentType == double.class ){
+	                    final Double d = (Double)returnObj;
+	                    Array.setDouble( array, i, d.doubleValue() );
+	                }
+	                else if( componentType == float.class ){
+	                    final Float f = (Float)returnObj;
+	                    Array.setFloat( array, i, f.floatValue() );
+	                }
+	                else if( componentType == int.class ){
+	                    final Integer integer = (Integer)returnObj;
+	                    Array.setInt( array, i, integer.intValue() );
+	                }
+	                else if( componentType == long.class ){
+	                    final Long l = (Long)returnObj;
+	                    Array.setLong( array, i, l.longValue() );
+	                }
+	                else if( componentType == short.class ){
+	                    final Short s = (Short)returnObj;
+	                    Array.setShort( array, i, s.shortValue() );
+	                }
+	                else {
+	                    throw new IllegalStateException("unrecognized primitive type: "  + componentType ); //$NON-NLS-1$
+	                }
+	            }
+	            else{
+	                Array.set( array, i, returnObj );
+	            }
+	        }
+	        return array;
+		}
+		// caller should have caught this case.
+	    else if( domValue instanceof ITypeBinding )
+			throw new IllegalStateException("sourceValue is a type binding."); //$NON-NLS-1$
+		
+	    else if( domValue instanceof IResolvedAnnotation )
+		{
+			final AnnotationMirrorImpl annoMirror = 
+				(AnnotationMirrorImpl)Factory.createAnnotationMirror(
+					(IResolvedAnnotation)domValue, 
+					_instance.getAnnotatedDeclaration(), 
+					_instance.getEnvironment());
+	        final AnnotationInvocationHandler handler = new AnnotationInvocationHandler(annoMirror, expectedType);
+	        return Proxy.newProxyInstance(expectedType.getClassLoader(),
+	                                      new Class[]{ expectedType }, handler );
+		}
+	    // primitive wrapper or String.
+	    else 
+	    	return domValue;	
+	}
+
