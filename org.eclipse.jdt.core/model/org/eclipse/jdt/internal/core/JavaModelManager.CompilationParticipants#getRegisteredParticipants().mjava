@@ -1,13 +1,13 @@
-		private CompilationParticipant[] getRegisteredParticipants() {
+		private Object[][] getRegisteredParticipants() {
 			if (this.registeredParticipants != null) {
 				return this.registeredParticipants;
 			}
 			IExtensionPoint extension = Platform.getExtensionRegistry().getExtensionPoint(JavaCore.PLUGIN_ID, COMPILATION_PARTICIPANT_EXTPOINT_ID);
 			if (extension == null)
 				return this.registeredParticipants = NO_PARTICIPANTS;
-			final HashMap modifyingEnv = new HashMap();
-			final HashMap creatingProblems = new HashMap();
-			final HashMap others = new HashMap();
+			final ArrayList modifyingEnv = new ArrayList();
+			final ArrayList creatingProblems = new ArrayList();
+			final ArrayList others = new ArrayList();
 			IExtension[] extensions = extension.getExtensions();
 			// for all extensions of this point...
 			for(int i = 0; i < extensions.length; i++) {
@@ -19,32 +19,39 @@
 					if (!("compilationParticipant".equals(elementName))) { //$NON-NLS-1$
 						continue;
 					}
-					Platform.run(new ISafeRunnable() {
-						public void handleException(Throwable exception) {
-							Util.log(exception, "Exception occurred while creating compilation participant"); //$NON-NLS-1$
-						}
-						public void run() throws Exception {
-							Object execExt = configElement.createExecutableExtension("class"); //$NON-NLS-1$ 
-							if (execExt instanceof CompilationParticipant) {
-								if ("true".equals(configElement.getAttribute("modifiesEnvironment"))) //$NON-NLS-1$ //$NON-NLS-2$
-									modifyingEnv.put(configElement, execExt);
-								else if ("true".equals(configElement.getAttribute("createsProblems"))) //$NON-NLS-1$ //$NON-NLS-2$
-									creatingProblems.put(configElement, execExt);
-								else
-									others.put(configElement, execExt);
-							}
-						}
-					});
+					// add config element in the group it belongs to
+					if ("true".equals(configElement.getAttribute("modifiesEnvironment"))) //$NON-NLS-1$ //$NON-NLS-2$
+						modifyingEnv.add(configElement);
+					else if ("true".equals(configElement.getAttribute("createsProblems"))) //$NON-NLS-1$ //$NON-NLS-2$
+						creatingProblems.add(configElement);
+					else
+						others.add(configElement);
 				}
 			}
 			int size = modifyingEnv.size() + creatingProblems.size() + others.size();
 			if (size == 0)
 				return this.registeredParticipants = NO_PARTICIPANTS;
-			CompilationParticipant[] result = new CompilationParticipant[size];
+			
+			// sort config elements in each group
+			IConfigurationElement[] configElements = new IConfigurationElement[size];
 			int index = 0;
-			index = sortParticipants(modifyingEnv, result, index);
-			index = sortParticipants(creatingProblems, result, index);
-			index = sortParticipants(others, result, index);
+			index = sortParticipants(modifyingEnv, configElements, index);
+			index = sortParticipants(creatingProblems, configElements, index);
+			index = sortParticipants(others, configElements, index);
+			
+			// create result table
+			Object[][] result = new Object[MAX_SOURCE_LEVEL][];
+			int length = configElements.length;
+			for (int i = 0; i < MAX_SOURCE_LEVEL; i++) {
+				result[i] = new Object[length];
+			}
+			for (int i = 0; i < length; i++) {
+				String sourceLevel = configElements[i].getAttribute("requiredSourceLevel"); //$NON-NLS-1$
+				int sourceLevelIndex = indexForSourceLevel(sourceLevel);
+				for (int j = sourceLevelIndex; j < MAX_SOURCE_LEVEL; j++) {
+					result[j][i] = configElements[i];
+				}
+			}
 			return this.registeredParticipants = result;
 		}
 

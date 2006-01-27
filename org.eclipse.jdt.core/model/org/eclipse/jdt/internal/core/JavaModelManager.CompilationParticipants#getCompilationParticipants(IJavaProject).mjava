@@ -1,13 +1,30 @@
 		public CompilationParticipant[] getCompilationParticipants(IJavaProject project) {
-			CompilationParticipant[] participants = getRegisteredParticipants();
-			if (participants == NO_PARTICIPANTS)
+			final Object[][] participantsPerSource = getRegisteredParticipants();
+			if (participantsPerSource == NO_PARTICIPANTS)
 				return null;
+			String sourceLevel = project.getOption(JavaCore.COMPILER_SOURCE, true/*inherit options*/);
+			final int sourceLevelIndex = indexForSourceLevel(sourceLevel);
+			final Object[] participants = participantsPerSource[sourceLevelIndex];
 			int length = participants.length;
 			CompilationParticipant[] result = new CompilationParticipant[length];
 			int index = 0;
 			for (int i = 0; i < length; i++) {
-				CompilationParticipant participant = participants[i];
-				if (participant.isActive(project))
+				if (participants[i] instanceof IConfigurationElement) {
+					final IConfigurationElement configElement = (IConfigurationElement) participants[i];
+					final int participantIndex = i;
+					Platform.run(new ISafeRunnable() {
+						public void handleException(Throwable exception) {
+							Util.log(exception, "Exception occurred while creating compilation participant"); //$NON-NLS-1$
+						}
+						public void run() throws Exception {
+							Object executableExtension = configElement.createExecutableExtension("class"); //$NON-NLS-1$ 
+							for (int j = sourceLevelIndex; j < MAX_SOURCE_LEVEL; j++)
+								participantsPerSource[j][participantIndex] = executableExtension;
+						}
+					});
+				} 
+				CompilationParticipant participant = (CompilationParticipant) participants[i];
+				if (participant != null && participant.isActive(project))
 					result[index++] = participant;
 			}
 			if (index == 0)
