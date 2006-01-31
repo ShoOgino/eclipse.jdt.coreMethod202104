@@ -1,0 +1,86 @@
+	/**
+	 * Boolean operator code generation Optimized operations are: &&
+	 */
+	public void generateOptimizedBoolean(BlockScope currentScope, CodeStream codeStream,
+			BranchLabel trueLabel, BranchLabel falseLabel, boolean valueRequired) {
+
+		if (constant != Constant.NotAConstant) {
+			super.generateOptimizedBoolean(currentScope, codeStream, trueLabel, falseLabel,
+					valueRequired);
+			return;
+		}
+
+		// <expr> && true --> <expr>
+		Constant cst = right.constant;
+		if (cst != Constant.NotAConstant && cst.booleanValue() == true) {
+			int pc = codeStream.position;
+			this.left.generateOptimizedBoolean(currentScope, codeStream, trueLabel, falseLabel, valueRequired);
+			if (mergedInitStateIndex != -1) {
+				codeStream.removeNotDefinitelyAssignedVariables(currentScope, mergedInitStateIndex);
+			}			
+			codeStream.recordPositionsFrom(pc, this.sourceStart);
+			return;
+		}
+		cst = left.optimizedBooleanConstant();
+		boolean leftIsConst = cst != Constant.NotAConstant;
+		boolean leftIsTrue = leftIsConst && cst.booleanValue() == true;
+
+		cst = right.optimizedBooleanConstant();
+		boolean rightIsConst = cst != Constant.NotAConstant;
+		boolean rightIsTrue = rightIsConst && cst.booleanValue() == true;
+
+		// default case
+		generateOperands : {
+			if (falseLabel == null) {
+				if (trueLabel != null) {
+					// implicit falling through the FALSE case
+					BranchLabel internalFalseLabel = new BranchLabel(codeStream);
+					left.generateOptimizedBoolean(currentScope, codeStream, null,
+							internalFalseLabel, !leftIsConst); 
+					// need value, e.g. if (a == 1 && ((b = 2) > 0)) {} -> shouldn't initialize 'b' if a!=1
+					if (leftIsConst && !leftIsTrue) {
+						internalFalseLabel.place();
+						break generateOperands; // no need to generate right operand
+					}
+					if (rightInitStateIndex != -1) {
+						codeStream
+								.addDefinitelyAssignedVariables(currentScope, rightInitStateIndex);
+					}
+					right.generateOptimizedBoolean(currentScope, codeStream, trueLabel, null,
+							valueRequired && !rightIsConst);
+					if (valueRequired && rightIsConst && rightIsTrue) {
+						codeStream.goto_(trueLabel);
+						codeStream.updateLastRecordedEndPC(currentScope, codeStream.position);
+					}
+					internalFalseLabel.place();
+				}
+			} else {
+				// implicit falling through the TRUE case
+				if (trueLabel == null) {
+					left.generateOptimizedBoolean(currentScope, codeStream, null, falseLabel, !leftIsConst); 
+					// need value, e.g. if (a == 1 && ((b = 2) > 0)) {} -> shouldn't initialize 'b' if a!=1
+					if (leftIsConst && !leftIsTrue) {
+						codeStream.goto_(falseLabel);
+						codeStream.updateLastRecordedEndPC(currentScope, codeStream.position);
+						break generateOperands; // no need to generate right operand
+					}
+					if (rightInitStateIndex != -1) {
+						codeStream
+								.addDefinitelyAssignedVariables(currentScope, rightInitStateIndex);
+					}
+					right.generateOptimizedBoolean(currentScope, codeStream, null, falseLabel,
+							valueRequired && !rightIsConst);
+					if (valueRequired && rightIsConst && !rightIsTrue) {
+						codeStream.goto_(falseLabel);
+						codeStream.updateLastRecordedEndPC(currentScope, codeStream.position);
+					}
+				} else {
+					// no implicit fall through TRUE/FALSE --> should never occur
+				}
+			}
+		}
+		if (mergedInitStateIndex != -1) {
+			codeStream.removeNotDefinitelyAssignedVariables(currentScope, mergedInitStateIndex);
+		}
+	}
+

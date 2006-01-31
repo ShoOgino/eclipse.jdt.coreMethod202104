@@ -1,0 +1,71 @@
+/*
+* Place the label. If we have forward references resolve them.
+*/
+public void place() { // Currently lacking wide support.
+	if (CodeStream.DEBUG) System.out.println("\t\t\t\t<place at: "+codeStream.position+" - "+ this); //$NON-NLS-1$ //$NON-NLS-2$
+//	if ((this.tagBits & USED) == 0 && this.forwardReferenceCount == 0) {
+//		return;
+//	}
+
+	//TODO how can position be set already ? cannot place more than once
+	if (position == POS_NOT_SET) {
+		if ((this.tagBits & USED) != 0 || this.forwardReferenceCount != 0) {
+			this.position = codeStream.getPosition();
+		} else {
+			this.position = codeStream.position;
+		}
+		codeStream.addLabel(this);
+		int oldPosition = position;
+		boolean isOptimizedBranch = false;
+		if (forwardReferenceCount != 0) {
+			isOptimizedBranch = (forwardReferences[forwardReferenceCount - 1] + 2 == position) && (codeStream.bCodeStream[codeStream.classFileOffset - 3] == Opcodes.OPC_goto);
+			if (isOptimizedBranch) {
+				codeStream.position = (position -= 3);
+				codeStream.classFileOffset -= 3;
+				forwardReferenceCount--;
+				// also update the PCs in the related debug attributes
+				/* OLD CODE
+					int index = codeStream.pcToSourceMapSize - 1;
+						while ((index >= 0) && (codeStream.pcToSourceMap[index][1] == oldPosition)) {
+							codeStream.pcToSourceMap[index--][1] = position;
+						}
+				*/
+				// Beginning of new code
+				int index = codeStream.pcToSourceMapSize - 2;
+				if (codeStream.lastEntryPC == oldPosition) {
+					codeStream.lastEntryPC = position;
+				}
+				if ((index >= 0) && (codeStream.pcToSourceMap[index] == position)) {
+					codeStream.pcToSourceMapSize-=2;
+				}
+				// end of new code
+				if ((codeStream.generateAttributes & ClassFileConstants.ATTR_VARS) != 0) {
+					LocalVariableBinding locals[] = codeStream.locals;
+					for (int i = 0, max = locals.length; i < max; i++) {
+						LocalVariableBinding local = locals[i];
+						if ((local != null) && (local.initializationCount > 0)) {
+							if (local.initializationPCs[((local.initializationCount - 1) << 1) + 1] == oldPosition) {
+								// we want to prevent interval of size 0 to have a negative size.
+								// see PR 1GIRQLA: ITPJCORE:ALL - ClassFormatError for local variable attribute
+								local.initializationPCs[((local.initializationCount - 1) << 1) + 1] = position;
+							}
+							if (local.initializationPCs[(local.initializationCount - 1) << 1] == oldPosition) {
+								local.initializationPCs[(local.initializationCount - 1) << 1] = position;
+							}
+						}
+					}
+				}
+			}
+		}
+		for (int i = 0; i < forwardReferenceCount; i++) {
+			codeStream.writePosition(this, forwardReferences[i]);
+		}
+		// For all labels placed at that position we check if we need to rewrite the jump
+		// offset. It is the case each time a label had a forward reference to the current position.
+		// Like we change the current position, we have to change the jump offset. See 1F4IRD9 for more details.
+		if (isOptimizedBranch) {
+			this.codeStream.optimizeBranch(oldPosition, this);
+		}
+	}
+}
+
