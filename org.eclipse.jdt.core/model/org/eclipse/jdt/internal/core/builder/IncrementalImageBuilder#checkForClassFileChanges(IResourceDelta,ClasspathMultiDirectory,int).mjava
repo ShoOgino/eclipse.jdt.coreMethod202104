@@ -1,0 +1,29 @@
+protected boolean checkForClassFileChanges(IResourceDelta binaryDelta, ClasspathMultiDirectory md, int segmentCount) throws CoreException {
+	IResource resource = binaryDelta.getResource();
+	// remember that if inclusion & exclusion patterns change then a full build is done
+	boolean isExcluded = (md.exclusionPatterns != null || md.inclusionPatterns != null)
+		&& Util.isExcluded(resource, md.inclusionPatterns, md.exclusionPatterns);
+	switch(resource.getType()) {
+		case IResource.FOLDER :
+			if (isExcluded && md.inclusionPatterns == null)
+		        return true; // no need to go further with this delta since its children cannot be included
+
+			IResourceDelta[] children = binaryDelta.getAffectedChildren();
+			for (int i = 0, l = children.length; i < l; i++)
+				checkForClassFileChanges(children[i], md, segmentCount);
+			return true;
+		case IResource.FILE :
+			if (!isExcluded && org.eclipse.jdt.internal.compiler.util.Util.isClassFileName(resource.getName())) {
+				// perform full build if a managed class file has been changed
+				IPath typePath = resource.getFullPath().removeFirstSegments(segmentCount).removeFileExtension();
+				if (newState.isKnownType(typePath.toString())) {
+					if (JavaBuilder.DEBUG)
+						System.out.println("MOST DO FULL BUILD. Found change to class file " + typePath); //$NON-NLS-1$
+					return false;
+				}
+				return true;
+			}
+	}
+	return true;
+}
+

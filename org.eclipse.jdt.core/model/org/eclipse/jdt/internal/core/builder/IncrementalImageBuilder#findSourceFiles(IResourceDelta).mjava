@@ -1,4 +1,5 @@
 protected boolean findSourceFiles(IResourceDelta delta) throws CoreException {
+	ArrayList visited = new ArrayList(sourceLocations.length);
 	for (int i = 0, l = sourceLocations.length; i < l; i++) {
 		ClasspathMultiDirectory md = sourceLocations[i];
 		if (md.sourceFolder.equals(javaBuilder.currentProject)) {
@@ -7,8 +8,20 @@ protected boolean findSourceFiles(IResourceDelta delta) throws CoreException {
 			IResourceDelta[] children = delta.getAffectedChildren();
 			for (int j = 0, m = children.length; j < m; j++)
 				if (!isExcludedFromProject(children[j].getFullPath()))
-					findSourceFiles(children[j], md, segmentCount);
+					if (!findSourceFiles(children[j], md, segmentCount))
+						return false;
 		} else {
+			if (md.hasIndependentOutputFolder && !visited.contains(md.binaryFolder)) {
+				visited.add(md.binaryFolder);
+				IResourceDelta binaryDelta = delta.findMember(md.binaryFolder.getProjectRelativePath());
+				if (binaryDelta != null) {
+					int segmentCount = binaryDelta.getFullPath().segmentCount();
+					IResourceDelta[] children = binaryDelta.getAffectedChildren();
+					for (int j = 0, m = children.length; j < m; j++)
+						if (!checkForClassFileChanges(children[j], md, segmentCount))
+							return false;
+				}
+			}
 			IResourceDelta sourceDelta = delta.findMember(md.sourceFolder.getProjectRelativePath());
 			if (sourceDelta != null) {
 				if (sourceDelta.getKind() == IResourceDelta.REMOVED) {
@@ -20,7 +33,8 @@ protected boolean findSourceFiles(IResourceDelta delta) throws CoreException {
 				IResourceDelta[] children = sourceDelta.getAffectedChildren();
 				try {
 					for (int j = 0, m = children.length; j < m; j++)
-						findSourceFiles(children[j], md, segmentCount);
+						if (!findSourceFiles(children[j], md, segmentCount))
+							return false;
 				} catch (CoreException e) {
 					// catch the case that a package has been renamed and collides on disk with an as-yet-to-be-deleted package
 					if (e.getStatus().getCode() == IResourceStatus.CASE_VARIANT_EXISTS) {
