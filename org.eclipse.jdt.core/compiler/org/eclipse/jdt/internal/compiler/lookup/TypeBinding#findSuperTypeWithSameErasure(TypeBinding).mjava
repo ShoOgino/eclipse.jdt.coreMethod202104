@@ -1,0 +1,82 @@
+/**
+ * Find supertype which erases to a given type, or null if not found
+ */
+public TypeBinding findSuperTypeWithSameErasure(TypeBinding otherType) {
+	if (this == otherType) return this;
+	if (otherType == null) return null;
+	switch(kind()) {
+		case Binding.ARRAY_TYPE :
+			ArrayBinding arrayType = (ArrayBinding) this;
+			int otherDim = otherType.dimensions();
+			if (arrayType.dimensions != otherDim) {
+				switch(otherType.id) {
+					case TypeIds.T_JavaLangObject :
+					case TypeIds.T_JavaIoSerializable :
+					case TypeIds.T_JavaLangCloneable :
+						return otherType;
+				}
+				if (otherDim < arrayType.dimensions & otherType.leafComponentType().id == TypeIds.T_JavaLangObject) {
+					return otherType; // X[][] has Object[] as an implicit supertype
+				}
+				return null;
+			}
+			if (!(arrayType.leafComponentType instanceof ReferenceBinding)) return null;
+			TypeBinding leafSuperType = arrayType.leafComponentType.findSuperTypeWithSameErasure(otherType.leafComponentType());
+			if (leafSuperType == null) return null;
+			return arrayType.environment().createArrayType(leafSuperType, arrayType.dimensions);	
+			
+		case Binding.TYPE_PARAMETER :
+		    if (isCapture()) {
+		    	CaptureBinding capture = (CaptureBinding) this;
+		    	TypeBinding captureBound = capture.firstBound;
+		    	if (captureBound instanceof ArrayBinding) {
+		    		TypeBinding match = captureBound.findSuperTypeWithSameErasure(otherType);
+		    		if (match != null) return match;
+		    	}
+		    }
+			// fall-through
+		case Binding.TYPE :
+		case Binding.PARAMETERIZED_TYPE :
+		case Binding.GENERIC_TYPE :
+		case Binding.RAW_TYPE :
+		case Binding.WILDCARD_TYPE :
+		    // do not allow type variables to match with erasures for free
+		    if (!otherType.isTypeVariable()) otherType = otherType.erasure();
+		    if (this == otherType || (!isTypeVariable() && erasure() == otherType)) return this;
+		    
+		    ReferenceBinding currentType = (ReferenceBinding)this;
+		    if (!otherType.isInterface()) {
+				while ((currentType = currentType.superclass()) != null) {
+					if (currentType == otherType || (!currentType.isTypeVariable() && currentType.erasure() == otherType)) return currentType;
+				}
+				return null;
+		    }
+			ReferenceBinding[][] interfacesToVisit = new ReferenceBinding[5][];
+			int lastPosition = -1;
+			do {
+				ReferenceBinding[] itsInterfaces = currentType.superInterfaces();
+				if (itsInterfaces != Binding.NO_SUPERINTERFACES) {
+					if (++lastPosition == interfacesToVisit.length)
+						System.arraycopy(interfacesToVisit, 0, interfacesToVisit = new ReferenceBinding[lastPosition * 2][], 0, lastPosition);
+					interfacesToVisit[lastPosition] = itsInterfaces;
+				}
+			} while ((currentType = currentType.superclass()) != null);
+					
+			for (int i = 0; i <= lastPosition; i++) {
+				ReferenceBinding[] interfaces = interfacesToVisit[i];
+				for (int j = 0, length = interfaces.length; j < length; j++) {
+					if ((currentType = interfaces[j]) == otherType || (!currentType.isTypeVariable() && currentType.erasure() == otherType))
+						return currentType;
+
+					ReferenceBinding[] itsInterfaces = currentType.superInterfaces();
+					if (itsInterfaces != Binding.NO_SUPERINTERFACES) {
+						if (++lastPosition == interfacesToVisit.length)
+							System.arraycopy(interfacesToVisit, 0, interfacesToVisit = new ReferenceBinding[lastPosition * 2][], 0, lastPosition);
+						interfacesToVisit[lastPosition] = itsInterfaces;
+					}
+				}
+			}
+	}
+	return null;
+}
+

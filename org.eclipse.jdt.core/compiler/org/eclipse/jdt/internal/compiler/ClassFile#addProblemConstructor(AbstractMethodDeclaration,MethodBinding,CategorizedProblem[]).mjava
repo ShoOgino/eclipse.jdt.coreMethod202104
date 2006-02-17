@@ -1,0 +1,62 @@
+	/**
+	 * INTERNAL USE-ONLY
+	 * Generate the byte for a problem method info that correspond to a boggus constructor.
+	 *
+	 * @param method org.eclipse.jdt.internal.compiler.ast.AbstractMethodDeclaration
+	 * @param methodBinding org.eclipse.jdt.internal.compiler.nameloopkup.MethodBinding
+	 * @param problems org.eclipse.jdt.internal.compiler.problem.Problem[]
+	 */
+	public void addProblemConstructor(
+		AbstractMethodDeclaration method,
+		MethodBinding methodBinding,
+		CategorizedProblem[] problems) {
+
+		// always clear the strictfp/native/abstract bit for a problem method
+		generateMethodInfoHeader(methodBinding, methodBinding.modifiers & ~(ClassFileConstants.AccStrictfp | ClassFileConstants.AccNative | ClassFileConstants.AccAbstract));
+		int methodAttributeOffset = contentsOffset;
+		int attributeNumber = generateMethodInfoAttribute(methodBinding, true);
+		
+		// Code attribute
+		attributeNumber++;
+		int codeAttributeOffset = contentsOffset;
+		generateCodeAttributeHeader();
+		codeStream.reset(method, this);
+		String problemString = "" ; //$NON-NLS-1$
+		int problemLine = 0;
+		if (problems != null) {
+			int max = problems.length;
+			StringBuffer buffer = new StringBuffer(25);
+			int count = 0;
+			for (int i = 0; i < max; i++) {
+				CategorizedProblem problem = problems[i];
+				if ((problem != null) && (problem.isError())) {
+					buffer.append("\t"  +problem.getMessage() + "\n" ); //$NON-NLS-1$ //$NON-NLS-2$
+					count++;
+					if (problemLine == 0) {
+						problemLine = problem.getSourceLineNumber();
+					}
+				}
+			} // insert the top line afterwards, once knowing how many problems we have to consider
+			if (count > 1) {
+				buffer.insert(0, Messages.compilation_unresolvedProblems);
+			} else {
+				buffer.insert(0, Messages.compilation_unresolvedProblem);
+			}
+			problemString = buffer.toString();
+		}
+
+		// return codeStream.generateCodeAttributeForProblemMethod(comp.options.runtimeExceptionNameForCompileError, "")
+		codeStream.generateCodeAttributeForProblemMethod(problemString);
+		completeCodeAttributeForProblemMethod(
+			method,
+			methodBinding,
+			codeAttributeOffset,
+			((SourceTypeBinding) methodBinding.declaringClass)
+				.scope
+				.referenceCompilationUnit()
+				.compilationResult
+				.getLineSeparatorPositions(),
+			problemLine);
+		completeMethodInfo(methodAttributeOffset, attributeNumber);
+	}
+

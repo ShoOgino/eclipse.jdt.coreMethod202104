@@ -1,0 +1,55 @@
+/**
+ * Creates a marker from each problem and adds it to the resource.
+ * The marker is as follows:
+ *   - its type is T_PROBLEM
+ *   - its plugin ID is the JavaBuilder's plugin ID
+ *	 - its message is the problem's message
+ *	 - its priority reflects the severity of the problem
+ *	 - its range is the problem's range
+ *	 - it has an extra attribute "ID" which holds the problem's id
+ */
+protected void storeProblemsFor(SourceFile sourceFile, CategorizedProblem[] problems) throws CoreException {
+	if (sourceFile == null || problems == null || problems.length == 0) return;
+
+	String missingClassFile = null;
+	IResource resource = sourceFile.resource;
+	for (int i = 0, l = problems.length; i < l; i++) {
+		CategorizedProblem problem = problems[i];
+		int id = problem.getID();
+		if (id == IProblem.IsClassPathCorrect) {
+			JavaBuilder.removeProblemsAndTasksFor(javaBuilder.currentProject); // make this the only problem for this project
+			String[] args = problem.getArguments();
+			missingClassFile = args[0];
+		}
+
+		if (id != IProblem.Task) {
+//			TODO need to ask problem for its marker type, once they are fully managed (clean/flush) 
+			IMarker marker = resource.createMarker(IJavaModelMarker.JAVA_MODEL_PROBLEM_MARKER);
+			//IMarker marker = resource.createMarker(problem.getMarkerType());
+			
+			// standard attributes
+			marker.setAttributes(
+				JAVA_PROBLEM_MARKER_ATTRIBUTE_NAMES,
+				new Object[] { 
+					problem.getMessage(), // message
+					problem.isError() ? S_ERROR : S_WARNING, // severity
+					new Integer(id), // ID
+					new Integer(problem.getSourceStart()), // start
+					new Integer(problem.getSourceEnd() + 1), // end
+					new Integer(problem.getSourceLineNumber()), // line
+					Util.getProblemArgumentsForMarker(problem.getArguments()), // arguments
+					new Integer(problem.getCategoryID()), // category ID
+				}
+			);
+			// optional extra attributes
+			String[] extraAttributeNames = problem.getExtraMarkerAttributeNames();
+			int extraLength = extraAttributeNames == null ? 0 : extraAttributeNames.length;
+			if (extraLength > 0) {
+				marker.setAttributes(extraAttributeNames, problem.getExtraMarkerAttributeValues());
+			}
+		}
+		if (missingClassFile != null)
+			throw new MissingClassFileException(missingClassFile);
+	}
+}
+
