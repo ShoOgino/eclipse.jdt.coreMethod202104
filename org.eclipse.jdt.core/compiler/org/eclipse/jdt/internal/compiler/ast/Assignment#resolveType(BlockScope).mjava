@@ -1,48 +1,52 @@
-	public TypeBinding resolveType(BlockScope scope) {
-
-		// due to syntax lhs may be only a NameReference, a FieldReference or an ArrayReference
-		this.constant = Constant.NotAConstant;
-		if (!(this.lhs instanceof Reference) || this.lhs.isThis()) {
-			scope.problemReporter().expressionShouldBeAVariable(this.lhs);
-			return null;
-		}
-		TypeBinding lhsType = lhs.resolveType(scope);
-		this.expression.setExpectedType(lhsType); // needed in case of generic method invocation
-		if (lhsType != null) 
-			this.resolvedType = lhsType.capture(scope, this.sourceEnd);
-		TypeBinding rhsType = this.expression.resolveType(scope);
-		if (lhsType == null || rhsType == null) {
-			return null;
-		}
-		checkAssignmentEffect(scope);
-
-		// Compile-time conversion of base-types : implicit narrowing integer into byte/short/character
-		// may require to widen the rhs expression at runtime
-		if (lhsType != rhsType) // must call before computeConversion() and typeMismatchError()
-			scope.compilationUnitScope().recordTypeConversion(lhsType, rhsType);
-		if ((this.expression.isConstantValueOfTypeAssignableToType(rhsType, lhsType)
-				|| (lhsType.isBaseType() && BaseTypeBinding.isWidening(lhsType.id, rhsType.id)))
-				|| rhsType.isCompatibleWith(lhsType)) {
-			this.expression.computeConversion(scope, lhsType, rhsType);
-			checkAssignment(scope, lhsType, rhsType);
-			if (this.expression instanceof CastExpression 
-					&& (this.expression.bits & ASTNode.UnnecessaryCast) == 0) {
-				CastExpression.checkNeedForAssignedCast(scope, lhsType, (CastExpression) this.expression);
-			}			
-			return this.resolvedType;
-		} else if (scope.isBoxingCompatibleWith(rhsType, lhsType) 
-							|| (rhsType.isBaseType()  // narrowing then boxing ?
-									&& scope.compilerOptions().sourceLevel >= ClassFileConstants.JDK1_5 // autoboxing
-									&& !lhsType.isBaseType()
-									&& this.expression.isConstantValueOfTypeAssignableToType(rhsType, scope.environment().computeBoxingType(lhsType)))) {
-			this.expression.computeConversion(scope, lhsType, rhsType);
-			if (this.expression instanceof CastExpression 
-					&& (this.expression.bits & ASTNode.UnnecessaryCast) == 0) {
-				CastExpression.checkNeedForAssignedCast(scope, lhsType, (CastExpression) this.expression);
-			}			
-			return this.resolvedType;
-		} 
-		scope.problemReporter().typeMismatchError(rhsType, lhsType, this.expression);
-		return lhsType;
+public TypeBinding resolveType(BlockScope scope) {
+	// due to syntax lhs may be only a NameReference, a FieldReference or an ArrayReference
+	this.constant = Constant.NotAConstant;
+	if (!(this.lhs instanceof Reference) || this.lhs.isThis()) {
+		scope.problemReporter().expressionShouldBeAVariable(this.lhs);
+		return null;
 	}
+	TypeBinding lhsType = lhs.resolveType(scope);
+	this.expression.setExpectedType(lhsType); // needed in case of generic method invocation
+	if (lhsType != null) 
+		this.resolvedType = lhsType.capture(scope, this.sourceEnd);
+	TypeBinding rhsType = this.expression.resolveType(scope);
+	if (lhsType == null || rhsType == null) {
+		return null;
+	}
+	
+	// check for assignment with no effect
+	Binding left = getDirectBinding(this.lhs);
+	if (left != null && left == getDirectBinding(this.expression)) {
+		scope.problemReporter().assignmentHasNoEffect(this, left.shortReadableName());
+	}
+
+	// Compile-time conversion of base-types : implicit narrowing integer into byte/short/character
+	// may require to widen the rhs expression at runtime
+	if (lhsType != rhsType) // must call before computeConversion() and typeMismatchError()
+		scope.compilationUnitScope().recordTypeConversion(lhsType, rhsType);
+	if ((this.expression.isConstantValueOfTypeAssignableToType(rhsType, lhsType)
+			|| (lhsType.isBaseType() && BaseTypeBinding.isWidening(lhsType.id, rhsType.id)))
+			|| rhsType.isCompatibleWith(lhsType)) {
+		this.expression.computeConversion(scope, lhsType, rhsType);
+		checkAssignment(scope, lhsType, rhsType);
+		if (this.expression instanceof CastExpression 
+				&& (this.expression.bits & ASTNode.UnnecessaryCast) == 0) {
+			CastExpression.checkNeedForAssignedCast(scope, lhsType, (CastExpression) this.expression);
+		}			
+		return this.resolvedType;
+	} else if (scope.isBoxingCompatibleWith(rhsType, lhsType) 
+						|| (rhsType.isBaseType()  // narrowing then boxing ?
+								&& scope.compilerOptions().sourceLevel >= ClassFileConstants.JDK1_5 // autoboxing
+								&& !lhsType.isBaseType()
+								&& this.expression.isConstantValueOfTypeAssignableToType(rhsType, scope.environment().computeBoxingType(lhsType)))) {
+		this.expression.computeConversion(scope, lhsType, rhsType);
+		if (this.expression instanceof CastExpression 
+				&& (this.expression.bits & ASTNode.UnnecessaryCast) == 0) {
+			CastExpression.checkNeedForAssignedCast(scope, lhsType, (CastExpression) this.expression);
+		}			
+		return this.resolvedType;
+	} 
+	scope.problemReporter().typeMismatchError(rhsType, lhsType, this.expression);
+	return lhsType;
+}
 
