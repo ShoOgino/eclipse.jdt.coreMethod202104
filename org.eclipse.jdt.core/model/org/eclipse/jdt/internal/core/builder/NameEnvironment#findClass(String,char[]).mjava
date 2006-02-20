@@ -1,35 +1,18 @@
 private NameEnvironmentAnswer findClass(String qualifiedTypeName, char[] typeName) {
-	if (initialTypeNames != null) {
-		// TODO (kent) should use a hash set to avoid linear search once massive source set is being processed
-		for (int i = 0, l = initialTypeNames.length; i < l; i++) {
-			if (qualifiedTypeName.equals(initialTypeNames[i])) {
-				if (isIncrementalBuild)
-					// catch the case that a type inside a source file has been renamed but other class files are looking for it
-					throw new AbortCompilation(true, new AbortIncrementalBuildException(qualifiedTypeName));
-				return null; // looking for a file which we know was provided at the beginning of the compilation
-			}
-		}
+	if (this.initialTypeNames != null && this.initialTypeNames.includes(qualifiedTypeName)) {
+		if (isIncrementalBuild)
+			// catch the case that a type inside a source file has been renamed but other class files are looking for it
+			throw new AbortCompilation(true, new AbortIncrementalBuildException(qualifiedTypeName));
+		return null; // looking for a file which we know was provided at the beginning of the compilation
 	}
 
-	if (additionalUnits != null && sourceLocations.length > 0) {
+	if (this.additionalUnits != null && this.sourceLocations.length > 0) {
 		// if an additional source file is waiting to be compiled, answer it BUT not if this is a secondary type search
 		// if we answer X.java & it no longer defines Y then the binary type looking for Y will think the class path is wrong
 		// let the recompile loop fix up dependents when the secondary type Y has been deleted from X.java
-		IPath qSourceFilePath = new Path(qualifiedTypeName); // doesn't have file extension
-		int qSegmentCount = qSourceFilePath.segmentCount();
-		next : for (int i = 0, l = additionalUnits.length; i < l; i++) {
-			SourceFile additionalUnit = additionalUnits[i];
-			IPath fullPath = additionalUnit.resource.getFullPath();
-			int prefixCount = additionalUnit.sourceLocation.sourceFolder.getFullPath().segmentCount();
-			if (qSegmentCount == fullPath.segmentCount() - prefixCount) {
-				for (int j = 0; j < qSegmentCount - 1; j++)
-					if (!qSourceFilePath.segment(j).equals(fullPath.segment(j + prefixCount)))
-						continue next;
-				if (!Util.equalsIgnoreJavaLikeExtension(fullPath.segment(qSegmentCount-1 + prefixCount), qSourceFilePath.segment(qSegmentCount-1)))
-					continue next;
-				return new NameEnvironmentAnswer(additionalUnit, null /*no access restriction*/);
-			}
-		}
+		SourceFile unit = (SourceFile) this.additionalUnits.get(qualifiedTypeName); // doesn't have file extension
+		if (unit != null)
+			return new NameEnvironmentAnswer(unit, null /*no access restriction*/);
 	}
 
 	String qBinaryFileName = qualifiedTypeName + SUFFIX_STRING_class;
