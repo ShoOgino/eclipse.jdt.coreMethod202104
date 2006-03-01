@@ -1,95 +1,94 @@
-	public TypeBinding resolveType(BlockScope scope) {
-
-		// Propagate the type checking to the arguments, and check if the constructor is defined.
-		constant = Constant.NotAConstant;
-		if (this.type == null) {
-			// initialization of an enum constant
-			this.resolvedType = scope.enclosingReceiverType();
-		} else {
-			this.resolvedType = this.type.resolveType(scope, true /* check bounds*/);
-			checkParameterizedAllocation: {
-				if (this.type instanceof ParameterizedQualifiedTypeReference) { // disallow new X<String>.Y<Integer>()
-					ReferenceBinding currentType = (ReferenceBinding)this.resolvedType;
-					if (currentType == null) return null;
-					do {
-						// isStatic() is answering true for toplevel types
-						if ((currentType.modifiers & ClassFileConstants.AccStatic) != 0) break checkParameterizedAllocation;
-						if (currentType.isRawType()) break checkParameterizedAllocation;
-					} while ((currentType = currentType.enclosingType())!= null);
-					ParameterizedQualifiedTypeReference qRef = (ParameterizedQualifiedTypeReference) this.type;
-					for (int i = qRef.typeArguments.length - 2; i >= 0; i--) {
-						if (qRef.typeArguments[i] != null) {
-							scope.problemReporter().illegalQualifiedParameterizedTypeAllocation(this.type, this.resolvedType);
-							break;
-						}
+public TypeBinding resolveType(BlockScope scope) {
+	// Propagate the type checking to the arguments, and check if the constructor is defined.
+	constant = Constant.NotAConstant;
+	if (this.type == null) {
+		// initialization of an enum constant
+		this.resolvedType = scope.enclosingReceiverType();
+	} else {
+		this.resolvedType = this.type.resolveType(scope, true /* check bounds*/);
+		checkParameterizedAllocation: {
+			if (this.type instanceof ParameterizedQualifiedTypeReference) { // disallow new X<String>.Y<Integer>()
+				ReferenceBinding currentType = (ReferenceBinding)this.resolvedType;
+				if (currentType == null) return null;
+				do {
+					// isStatic() is answering true for toplevel types
+					if ((currentType.modifiers & ClassFileConstants.AccStatic) != 0) break checkParameterizedAllocation;
+					if (currentType.isRawType()) break checkParameterizedAllocation;
+				} while ((currentType = currentType.enclosingType())!= null);
+				ParameterizedQualifiedTypeReference qRef = (ParameterizedQualifiedTypeReference) this.type;
+				for (int i = qRef.typeArguments.length - 2; i >= 0; i--) {
+					if (qRef.typeArguments[i] != null) {
+						scope.problemReporter().illegalQualifiedParameterizedTypeAllocation(this.type, this.resolvedType);
+						break;
 					}
 				}
 			}
 		}
-		// will check for null after args are resolved
-
-		// resolve type arguments (for generic constructor call)
-		if (this.typeArguments != null) {
-			int length = this.typeArguments.length;
-			boolean argHasError = false; // typeChecks all arguments
-			this.genericTypeArguments = new TypeBinding[length];
-			for (int i = 0; i < length; i++) {
-				if ((this.genericTypeArguments[i] = this.typeArguments[i].resolveType(scope, true /* check bounds*/)) == null) {
-					argHasError = true;
-				}
-			}
-			if (argHasError) {
-				return null;
-			}
-		}
-		
-		// buffering the arguments' types
-		boolean argsContainCast = false;
-		TypeBinding[] argumentTypes = Binding.NO_PARAMETERS;
-		if (arguments != null) {
-			boolean argHasError = false;
-			int length = arguments.length;
-			argumentTypes = new TypeBinding[length];
-			for (int i = 0; i < length; i++) {
-				Expression argument = this.arguments[i];
-				if (argument instanceof CastExpression) {
-					argument.bits |= DisableUnnecessaryCastCheck; // will check later on
-					argsContainCast = true;
-				}
-				if ((argumentTypes[i] = argument.resolveType(scope)) == null) {
-					argHasError = true;
-				}
-			}
-			if (argHasError) {
-				if (this.resolvedType instanceof ReferenceBinding) {
-					// record a best guess, for clients who need hint about possible contructor match
-					TypeBinding[] pseudoArgs = new TypeBinding[length];
-					for (int i = length; --i >= 0;)
-						pseudoArgs[i] = argumentTypes[i] == null ? this.resolvedType : argumentTypes[i]; // replace args with errors with receiver
-					this.binding = scope.findMethod((ReferenceBinding) this.resolvedType, TypeConstants.INIT, pseudoArgs, this);
-				}
-				return this.resolvedType;
-			}
-		}
-		if (this.resolvedType == null)
-			return null;
-
-		// null type denotes fake allocation for enum constant inits
-		if (this.type != null && !this.resolvedType.canBeInstantiated()) {
-			scope.problemReporter().cannotInstantiate(type, this.resolvedType);
-			return this.resolvedType;
-		}
-		ReferenceBinding allocationType = (ReferenceBinding) this.resolvedType;
-		if (!(binding = scope.getConstructor(allocationType, argumentTypes, this)).isValidBinding()) {
-			if (binding.declaringClass == null)
-				binding.declaringClass = allocationType;
-			scope.problemReporter().invalidConstructor(this, binding);
-			return this.resolvedType;
-		}
-		if (isMethodUseDeprecated(binding, scope, true))
-			scope.problemReporter().deprecatedMethod(binding, this);
-		checkInvocationArguments(scope, null, allocationType, this.binding, this.arguments, argumentTypes, argsContainCast, this);
-
-		return allocationType;
 	}
+	// will check for null after args are resolved
+
+	// resolve type arguments (for generic constructor call)
+	if (this.typeArguments != null) {
+		int length = this.typeArguments.length;
+		boolean argHasError = false; // typeChecks all arguments
+		this.genericTypeArguments = new TypeBinding[length];
+		for (int i = 0; i < length; i++) {
+			if ((this.genericTypeArguments[i] = this.typeArguments[i].resolveType(scope, true /* check bounds*/)) == null) {
+				argHasError = true;
+			}
+		}
+		if (argHasError) {
+			return null;
+		}
+	}
+	
+	// buffering the arguments' types
+	boolean argsContainCast = false;
+	TypeBinding[] argumentTypes = Binding.NO_PARAMETERS;
+	if (arguments != null) {
+		boolean argHasError = false;
+		int length = arguments.length;
+		argumentTypes = new TypeBinding[length];
+		for (int i = 0; i < length; i++) {
+			Expression argument = this.arguments[i];
+			if (argument instanceof CastExpression) {
+				argument.bits |= DisableUnnecessaryCastCheck; // will check later on
+				argsContainCast = true;
+			}
+			if ((argumentTypes[i] = argument.resolveType(scope)) == null) {
+				argHasError = true;
+			}
+		}
+		if (argHasError) {
+			if (this.resolvedType instanceof ReferenceBinding) {
+				// record a best guess, for clients who need hint about possible contructor match
+				TypeBinding[] pseudoArgs = new TypeBinding[length];
+				for (int i = length; --i >= 0;)
+					pseudoArgs[i] = argumentTypes[i] == null ? this.resolvedType : argumentTypes[i]; // replace args with errors with receiver
+				this.binding = scope.findMethod((ReferenceBinding) this.resolvedType, TypeConstants.INIT, pseudoArgs, this);
+			}
+			return this.resolvedType;
+		}
+	}
+	if (this.resolvedType == null)
+		return null;
+
+	// null type denotes fake allocation for enum constant inits
+	if (this.type != null && !this.resolvedType.canBeInstantiated()) {
+		scope.problemReporter().cannotInstantiate(type, this.resolvedType);
+		return this.resolvedType;
+	}
+	ReferenceBinding allocationType = (ReferenceBinding) this.resolvedType;
+	if (!(binding = scope.getConstructor(allocationType, argumentTypes, this)).isValidBinding()) {
+		if (binding.declaringClass == null)
+			binding.declaringClass = allocationType;
+		scope.problemReporter().invalidConstructor(this, binding);
+		return this.resolvedType;
+	}
+	if (isMethodUseDeprecated(binding, scope, true))
+		scope.problemReporter().deprecatedMethod(binding, this);
+	checkInvocationArguments(scope, null, allocationType, this.binding, this.arguments, argumentTypes, argsContainCast, this);
+
+	return allocationType;
+}
 
