@@ -1,51 +1,50 @@
-	/* 
-	 * Access emulation for a local type
-	 * force to emulation of access to direct enclosing instance.
-	 * By using the initializer scope, we actually only request an argument emulation, the
-	 * field is not added until actually used. However we will force allocations to be qualified
-	 * with an enclosing instance.
-	 * 15.9.2
-	 */
-	public void manageEnclosingInstanceAccessIfNecessary(BlockScope currentScope, FlowInfo flowInfo) {
+/* 
+ * Access emulation for a local type
+ * force to emulation of access to direct enclosing instance.
+ * By using the initializer scope, we actually only request an argument emulation, the
+ * field is not added until actually used. However we will force allocations to be qualified
+ * with an enclosing instance.
+ * 15.9.2
+ */
+public void manageEnclosingInstanceAccessIfNecessary(BlockScope currentScope, FlowInfo flowInfo) {
+	if ((flowInfo.tagBits & FlowInfo.UNREACHABLE) != 0) return;
+	NestedTypeBinding nestedType = (NestedTypeBinding) this.binding;
+	
+	MethodScope methodScope = currentScope.methodScope();
+	if (!methodScope.isStatic && !methodScope.isConstructorCall){
+		nestedType.addSyntheticArgumentAndField(nestedType.enclosingType());	
+	}
+	// add superclass enclosing instance arg for anonymous types (if necessary)
+	if (nestedType.isAnonymousType()) {
+		ReferenceBinding superclassBinding = (ReferenceBinding)nestedType.superclass.erasure();
+		if (superclassBinding.enclosingType() != null && !superclassBinding.isStatic()) {
+			if (!superclassBinding.isLocalType()
+					|| ((NestedTypeBinding)superclassBinding).getSyntheticField(superclassBinding.enclosingType(), true) != null){
 
- 		if ((flowInfo.tagBits & FlowInfo.UNREACHABLE) != 0) return;
-		NestedTypeBinding nestedType = (NestedTypeBinding) binding;
-		
-		MethodScope methodScope = currentScope.methodScope();
-		if (!methodScope.isStatic && !methodScope.isConstructorCall){
-			nestedType.addSyntheticArgumentAndField(nestedType.enclosingType());	
+				nestedType.addSyntheticArgument(superclassBinding.enclosingType());	
+			}
 		}
-		// add superclass enclosing instance arg for anonymous types (if necessary)
-		if (nestedType.isAnonymousType()) {
-			ReferenceBinding superclassBinding = (ReferenceBinding)nestedType.superclass.erasure();
-			if (superclassBinding.enclosingType() != null && !superclassBinding.isStatic()) {
-				if (!superclassBinding.isLocalType()
-						|| ((NestedTypeBinding)superclassBinding).getSyntheticField(superclassBinding.enclosingType(), true) != null){
-
-					nestedType.addSyntheticArgument(superclassBinding.enclosingType());	
-				}
-			}
-			// From 1.5 on, provide access to enclosing instance synthetic constructor argument when declared inside constructor call
-			// only for direct anonymous type
-			//public class X {
-			//	void foo() {}
-			//	class M {
-			//		M(Object o) {}
-			//		M() { this(new Object() { void baz() { foo(); }}); } // access to #foo() indirects through constructor synthetic arg: val$this$0
-			//	}
-			//}
-			if (!methodScope.isStatic && methodScope.isConstructorCall && currentScope.compilerOptions().complianceLevel >= ClassFileConstants.JDK1_5) {
-				ReferenceBinding enclosing = nestedType.enclosingType();
-				if (enclosing.isNestedType()) {
-					NestedTypeBinding nestedEnclosing = (NestedTypeBinding)enclosing;
+		// From 1.5 on, provide access to enclosing instance synthetic constructor argument when declared inside constructor call
+		// only for direct anonymous type
+		//public class X {
+		//	void foo() {}
+		//	class M {
+		//		M(Object o) {}
+		//		M() { this(new Object() { void baz() { foo(); }}); } // access to #foo() indirects through constructor synthetic arg: val$this$0
+		//	}
+		//}
+		if (!methodScope.isStatic && methodScope.isConstructorCall && currentScope.compilerOptions().complianceLevel >= ClassFileConstants.JDK1_5) {
+			ReferenceBinding enclosing = nestedType.enclosingType();
+			if (enclosing.isNestedType()) {
+				NestedTypeBinding nestedEnclosing = (NestedTypeBinding)enclosing;
 //					if (nestedEnclosing.findSuperTypeErasingTo(nestedEnclosing.enclosingType()) == null) { // only if not inheriting
-						SyntheticArgumentBinding syntheticEnclosingInstanceArgument = nestedEnclosing.getSyntheticArgument(nestedEnclosing.enclosingType(), true);
-						if (syntheticEnclosingInstanceArgument != null) {
-							nestedType.addSyntheticArgumentAndField(syntheticEnclosingInstanceArgument);	
-						}
+					SyntheticArgumentBinding syntheticEnclosingInstanceArgument = nestedEnclosing.getSyntheticArgument(nestedEnclosing.enclosingType(), true);
+					if (syntheticEnclosingInstanceArgument != null) {
+						nestedType.addSyntheticArgumentAndField(syntheticEnclosingInstanceArgument);	
 					}
+				}
 //				}
-			}
 		}
 	}
+}
 
