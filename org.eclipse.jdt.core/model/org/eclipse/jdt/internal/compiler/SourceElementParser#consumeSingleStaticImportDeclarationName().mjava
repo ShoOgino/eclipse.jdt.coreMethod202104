@@ -1,23 +1,56 @@
 protected void consumeSingleStaticImportDeclarationName() {
 	// SingleTypeImportDeclarationName ::= 'import' 'static' Name
-	super.consumeSingleStaticImportDeclarationName();
-	ImportReference impt = (ImportReference)astStack[astPtr];
+	ImportReference impt;
+	int length;
+	char[][] tokens = new char[length = this.identifierLengthStack[this.identifierLengthPtr--]][];
+	this.identifierPtr -= length;
+	long[] positions = new long[length];
+	System.arraycopy(this.identifierStack, this.identifierPtr + 1, tokens, 0, length);
+	System.arraycopy(this.identifierPositionStack, this.identifierPtr + 1, positions, 0, length);
+	pushOnAstStack(impt = newImportReference(tokens, positions, false, ClassFileConstants.AccStatic));
+	
+	this.modifiers = ClassFileConstants.AccDefault;
+	this.modifiersSourceStart = -1; // <-- see comment into modifiersFlag(int)
+	
+	if (this.currentToken == TokenNameSEMICOLON){
+		impt.declarationSourceEnd = this.scanner.currentPosition - 1;
+	} else {
+		impt.declarationSourceEnd = impt.sourceEnd;
+	}
+	impt.declarationEnd = impt.declarationSourceEnd;
+	//this.endPosition is just before the ;
+	impt.declarationSourceStart = this.intStack[this.intPtr--];
+	
+	if(!this.statementRecoveryActivated &&
+			this.options.sourceLevel < ClassFileConstants.JDK1_5 &&
+			this.lastErrorEndPositionBeforeRecovery < this.scanner.currentPosition) {
+		impt.modifiers = ClassFileConstants.AccDefault; // convert the static import reference to a non-static importe reference
+		this.problemReporter().invalidUsageOfStaticImports(impt);
+	}
+	
+	// recovery
+	if (this.currentElement != null){
+		this.lastCheckPoint = impt.declarationSourceEnd+1;
+		this.currentElement = this.currentElement.add(impt, 0);
+		this.lastIgnoredToken = -1;
+		this.restartRecovery = true; // used to avoid branching back into the regular automaton		
+	}
 	if (reportReferenceInfo) {
 		// Name for static import is TypeName '.' Identifier
 		// => accept unknown ref on identifier
-		int length = impt.tokens.length-1;
-		int start = (int) (impt.sourcePositions[length] >>> 32);
-		char[] last = impt.tokens[length];
+		int tokensLength = impt.tokens.length-1;
+		int start = (int) (impt.sourcePositions[tokensLength] >>> 32);
+		char[] last = impt.tokens[tokensLength];
 		// accept all possible kind for last name, index users will have to select the right one...
 		// see bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=86901
 		requestor.acceptFieldReference(last, start);
 		requestor.acceptMethodReference(last, 0,start);
 		requestor.acceptTypeReference(last, start);
 		// accept type name
-		if (length > 0) {
-			char[][] compoundName = new char[length][];
-			System.arraycopy(impt.tokens, 0, compoundName, 0, length);
-			int end = (int) impt.sourcePositions[length-1];
+		if (tokensLength > 0) {
+			char[][] compoundName = new char[tokensLength][];
+			System.arraycopy(impt.tokens, 0, compoundName, 0, tokensLength);
+			int end = (int) impt.sourcePositions[tokensLength-1];
 			requestor.acceptTypeReference(compoundName, impt.sourceStart, end);
 		}
 	}
