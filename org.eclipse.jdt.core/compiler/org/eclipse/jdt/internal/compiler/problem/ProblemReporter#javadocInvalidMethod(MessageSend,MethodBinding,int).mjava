@@ -16,31 +16,34 @@ public void javadocInvalidMethod(MessageSend messageSend, MethodBinding method, 
 			id = IProblem.JavadocUndefinedMethod;
 			problemMethod = (ProblemMethodBinding) method;
 			if (problemMethod.closestMatch != null) {
-					String closestParameterTypeNames = typesAsString(problemMethod.closestMatch.isVarargs(), problemMethod.closestMatch.parameters, false);
-					String parameterTypeNames = typesAsString(method.isVarargs(), method.parameters, false);
-					String closestParameterTypeShortNames = typesAsString(problemMethod.closestMatch.isVarargs(), problemMethod.closestMatch.parameters, true);
-					String parameterTypeShortNames = typesAsString(method.isVarargs(), method.parameters, true);
-					if (closestParameterTypeShortNames.equals(parameterTypeShortNames)){
-						closestParameterTypeShortNames = closestParameterTypeNames;
-						parameterTypeShortNames = parameterTypeNames;
-					}
-					this.handle(
-						IProblem.JavadocParameterMismatch,
-						new String[] {
-							new String(problemMethod.closestMatch.declaringClass.readableName()),
-							new String(problemMethod.closestMatch.selector),
-							closestParameterTypeNames,
-							parameterTypeNames 
-						},
-						new String[] {
-							new String(problemMethod.closestMatch.declaringClass.shortReadableName()),
-							new String(problemMethod.closestMatch.selector),
-							closestParameterTypeShortNames,
-							parameterTypeShortNames
-						},
-						(int) (messageSend.nameSourcePosition >>> 32),
-						(int) messageSend.nameSourcePosition);
-					return;
+				int severity = computeSeverity(IProblem.JavadocParameterMismatch);
+				if (severity == ProblemSeverities.Ignore) return;
+				String closestParameterTypeNames = typesAsString(problemMethod.closestMatch.isVarargs(), problemMethod.closestMatch.parameters, false);
+				String parameterTypeNames = typesAsString(method.isVarargs(), method.parameters, false);
+				String closestParameterTypeShortNames = typesAsString(problemMethod.closestMatch.isVarargs(), problemMethod.closestMatch.parameters, true);
+				String parameterTypeShortNames = typesAsString(method.isVarargs(), method.parameters, true);
+				if (closestParameterTypeShortNames.equals(parameterTypeShortNames)){
+					closestParameterTypeShortNames = closestParameterTypeNames;
+					parameterTypeShortNames = parameterTypeNames;
+				}
+				this.handle(
+					IProblem.JavadocParameterMismatch,
+					new String[] {
+						new String(problemMethod.closestMatch.declaringClass.readableName()),
+						new String(problemMethod.closestMatch.selector),
+						closestParameterTypeNames,
+						parameterTypeNames 
+					},
+					new String[] {
+						new String(problemMethod.closestMatch.declaringClass.shortReadableName()),
+						new String(problemMethod.closestMatch.selector),
+						closestParameterTypeShortNames,
+						parameterTypeShortNames
+					},
+					severity,
+					(int) (messageSend.nameSourcePosition >>> 32),
+					(int) messageSend.nameSourcePosition);
+				return;
 			}
 			break;
 		case ProblemReasons.NotVisible :
@@ -50,6 +53,8 @@ public void javadocInvalidMethod(MessageSend messageSend, MethodBinding method, 
 			id = IProblem.JavadocAmbiguousMethod;
 			break;
 		case ProblemReasons.ParameterBoundMismatch :
+			int severity = computeSeverity(IProblem.JavadocGenericMethodTypeArgumentMismatch);
+			if (severity == ProblemSeverities.Ignore) return;
 			problemMethod = (ProblemMethodBinding) method;
 			ParameterizedGenericMethodBinding substitutedMethod = (ParameterizedGenericMethodBinding) problemMethod.closestMatch;
 			shownMethod = substitutedMethod.original();
@@ -76,15 +81,19 @@ public void javadocInvalidMethod(MessageSend messageSend, MethodBinding method, 
 				        new String(inferredTypeArgument.shortReadableName()), 
 				        new String(typeParameter.sourceName), 
 				        parameterBoundAsString(typeParameter, true) },
+				severity,
 				(int) (messageSend.nameSourcePosition >>> 32),
 				(int) messageSend.nameSourcePosition);		    
 			return;
 		case ProblemReasons.TypeParameterArityMismatch :
 			problemMethod = (ProblemMethodBinding) method;
 			shownMethod = problemMethod.closestMatch;
-			if (shownMethod.typeVariables == Binding.NO_TYPE_VARIABLES) {
+			boolean noTypeVariables = shownMethod.typeVariables == Binding.NO_TYPE_VARIABLES;
+			severity = computeSeverity(noTypeVariables ? IProblem.JavadocNonGenericMethod : IProblem.JavadocIncorrectArityForParameterizedMethod);
+			if (severity == ProblemSeverities.Ignore) return;
+			if (noTypeVariables) {
 				this.handle(
-					IProblem.JavadocNonGenericMethod ,
+					IProblem.JavadocNonGenericMethod,
 					new String[] { 
 					        new String(shownMethod.selector),
 					        typesAsString(shownMethod.isVarargs(), shownMethod.parameters, false), 
@@ -95,11 +104,12 @@ public void javadocInvalidMethod(MessageSend messageSend, MethodBinding method, 
 					        typesAsString(shownMethod.isVarargs(), shownMethod.parameters, true), 
 					        new String(shownMethod.declaringClass.shortReadableName()), 
 					        typesAsString(method.isVarargs(), method.parameters, true) },
+					severity,
 					(int) (messageSend.nameSourcePosition >>> 32),
 					(int) messageSend.nameSourcePosition);		    
 			} else {
 				this.handle(
-					IProblem.JavadocIncorrectArityForParameterizedMethod  ,
+					IProblem.JavadocIncorrectArityForParameterizedMethod,
 					new String[] { 
 					        new String(shownMethod.selector),
 					        typesAsString(shownMethod.isVarargs(), shownMethod.parameters, false), 
@@ -112,11 +122,14 @@ public void javadocInvalidMethod(MessageSend messageSend, MethodBinding method, 
 					        new String(shownMethod.declaringClass.shortReadableName()), 
 							typesAsString(false, shownMethod.typeVariables, true),
 					        typesAsString(method.isVarargs(), method.parameters, true) },
+					severity,
 					(int) (messageSend.nameSourcePosition >>> 32),
 					(int) messageSend.nameSourcePosition);		    
 			}
 			return;
 		case ProblemReasons.ParameterizedMethodTypeMismatch :
+			severity = computeSeverity(IProblem.JavadocParameterizedMethodArgumentTypeMismatch);
+			if (severity == ProblemSeverities.Ignore) return;
 			problemMethod = (ProblemMethodBinding) method;
 			shownMethod = problemMethod.closestMatch;
 			this.handle(
@@ -133,14 +146,17 @@ public void javadocInvalidMethod(MessageSend messageSend, MethodBinding method, 
 				        new String(shownMethod.declaringClass.shortReadableName()), 
 						typesAsString(false, ((ParameterizedGenericMethodBinding)shownMethod).typeArguments, true),
 				        typesAsString(method.isVarargs(), method.parameters, true) },
+				severity,
 				(int) (messageSend.nameSourcePosition >>> 32),
 				(int) messageSend.nameSourcePosition);		    
 			return;
 		case ProblemReasons.TypeArgumentsForRawGenericMethod :
+			severity = computeSeverity(IProblem.JavadocTypeArgumentsForRawGenericMethod);
+			if (severity == ProblemSeverities.Ignore) return;
 			problemMethod = (ProblemMethodBinding) method;
 			shownMethod = problemMethod.closestMatch;
 			this.handle(
-				IProblem.JavadocTypeArgumentsForRawGenericMethod ,
+				IProblem.JavadocTypeArgumentsForRawGenericMethod,
 				new String[] { 
 				        new String(shownMethod.selector),
 				        typesAsString(shownMethod.isVarargs(), shownMethod.parameters, false), 
@@ -151,6 +167,7 @@ public void javadocInvalidMethod(MessageSend messageSend, MethodBinding method, 
 				        typesAsString(shownMethod.isVarargs(), shownMethod.parameters, true), 
 				        new String(shownMethod.declaringClass.shortReadableName()), 
 				        typesAsString(method.isVarargs(), method.parameters, true) },
+				severity,
 				(int) (messageSend.nameSourcePosition >>> 32),
 				(int) messageSend.nameSourcePosition);		       
 			return;
@@ -159,6 +176,8 @@ public void javadocInvalidMethod(MessageSend messageSend, MethodBinding method, 
 			needImplementation(); // want to fail to see why we were here...
 			break;
 	}
+	int severity = computeSeverity(id);
+	if (severity == ProblemSeverities.Ignore) return;
 	// report issue
 	this.handle(
 		id,
@@ -168,6 +187,7 @@ public void javadocInvalidMethod(MessageSend messageSend, MethodBinding method, 
 		new String[] {
 			new String(method.declaringClass.shortReadableName()),
 			new String(method.selector), typesAsString(method.isVarargs(), method.parameters, true)},
+		severity,
 		(int) (messageSend.nameSourcePosition >>> 32),
 		(int) messageSend.nameSourcePosition);
 }
