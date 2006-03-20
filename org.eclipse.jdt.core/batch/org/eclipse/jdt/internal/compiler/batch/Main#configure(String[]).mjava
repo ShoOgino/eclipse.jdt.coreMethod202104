@@ -20,14 +20,13 @@
 		final int INSIDE_SOURCE_PATH = 11;
 
 		final int DEFAULT = 0;
-		int DEFAULT_SIZE_CLASSPATH = 4;
+		final int DEFAULT_SIZE_CLASSPATH = 4;
 		ArrayList bootclasspaths = new ArrayList(DEFAULT_SIZE_CLASSPATH),
 			extdirsClasspaths = new ArrayList(DEFAULT_SIZE_CLASSPATH),
 			extdirsNames = new ArrayList(DEFAULT_SIZE_CLASSPATH),
 			sourcepathClasspaths = new ArrayList(DEFAULT_SIZE_CLASSPATH),
 			classpaths = new ArrayList(DEFAULT_SIZE_CLASSPATH);
-		String currentClasspathName = null;
-		ArrayList currentRuleSpecs = new ArrayList(DEFAULT_SIZE_CLASSPATH);
+		
 		int index = -1, filesCount = 0, argCount = argv.length;
 		int mode = DEFAULT;
 		this.repetitions = 0;
@@ -882,95 +881,19 @@
 					mode = DEFAULT;
 					continue;
 				case INSIDE_CLASSPATH:
+					classpaths.add(currentArg);
+					mode = DEFAULT;
+					continue;
 				case INSIDE_BOOTCLASSPATH:
+					bootclasspaths.add(currentArg);
+					mode = DEFAULT;
+					continue;
 				case INSIDE_SOURCE_PATH :
-					StringTokenizer tokenizer = new StringTokenizer(currentArg,
-							File.pathSeparator + "[]", true); //$NON-NLS-1$
-					// state machine
-					final int start = 0; 
-					final int readyToClose = 1;
-					// 'path' 'path1[rule];path2'
-					final int readyToCloseEndingWithRules = 2;
-					// 'path[rule]' 'path1;path2[rule]'
-					final int readyToCloseOrOtherEntry = 3;
-					// 'path[rule];' 'path;' 'path1;path2;'
-					final int rulesNeedAnotherRule = 4;
-					// 'path[rule1;'
-					final int rulesStart = 5;
-					// 'path[' 'path1;path2['
-					final int rulesReadyToClose = 6;
-					// 'path[rule' 'path[rule1;rule2'
-					final int error = 99;
-					int state = start;
-					String token = null;
-					while (tokenizer.hasMoreTokens()) {
-						token = tokenizer.nextToken();
-						if (token.equals(File.pathSeparator)) {
-							switch (state) {
-							case start:
-								break;
-							case readyToClose:
-							case readyToCloseEndingWithRules:
-							case readyToCloseOrOtherEntry:
-								state = readyToCloseOrOtherEntry;
-								addNewEntry(INSIDE_CLASSPATH, INSIDE_SOURCE_PATH, bootclasspaths, classpaths, sourcepathClasspaths, currentClasspathName, currentRuleSpecs, mode, customEncoding);
-								currentRuleSpecs.clear();
-								break;
-							case rulesReadyToClose:
-								state = rulesNeedAnotherRule;
-								break;
-							default:
-								state = error;
-							}
-						} else if (token.equals("[")) { //$NON-NLS-1$
-							switch (state) {
-							case readyToClose:
-								state = rulesStart;
-								break;
-							default:
-								state = error;
-							}
-						} else if (token.equals("]")) { //$NON-NLS-1$
-							switch (state) {
-							case rulesReadyToClose:
-								state = readyToCloseEndingWithRules;
-								break;
-							default:
-								state = error;
-							}
-	
-						} else {
-							// regular word
-							switch (state) {
-							case start:
-							case readyToCloseOrOtherEntry:
-								state = readyToClose;
-								currentClasspathName = token;
-								break;
-							case rulesNeedAnotherRule:
-							case rulesStart:
-								state = rulesReadyToClose;
-								currentRuleSpecs.add(token);
-								break;
-							default:
-								state = error;
-							}
-						}
-					}
-					switch(state) {
-						case readyToClose :
-						case readyToCloseEndingWithRules :
-						case readyToCloseOrOtherEntry :
-							addNewEntry(INSIDE_CLASSPATH, INSIDE_SOURCE_PATH, bootclasspaths, classpaths, sourcepathClasspaths, currentClasspathName, currentRuleSpecs, mode, customEncoding);
-							break;
-						default :
-							// we go on anyway
-							this.logger.logIncorrectClasspath(currentArg);
-					}
+					sourcepathClasspaths.add(currentArg);
 					mode = DEFAULT;
 					continue;
 				case INSIDE_EXT_DIRS :
-					tokenizer = new StringTokenizer(currentArg,	File.pathSeparator, false);
+					StringTokenizer tokenizer = new StringTokenizer(currentArg,	File.pathSeparator, false);
 					while (tokenizer.hasMoreTokens())
 						extdirsNames.add(tokenizer.nextToken());
 					if (extdirsNames.size() == 0) // empty entry
@@ -1028,7 +951,6 @@
 			mode = DEFAULT;
 			continue;
 		}
-		
 
 		if (this.log != null) {
 			this.logger.setLog(this.log);
@@ -1043,38 +965,17 @@
 			return;
 		}
 
-		if (filesCount != 0)
-			System.arraycopy(
-				this.filenames,
-				0,
-				(this.filenames = new String[filesCount]),
-				0,
-				filesCount);
-		if (classpaths.size() == 0) {
-			// no user classpath specified.
-			String classProp = System.getProperty("java.class.path"); //$NON-NLS-1$
-			if ((classProp == null) || (classProp.length() == 0)) {
-				this.logger.logNoClasspath();
-				classpaths.add(FileSystem.getClasspath(System.getProperty("user.dir"), customEncoding, 0, null));//$NON-NLS-1$
-			} else {
-				StringTokenizer tokenizer = new StringTokenizer(classProp, File.pathSeparator);
-				String token;
-				while (tokenizer.hasMoreTokens()) {
-					token = tokenizer.nextToken();
-					FileSystem.Classpath currentClasspath = FileSystem
-							.getClasspath(token, customEncoding, 0, null);
-					if (currentClasspath != null) {
-						classpaths.add(currentClasspath);
-					} else {
-						this.logger.logIncorrectClasspath(token);
-						// should not happen - we go on anyway
-					}
-				}
-			}
-		}
-		
+		// process bootclasspath, classpath and sourcepaths
 	 	final File javaHome = getJavaHome();
-		if (bootclasspaths.size() == 0) {
+	 	final int bootclasspathsSize = bootclasspaths.size();
+		if (bootclasspathsSize != 0) {
+			String[] paths = new String[bootclasspathsSize];
+			bootclasspaths.toArray(paths);
+			bootclasspaths.clear();
+			for (int i = 0; i < bootclasspathsSize; i++) {
+				processPathEntries(DEFAULT_SIZE_CLASSPATH, bootclasspaths, paths[i], customEncoding, false);
+			}
+		} else {
 			/* no bootclasspath specified
 			 * we can try to retrieve the default librairies of the VM used to run
 			 * the batch compiler
@@ -1118,8 +1019,55 @@
 					}
 				}
 	 		}
-	 	 }
+		}
+		final int classpathsSize = classpaths.size();
+		if (classpaths.size() != 0) {
+			String[] paths = new String[classpathsSize];
+			classpaths.toArray(paths);
+			classpaths.clear();
+			for (int i = 0; i < classpathsSize; i++) {
+				processPathEntries(DEFAULT_SIZE_CLASSPATH, classpaths, paths[i], customEncoding, false);
+			}			
+		} else {
+			// no user classpath specified.
+			String classProp = System.getProperty("java.class.path"); //$NON-NLS-1$
+			if ((classProp == null) || (classProp.length() == 0)) {
+				this.logger.logNoClasspath();
+				classpaths.add(FileSystem.getClasspath(System.getProperty("user.dir"), customEncoding, 0, null));//$NON-NLS-1$
+			} else {
+				StringTokenizer tokenizer = new StringTokenizer(classProp, File.pathSeparator);
+				String token;
+				while (tokenizer.hasMoreTokens()) {
+					token = tokenizer.nextToken();
+					FileSystem.Classpath currentClasspath = FileSystem
+							.getClasspath(token, customEncoding, 0, null);
+					if (currentClasspath != null) {
+						classpaths.add(currentClasspath);
+					} else {
+						this.logger.logIncorrectClasspath(token);
+						// should not happen - we go on anyway
+					}
+				}
+			}
+		}
+		final int sourcepathClasspathsSize = sourcepathClasspaths.size();
+		if (sourcepathClasspathsSize != 0) {
+			String[] paths = new String[sourcepathClasspathsSize];
+			sourcepathClasspaths.toArray(paths);
+			sourcepathClasspaths.clear();
+			for (int i = 0; i < sourcepathClasspathsSize; i++) {
+				processPathEntries(DEFAULT_SIZE_CLASSPATH, sourcepathClasspaths, paths[i], customEncoding, true);
+			}			
+		}
 		
+		if (filesCount != 0)
+			System.arraycopy(
+				this.filenames,
+				0,
+				(this.filenames = new String[filesCount]),
+				0,
+				filesCount);
+
 		/*
 		 * Feed extdirsNames according to:
 		 * - -extdirs first if present;
