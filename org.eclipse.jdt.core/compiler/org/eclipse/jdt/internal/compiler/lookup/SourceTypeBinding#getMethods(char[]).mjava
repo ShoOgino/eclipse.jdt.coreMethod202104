@@ -1,37 +1,49 @@
 // NOTE: the return type, arg & exception types of each method of a source type are resolved when needed
 public MethodBinding[] getMethods(char[] selector) {
-	int selectorLength = selector.length;
-	boolean methodsAreResolved = (tagBits & TagBits.AreMethodsComplete) != 0; // have resolved all arg types & return type of the methods
-	java.util.ArrayList matchingMethods = null;
-	for (int i = 0, length = methods.length; i < length; i++) {
-		MethodBinding method = methods[i];
-		if (method.selector.length == selectorLength && CharOperation.equals(method.selector, selector)) {
-			if (!methodsAreResolved && resolveTypesFor(method) == null || method.returnType == null) {
+	if ((this.tagBits & TagBits.AreMethodsComplete) != 0) {
+		long range;
+		if ((range = ReferenceBinding.binarySearch(selector, this.methods)) >= 0) {
+			int start = (int) range, end = (int) (range >> 32);
+			int length = end - start + 1;
+			MethodBinding[] result;
+			System.arraycopy(this.methods, start, result = new MethodBinding[length], 0, length);
+			return result;
+		} else {
+			return Binding.NO_METHODS;			
+		}
+	}
+	// lazily sort methods
+	if ((this.tagBits & TagBits.AreMethodsSorted) == 0) {
+		int length = this.methods.length;
+		if (length > 1) 	ReferenceBinding.sortMethods(this.methods, 0, length - 1);
+		this.tagBits |= TagBits.AreMethodsSorted;
+	}
+	MethodBinding[] result;	
+	long range;
+	if ((range = ReferenceBinding.binarySearch(selector, this.methods)) >= 0) {
+		int start = (int) range, end = (int) (range >> 32);
+		for (int i = start; i <= end; i++) {
+			MethodBinding method = this.methods[i];
+			if (resolveTypesFor(method) == null || method.returnType == null) {
 				methods();
 				return getMethods(selector); // try again since the problem methods have been removed
 			}
-			if (matchingMethods == null)
-				matchingMethods = new java.util.ArrayList(2);
-			matchingMethods.add(method);
 		}
-	}
-	if (matchingMethods == null)
+		int length = end - start + 1;
+		System.arraycopy(this.methods, start, result = new MethodBinding[length], 0, length);
+	} else {
 		return Binding.NO_METHODS;
-
-	MethodBinding[] result = new MethodBinding[matchingMethods.size()];
-	matchingMethods.toArray(result);
-	if (!methodsAreResolved) {
-		boolean isSource15 = this.scope.compilerOptions().sourceLevel >= ClassFileConstants.JDK1_5;
-		for (int i = 0, length = result.length - 1; i < length; i++) {
-			MethodBinding method = result[i];
-			for (int j = length; j > i; j--) {
-				boolean paramsMatch = isSource15
-					? method.areParameterErasuresEqual(result[j])
-					: method.areParametersEqual(result[j]);
-				if (paramsMatch) {
-					methods();
-					return getMethods(selector); // try again since the duplicate methods have been removed
-				}
+	}
+	boolean isSource15 = this.scope.compilerOptions().sourceLevel >= ClassFileConstants.JDK1_5;
+	for (int i = 0, length = result.length - 1; i < length; i++) {
+		MethodBinding method = result[i];
+		for (int j = length; j > i; j--) {
+			boolean paramsMatch = isSource15
+				? method.areParameterErasuresEqual(result[j])
+				: method.areParametersEqual(result[j]);
+			if (paramsMatch) {
+				methods();
+				return getMethods(selector); // try again since the duplicate methods have been removed
 			}
 		}
 	}

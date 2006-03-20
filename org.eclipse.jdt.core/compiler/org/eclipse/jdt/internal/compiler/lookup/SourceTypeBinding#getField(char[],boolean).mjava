@@ -1,26 +1,37 @@
-// NOTE: the type of a field of a source type is resolved when needed
+//NOTE: the type of a field of a source type is resolved when needed
 public FieldBinding getField(char[] fieldName, boolean needResolve) {
+	
+	if ((this.tagBits & TagBits.AreFieldsComplete) != 0) {
+		return ReferenceBinding.binarySearch(fieldName, this.fields);
+	}
+	// lazily sort fields
+	if ((this.tagBits & TagBits.AreFieldsSorted) == 0) {
+		int length = this.fields.length;
+		if (length > 1) 	ReferenceBinding.sortFields(this.fields, 0, length - 1);
+		this.tagBits |= TagBits.AreFieldsSorted;
+	}		
 	// always resolve anyway on source types
-	int fieldLength = fieldName.length;
-	for (int i = 0, length = fields.length; i < length; i++) {
-		FieldBinding field = fields[i];
-		if (field.name.length == fieldLength && CharOperation.equals(field.name, fieldName)) {
-			FieldBinding result = null;
-			try {
-				result = resolveTypeFor(field);
-				return result;
-			} finally {
-				if (result == null) {
-					// ensure fields are consistent reqardless of the error
-					int newSize = fields.length - 1;
-					if (newSize == 0) {
-						fields = Binding.NO_FIELDS;
-					} else {
-						FieldBinding[] newFields = new FieldBinding[newSize];
-						System.arraycopy(fields, 0, newFields, 0, i);
-						System.arraycopy(fields, i + 1, newFields, i, newSize - i);
-						fields = newFields;
+	FieldBinding field = ReferenceBinding.binarySearch(fieldName, this.fields);
+	if (field != null) {
+		FieldBinding result = null;
+		try {
+			result = resolveTypeFor(field);
+			return result;
+		} finally {
+			if (result == null) {
+				// ensure fields are consistent reqardless of the error
+				int newSize = this.fields.length - 1;
+				if (newSize == 0) {
+					this.fields = Binding.NO_FIELDS;
+				} else {
+					FieldBinding[] newFields = new FieldBinding[newSize];
+					int index = 0;
+					for (int i = 0, length = this.fields.length; i < length; i++) {
+						FieldBinding f = this.fields[i];
+						if (f == field) continue;
+						newFields[index++] = f;
 					}
+					this.fields = newFields;
 				}
 			}
 		}
