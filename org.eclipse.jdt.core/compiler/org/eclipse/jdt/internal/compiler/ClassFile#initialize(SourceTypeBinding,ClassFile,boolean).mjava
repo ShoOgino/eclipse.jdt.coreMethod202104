@@ -1,27 +1,10 @@
-	/**
-	 * INTERNAL USE-ONLY
-	 * This methods creates a new instance of the receiver.
-	 *
-	 * @param aType org.eclipse.jdt.internal.compiler.lookup.SourceTypeBinding
-	 * @param enclosingClassFile org.eclipse.jdt.internal.compiler.ClassFile
-	 * @param creatingProblemType <CODE>boolean</CODE>
-	 */
-	public ClassFile(
-		SourceTypeBinding aType,
-		ClassFile enclosingClassFile,
-		boolean creatingProblemType) {
-	    
-		this.referenceBinding = aType;
-		initByteArrays();
-
+	public void initialize(SourceTypeBinding aType, ClassFile parentClassFile, boolean createProblemType) {
 		// generate the magic numbers inside the header
 		header[headerOffset++] = (byte) (0xCAFEBABEL >> 24);
 		header[headerOffset++] = (byte) (0xCAFEBABEL >> 16);
 		header[headerOffset++] = (byte) (0xCAFEBABEL >> 8);
 		header[headerOffset++] = (byte) (0xCAFEBABEL >> 0);
 		
-		final CompilerOptions options = aType.scope.compilerOptions();
-		this.targetJDK = options.targetJDK;
 		header[headerOffset++] = (byte) (this.targetJDK >> 8); // minor high
 		header[headerOffset++] = (byte) (this.targetJDK >> 0); // minor low
 		header[headerOffset++] = (byte) (this.targetJDK >> 24); // major high
@@ -29,7 +12,7 @@
 
 		constantPoolOffset = headerOffset;
 		headerOffset += 2;
-		constantPool = new ConstantPool(this);
+		this.constantPool.initialize(this);
 		
 		// Modifier manipulations for classfile
 		int accessFlags = aType.getAccessFlags();
@@ -54,7 +37,7 @@
 			accessFlags |= ClassFileConstants.AccSuper;
 		}
 		
-		this.enclosingClassFile = enclosingClassFile;
+		this.enclosingClassFile = parentClassFile;
 		// innerclasses get their names computed at code gen time
 
 		// now we continue to generate the bytes inside the contents array
@@ -81,23 +64,16 @@
 			contents[contentsOffset++] = (byte) (interfaceIndex >> 8);
 			contents[contentsOffset++] = (byte) interfaceIndex;
 		}
-		produceAttributes = options.produceDebugAttributes;
 		innerClassesBindings = new ReferenceBinding[INNER_CLASSES_SIZE];
-		this.creatingProblemType = creatingProblemType;
-		if (this.targetJDK >= ClassFileConstants.JDK1_6) {
-			this.produceAttributes |= ClassFileConstants.ATTR_STACK_MAP;
-			codeStream = new StackMapFrameCodeStream(this);
-		} else {
-			codeStream = new CodeStream(this);
-		}
+		this.creatingProblemType = createProblemType;
 
 		// retrieve the enclosing one guaranteed to be the one matching the propagated flow info
 		// 1FF9ZBU: LFCOM:ALL - Local variable attributes busted (Sanity check)
 		if (this.enclosingClassFile == null) {
-			codeStream.maxFieldCount = aType.scope.referenceType().maxFieldCount;
+			this.codeStream.maxFieldCount = aType.scope.referenceType().maxFieldCount;
 		} else {
 			ClassFile outermostClassFile = this.outerMostEnclosingClassFile();
-			codeStream.maxFieldCount = outermostClassFile.codeStream.maxFieldCount;
+			this.codeStream.maxFieldCount = outermostClassFile.codeStream.maxFieldCount;
 		}
 	}
 
