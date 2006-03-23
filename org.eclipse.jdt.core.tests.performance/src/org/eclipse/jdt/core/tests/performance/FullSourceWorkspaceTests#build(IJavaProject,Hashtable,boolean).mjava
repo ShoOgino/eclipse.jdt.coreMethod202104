@@ -1,20 +1,48 @@
 	/**
-	 * Start a build on workspace using given options.
-	 * @param options
-	 * @throws IOException
-	 * @throws CoreException
+	 * Start a build on given projkect or workspace using given options.
+	 * 
+	 * @param javaProject Project which must be (full) build or null if all workspace has to be built.
+	 * @param options Options used while building
 	 */
-	protected void startBuild(Hashtable options, boolean noWarning) throws IOException, CoreException {
+	protected void build(final IJavaProject javaProject, Hashtable options, boolean noWarning) throws IOException, CoreException {
 		if (DEBUG) System.out.print("\tstart build...");
 		JavaCore.setOptions(options);
-		
-		// Clean memory
-		runGc();
-		
-		// Measure
-		startMeasuring();
-		ENV.fullBuild();
-		stopMeasuring();
+		if (PRINT) System.out.println("Options: "+options);
+
+		// Build workspace if no project
+		if (javaProject == null) {
+			// single measure
+			runGc();
+			startMeasuring();
+			ENV.fullBuild();
+			stopMeasuring();
+		} else {
+			// warm-up
+			ENV.fullBuild(javaProject.getProject().getName());
+			
+			// measures
+			int max = MEASURES_COUNT / 2;
+			for (int i=0; i<max; i++) {
+				runGc();
+				startMeasuring();
+				IWorkspaceRunnable compilation = new IWorkspaceRunnable() {
+					public void run(IProgressMonitor monitor) throws CoreException {
+						ENV.fullBuild(javaProject.getPath());
+					}
+				};
+				IWorkspace workspace = ResourcesPlugin.getWorkspace();
+				if (workspace.isTreeLocked()) {
+					compilation.run(null/*no progress available*/);
+				} else {
+					workspace.run(
+						compilation,
+						null/*don't take any lock*/,
+						IWorkspace.AVOID_UPDATE,
+						null/*no progress available here*/);
+				}
+				stopMeasuring();
+			}
+		}
 		
 		// Verify markers
 		IMarker[] markers = ResourcesPlugin.getWorkspace().getRoot().findMarkers(IJavaModelMarker.JAVA_MODEL_PROBLEM_MARKER, true, IResource.DEPTH_INFINITE);
@@ -56,7 +84,7 @@
 		// Commit measure
 		commitMeasurements();
 		assertPerformance();
-
+	
 		// Store warning
 		if (warnings>0) {
 			System.out.println("\t- "+warnings+" warnings found while performing build.");

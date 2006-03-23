@@ -1,0 +1,79 @@
+	/*
+	 * Full Build using batch compiler
+	 */
+	protected void compile(String pluginID, String options, boolean log) throws IOException, CoreException {
+		IWorkspace workspace = ResourcesPlugin.getWorkspace();
+		final IWorkspaceRoot workspaceRoot = workspace.getRoot();
+		final String targetWorkspacePath = workspaceRoot.getProject(pluginID).getLocation().toFile().getCanonicalPath();
+		String sources = targetWorkspacePath;
+//		if (JavaCore.PLUGIN_ID.equals(pluginID)) sources += File.separator + "compiler";
+		String logFileName = targetWorkspacePath + File.separator + getName()+".log";
+
+		// Warm up
+		String compliance = " -" + (COMPLIANCE==null ? "1.4" : COMPLIANCE);
+		final String cmdLine = sources + compliance + " -g -preserveAllLocals "+(options==null?"":options)+" -d " + COMPILER_OUTPUT_DIR + (log?" -log "+logFileName:"");
+		if (PRINT) System.out.println("	Compiler command line = "+cmdLine);
+		int errorsCount = 0;
+		int warnings = 0;
+		StringWriter errStrWriter = new StringWriter();
+		PrintWriter err = new PrintWriter(errStrWriter);
+		PrintWriter out = new PrintWriter(new StringWriter());
+		Main warmup = new Main(out, err, false);
+		warmup.compile(Main.tokenize(cmdLine));
+		if (warmup.globalErrorsCount > 0 && warmup.globalErrorsCount != errorsCount) {
+			System.out.println(this.scenarioShortName+": "+errorsCount+" Unexpected compile ERROR!");
+			if (DEBUG) {
+				System.out.println(errStrWriter.toString());
+				System.out.println("--------------------");
+			}
+			errorsCount = warmup.globalErrorsCount;
+		}
+		if (!"none".equals(COMPILER_OUTPUT_DIR)) {
+			cleanupDirectory(new File(COMPILER_OUTPUT_DIR));
+		}
+		warnings = warmup.globalWarningsCount;
+		if (!log) Util.writeToFile(errStrWriter.toString(), logFileName);
+
+		// Measures
+		for (int i = 0; i < MEASURES_COUNT; i++) {
+			runGc();
+			NullPrintWriter nullPrint= new NullPrintWriter();
+			startMeasuring();
+			final Main main = new Main(nullPrint, nullPrint, false);
+			IWorkspaceRunnable compilation = new IWorkspaceRunnable() {
+				public void run(IProgressMonitor monitor) throws CoreException {
+					main.compile(Main.tokenize(cmdLine));
+				}
+			};
+			if (workspace.isTreeLocked()) {
+				compilation.run(null/*no progress available*/);
+			} else {
+				workspace.run(
+					compilation,
+					null/*don't take any lock*/,
+					IWorkspace.AVOID_UPDATE,
+					null/*no progress available here*/);
+			}
+			stopMeasuring();
+			if (!"none".equals(COMPILER_OUTPUT_DIR)) {
+				cleanupDirectory(new File(COMPILER_OUTPUT_DIR));
+			}
+		}
+		
+		// Commit measures
+		commitMeasurements();
+		assertPerformance();
+
+		// Store warning
+		if (warnings>0) {
+			System.out.println("\t- "+warnings+" warnings found while performing batch compilation.");
+		}
+		if (this.scenarioComment == null) {
+			this.scenarioComment = new StringBuffer("["+TEST_POSITION+"]");
+		} else {
+			this.scenarioComment.append(' ');
+		}
+		this.scenarioComment.append("warn=");
+		this.scenarioComment.append(warnings);
+	}
+

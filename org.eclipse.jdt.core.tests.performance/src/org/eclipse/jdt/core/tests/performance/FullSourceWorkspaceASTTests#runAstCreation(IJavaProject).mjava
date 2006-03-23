@@ -1,0 +1,59 @@
+	/*
+	 * Create AST nodes for all compilation unit of a given project
+	 */
+	private void runAstCreation(IJavaProject javaProject) throws JavaModelException {
+		if (DEBUG) System.out.println("Creating AST for project" + javaProject.getElementName());
+		ASTParser parser = ASTParser.newParser(AST.JLS3);
+		parser.setResolveBindings(true);
+		parser.setProject(javaProject);
+				
+		Map options= javaProject.getOptions(true);
+		// turn all errors and warnings into ignore. The customizable set of compiler
+		// options only contains additional Eclipse options. The standard JDK compiler
+		// options can't be changed anyway.
+		for (Iterator iter= options.keySet().iterator(); iter.hasNext();) {
+			String key= (String)iter.next();
+			String value= (String)options.get(key);
+			if ("error".equals(value) || "warning".equals(value)) {  //$NON-NLS-1$//$NON-NLS-2$
+				// System.out.println("Ignoring - " + key);
+				options.put(key, "ignore"); //$NON-NLS-1$
+			}
+		}
+		options.put(JavaCore.COMPILER_TASK_TAGS, ""); //$NON-NLS-1$		
+		parser.setCompilerOptions(options);
+		
+		List units = getProjectCompilationUnits(javaProject);
+		ICompilationUnit[] compilationUnits = new ICompilationUnit[units.size()];
+		units.toArray(compilationUnits);
+
+		// warm up
+		if (PRINT) System.out.println("	- "+compilationUnits.length+" units will be parsed in "+javaProject.getElementName()+" project");
+		parser.createASTs(compilationUnits, new String[0], new ASTRequestor() {
+				public void acceptAST(ICompilationUnit source, CompilationUnit ast) {
+					IProblem[] problems = ast.getProblems();
+					int length = problems.length;
+					if (length > 0) {
+						StringBuffer buffer = new StringBuffer();
+						for (int i=0; i<length; i++) {
+							buffer.append(problems[i].getMessage());
+							buffer.append('\n');
+						}
+						assertEquals("Unexpected problems: "+buffer.toString(), 0, length);
+					}
+				}
+			},
+			null);
+		
+		// Clean memory
+		runGc();
+		
+		// Measures
+		for (int i = 0; i < MEASURES_COUNT; i++) {
+			startMeasuring();
+			parser.createASTs(compilationUnits, new String[0], new ASTRequestor() {/* do nothing*/}, null);
+			stopMeasuring();
+		}
+		commitMeasurements();
+		assertPerformance();
+	}
+

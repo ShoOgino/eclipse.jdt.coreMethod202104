@@ -1,43 +1,31 @@
 	/*
 	 * Set up full source workpsace from zip file.
 	 */
-	private static void setUpFullSourceWorkspace() throws IOException, CoreException {
+	private void setUpFullSourceWorkspace() throws IOException, CoreException {
+
+		// Get projects in workspace (save projects creation on local boxes...)
 		IWorkspace workspace = ResourcesPlugin.getWorkspace();
 		final IWorkspaceRoot workspaceRoot = workspace.getRoot();
-		if (workspaceRoot.getProjects().length == 0) {
-			String fullSourceZipPath = getPluginDirectoryPath() + File.separator + "full-source-R3_0.zip";
-			final String targetWorkspacePath = workspaceRoot.getLocation().toFile().getCanonicalPath();
+		IProject[] projects = workspaceRoot.getProjects();
+		int projectsLength = projects.length;
 
-			// Print for log in case of project creation troubles...
-			long start = System.currentTimeMillis();
-			System.out.println("Unzipping "+fullSourceZipPath);
-			System.out.print("	in "+targetWorkspacePath+"...");
-			
-			// Unzip file
-			Util.unzip(fullSourceZipPath, targetWorkspacePath);
-
-			// Create and open projects
-			workspace.run(new IWorkspaceRunnable() {
-				public void run(IProgressMonitor monitor) throws CoreException {
-					File targetWorkspaceDir = new File(targetWorkspacePath);
-					String[] projectNames = targetWorkspaceDir.list();
-					for (int i = 0, length = projectNames.length; i < length; i++) {
-						String projectName = projectNames[i];
-						if (".metadata".equals(projectName)) continue;
-						IProject project = workspaceRoot.getProject(projectName);
-						project.create(monitor);
-						project.open(monitor);
-					}
-				}
-			}, null);
-			System.out.println("("+(System.currentTimeMillis()-start)+"ms)");
+		// If no projects then unzip file
+		if (projectsLength == 0) {
+			projects = createFullSourceWorkspace();
+			projectsLength = projects.length;
 		}
+
+		// Init environment with existing porjects
+		for (int i = 0; i < projectsLength; i++) {
+			ENV.addProject(projects[i]);
+		}
+
+		// Init JRE_LIB variable
 		String jdkLib = Util.getJavaClassLibs()[0];
 		JavaCore.setClasspathVariable("JRE_LIB", new Path(jdkLib), null);
 		
 		// Set classpaths (workaround bug 73253 Project references not set on project open)
 		System.out.print("Set projects classpaths...");
-		long start = System.currentTimeMillis();
 		ALL_PROJECTS = JavaCore.create(workspaceRoot).getJavaProjects();
 		int length = ALL_PROJECTS.length;
 		for (int i = 0; i < length; i++) {
@@ -46,6 +34,8 @@
 				JDT_CORE_PROJECT = ALL_PROJECTS[i];
 			} else if (BIG_PROJECT_NAME.equals(projectName)) {
 				BIG_PROJECT = (JavaProject) ALL_PROJECTS[i];
+//			} else if (JUNIT_PROJECT_NAME.equals(projectName)) {
+//				JUNIT_PROJECT = ALL_PROJECTS[i];
 			}
 			ALL_PROJECTS[i].setRawClasspath(ALL_PROJECTS[i].getRawClasspath(), null);
 			// Make Big project dependent from jdt.core one
@@ -54,9 +44,11 @@
 //			System.arraycopy(bigProjectEntries, 0, bigProjectEntries = new IClasspathEntry[bpeLength+1], 0, bpeLength);
 //			bigProjectEntries[bpeLength] = JavaCore.newProjectEntry(JDT_CORE_PROJECT.getPath());
 		}
+		System.out.println("done");
+
+		// Initialize Parser wokring copy
 		IJavaElement element = JDT_CORE_PROJECT.findType("org.eclipse.jdt.internal.compiler.parser.Parser");
 		assertTrue("Parser should exist in org.eclipse.jdt.core project!", element != null && element.exists());
 		PARSER_WORKING_COPY = (ICompilationUnit) element.getParent();
-		System.out.println("("+(System.currentTimeMillis()-start)+"ms)");
 	}
 
