@@ -34,30 +34,27 @@
     	// Add sourcepath and classpath variables
     	try {
     		IClasspathEntry[] classpathEntries = jproj.getResolvedClasspath(true);
-    		StringBuilder classpathSB = new StringBuilder();
-    		StringBuilder sourcepathSB = new StringBuilder();
-    		boolean firstCP = true;
-    		boolean firstSP = true;
+    		Set<String> classpath = new LinkedHashSet<String>();
+    		Set<String> sourcepath = new LinkedHashSet<String>();
+    		
+    		// For projects on the classpath, loops can exist; need to make sure we 
+    		// don't loop forever
+    		Set<IJavaProject> projectsProcessed = new HashSet<IJavaProject>();
+    		projectsProcessed.add(jproj);
     		for (IClasspathEntry entry : classpathEntries) {
     			int kind = entry.getEntryKind();
     			if (kind == IClasspathEntry.CPE_LIBRARY) {
-	    			if (firstCP) {
-	    				firstCP = false;
-	    			}
-	    			else {
-	    				classpathSB.append(File.pathSeparatorChar);
-	    			}
 	    			IPath cpPath = entry.getPath();
 	    			
 	    			IResource res = root.findMember(cpPath);
 	    			
 	    			// If res is null, the path is absolute (it's an external jar)
 	    			if (res == null) {
-	    				classpathSB.append(cpPath.toOSString());
+	    				classpath.add(cpPath.toOSString());
 	    			}
 	    			else {
 	    				// It's relative
-	    				classpathSB.append(res.getLocation().toOSString());
+	    				classpath.add(res.getLocation().toOSString());
 	    			}
     			}
     			else if (kind == IClasspathEntry.CPE_SOURCE) {
@@ -70,22 +67,29 @@
     					continue;
     				}
     				
-    				if (firstSP) {
-    					firstSP = false;
-    				}
-    				else {
-    					sourcepathSB.append(File.pathSeparatorChar);
-    				}
+    				sourcepath.add(srcPath.toOSString());
+    			}
+    			else if (kind == IClasspathEntry.CPE_PROJECT) {
+    				// Add the dependent project's build path and classpath to ours
+    				IPath otherProjectPath = entry.getPath();
+    				IProject otherProject = root.getProject(otherProjectPath.segment(0));
     				
-    				sourcepathSB.append(srcPath.toOSString());
+    				// Note: JavaCore.create() is safe, even if the project is null -- 
+    				// in that case, we get null back
+    				IJavaProject otherJavaProject = JavaCore.create(otherProject);
+    				
+    				// If it doesn't exist, ignore it
+    				if (otherJavaProject != null) {
+    					addProjectClasspath(root, otherJavaProject, projectsProcessed, classpath);
+    				}
     			}
     		}
     		// if you add options here, also add them in isAutomaticProcessorOption(),
     		// and document them in docs/reference/automatic_processor_options.html.
     		
     		// Classpath and sourcepath
-    		options.put("-classpath",classpathSB.toString()); //$NON-NLS-1$    		
-    		options.put("-sourcepath", sourcepathSB.toString()); //$NON-NLS-1$
+    		options.put("-classpath",convertPathCollectionToString(classpath)); //$NON-NLS-1$    		
+    		options.put("-sourcepath", convertPathCollectionToString(sourcepath)); //$NON-NLS-1$
     		
     		// Get absolute path for generated source dir
     		IFolder genSrcDir = jproj.getProject().getFolder(getGenSrcDir(jproj));
