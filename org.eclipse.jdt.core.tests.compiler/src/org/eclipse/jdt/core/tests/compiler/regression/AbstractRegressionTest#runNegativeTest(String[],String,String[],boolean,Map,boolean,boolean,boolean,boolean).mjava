@@ -1,0 +1,74 @@
+	/**
+	 * Log contains all problems (warnings+errors)
+	 */
+	protected void runNegativeTest(
+		String[] testFiles, 
+		String expectedProblemLog, 
+		String[] classLib,
+		boolean shouldFlushOutputDirectory, 
+		Map customOptions, 
+		boolean generateOutput,
+		boolean showCategory,
+		boolean showWarningToken,
+		boolean skipJavac) {
+		// Non-javac part
+		try {
+			if (shouldFlushOutputDirectory)
+				Util.flushDirectoryContent(new File(OUTPUT_DIR));
+	
+			IProblemFactory problemFactory = getProblemFactory();
+			Requestor requestor = 
+				new Requestor(
+					problemFactory, 
+					OUTPUT_DIR.endsWith(File.separator) ? OUTPUT_DIR : OUTPUT_DIR + File.separator, 
+					generateOutput,
+					null/*no custom requestor*/,
+					showCategory,
+					showWarningToken);
+			Map options = getCompilerOptions();
+			if (customOptions != null) {
+				options.putAll(customOptions);
+			}
+			Compiler batchCompiler = 
+				new Compiler(
+					getNameEnvironment(new String[]{}, classLib), 
+					getErrorHandlingPolicy(), 
+					options,
+					requestor, 
+					problemFactory,
+					false);
+			batchCompiler.options.produceReferenceInfo = true;
+			Throwable exception = null;
+			try {
+				batchCompiler.compile(Util.compilationUnits(testFiles)); // compile all files together
+			} catch(RuntimeException e){
+				exception = e;
+				throw e;
+			} catch(Error e) {
+				exception = e;
+				throw e;
+			} finally {
+				String computedProblemLog = Util.convertToIndependantLineDelimiter(requestor.problemLog.toString());
+				String platformIndependantExpectedLog = Util.convertToIndependantLineDelimiter(expectedProblemLog);
+				if (!platformIndependantExpectedLog.equals(computedProblemLog)) {
+					System.out.println(getClass().getName() + '#' + getName());
+					System.out.println(Util.displayString(computedProblemLog, INDENT, SHIFT));
+					for (int i = 0; i < testFiles.length; i += 2) {
+						System.out.print(testFiles[i]);
+						System.out.println(" ["); //$NON-NLS-1$
+						System.out.println(testFiles[i + 1]);
+						System.out.println("]"); //$NON-NLS-1$
+					}
+				}
+				if (exception == null)
+					assertEquals("Invalid problem log ", platformIndependantExpectedLog, computedProblemLog);
+			}
+		// javac part
+		} catch (AssertionFailedError e) {
+			throw e;
+		} finally {
+			if (RUN_JAVAC && !skipJavac)
+				runJavac(testFiles, expectedProblemLog, null, shouldFlushOutputDirectory);
+		}
+	}
+

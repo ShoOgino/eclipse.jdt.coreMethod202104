@@ -1,0 +1,207 @@
+	/*
+	 * Run Sun compilation using javac.
+	 * Launch compilation in a thread and verify that it does not take more than 5s
+	 * to perform it. Otherwise abort the process and log in console.
+	 * WORK not sure we really do that 5s cap any more.
+	 * A semi verbose output is sent to the console that analyzes differences
+	 * of behaviors between javac and Eclipse on a per test basis. A more 
+	 * verbose output is produced into a file which name is printed on the
+	 * console. Such files can be compared between various javac releases
+	 * to check potential changes. 
+	 * To enable such tests, specify the following VM properies in the launch
+	 * configuration:
+	 * -Drun.javac=enabled
+	 *     mandatory - tells the test suite to run javac tests
+	 * -Djdk.root=<the root directory of the tested javac>
+	 *     optional - enables to find the javac that will be run by the tests
+	 *     suite; the root directory must be specified as an absolute path and
+	 *     should point to the JDK root, aka /opt/jdk1.5.0_05 for Linux or
+	 *     c:/JDK_50 for Windows; in case this property is not specified, the
+	 *     tests suite will use the runtime JRE of the launching configuration.
+	 * Note that enabling javac tests implies running into 1.5 compliance level
+	 * (without having to specify it into the VM properties.)
+	 * TODO (maxime) consider impacts of Java 6
+	 */
+	protected void runJavac(
+			String[] testFiles, 
+			final String expectedProblemLog, 
+			final String expectedSuccessOutputString, 
+			boolean shouldFlushOutputDirectory) {
+		String testName = null;
+		Process compileProcess = null;
+		Process execProcess = null;
+		try {
+			// Init test name
+			testName = testName();
+
+			// Cleanup javac output dir if needed
+			File javacOutputDirectory = new File(JAVAC_OUTPUT_DIR);
+			if (shouldFlushOutputDirectory) {
+				cleanupDirectory(javacOutputDirectory);
+			}
+			
+			// Write files in dir
+			writeFiles(testFiles);
+
+			// Prepare command line
+			StringBuffer cmdLine = new StringBuffer(javacCommandLineHeader);
+			// compute extra classpath
+			String[] classpath = Util.concatWithClassLibs(JAVAC_OUTPUT_DIR, false);
+			StringBuffer cp = new StringBuffer(" -classpath ");
+			int length = classpath.length;
+			for (int i = 0; i < length; i++) {
+				if (i > 0)
+				  cp.append(File.pathSeparatorChar);
+				if (classpath[i].indexOf(" ") != -1) {
+					cp.append("\"" + classpath[i] + "\"");
+				} else {
+					cp.append(classpath[i]);
+				}
+			} 
+			cmdLine.append(cp);
+			// add source files
+			for (int i = 0; i < testFiles.length; i += 2) {
+				// *.java is not enough (p1/X.java, p2/Y.java)
+				cmdLine.append(' ');
+				cmdLine.append(testFiles[i]);
+			}
+
+			// Launch process
+			compileProcess = Runtime.getRuntime().exec(
+				cmdLine.toString(), null, this.outputTestDirectoryPath.toFile());
+
+			// Log errors
+      Logger errorLogger = new Logger(compileProcess.getErrorStream(), "ERROR");            
+
+      // Log output
+      Logger outputLogger = new Logger(compileProcess.getInputStream(), "OUTPUT");
+
+      // start the threads to run outputs (standard/error)
+      errorLogger.start();
+      outputLogger.start();
+
+      // Wait for end of process
+			int exitValue = compileProcess.waitFor();
+			errorLogger.join(); // make sure we get the whole output
+			outputLogger.join();
+
+			// Report raw javac results
+			if (! testName.equals(javacTestName)) {
+				javacTestName = testName;
+				javacTestErrorFlag = false;
+				javacFullLog.println("-----------------------------------------------------------------");
+				javacFullLog.println(CURRENT_CLASS_NAME + " " + testName);
+			}
+			if (exitValue != 0) {
+				javacTestErrorFlag = true;
+			}
+			if (errorLogger.buffer.length() > 0) {
+				javacFullLog.println("--- javac err: ---");
+				javacFullLog.println(errorLogger.buffer.toString());
+			}
+			if (outputLogger.buffer.length() > 0) {
+				javacFullLog.println("--- javac out: ---");
+				javacFullLog.println(outputLogger.buffer.toString());
+			}
+
+			// Compare compilation results
+			if (expectedProblemLog == null || expectedProblemLog.length() == 0) {
+				// Eclipse found no error and no warning
+				if (exitValue != 0) {
+					// Javac found errors
+					System.out.println("----------------------------------------");
+					System.out.println(testName + " - Javac has found error(s) but Eclipse expects conform result:\n");
+					javacFullLog.println("JAVAC_MISMATCH: Javac has found error(s) but Eclipse expects conform result");
+					System.out.println(errorLogger.buffer.toString());
+					printFiles(testFiles);
+					DIFF_COUNTERS[0]++;
+				} 
+				else {
+					// Javac found no error - may have found warnings
+					if (errorLogger.buffer.length() > 0) {
+						System.out.println("----------------------------------------");
+						System.out.println(testName + " - Javac has found warning(s) but Eclipse expects conform result:\n");
+						javacFullLog.println("JAVAC_MISMATCH: Javac has found warning(s) but Eclipse expects conform result");
+						System.out.println(errorLogger.buffer.toString());
+						printFiles(testFiles);
+						DIFF_COUNTERS[0]++;
+					} 
+					if (expectedSuccessOutputString != null && !javacTestErrorFlag) {
+						// Neither Eclipse nor Javac found errors, and we have a runtime
+						// bench value
+						StringBuffer javaCmdLine = new StringBuffer(javaCommandLineHeader);
+						javaCmdLine.append(cp);
+						javaCmdLine.append(' ').append(testFiles[0].substring(0, testFiles[0].indexOf('.')));
+							// assume executable class is name of first test file - PREMATURE check if this is also the case in other test fwk classes
+						execProcess = Runtime.getRuntime().exec(javaCmdLine.toString(), null, this.outputTestDirectoryPath.toFile());
+						Logger logger = new Logger(execProcess.getInputStream(), ""); // WORK
+						logger.start();
+						exitValue = execProcess.waitFor();
+						logger.join(); // make sure we get the whole output
+						String javaOutput = logger.buffer.toString().trim();
+						if (!expectedSuccessOutputString.equals(javaOutput)) {
+							System.out.println("----------------------------------------");
+							System.out.println(testName + " - Javac and Eclipse runtime output is not the same:");
+							javacFullLog.println("JAVAC_MISMATCH: Javac and Eclipse runtime output is not the same");
+							dualPrintln("eclipse:");
+							dualPrintln(expectedSuccessOutputString);
+							dualPrintln("javac:");
+							dualPrintln(javaOutput);
+							System.out.println("\n");
+							printFiles(testFiles); // PREMATURE consider printing files to the log as well
+							DIFF_COUNTERS[2]++;
+						}
+					}
+				}
+			} 
+			else {
+				// Eclipse found errors or warnings
+				if (errorLogger.buffer.length() == 0) {
+					System.out.println("----------------------------------------");
+					System.out.println(testName + " - Eclipse has found error(s)/warning(s) but Javac did not find any:");
+					javacFullLog.println("JAVAC_MISMATCH: Eclipse has found error(s)/warning(s) but Javac did not find any");
+					dualPrintln("eclipse:");
+					dualPrintln(expectedProblemLog);
+					printFiles(testFiles);
+					DIFF_COUNTERS[1]++;
+				} else if (expectedProblemLog.indexOf("ERROR") > 0 && exitValue == 0){
+					System.out.println("----------------------------------------");
+					System.out.println(testName + " - Eclipse has found error(s) but Javac only found warning(s):");
+					javacFullLog.println("JAVAC_MISMATCH: Eclipse has found error(s) but Javac only found warning(s)");
+					dualPrintln("eclipse:");
+					dualPrintln(expectedProblemLog);
+					System.out.println("javac:");
+					System.out.println(errorLogger.buffer.toString());
+					printFiles(testFiles);
+					DIFF_COUNTERS[1]++;
+				} else {
+					// PREMATURE refine comparison
+					// TODO (frederic) compare warnings in each result and verify they are similar...
+//						System.out.println(testName+": javac has found warnings :");
+//						System.out.print(errorLogger.buffer.toString());
+//						System.out.println(testName+": we're expecting warning results:");
+//						System.out.println(expectedProblemLog);
+				}
+			}
+		} 
+		catch (InterruptedException e1) {
+			if (compileProcess != null) compileProcess.destroy();
+			if (execProcess != null) execProcess.destroy();
+			System.out.println(testName+": Sun javac compilation was aborted!");
+			javacFullLog.println("JAVAC_WARNING: Sun javac compilation was aborted!");
+			e1.printStackTrace(javacFullLog);
+		}
+		catch (Throwable e) {
+			System.out.println(testName+": could not launch Sun javac compilation!");
+			e.printStackTrace();
+			javacFullLog.println("JAVAC_ERROR: could not launch Sun javac compilation!");
+			e.printStackTrace(javacFullLog);
+			// PREMATURE failing the javac pass or comparison could also fail
+			//           the test itself
+		} 
+		finally {
+			// Clean up written file(s)
+			cleanupDirectory(outputTestDirectoryPath.toFile());
+		}
+	}
+
