@@ -1,5 +1,5 @@
 	/**
-	 * Answer a new CompilationUnitVisitor using the given name environment and compiler options.
+	 * Answer a new compiler using the given name environment and compiler options.
 	 * The environment and options will be in effect for the lifetime of the compiler.
 	 * When the compiler is run, compilation results are sent to the given requestor.
 	 *
@@ -17,8 +17,6 @@
 	 *      them all) and at the same time perform some actions such as opening a dialog
 	 *      in UI when compiling interactively.
 	 *      @see org.eclipse.jdt.internal.compiler.DefaultErrorHandlingPolicies
-	 * 
-	 *	@param settings The settings to use for the resolution.
 	 *      
 	 *  @param requestor org.eclipse.jdt.internal.compiler.api.ICompilerRequestor
 	 *      Component which will receive and persist all compilation results and is intended
@@ -33,23 +31,32 @@
 	 *      to accumulate the created problems, the compiler will gather them all and hand
 	 *      them back as part of the compilation unit result.
 	 */
-	protected CompilationUnitProblemFinder(
-		INameEnvironment environment,
-		IErrorHandlingPolicy policy,
-		Map settings,
-		ICompilerRequestor requestor,
-		IProblemFactory problemFactory,
-		boolean creatingAST,
-		boolean statementsRecovery) {
-
-		super(environment,
-			policy,
-			settings,
-			requestor,
-			problemFactory,
-			!creatingAST/*parse literal expressions as constants only if not creating a DOM AST*/,
-			creatingAST/*store annotations in the bindings if creating a DOM AST*/,
-			statementsRecovery/*perform statements recovery during parse if creating a DOM AST*/
-		);
+	public Compiler(
+			INameEnvironment environment,
+			IErrorHandlingPolicy policy,
+			CompilerOptions options,
+			final ICompilerRequestor requestor,
+			IProblemFactory problemFactory,
+			PrintWriter out) {
+		
+		this.options = options;
+		
+		// wrap requestor in DebugRequestor if one is specified
+		if(DebugRequestor == null) {
+			this.requestor = requestor;
+		} else {
+			this.requestor = new ICompilerRequestor(){
+				public void acceptResult(CompilationResult result){
+					if (DebugRequestor.isActive()){
+						DebugRequestor.acceptDebugResult(result);
+					}
+					requestor.acceptResult(result);
+				}
+			};
+		}
+		this.problemReporter = new ProblemReporter(policy, this.options, problemFactory);
+		this.lookupEnvironment = new LookupEnvironment(this, this.options, problemReporter, environment);
+		this.out = out == null ? new PrintWriter(System.out, true) : out;
+		initializeParser();
 	}
 
