@@ -1,0 +1,69 @@
+	public void checkForErasedCandidateCollisions() {
+		// check for parameterized interface collisions (when different parameterizations occur)
+		SourceTypeBinding sourceType = referenceContext.binding;
+		ReferenceBinding[] interfaces = sourceType.superInterfaces;
+		int count = interfaces.length;
+		Map invocations = new HashMap(2);
+		ReferenceBinding itsSuperclass = sourceType.isInterface() ? null : sourceType.superclass;
+		nextInterface: for (int i = 0, length = count; i < length; i++) {
+			ReferenceBinding one =  interfaces[i];
+			if (one == null) continue nextInterface;
+			if (itsSuperclass != null && hasErasedCandidatesCollisions(itsSuperclass, one, invocations, sourceType, referenceContext)) {
+				interfaces[i] = null;
+				count--;
+				continue nextInterface;
+			}
+			nextOtherInterface: for (int j = 0; j < i; j++) {
+				ReferenceBinding two = interfaces[j];
+				if (two == null) continue nextOtherInterface;
+				if (hasErasedCandidatesCollisions(one, two, invocations, sourceType, referenceContext)) {
+					interfaces[i] = null;
+					count--;
+					continue nextInterface;
+				}
+			}
+		}
+		if (count < interfaces.length) {
+			if (count == 0) {
+				sourceType.superInterfaces = Binding.NO_SUPERINTERFACES;
+			} else {
+				ReferenceBinding[] newInterfaceBindings = new ReferenceBinding[count];
+				for (int i = 0, j = 0, l = interfaces.length; i < l; i++)
+					if (interfaces[i] != null)
+						newInterfaceBindings[j++] = interfaces[i];
+				sourceType.superInterfaces = newInterfaceBindings;
+			}
+		}
+
+		TypeParameter[] typeParameters = this.referenceContext.typeParameters;
+		nextVariable : for (int i = 0, paramLength = typeParameters == null ? 0 : typeParameters.length; i < paramLength; i++) {
+			TypeParameter typeParameter = typeParameters[i];
+			TypeVariableBinding typeVariable = typeParameter.binding;
+			if (typeVariable == null || !typeVariable.isValidBinding()) continue nextVariable;
+
+			TypeReference[] boundRefs = typeParameter.bounds;
+			if (boundRefs != null) {
+				boolean checkSuperclass = typeVariable.firstBound == typeVariable.superclass;
+				for (int j = 0, boundLength = boundRefs.length; j < boundLength; j++) {
+					TypeReference typeRef = boundRefs[j];
+					TypeBinding superType = typeRef.resolvedType;
+					if (superType == null || !superType.isValidBinding()) continue;
+
+					// check against superclass
+					if (checkSuperclass)
+						if (hasErasedCandidatesCollisions(superType, typeVariable.superclass, invocations, typeVariable, typeRef))
+							continue nextVariable;
+					// check against superinterfaces
+					for (int index = typeVariable.superInterfaces.length; --index >= 0;)
+						if (hasErasedCandidatesCollisions(superType, typeVariable.superInterfaces[index], invocations, typeVariable, typeRef))
+							continue nextVariable;
+				}
+			}
+		}
+
+		ReferenceBinding[] memberTypes = referenceContext.binding.memberTypes;
+		if (memberTypes != null && memberTypes != Binding.NO_MEMBER_TYPES)
+			for (int i = 0, size = memberTypes.length; i < size; i++)
+				 ((SourceTypeBinding) memberTypes[i]).scope.checkForErasedCandidateCollisions();
+	}
+
