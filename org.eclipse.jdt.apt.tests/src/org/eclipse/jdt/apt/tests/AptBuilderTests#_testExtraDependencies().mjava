@@ -1,0 +1,124 @@
+	/**
+	 *   This test makes sure that our extra-dependency stuff is hooked up in the build.  
+	 *   Specifically, we test to make sure that Extra dependencies only appear when 
+	 *   an annotation processor looks up a type by name.  We also test that expected
+	 *   build output is there because of the dependency.
+	 */
+
+	@SuppressWarnings("nls")	
+	public void _testExtraDependencies()
+	{
+		String codeA = "package p1.p2.p3.p4;\n"
+			+  "public class A { B b; }";
+		
+		String codeB1 = "package p1.p2.p3.p4;\n"
+			+  "public class B { }";
+		
+		String codeB2 = "package p1.p2.p3.p4;\n"
+			+  "public class B { public static void main( String[] argv ) {} }";
+		
+		String codeC = "package p1.p2.p3.p4;\n"
+			+  "public class C { }";
+		
+		String codeC2 = "package p1.p2.p3.p4;\n"
+			+  "public class C { public int foo; }";
+		
+		String codeD = "package p1.p2.p3.p4;\n"
+			+  "public class D { }";
+		 
+		String codeE = "package p1.p2.p3.p4;\n"
+			+  "public class E { }";
+		
+		IProject project = env.getProject( getProjectName() );
+		IPath srcRoot = getSourcePath( getProjectName() );
+		
+		env.addClass( srcRoot, "p1.p2.p3.p4", "A", //$NON-NLS-1$ //$NON-NLS-2$
+			codeA );
+		
+		env.addClass( srcRoot, "p1.p2.p3.p4", "B", //$NON-NLS-1$ //$NON-NLS-2$
+			codeB1 );
+		
+		env.addClass( srcRoot, "p1.p2.p3.p4", "C", //$NON-NLS-1$ //$NON-NLS-2$
+			codeC );
+		
+		env.addClass( srcRoot, "p1.p2.p3.p4", "D", //$NON-NLS-1$ //$NON-NLS-2$
+			codeD );
+		
+		env.addClass( srcRoot, "p1.p2.p3.p4", "E", //$NON-NLS-1$ //$NON-NLS-2$
+			codeE );
+		
+		fullBuild( project.getFullPath() );
+		expectingNoProblems();
+		
+		// touch B - make sure its public shape changes.
+		env.addClass( srcRoot, "p1.p2.p3.p4", "B", //$NON-NLS-1$ //$NON-NLS-2$
+			codeB2 );
+		
+		incrementalBuild( project.getFullPath() );
+		expectingNoProblems();
+		expectingCompiledClasses(new String[]{"p1.p2.p3.p4.B", "p1.p2.p3.p4.A"}); //$NON-NLS-1$ //$NON-NLS-2$
+		expectingCompilingOrder(new String[]{"p1.p2.p3.p4.B", "p1.p2.p3.p4.A"}); //$NON-NLS-1$ //$NON-NLS-2$
+
+		//
+		//  Now have p1.p2.p3.p4.A w/ an anontation whose processor looks up p1.p2.p3.p4.C by name 
+		//
+		
+		// new code for A with an annotation processor that should introduce a dep on C
+		codeA = "package p1.p2.p3.p4;\n"
+			+  "import org.eclipse.jdt.apt.tests.annotations.extradependency.ExtraDependencyAnnotation;" + "\n" 
+			+  "@ExtraDependencyAnnotation" + "\n" 
+			+  "public class A {  }";
+		
+		env.addClass( srcRoot, "p1.p2.p3.p4", "A", //$NON-NLS-1$ //$NON-NLS-2$
+			codeA );
+		
+		fullBuild( project.getFullPath() );
+		expectingNoProblems();
+		
+		// touch C
+		env.addClass( srcRoot, "p1.p2.p3.p4", "C", //$NON-NLS-1$ //$NON-NLS-2$
+			codeC2 );
+		
+		incrementalBuild( project.getFullPath() );
+		expectingNoProblems();
+		
+		//
+		// Note that p1.p2.p3.p4.A is showing up twice because it has annotations, and we need to 
+		// parse the source, parsing runs through the compiler, and this registers the 
+		// file a second time with the Compiler#DebugRequestor 
+		//
+		expectingCompiledClasses(new String[]{"p1.p2.p3.p4.C", "p1.p2.p3.p4.A", "p1.p2.p3.p4.A"}); //$NON-NLS-1$ //$NON-NLS-2$
+		expectingCompilingOrder(new String[]{"p1.p2.p3.p4.C", "p1.p2.p3.p4.A", "p1.p2.p3.p4.A"}); //$NON-NLS-1$ //$NON-NLS-2$
+		
+		//
+		// now make sure that p1.p2.p3.p4.C is not compiled when A uses NoOp Annotation
+		//
+		
+		// new code for A with an annotation processor that should remove a dep on C
+		codeA = "package p1.p2.p3.p4;\n"
+			+  "import org.eclipse.jdt.apt.tests.annotations.noop.NoOpAnnotation;" + "\n" 
+			+  "@NoOpAnnotation" + "\n" 
+			+  "public class A { B b; D d; }";
+		
+		env.addClass( srcRoot, "p1.p2.p3.p4", "A", //$NON-NLS-1$ //$NON-NLS-2$
+			codeA );
+		
+		fullBuild( project.getFullPath() );
+		expectingNoProblems();
+		
+		// touch C
+		env.addClass( srcRoot, "p1.p2.p3.p4", "C", //$NON-NLS-1$ //$NON-NLS-2$
+			codeC2 );
+		
+		incrementalBuild( project.getFullPath() );
+		expectingNoProblems();
+		
+		//
+		// Note that p1.p2.p3.p4.A is showing up twice because it has annotations, and we need to 
+		// parse the source, parsing runs through the compiler, and this registers the 
+		// file a second time with the Compiler#DebugRequestor 
+		//
+		expectingCompiledClasses(new String[]{"p1.p2.p3.p4.C" }); //$NON-NLS-1$ //$NON-NLS-2$
+		expectingCompilingOrder(new String[]{"p1.p2.p3.p4.C" }); //$NON-NLS-1$ //$NON-NLS-2$
+	}
+

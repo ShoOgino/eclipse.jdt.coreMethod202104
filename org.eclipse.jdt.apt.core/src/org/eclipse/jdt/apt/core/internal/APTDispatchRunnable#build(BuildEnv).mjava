@@ -1,0 +1,60 @@
+	/**
+	 * @param processorEnv 
+	 * @param filesWithMissingType
+	 * @param internalRound
+	 * @param result output parameter
+	 */
+	private Set<AnnotationProcessorFactory> build(final BuildEnv processorEnv)
+	{
+		try {
+			final BuildContext[] results = processorEnv.getFilesWithAnnotation();
+			GeneratedFileManager gfm = _aptProject.getGeneratedFileManager();
+			final Map<IFile,Set<IFile>> lastGeneratedFiles = new HashMap<IFile,Set<IFile>>();
+			for( BuildContext result : results ){
+				final IFile parentIFile = result.getFile();
+				lastGeneratedFiles.put(parentIFile, gfm.getGeneratedFilesForParent(parentIFile));
+			}
+			
+			boolean mixedModeDispatch = shouldDispatchToBatchProcessor(processorEnv);
+			if( mixedModeDispatch ){
+				runAPTInMixedMode(lastGeneratedFiles, processorEnv);
+			}
+			else{
+				runAPTInFileBasedMode(processorEnv, lastGeneratedFiles);
+			}
+
+			// notify the processor listeners
+			final Set<AnnotationProcessorListener> listeners = processorEnv
+					.getProcessorListeners();
+			for (AnnotationProcessorListener listener : listeners) {
+				EclipseRoundCompleteEvent event = null;
+				if (listener instanceof RoundCompleteListener) {
+					if (event == null)
+						event = new EclipseRoundCompleteEvent(processorEnv);
+					final RoundCompleteListener rcListener = (RoundCompleteListener) listener;
+					rcListener.roundComplete(event);
+				}
+			}
+			if( _filesWithoutAnnotation != null ){
+				cleanupAllGeneratedFilesFrom(_filesWithoutAnnotation);
+			}
+			
+			processorEnv.close();
+			gfm.writeState();
+
+			// log unclaimed annotations.
+		}
+		catch (Error t) {
+			// Don't catch junit exceptions. This prevents one from unit
+			// testing a processor
+			if (t.getClass().getName().startsWith("junit.framework")) //$NON-NLS-1$
+				throw t;
+			AptPlugin.log(t, "Unexpected failure running APT on the file(s): " + getFileNamesForPrinting(processorEnv)); //$NON-NLS-1$
+		} 
+		catch (Throwable t) {
+			AptPlugin.log(t, "Unexpected failure running APT on the file(s): " + getFileNamesForPrinting(processorEnv)); //$NON-NLS-1$
+		}
+		
+		return Collections.emptySet();
+	}
+
