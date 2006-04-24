@@ -35,19 +35,14 @@
 					ClassScope classScope = (ClassScope) scope;
 					ReferenceBinding receiverType = classScope.enclosingReceiverType();
 					if (!insideTypeAnnotation) {
-						boolean isExactMatch = true;
 						// retrieve an exact visible match (if possible)
 						// compilationUnitScope().recordTypeReference(receiverType);   not needed since receiver is the source type
 						MethodBinding methodBinding =
 							(foundMethod == null)
 								? classScope.findExactMethod(receiverType, selector, argumentTypes, invocationSite)
 								: classScope.findExactMethod(receiverType, foundMethod.selector, foundMethod.parameters, invocationSite);
-						if (methodBinding == null) {
-							// answers closest approximation, may not check argumentTypes or visibility
-							isExactMatch = false;
+						if (methodBinding == null)
 							methodBinding = classScope.findMethod(receiverType, selector, argumentTypes, invocationSite);
-							// methodBinding = findMethod(receiverType, selector, argumentTypes, invocationSite);
-						}
 						if (methodBinding != null) { // skip it if we did not find anything
 							if (methodBinding.problemId() == ProblemReasons.Ambiguous) {
 								if (foundMethod == null || foundMethod.problemId() == ProblemReasons.NotVisible) {
@@ -64,35 +59,7 @@
 							MethodBinding fuzzyProblem = null;
 							MethodBinding insideProblem = null;
 							if (methodBinding.isValidBinding()) {
-								if (!isExactMatch) {
-									MethodBinding compatibleMethod = computeCompatibleMethod(methodBinding, argumentTypes, invocationSite);
-									if (compatibleMethod == null) {
-										// likely not a match in the first place, 2 cases are possible
-										// first is when methodBinding was found thru inheritance starting from an nested type - in this case do not want to search outer scope
-										// second is when normal search turned up only this selector match so NotFound is expected
-										// except in 1.5 when static import methods can match correctly
-										if (foundMethod == null || foundMethod.problemId() == ProblemReasons.NotVisible) {
-											if (compilerOptions().sourceLevel >= ClassFileConstants.JDK1_5 && !receiverType.isNestedType()) {
-												foundFuzzyProblem = new ProblemMethodBinding(methodBinding, selector, argumentTypes, ProblemReasons.NotFound);
-												break; // need to search for static import method matches
-											}
-											// inherited mismatch is reported directly, not looking at enclosing matches
-											return new ProblemMethodBinding(methodBinding, selector, argumentTypes, ProblemReasons.NotFound);
-										} else {
-											// make the user qualify the method, likely wants the first inherited method (javac generates an ambiguous error instead)
-											fuzzyProblem = new ProblemMethodBinding(methodBinding, selector, methodBinding.parameters, ProblemReasons.InheritedNameHidesEnclosingName);
-										}
-									} else if (!compatibleMethod.isValidBinding()) {
-										fuzzyProblem = compatibleMethod;
-									} else {
-										methodBinding = compatibleMethod;
-										if (!methodBinding.canBeSeenBy(receiverType, invocationSite, classScope)) {
-											// using <classScope> instead of <this> for visibility check does grant all access to innerclass
-											fuzzyProblem = new ProblemMethodBinding(methodBinding, selector, methodBinding.parameters, ProblemReasons.NotVisible);
-										}
-									}
-								}
-								if (fuzzyProblem == null && !methodBinding.isStatic()) {
+								if (!methodBinding.isStatic()) {
 									if (insideConstructorCall) {
 										insideProblem =
 											new ProblemMethodBinding(
@@ -109,37 +76,40 @@
 												ProblemReasons.NonStaticReferenceInStaticContext);
 									}
 								}
-	
-								if (receiverType == methodBinding.declaringClass
-									|| (receiverType.getMethods(selector)) != Binding.NO_METHODS
-									|| ((fuzzyProblem == null || fuzzyProblem.problemId() != ProblemReasons.NotVisible) && compilerOptions().complianceLevel >= ClassFileConstants.JDK1_4)) {
-									// found a valid method in the 'immediate' scope (ie. not inherited)
-									// OR the receiverType implemented a method with the correct name
-									// OR in 1.4 mode (inherited visible shadows enclosing)
-									if (foundMethod == null) {
-										if (depth > 0){
-											invocationSite.setDepth(depth);
-											invocationSite.setActualReceiverType(receiverType);
+
+								if (foundMethod == null) {
+									if (receiverType == methodBinding.declaringClass
+										|| (receiverType.getMethods(selector)) != Binding.NO_METHODS
+										|| ((foundFuzzyProblem == null || foundFuzzyProblem.problemId() != ProblemReasons.NotVisible) && compilerOptions().complianceLevel >= ClassFileConstants.JDK1_4)) {
+											// found a valid method in the 'immediate' scope (ie. not inherited)
+											// OR the receiverType implemented a method with the correct name
+											// OR in 1.4 mode (inherited visible shadows enclosing)
+											if (depth > 0) {
+												invocationSite.setDepth(depth);
+												invocationSite.setActualReceiverType(receiverType);
+											}
+											// return the methodBinding if it is not declared in a superclass of the scope's binding (that is, inherited)
+											if (foundFuzzyProblem != null && foundFuzzyProblem.problemId() != ProblemReasons.NotVisible)
+												return foundFuzzyProblem;
+											if (insideProblem != null)
+												return insideProblem;
+											return methodBinding;
 										}
-										// return the methodBinding if it is not declared in a superclass of the scope's binding (that is, inherited)
-										if (fuzzyProblem != null)
-											return fuzzyProblem;
-										if (insideProblem != null)
-											return insideProblem;
-										return methodBinding;
 									}
+							} else {
+								fuzzyProblem = methodBinding;
+							}
+
+							if (foundMethod != null && foundMethod.declaringClass != methodBinding.declaringClass)
+								if (receiverType == methodBinding.declaringClass || (receiverType.getMethods(selector)) != Binding.NO_METHODS)
 									// if a method was found, complain when another is found in an 'immediate' enclosing type (that is, not inherited)
 									// NOTE: Unlike fields, a non visible method hides a visible method
-									if (foundMethod.declaringClass != methodBinding.declaringClass)
-										// ie. have we found the same method - do not trust field identity yet
-										return new ProblemMethodBinding(
-											methodBinding, // closest match
-											methodBinding.selector,
-											methodBinding.parameters,
-											ProblemReasons.InheritedNameHidesEnclosingName);
-								}
-							}
-	
+									return new ProblemMethodBinding(
+										methodBinding, // closest match
+										methodBinding.selector,
+										methodBinding.parameters,
+										ProblemReasons.InheritedNameHidesEnclosingName);
+
 							if (foundMethod == null || (foundMethod.problemId() == ProblemReasons.NotVisible && methodBinding.problemId() != ProblemReasons.NotVisible)) {
 								// only remember the methodBinding if its the first one found or the previous one was not visible & methodBinding is...
 								// remember that private methods are visible if defined directly by an enclosing class
@@ -170,12 +140,21 @@
 			scope = scope.parent;
 		}
 
+		if (foundFuzzyProblem != null)
+			if (foundFuzzyProblem.problemId() != ProblemReasons.NotVisible && foundFuzzyProblem.problemId() != ProblemReasons.NotFound)
+				return foundFuzzyProblem;
+		if (foundInsideProblem != null)
+			return foundInsideProblem;
+
 		if (insideStaticContext && compilerOptions().sourceLevel >= ClassFileConstants.JDK1_5) {
+			if (foundFuzzyProblem != null && foundFuzzyProblem.declaringClass != null && foundFuzzyProblem.declaringClass.id == TypeIds.T_JavaLangObject)
+				return foundFuzzyProblem; // static imports lose to methods from Object
+
 			// at this point the scope is a compilation unit scope & need to check for imported static methods
 			CompilationUnitScope unitScope = (CompilationUnitScope) scope;
 			ImportBinding[] imports = unitScope.imports;
 			if (imports != null) {
-				MethodBinding[] visible = null;
+				ObjectVector visible = null;
 				boolean skipOnDemand = false; // set to true when matched static import of method name so stop looking for on demand methods
 				for (int i = 0, length = imports.length; i < length; i++) {
 					ImportBinding importBinding = imports[i];
@@ -205,62 +184,53 @@
 								}
 							}
 						}
-						if (possible != null && possible != foundMethod) {
+						if (possible != null && possible != foundFuzzyProblem) {
 							if (!possible.isValidBinding()) {
-								if (foundMethod == null)
-									foundMethod = possible; // answer as error case match
+								if (foundFuzzyProblem == null)
+									foundFuzzyProblem = possible; // answer as error case match
 							} else if (possible.isStatic()) {
 								MethodBinding compatibleMethod = computeCompatibleMethod(possible, argumentTypes, invocationSite);
 								if (compatibleMethod != null) {
 									if (compatibleMethod.isValidBinding()) {
 										if (compatibleMethod.canBeSeenBy(unitScope.fPackage)) {
-											ImportReference importReference = importBinding.reference;
-											if (importReference != null) importReference.used = true;
-											if (foundMethod == null || !foundMethod.isValidBinding()) {
-												foundMethod = compatibleMethod;
-												if (!importBinding.onDemand && foundMethod.isValidBinding())
-													skipOnDemand = true;
-											} else {
+											if (visible == null || !visible.contains(compatibleMethod)) {
+												ImportReference importReference = importBinding.reference;
+												if (importReference != null) importReference.used = true;
 												if (!skipOnDemand && !importBinding.onDemand) {
 													visible = null; // forget previous matches from on demand imports
-													foundMethod = compatibleMethod;
 													skipOnDemand = true;
-												} else if (visible == null) {
-													visible = new MethodBinding[] {foundMethod, compatibleMethod};
-												} else {
-													int visibleLength = visible.length;
-													MethodBinding[] temp = new MethodBinding[visibleLength + 1];
-													System.arraycopy(visible, 0, temp, 0, visibleLength);
-													temp[visibleLength] = compatibleMethod;
-													visible = temp;
 												}
+												if (visible == null)
+													visible = new ObjectVector(3);
+												visible.add(compatibleMethod);
 											}
-										} else if (foundMethod == null) {
-											foundMethod = new ProblemMethodBinding(compatibleMethod, selector, compatibleMethod.parameters, ProblemReasons.NotVisible);
+										} else if (foundFuzzyProblem == null) {
+											foundFuzzyProblem = new ProblemMethodBinding(compatibleMethod, selector, compatibleMethod.parameters, ProblemReasons.NotVisible);
 										}
+									} else if (foundFuzzyProblem == null) {
+										foundFuzzyProblem = compatibleMethod;
 									}
-								} else if (foundMethod == null) {
-									foundMethod = new ProblemMethodBinding(possible, selector, argumentTypes, ProblemReasons.NotFound);
+								} else if (foundFuzzyProblem == null) {
+									foundFuzzyProblem = new ProblemMethodBinding(possible, selector, argumentTypes, ProblemReasons.NotFound);
 								}
 							}
 						}
 					}
 				}
-				if (visible != null)
-					foundMethod = mostSpecificMethodBinding(visible, visible.length, argumentTypes, invocationSite, null);
-			}
-			if (foundMethod != null) {
-				invocationSite.setActualReceiverType(foundMethod.declaringClass);
-				return foundMethod;
+				if (visible != null) {
+					MethodBinding[] temp = new MethodBinding[visible.size];
+					visible.copyInto(temp);
+					foundMethod = mostSpecificMethodBinding(temp, temp.length, argumentTypes, invocationSite, null);
+				}
 			}
 		}
 
+		if (foundMethod != null) {
+			invocationSite.setActualReceiverType(foundMethod.declaringClass);
+			return foundMethod;
+		}
 		if (foundFuzzyProblem != null)
 			return foundFuzzyProblem;
-		if (foundInsideProblem != null)
-			return foundInsideProblem;
-		if (foundMethod != null)
-			return foundMethod;
 
 		return new ProblemMethodBinding(selector, argumentTypes, ProblemReasons.NotFound);
 	}

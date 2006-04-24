@@ -1,0 +1,49 @@
+	// abstract method lookup lookup (since maybe missing default abstract methods)
+	protected MethodBinding findDefaultAbstractMethod(
+		ReferenceBinding receiverType, 
+		char[] selector,
+		TypeBinding[] argumentTypes,
+		InvocationSite invocationSite,
+		ReferenceBinding classHierarchyStart,
+		ObjectVector found) {
+
+		int startFoundSize = found.size;
+		ReferenceBinding currentType = classHierarchyStart;
+		while (currentType != null) {
+			findMethodInSuperInterfaces(currentType, selector, found);
+			currentType = currentType.superclass();
+		}
+		CompilationUnitScope unitScope = compilationUnitScope();
+		int foundSize = found.size;
+		if (foundSize == startFoundSize)
+			return null;
+		MethodBinding[] candidates = null;
+		int candidatesCount = 0;
+		MethodBinding problemMethod = null;
+		// argument type compatibility check
+		for (int i = startFoundSize; i < foundSize; i++) {
+			MethodBinding methodBinding = (MethodBinding) found.elementAt(i);
+			MethodBinding compatibleMethod = computeCompatibleMethod(methodBinding, argumentTypes, invocationSite);
+			if (compatibleMethod != null) {
+				if (compatibleMethod.isValidBinding()) {
+					if (candidatesCount == 0)
+						candidates = new MethodBinding[foundSize - startFoundSize];
+					candidates[candidatesCount++] = compatibleMethod;
+				} else if (problemMethod == null) {
+					problemMethod = compatibleMethod;
+				}
+			}
+		}
+
+		if (candidatesCount == 1) {
+			unitScope.recordTypeReferences(candidates[0].thrownExceptions);
+			return candidates[0]; 
+		}
+		if (candidatesCount == 0)
+			return problemMethod; // can be null
+		// no need to check for visibility - interface methods are public
+		if (compilerOptions().complianceLevel >= ClassFileConstants.JDK1_4)
+			return mostSpecificMethodBinding(candidates, candidatesCount, argumentTypes, invocationSite, receiverType);
+		return mostSpecificInterfaceMethodBinding(candidates, candidatesCount, invocationSite);
+	}
+
