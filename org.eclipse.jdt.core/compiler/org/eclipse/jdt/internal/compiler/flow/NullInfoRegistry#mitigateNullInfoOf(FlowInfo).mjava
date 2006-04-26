@@ -12,58 +12,32 @@ public UnconditionalFlowInfo mitigateNullInfoOf(FlowInfo flowInfo) {
 	if ((this.tagBits & NULL_FLAG_MASK) == 0) {
 		return flowInfo.unconditionalInits();
 	}
-//	// Reference implementation
-//	UnconditionalFlowInfo source = flowInfo.unconditionalCopy();
-//	long mask;
-//	// clear uncompatible protections
-//	mask = source.nullAssignmentStatusBit1 & source.nullAssignmentStatusBit2
-//			// prot. non null
-//		& (this.nullAssignmentStatusBit1 | this.nullAssignmentValueBit1);
-//			// null or unknown
-//	source.nullAssignmentStatusBit1 &= ~mask;
-//	source.nullAssignmentStatusBit2 &= ~mask;
-//	mask = ~source.nullAssignmentStatusBit1 & source.nullAssignmentStatusBit2
-//			// prot. null
-//		& (this.nullAssignmentStatusBit2 | this.nullAssignmentValueBit1
-//				| this.nullAssignmentValueBit2);
-//			// non null or unknown
-//	source.nullAssignmentStatusBit2 &= ~mask;
-//	// clear uncompatible assignments
-//	mask = source.nullAssignmentStatusBit1 & ~source.nullAssignmentStatusBit2
-//		& (source.nullAssignmentValueBit1 & ~source.nullAssignmentValueBit2 
-//				& (this.nullAssignmentStatusBit2 | this.nullAssignmentValueBit1
-//						| this.nullAssignmentValueBit2)
-//			| ~source.nullAssignmentValueBit1 & source.nullAssignmentValueBit2
-//				& (this.nullAssignmentStatusBit1 | this.nullAssignmentValueBit1)
-//			| source.nullAssignmentValueBit1 & source.nullAssignmentValueBit2
-//				& (this.nullAssignmentStatusBit1));
-//	source.nullAssignmentStatusBit1 &= ~mask;
-	long m1, m2, m3, a1, a2, a3, a4, s1, s2, s3, s4;
+	long m, m1, nm1, m2, nm2, m3, a2, a3, a4, s1, s2, ns2, s3, ns3, s4, ns4;
 	boolean newCopy = false;
 	UnconditionalFlowInfo source = flowInfo.unconditionalInits();
-	// clear uncompatible protections
-	m1 = (s1 = source.nullAssignmentStatusBit1) 
-			& (s2 = source.nullAssignmentStatusBit2)
+	// clear incompatible protections
+	m1 = (s1 = source.nullBit1) & (s3 = source.nullBit3) 
+				& (s4 = source.nullBit4)
 			// prot. non null
-		& ((a1 = this.nullAssignmentStatusBit1)
-				| (a3 = this.nullAssignmentValueBit1));
+		& ((a2 = this.nullBit2) | (a4 = this.nullBit4));
 			// null or unknown
-	m2 = ~s1 & s2
+	m2 = s1 & (s2 = this.nullBit2) & (s3 ^ s4)
 			// prot. null
-		& ((a2 = this.nullAssignmentStatusBit2) | a3
-				| (a4 = this.nullAssignmentValueBit2));
+		& ((a3 = this.nullBit3) | a4);
 			// non null or unknown
-	// clear uncompatible assignments
-	m3 = s1 & ~s2
-		& ((s3 = source.nullAssignmentValueBit1) 
-				& ~(s4 = source.nullAssignmentValueBit2) 
-				& (a2 | a3 | a4)
-					| s4 & (~s3 & a3 | a1));
-	if ((m1 | m2 | m3) != 0) {
+	// clear incompatible assignments
+	// PREMATURE check effect of protected non null (no NPE on call)
+	// TODO (maxime) code extensive implementation tests
+	m3 = s1	& (s2 & (ns3 = ~s3) & (ns4 = ~s4) & (a3 | a4)
+				| (ns2 = ~s2) & s3 & ns4 & (a2 | a4)
+				| ns2 & ns3 & s4 & (a2 | a3)); 
+	if ((m = (m1 | m2 | m3)) != 0) {
 		newCopy = true;
 		source = source.unconditionalCopy();
-		source.nullAssignmentStatusBit1 &= ~(m1 | m3);
-		source.nullAssignmentStatusBit2 &= ~(m1 | m2);
+		source.nullBit1 &= ~m;
+		source.nullBit2 &= (nm1 = ~m1) & ((nm2 = ~m2) | a4);
+		source.nullBit3 &= (nm1 | a2) & nm2;
+		source.nullBit4 &= nm1 & nm2;
 	}
 	if (this.extra != null && source.extra != null) {
 		int length = this.extra[2].length, sourceLength = source.extra[0].length;
@@ -71,29 +45,24 @@ public UnconditionalFlowInfo mitigateNullInfoOf(FlowInfo flowInfo) {
 			length = sourceLength;
 		}
 		for (int i = 0; i < length; i++) {
-			// clear uncompatible protections
-			m1 = (s1 = source.extra[2][i]) & (s2 = source.extra[3][i])
-					// prot. non null
-				& ((a1 = this.extra[2][i]) | (a3 = this.extra[4][i]));
-					// null or unknown
-			m2 = ~s1 & s2
-					// prot. null
-				& ((a2 = this.extra[3][i]) | a3
-						| (a4 = this.extra[5][i]));
-					// non null or unknown
-			// clear uncompatible assignments
-			m3 = s1 & ~s2
-				& ((s3 = source.extra[4][i]) & ~(s4 = source.extra[5][i]) 
-						& (a2 | a3 | a4)
-					| s4 & (~s3 & a3 | a1));
-			if ((m1 | m2 | m3) != 0) {
-				if (!newCopy) {
-					newCopy = true;
-					source = source.unconditionalCopy();
-				}
-				source.extra[2][i] &= ~(m1 | m3);
-				source.extra[3][i] &= ~(m1 | m2);
-			}
+        	m1 = (s1 = source.extra[1 + 1][i]) & (s3 = source.extra[3 + 1][i]) 
+        				& (s4 = source.extra[4 + 1][i])
+        		& ((a2 = this.extra[2 + 1][i]) | (a4 = this.extra[4 + 1][i]));
+        	m2 = s1 & (s2 = this.extra[2 + 1][i]) & (s3 ^ s4)
+        		& ((a3 = this.extra[3 + 1][i]) | a4);
+        	m3 = s1	& (s2 & (ns3 = ~s3) & (ns4 = ~s4) & (a3 | a4)
+        				| (ns2 = ~s2) & s3 & ns4 & (a2 | a4)
+        				| ns2 & ns3 & s4 & (a2 | a3)); 
+        	if ((m = (m1 | m2 | m3)) != 0) {
+        	  	if (! newCopy) {
+            		newCopy = true;
+            		source = source.unconditionalCopy();
+        	  	}
+        		source.extra[1 + 1][i] &= ~m;
+        		source.extra[2 + 1][i] &= (nm1 = ~m1) & ((nm2 = ~m2) | a4);
+        		source.extra[3 + 1][i] &= (nm1 | a2) & nm2;
+        		source.extra[4 + 1][i] &= nm1 & nm2;
+        	}
 		}
 	}
 	return source;

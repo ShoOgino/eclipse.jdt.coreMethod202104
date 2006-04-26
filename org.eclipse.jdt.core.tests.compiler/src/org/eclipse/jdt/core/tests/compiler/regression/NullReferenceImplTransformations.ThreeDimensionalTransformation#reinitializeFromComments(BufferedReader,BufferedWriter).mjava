@@ -1,0 +1,288 @@
+void reinitializeFromComments(BufferedReader input, BufferedWriter output) {
+	String line, tab = "";
+	int cursor;
+	char c;
+	this.initializedTransitions = new HashMap(State.stateMaxValue);
+	int lineNumber = 0;
+	try {
+		while ((line = input.readLine()) != null) {
+			lineNumber++;
+			output.write(line);
+			output.write('\n');
+			if ((cursor = line.indexOf(definitionStartMarker)) != -1) {
+				// check the line format
+				boolean reachedStart = true;
+				for (int i = 0; i < cursor; i++) {
+					if (!Character.isWhitespace(c = line.charAt(i))) {
+						reachedStart = false;
+						break;
+					}
+					else {
+						tab += c;
+					}
+				}
+				if (reachedStart) {
+					while ((line = input.readLine()) != null && 
+							line.indexOf(definitionEndMarker) == -1) {
+						lineNumber++;
+						final int 
+							start = 0,
+							commentStart = 1,
+							commentFound = 2,
+							firstState = 10,
+							firstStateWS = 11,
+							plus = 20,
+							secondState = 30,
+							secondStateWS = 31,
+							implies = 40,
+							impliesWS = 41,
+							thirdState = 50,
+							thirdStateWS = 51, // caveat, multi-state
+							error = 99;
+						int state = start, 
+							firstStateStart = 0, firstStateEnd = 0, firstStateWhiteSpace = 0,
+							secondStateStart = 0, secondStateEnd = 0, secondStateWhiteSpace = 0,
+							thirdStateStart = 0, thirdStateEnd = 0, thirdStateWhiteSpace = 0;
+						char current;
+						analysis: for (int i = 0, length = line.length(); i < length; i++) {
+							current = line.charAt(i);
+							switch (state) {
+								case start:
+									if (current == '/') {
+										state = commentStart;
+									} else if (! Character.isWhitespace(current)) {
+										state = error;
+										break analysis;
+									} 
+									break;
+								case commentStart:
+									if (current == '/') {
+										state = commentFound;
+									} else {
+										state = error;
+										break analysis;
+									}
+									break;
+								case commentFound:
+									if (! Character.isWhitespace(current)) {
+										firstStateStart = firstStateEnd = i;
+										state = firstState;
+									}
+									break;
+								case firstState:
+									if (Character.isWhitespace(current)) {
+										state = firstStateWS;
+										firstStateWhiteSpace = 1;
+									} else {
+										firstStateEnd++;
+									}
+									break;
+								case firstStateWS:
+									if (current == '+') {
+										state = plus;
+									} else if (Character.isWhitespace(current)) {
+										firstStateWhiteSpace++;
+									} else {
+										state = firstState;
+										firstStateEnd += firstStateWhiteSpace + 1;
+									}
+									break;
+								case plus:
+									if (! Character.isWhitespace(current)) {
+										secondStateStart = secondStateEnd = i;
+										state = secondState;
+									}
+									break;
+								case secondState:
+									if (Character.isWhitespace(current)) {
+										state = secondStateWS;
+										secondStateWhiteSpace = 1;
+									} else {
+										secondStateEnd++;
+									}
+									break;
+								case secondStateWS:
+									if (current == '=') {
+										state = implies;
+									} else if (Character.isWhitespace(current)) {
+										secondStateWhiteSpace++;
+									} else {
+										state = secondState;
+										secondStateEnd += secondStateWhiteSpace + 1;
+									}
+									break;
+								case implies:
+									if (current == '>') {
+										state = impliesWS;
+									} else {
+										state = error;
+										break analysis;
+									}
+									break;
+								case impliesWS:
+									if (! Character.isWhitespace(current)) {
+										thirdStateStart = thirdStateEnd = i;
+										state = thirdState;
+									}
+									break;
+								case thirdState:
+									if (current == '/') {
+										break analysis;
+									} else if (Character.isWhitespace(current)) {
+										state = thirdStateWS;
+										thirdStateWhiteSpace = 1;
+									} else {
+										thirdStateEnd++;
+									}
+									break;
+								case thirdStateWS:
+									if (current == '/') {
+										state = thirdState;
+										break analysis;
+									} else if (current == 'C') {
+										state++;
+									} else if (Character.isWhitespace(current)) {
+										thirdStateWhiteSpace++;
+									} else {
+										state = thirdState;
+										thirdStateEnd += thirdStateWhiteSpace + 1;
+									}
+									break;
+								case thirdStateWS + 1:
+									if (current == '/') {
+										state = thirdState;
+										break analysis;
+									} else if (current == 'H') {
+										state++;
+									} else {
+										state = thirdState;
+										thirdStateEnd += thirdStateWhiteSpace + 2;
+									}
+									break;
+								case thirdStateWS + 2:
+									if (current == '/') {
+										state = thirdState;
+										break analysis;
+									} else if (current == 'E') {
+										state++;
+									} else {
+										state = thirdState;
+										thirdStateEnd += thirdStateWhiteSpace + 3;
+									}
+									break;
+								case thirdStateWS + 3:
+									if (current == '/') {
+										state = thirdState;
+										break analysis;
+									} else if (current == 'C') {
+										state++;
+									} else {
+										state = thirdState;
+										thirdStateEnd += thirdStateWhiteSpace + 4;
+									}
+									break;
+								case thirdStateWS + 4:
+									if (current == '/' || current == 'K') {
+										state = thirdState;
+										break analysis;
+									} else {
+										state = thirdState;
+										thirdStateEnd += thirdStateWhiteSpace + 5;
+									}
+									break;
+									
+							}
+						}
+						if (state == error || state < thirdState) {
+							System.err.println("Could not interpret comment definition"); // PREMATURE improve diagnostic
+						} else {
+							if (state > thirdStateWS) {
+								thirdStateEnd += (state - thirdState);
+							}
+							String stateName;
+							State first, second, third;
+							if ((first = State.fromSymbolicName(
+										stateName = line.substring(firstStateStart, firstStateEnd + 1)))
+									== null) {
+								System.err.println("Could not find state: " + stateName); // PREMATURE improve diagnostic
+							}
+							if ((second = State.fromSymbolicName(
+										stateName = line.substring(secondStateStart, secondStateEnd + 1)))
+									== null) {
+								System.err.println("Could not find state: " + stateName); // PREMATURE improve diagnostic
+							}
+							if ((third = State.fromSymbolicName(
+										stateName = line.substring(thirdStateStart, thirdStateEnd + 1)))
+									== null) {
+								System.err.println("Could not find state: " + stateName); // PREMATURE improve diagnostic
+							}
+							if (first != null && second != null && third != null) {
+								Map transitions;
+								if ((transitions = (Map) this.initializedTransitions.get(first)) == null) {
+									transitions = new HashMap(State.stateMaxValue + 1);
+									this.initializedTransitions.put(first, transitions);
+								}
+								if (transitions.get(second) != null) {
+									System.err.println("Line " + lineNumber + ": Skipping duplicate entry for states: (" + first
+											+ ", " + second + ")"); // PREMATURE improve diagnostic
+								} else {
+									transitions.put(second, third);
+								}
+							}
+						}
+						output.write(line);
+						output.write('\n');
+					}
+				}
+				printMissingEntries(output, tab);
+				output.write(tab + definitionEndMarker + "\n");
+			}
+			if (line != null && (cursor = line.indexOf(initializerStartMarker)) != -1) {
+				// check the line format
+				boolean reachedStart = true;
+				tab = "";
+				for (int i = 0; i < cursor; i++) {
+					if (!Character.isWhitespace(c = line.charAt(i))) {
+						reachedStart = false;
+						break;
+					}
+					else {
+						tab += c;
+					}
+				}
+				if (reachedStart) {
+					while ((line = input.readLine()) != null && 
+							line.indexOf(initializerEndMarker) == -1) {
+						// loop
+					}
+					SortedMap sortedTransitionsSet = new TreeMap(this.initializedTransitions);
+					Iterator transitionsSets = sortedTransitionsSet.entrySet().iterator();
+					Map.Entry transitionsSet;
+					while (transitionsSets.hasNext()) {
+						transitionsSet = (Map.Entry) transitionsSets.next();
+						SortedMap sortedTransitions = new TreeMap((Map) transitionsSet.getValue());
+						Iterator transitions = sortedTransitions.entrySet().iterator();
+						Map.Entry transition;
+						while (transitions.hasNext()) {
+							transition = (Map.Entry) transitions.next();
+							output.write(tab);
+							output.write('{');
+							output.write(((State)transitionsSet.getKey()).hexString);
+							output.write(',');
+							output.write(((State)transition.getKey()).hexString);
+							output.write(',');
+							output.write(((State)transition.getValue()).hexString);
+							output.write("},");
+							output.write('\n');
+						}
+					}
+					output.write(tab + initializerEndMarker + "\n");
+				}
+			}
+		}
+		output.flush();
+	} catch (IOException e) {
+		throw new RuntimeException(e);
+	}
+}
+
