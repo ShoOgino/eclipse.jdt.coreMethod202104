@@ -1,0 +1,50 @@
+	public void testBug114418() throws Exception {
+		
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("  void foo() {\n");
+		buf.append("    try {\n");
+		buf.append("    } catch (IOException e) {\n");
+		buf.append("    }\n");
+		buf.append("    // comment\n");	
+		buf.append("  }\n");	
+		buf.append("}\n");	
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+		
+		CompilationUnit astRoot= createAST3(cu);
+		ASTRewrite rewrite= ASTRewrite.create(astRoot.getAST());
+		
+		AST ast= astRoot.getAST();
+		
+		assertTrue("Parse errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+		TryStatement statement= (TryStatement) ((MethodDeclaration) type.bodyDeclarations().get(0)).getBody().statements().get(0);
+		
+		ListRewrite listRewrite= rewrite.getListRewrite(statement, TryStatement.CATCH_CLAUSES_PROPERTY);
+		CatchClause clause= ast.newCatchClause();
+		SingleVariableDeclaration newSingleVariableDeclaration= ast.newSingleVariableDeclaration();
+		newSingleVariableDeclaration.setName(ast.newSimpleName("e"));
+		newSingleVariableDeclaration.setType(ast.newSimpleType(ast.newSimpleName("MyException")));
+		clause.setException(newSingleVariableDeclaration);
+		
+		listRewrite.insertLast(clause, null);
+			
+		String preview= evaluateRewrite(cu, rewrite);
+		
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("  void foo() {\n");
+		buf.append("    try {\n");
+		buf.append("    } catch (IOException e) {\n");
+		buf.append("    }\n");
+		buf.append("    // comment\n");
+		buf.append(" catch (MyException e) {\n");
+		buf.append("    }\n");
+		buf.append("  }\n");	
+		buf.append("}\n");	
+		assertEqualString(preview, buf.toString());
+	}
+
