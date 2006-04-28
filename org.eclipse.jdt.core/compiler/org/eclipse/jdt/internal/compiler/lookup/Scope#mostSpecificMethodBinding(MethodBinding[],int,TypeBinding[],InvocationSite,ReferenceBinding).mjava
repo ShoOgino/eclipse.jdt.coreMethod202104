@@ -67,6 +67,8 @@
 		nextSpecific : for (int i = 0; i < visibleSize; i++) {
 			MethodBinding current = moreSpecific[i];
 			if (current != null) {
+				ReferenceBinding[] mostSpecificExceptions = null;
+				SimpleSet possibleMethods = null;
 				MethodBinding original = current.original();
 				for (int j = 0; j < visibleSize; j++) {
 					MethodBinding next = moreSpecific[j];
@@ -126,9 +128,63 @@
 						}
 						if (original.typeVariables != Binding.NO_TYPE_VARIABLES)
 							original2 = original.computeSubstitutedMethod(original2, environment());
-						if (original2 == null || !original.areParameterErasuresEqual(original2) || !original.returnType.isCompatibleWith(original2.returnType)) // 15.2.2
+						if (original2 == null || !original.areParameterErasuresEqual(original2))
 							continue nextSpecific; // current does not override next
+						if (!original.returnType.isCompatibleWith(original2.returnType)) // 15.12.2
+							continue nextSpecific; // choose original2 instead
+						if (original.thrownExceptions != original2.thrownExceptions) {
+							if (mostSpecificExceptions == null)
+								mostSpecificExceptions = original.thrownExceptions;
+							if (possibleMethods == null)
+								possibleMethods = new SimpleSet(3);
+							int mostSpecificLength = mostSpecificExceptions.length;
+							int original2Length = original2.thrownExceptions.length;
+							SimpleSet temp = new SimpleSet(mostSpecificLength);
+							nextException : for (int t = 0; t < mostSpecificLength; t++) {
+								ReferenceBinding exception = mostSpecificExceptions[t];
+								for (int s = 0; s < original2Length; s++) {
+									if (exception.isCompatibleWith(original2.thrownExceptions[s])) {
+										possibleMethods.add(current);
+										temp.add(exception);
+										continue nextException;
+									} else if (original2.thrownExceptions[s].isCompatibleWith(exception)) {
+										possibleMethods.add(next);
+										temp.add(original2.thrownExceptions[s]);
+										continue nextException;
+									}
+								}
+							}
+							mostSpecificExceptions = temp.elementSize == 0 ? Binding.NO_EXCEPTIONS : new ReferenceBinding[temp.elementSize];
+							temp.asArray(mostSpecificExceptions);
+						}
 					}
+				}
+				if (mostSpecificExceptions != null) {
+					Object[] values = possibleMethods.values;
+					int exceptionLength = mostSpecificExceptions.length;
+					nextMethod : for (int p = 0, vLength = values.length; p < vLength; p++) {
+						MethodBinding possible = (MethodBinding) values[p];
+						if (possible == null) continue nextMethod;
+						ReferenceBinding[] itsExceptions = possible.thrownExceptions;
+						if (itsExceptions.length == exceptionLength) {
+							nextException : for (int e = 0; e < exceptionLength; e++) {
+								ReferenceBinding exception = itsExceptions[e];
+								for (int f = 0; f < exceptionLength; f++)
+									if (exception == mostSpecificExceptions[f]) continue nextException;
+								continue nextMethod;
+							}
+							return possible;
+						}
+					}
+// do not return a new methodBinding until we know that it does not cause problems
+//					return new MethodBinding(
+//						current.modifiers,
+//						current.selector,
+//						current.returnType,
+//						current.parameters,
+//						mostSpecificExceptions,
+//						current.declaringClass
+//					);
 				}
 				return current;
 			}
