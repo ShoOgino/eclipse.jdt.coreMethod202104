@@ -5,7 +5,8 @@
 		TypeBinding[] argumentTypes,
 		InvocationSite invocationSite,
 		ReferenceBinding classHierarchyStart,
-		ObjectVector found) {
+		ObjectVector found,
+		MethodBinding concreteMatch) {
 
 		int startFoundSize = found.size;
 		ReferenceBinding currentType = classHierarchyStart;
@@ -16,7 +17,7 @@
 		CompilationUnitScope unitScope = compilationUnitScope();
 		int foundSize = found.size;
 		if (foundSize == startFoundSize)
-			return null;
+			return concreteMatch;
 		MethodBinding[] candidates = null;
 		int candidatesCount = 0;
 		MethodBinding problemMethod = null;
@@ -26,8 +27,11 @@
 			MethodBinding compatibleMethod = computeCompatibleMethod(methodBinding, argumentTypes, invocationSite);
 			if (compatibleMethod != null) {
 				if (compatibleMethod.isValidBinding()) {
-					if (candidatesCount == 0)
-						candidates = new MethodBinding[foundSize - startFoundSize];
+					if (candidatesCount == 0) {
+						candidates = new MethodBinding[foundSize - startFoundSize + 1];
+						if (concreteMatch != null)
+							candidates[candidatesCount++] = concreteMatch;
+					}
 					candidates[candidatesCount++] = compatibleMethod;
 				} else if (problemMethod == null) {
 					problemMethod = compatibleMethod;
@@ -35,12 +39,15 @@
 			}
 		}
 
+		if (candidatesCount == 0) {
+			if (concreteMatch == null)
+				return problemMethod; // can be null
+			return concreteMatch;
+		}
 		if (candidatesCount == 1) {
 			unitScope.recordTypeReferences(candidates[0].thrownExceptions);
 			return candidates[0]; 
 		}
-		if (candidatesCount == 0)
-			return problemMethod; // can be null
 		// no need to check for visibility - interface methods are public
 		if (compilerOptions().complianceLevel >= ClassFileConstants.JDK1_4)
 			return mostSpecificMethodBinding(candidates, candidatesCount, argumentTypes, invocationSite, receiverType);
