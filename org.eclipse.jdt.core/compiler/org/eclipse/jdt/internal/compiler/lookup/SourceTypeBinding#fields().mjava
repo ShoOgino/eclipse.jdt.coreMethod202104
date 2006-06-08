@@ -4,6 +4,7 @@ public FieldBinding[] fields() {
 		return this.fields;	
 
 	int failed = 0;
+	FieldBinding[] resolvedFields = this.fields;
 	try {
 		// lazily sort fields
 		if ((this.tagBits & TagBits.AreFieldsSorted) == 0) {
@@ -11,24 +12,28 @@ public FieldBinding[] fields() {
 			if (length > 1)
 				ReferenceBinding.sortFields(this.fields, 0, length);
 			this.tagBits |= TagBits.AreFieldsSorted;
-		}			
+		}
 		for (int i = 0, length = this.fields.length; i < length; i++) {
 			if (resolveTypeFor(this.fields[i]) == null) {
-				this.fields[i] = null;
+				// do not alter original field array until resolution is over, due to reentrance (143259)
+				if (resolvedFields == this.fields) {
+					System.arraycopy(this.fields, 0, resolvedFields = new FieldBinding[length], 0, length);
+				}
+				resolvedFields[i] = null;
 				failed++;
 			}
 		}
 	} finally {
 		if (failed > 0) {
 			// ensure fields are consistent reqardless of the error
-			int newSize = this.fields.length - failed;
+			int newSize = resolvedFields.length - failed;
 			if (newSize == 0)
 				return this.fields = Binding.NO_FIELDS;
 
 			FieldBinding[] newFields = new FieldBinding[newSize];
-			for (int i = 0, j = 0, length = this.fields.length; i < length; i++) {
-				if (this.fields[i] != null)
-					newFields[j++] = this.fields[i];
+			for (int i = 0, j = 0, length = resolvedFields.length; i < length; i++) {
+				if (resolvedFields[i] != null)
+					newFields[j++] = resolvedFields[i];
 			}
 			this.fields = newFields;
 		}
