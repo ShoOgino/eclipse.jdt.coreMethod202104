@@ -1,0 +1,54 @@
+private void fixSupertypeBindings() {
+	for (int current = this.typeIndex; current >= 0; current--) {
+		ReferenceBinding typeBinding = this.typeBindings[current];
+	
+		
+		if (typeBinding instanceof SourceTypeBinding) {
+			ClassScope scope = ((SourceTypeBinding) typeBinding).scope;
+			if (scope != null) {
+				TypeDeclaration typeDeclaration = scope.referenceContext;
+				TypeReference superclassRef = typeDeclaration == null ? null : typeDeclaration.superclass;
+				TypeBinding superclass = superclassRef == null ? null : superclassRef.resolvedType;
+				if (superclass instanceof ProblemReferenceBinding) {
+					superclass = ((ProblemReferenceBinding) superclass).closestMatch;
+				}
+				if (superclass != null) 
+					((SourceTypeBinding) typeBinding).superclass = (ReferenceBinding) superclass;
+	
+				TypeReference[] superInterfaces = typeDeclaration == null ? null : typeDeclaration.superInterfaces;
+				int length;
+				ReferenceBinding[] interfaceBindings = typeBinding.superInterfaces();
+				if (superInterfaces != null && (length = superInterfaces.length) > (interfaceBindings == null ? 0 : interfaceBindings.length)) { // check for interfaceBindings being null (see https://bugs.eclipse.org/bugs/show_bug.cgi?id=139689)
+					interfaceBindings = new ReferenceBinding[length];
+					int index = 0;
+					for (int i = 0; i < length; i++) {
+						ReferenceBinding superInterface = (ReferenceBinding) superInterfaces[i].resolvedType;
+						if (superInterface instanceof ProblemReferenceBinding)
+							superInterface = ((ProblemReferenceBinding) superInterface).closestMatch;
+						if (superInterface != null)
+							interfaceBindings[index++] = superInterface;
+					}
+					if (index < length)
+						System.arraycopy(interfaceBindings, 0, interfaceBindings = new ReferenceBinding[index], 0 , index);
+					((SourceTypeBinding) typeBinding).superInterfaces = interfaceBindings;
+				}
+			}		
+		} else if (typeBinding instanceof BinaryTypeBinding) {
+			try {
+				typeBinding.superclass();
+			} catch (AbortCompilation e) {
+				// allow subsequent call to superclass() to succeed so that we don't have to catch AbortCompilation everywhere
+				((BinaryTypeBinding) typeBinding).tagBits &= ~TagBits.HasUnresolvedSuperclass;
+				this.builder.hierarchy.missingTypes.add(new String(typeBinding.superclass().sourceName()));
+				this.hasMissingSuperClass = true;
+			}
+			try {
+				typeBinding.superInterfaces();
+			} catch (AbortCompilation e) {
+				// allow subsequent call to superInterfaces() to succeed so that we don't have to catch AbortCompilation everywhere
+				((BinaryTypeBinding) typeBinding).tagBits &= ~TagBits.HasUnresolvedSuperinterfaces;
+			}
+		}
+	}	
+}
+
