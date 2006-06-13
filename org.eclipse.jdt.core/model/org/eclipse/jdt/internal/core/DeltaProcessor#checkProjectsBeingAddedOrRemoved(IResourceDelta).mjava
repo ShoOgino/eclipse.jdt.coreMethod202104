@@ -7,13 +7,13 @@
 	 */
 	private void checkProjectsBeingAddedOrRemoved(IResourceDelta delta) {
 		IResource resource = delta.getResource();
-		boolean processChildren = false;
+		IResourceDelta[] children = null;
 	
 		switch (resource.getType()) {
 			case IResource.ROOT :
 				// workaround for bug 15168 circular errors not reported 
 				this.state.getOldJavaProjecNames(); // force list to be computed
-				processChildren = true;
+				children = delta.getAffectedChildren();
 				break;
 			case IResource.PROJECT :
 				// NB: No need to check project's nature as if the project is not a java project:
@@ -26,23 +26,24 @@
 						this.manager.batchContainerInitializations = true;
 					
 						// remember project and its dependents
-						this.addToRootsToRefreshWithDependents(javaProject);
+						addToRootsToRefreshWithDependents(javaProject);
 						
 						// workaround for bug 15168 circular errors not reported 
 						if (JavaProject.hasJavaNature(project)) {
-							this.addToParentInfo(javaProject);
+							addToParentInfo(javaProject);
+							
+							try {
+								// force to (re)read the .classpath file
+								javaProject.getPerProjectInfo().readAndCacheClasspath(javaProject);
+							} catch (JavaModelException e) {	
+								if (VERBOSE) {
+									e.printStackTrace();
+								}
+							}
 							
 							// ensure project references are updated (see https://bugs.eclipse.org/bugs/show_bug.cgi?id=121569)
-							try {
-								this.state.updateProjectReferences(
-									javaProject, 
-									null/*no old classpath*/, 
-									null/*compute new resolved classpath later*/, 
-									null/*read raw classpath later*/, 
-									false/*cannot change resources*/);
-							} catch (JavaModelException e1) {
-								// project always exists
-							}					
+							ClasspathChange change = (ClasspathChange) this.classpathChanges.get(project);
+							this.state.addProjectReferenceChange(javaProject, change == null ? null : change.oldResolvedClasspath);
 						}
 						
 						this.state.rootsAreStale = true; 
@@ -53,12 +54,12 @@
 								this.manager.batchContainerInitializations = true;
 		
 								// project opened or closed: remember  project and its dependents
-								this.addToRootsToRefreshWithDependents(javaProject);
+								addToRootsToRefreshWithDependents(javaProject);
 								
 								// workaround for bug 15168 circular errors not reported 
 								if (project.isOpen()) {
 									if (JavaProject.hasJavaNature(project)) {
-										this.addToParentInfo(javaProject);
+										addToParentInfo(javaProject);
 									}
 								} else {
 									try {
@@ -74,7 +75,7 @@
 							} else if ((delta.getFlags() & IResourceDelta.DESCRIPTION) != 0) {
 								boolean wasJavaProject = this.state.findJavaProject(project.getName()) != null;
 								boolean isJavaProject = JavaProject.hasJavaNature(project);
-								if (wasJavaProject != isJavaProject) { 
+								if (wasJavaProject != isJavaProject) {
 									this.manager.batchContainerInitializations = true;
 									
 									// java nature added or removed: remember  project and its dependents
@@ -101,7 +102,7 @@
 									// in case the project was removed then added then changed (see bug 19799)
 									if (isJavaProject) { // need nature check - 18698
 										this.addToParentInfo(javaProject);
-										processChildren = true;
+										children = delta.getAffectedChildren();
 									}
 								}
 							} else {
@@ -109,7 +110,7 @@
 								// in case the project was removed then added then changed
 								if (JavaProject.hasJavaNature(project)) { // need nature check - 18698
 									this.addToParentInfo(javaProject);
-									processChildren = true;
+									children = delta.getAffectedChildren();
 								}						
 							}		
 							break;
@@ -135,14 +136,33 @@
 				/* classpath file change */
 				if (file.getName().equals(JavaProject.CLASSPATH_FILENAME)) {
 					this.manager.batchContainerInitializations = true;
-					reconcileClasspathFileUpdate(delta, (JavaProject)JavaCore.create(file.getProject()));
+					switch (delta.getKind()) {
+						case IResourceDelta.CHANGED :
+							int flags = delta.getFlags();
+							if ((flags & IResourceDelta.CONTENT) == 0  // only consider content change
+								&& (flags & IResourceDelta.ENCODING) == 0 // and encoding change
+								&& (flags & IResourceDelta.MOVED_FROM) == 0) {// and also move and overide scenario (see http://dev.eclipse.org/bugs/show_bug.cgi?id=21420)
+								break;
+							}
+						// fall through
+						case IResourceDelta.ADDED :
+							javaProject = (JavaProject)JavaCore.create(file.getProject());
+							
+							// force to (re)read the .classpath file
+							try {
+								javaProject.getPerProjectInfo().readAndCacheClasspath(javaProject);
+							} catch (JavaModelException e) {
+								// project doesn't exist
+								return;
+							}
+							break;
+					}
 					this.state.rootsAreStale = true;
 				}
 				break;
 				
 		}
-		if (processChildren) {
-			IResourceDelta[] children = delta.getAffectedChildren();
+		if (children != null) {
 			for (int i = 0; i < children.length; i++) {
 				checkProjectsBeingAddedOrRemoved(children[i]);
 			}

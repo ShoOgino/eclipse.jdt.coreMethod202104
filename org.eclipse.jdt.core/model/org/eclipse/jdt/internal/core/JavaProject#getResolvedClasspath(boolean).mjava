@@ -1,14 +1,37 @@
 	/**
 	 * @see IJavaProject
 	 */
-	public IClasspathEntry[] getResolvedClasspath(boolean ignoreUnresolvedEntry)
-		throws JavaModelException {
+	public IClasspathEntry[] getResolvedClasspath(boolean ignoreUnresolvedEntry) throws JavaModelException {
+		if  (JavaModelManager.getJavaModelManager().isClasspathBeingResolved(this)) {
+			if (JavaModelManager.CP_RESOLVE_VERBOSE) {
+				Util.verbose(
+					"CPResolution: reentering raw classpath resolution, will use empty classpath instead" + //$NON-NLS-1$
+					"	project: " + getElementName() + '\n' + //$NON-NLS-1$
+					"	invocation stack trace:"); //$NON-NLS-1$
+				new Exception("<Fake exception>").printStackTrace(System.out); //$NON-NLS-1$
+			}						
+		    return RESOLUTION_IN_PROGRESS;
+		}
+		PerProjectInfo perProjectInfo = getPerProjectInfo();
 
-		return 
-			getResolvedClasspath(
-				ignoreUnresolvedEntry, 
-				false, // don't generateMarkerOnError
-				true // returnResolutionInProgress
-			);
+		// use synchronized block to ensure consistency
+		IClasspathEntry[] resolvedClasspath;
+		IJavaModelStatus unresolvedEntryStatus;
+		synchronized (perProjectInfo) {
+			resolvedClasspath = perProjectInfo.resolvedClasspath;
+			unresolvedEntryStatus = perProjectInfo.unresolvedEntryStatus;
+		}
+		
+		if (resolvedClasspath == null 
+				|| (unresolvedEntryStatus != null && !unresolvedEntryStatus.isOK())) { // force resolution to ensure initializers are run again
+			resolveClasspath(perProjectInfo);
+			synchronized (perProjectInfo) {
+				resolvedClasspath = perProjectInfo.resolvedClasspath;
+				unresolvedEntryStatus = perProjectInfo.unresolvedEntryStatus;
+			}
+		}
+		if (!ignoreUnresolvedEntry && unresolvedEntryStatus != null && !unresolvedEntryStatus.isOK())
+			throw new JavaModelException(unresolvedEntryStatus);
+		return resolvedClasspath;
 	}
 

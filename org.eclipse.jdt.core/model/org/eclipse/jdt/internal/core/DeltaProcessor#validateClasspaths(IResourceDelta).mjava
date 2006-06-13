@@ -1,0 +1,45 @@
+	/*
+	 * Validate the classpaths of the projects affected by the given delta.
+	 * Create markers if necessary.
+	 */
+	private void validateClasspaths(IResourceDelta delta) {
+		HashSet affectedProjects = new HashSet(5);
+		validateClasspaths(delta, affectedProjects); 
+	
+		// validate classpaths of affected projects (dependent projects 
+		// or projects that reference a library in one of the projects that have changed)
+		if (!affectedProjects.isEmpty()) {
+			IWorkspaceRoot workspaceRoot = ResourcesPlugin.getWorkspace().getRoot();
+			IProject[] projects = workspaceRoot.getProjects();
+			int length = projects.length;
+			for (int i = 0; i < length; i++){
+				IProject project = projects[i];
+				JavaProject javaProject = (JavaProject)JavaCore.create(project);
+				try {
+					IPath projectPath = project.getFullPath();
+					IClasspathEntry[] classpath = javaProject.getResolvedClasspath(); // allowed to reuse model cache
+					for (int j = 0, cpLength = classpath.length; j < cpLength; j++) {
+						IClasspathEntry entry = classpath[j];
+						switch (entry.getEntryKind()) {
+							case IClasspathEntry.CPE_PROJECT:
+								if (affectedProjects.contains(entry.getPath())) {
+									this.state.addClasspathValidation(javaProject);
+								}
+								break;
+							case IClasspathEntry.CPE_LIBRARY:
+								IPath entryPath = entry.getPath();
+								IPath libProjectPath = entryPath.removeLastSegments(entryPath.segmentCount()-1);
+								if (!libProjectPath.equals(projectPath) // if library contained in another project
+										&& affectedProjects.contains(libProjectPath)) {
+									this.state.addClasspathValidation(javaProject);
+								}
+								break;
+						}
+					}
+				} catch(JavaModelException e) {
+						// project no longer exists
+				}
+			}
+		}
+	}
+

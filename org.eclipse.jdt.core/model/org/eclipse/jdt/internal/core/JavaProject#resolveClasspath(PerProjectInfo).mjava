@@ -1,0 +1,91 @@
+	/*
+	 * Resolve the given perProjectInfo's raw classpath and store the resolved classpath in the perProjectInfo.
+	 */
+	public void resolveClasspath(PerProjectInfo perProjectInfo) throws JavaModelException {
+		JavaModelManager manager = JavaModelManager.getJavaModelManager();
+		try {
+			manager.setClasspathBeingResolved(this, true);
+			
+			// get raw info inside a synchronized block to ensure that it is consistent
+			IClasspathEntry[] rawClasspath;
+			IPath outputLocation;
+			IJavaModelStatus rawClasspathStatus;
+			synchronized (perProjectInfo) {
+				rawClasspath= perProjectInfo.rawClasspath;
+				if (rawClasspath == null)
+					rawClasspath = perProjectInfo.readAndCacheClasspath(this);
+				outputLocation = perProjectInfo.outputLocation;
+				rawClasspathStatus = perProjectInfo.rawClasspathStatus;
+			}
+			 			
+			IJavaModelStatus unresolvedEntryStatus = JavaModelStatus.VERIFIED_OK;
+			HashMap rawReverseMap = new HashMap();
+			
+			ArrayList resolvedEntries = new ArrayList();
+			int length = rawClasspath.length;
+			for (int i = 0; i < length; i++) {
+	
+				IClasspathEntry rawEntry = rawClasspath[i];
+				IPath resolvedPath;
+				
+				switch (rawEntry.getEntryKind()){
+					
+					case IClasspathEntry.CPE_VARIABLE :
+						IClasspathEntry resolvedEntry = null;
+						try {
+							resolvedEntry = JavaCore.getResolvedClasspathEntry(rawEntry);
+						} catch (AssertionFailedException e) {
+							// Catch the assertion failure and set ststus instead
+							// see bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=55992
+							unresolvedEntryStatus = new JavaModelStatus(IJavaModelStatusConstants.INVALID_PATH, e.getMessage());
+							break;
+						}
+						if (resolvedEntry == null) {
+							unresolvedEntryStatus = new JavaModelStatus(IJavaModelStatusConstants.CP_VARIABLE_PATH_UNBOUND, this, rawEntry.getPath());
+						} else {
+							if (rawReverseMap != null) {
+								if (rawReverseMap.get(resolvedPath = resolvedEntry.getPath()) == null) rawReverseMap.put(resolvedPath , rawEntry);
+							}
+							resolvedEntries.add(resolvedEntry);
+						}
+						break; 
+	
+					case IClasspathEntry.CPE_CONTAINER :
+						IClasspathContainer container = JavaCore.getClasspathContainer(rawEntry.getPath(), this);
+						if (container == null){
+							unresolvedEntryStatus = new JavaModelStatus(IJavaModelStatusConstants.CP_CONTAINER_PATH_UNBOUND, this, rawEntry.getPath());
+							break;
+						}
+	
+						IClasspathEntry[] containerEntries = container.getClasspathEntries();
+						if (containerEntries == null) break;
+	
+						// container was bound
+						for (int j = 0, containerLength = containerEntries.length; j < containerLength; j++){
+							ClasspathEntry cEntry = (ClasspathEntry) containerEntries[j];
+							// if container is exported or restricted, then its nested entries must in turn be exported  (21749) and/or propagate restrictions
+							cEntry = cEntry.combineWith((ClasspathEntry) rawEntry);
+							if (rawReverseMap != null) {
+								if (rawReverseMap.get(resolvedPath = cEntry.getPath()) == null) rawReverseMap.put(resolvedPath , rawEntry);
+							}
+							resolvedEntries.add(cEntry);
+						}
+						break;
+											
+					default :
+						if (rawReverseMap != null) {
+							if (rawReverseMap.get(resolvedPath = rawEntry.getPath()) == null) rawReverseMap.put(resolvedPath , rawEntry);
+						}
+						resolvedEntries.add(rawEntry);
+				}					
+			}
+	
+			// store resolved info along with the raw info to ensure consistency
+			IClasspathEntry[] resolvedClasspath = new IClasspathEntry[resolvedEntries.size()];
+			resolvedEntries.toArray(resolvedClasspath);
+			perProjectInfo.setClasspath(rawClasspath, outputLocation, rawClasspathStatus, resolvedClasspath, rawReverseMap, unresolvedEntryStatus);
+		} finally {
+			manager.setClasspathBeingResolved(this, false);
+		}
+	}
+

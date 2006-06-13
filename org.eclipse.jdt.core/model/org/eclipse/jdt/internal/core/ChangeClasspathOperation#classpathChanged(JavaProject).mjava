@@ -1,0 +1,36 @@
+	/*
+	 * The resolved classpath of the given project may have changed:
+	 * - generate a delta
+	 * - trigger indexing
+	 * - update project references
+	 * - create resolved classpath markers
+	 */
+	protected void classpathChanged(JavaProject project) throws JavaModelException {
+		DeltaProcessingState state = JavaModelManager.getJavaModelManager().deltaState;
+		DeltaProcessor deltaProcessor = state.getDeltaProcessor();
+		ClasspathChange change = (ClasspathChange) deltaProcessor.classpathChanges.get(project.getProject());
+		if (this.canChangeResources) {
+			// delta, indexing and classpath markers are going to be created by the delta processor 
+			// while handling the .classpath file change
+
+			// however ensure project references are updated
+			// since some clients rely on the project references when run inside an IWorkspaceRunnable
+			new ProjectReferenceChange(project, change.oldResolvedClasspath).updateProjectReferencesIfNecessary();
+		} else {
+			JavaElementDelta delta = new JavaElementDelta(getJavaModel());
+			if (change.generateDelta(delta)) {
+				// create delta
+				addDelta(delta);
+				
+				// ensure indexes are updated
+				change.requestIndexing();
+				
+				// ensure classpath is validated on next build
+				state.addClasspathValidation(project);
+		
+				// ensure project references are updated on next build
+				state.addProjectReferenceChange(project, change.oldResolvedClasspath);
+			}
+		}
+	}
+

@@ -1,0 +1,87 @@
+	/*
+	 * Request the indexing of entries that have been added, and remove the index for removed entries.
+	 */
+	public void requestIndexing() {
+		IClasspathEntry[] newResolvedClasspath = null;
+		try {
+			newResolvedClasspath = this.project.getResolvedClasspath();
+		} catch (JavaModelException e) {	
+			// project doesn't exist
+			return;
+		}
+		
+		JavaModelManager manager = JavaModelManager.getJavaModelManager();
+		IndexManager indexManager = manager.indexManager;
+		if (indexManager == null)
+			return;
+		DeltaProcessingState state = manager.deltaState;
+
+		int newLength = newResolvedClasspath.length;
+		int oldLength = this.oldResolvedClasspath.length;		
+		for (int i = 0; i < oldLength; i++) {
+			int index = classpathContains(newResolvedClasspath, this.oldResolvedClasspath[i]);
+			if (index == -1) {
+				// remote projects are not indexed in this project
+				if (this.oldResolvedClasspath[i].getEntryKind() == IClasspathEntry.CPE_PROJECT){
+					continue; 
+				}
+
+				// Remove the .java files from the index for a source folder
+				// For a lib folder or a .jar file, remove the corresponding index if not shared.
+				IClasspathEntry oldEntry = this.oldResolvedClasspath[i];
+				final IPath path = oldEntry.getPath();
+				int changeKind = this.oldResolvedClasspath[i].getEntryKind();
+				switch (changeKind) {
+					case IClasspathEntry.CPE_SOURCE:
+						char[][] inclusionPatterns = ((ClasspathEntry)oldEntry).fullInclusionPatternChars();
+						char[][] exclusionPatterns = ((ClasspathEntry)oldEntry).fullExclusionPatternChars();
+						indexManager.removeSourceFolderFromIndex(this.project, path, inclusionPatterns, exclusionPatterns);
+						break;
+					case IClasspathEntry.CPE_LIBRARY:
+						if (state.otherRoots.get(path) == null) { // if root was not shared
+							indexManager.discardJobs(path.toString());
+							indexManager.removeIndex(path);
+							// TODO (kent) we could just remove the in-memory index and have the indexing check for timestamps
+						}
+						break;
+				}
+			}
+		}
+
+		for (int i = 0; i < newLength; i++) {
+			int index = classpathContains(this.oldResolvedClasspath, newResolvedClasspath[i]);
+			if (index == -1) {
+				// remote projects are not indexed in this project
+				if (newResolvedClasspath[i].getEntryKind() == IClasspathEntry.CPE_PROJECT){
+					continue; 
+				}
+				
+				// Request indexing
+				int entryKind = newResolvedClasspath[i].getEntryKind();
+				switch (entryKind) {
+					case IClasspathEntry.CPE_LIBRARY:
+						boolean pathHasChanged = true;
+						IPath newPath = newResolvedClasspath[i].getPath();
+						for (int j = 0; j < oldLength; j++) {
+							IClasspathEntry oldEntry = this.oldResolvedClasspath[j];
+							if (oldEntry.getPath().equals(newPath)) {
+								pathHasChanged = false;
+								break;
+							}
+						}
+						if (pathHasChanged) {
+							indexManager.indexLibrary(newPath, this.project.getProject());
+						}
+						break;
+					case IClasspathEntry.CPE_SOURCE:
+						IClasspathEntry entry = newResolvedClasspath[i];
+						IPath path = entry.getPath();
+						char[][] inclusionPatterns = ((ClasspathEntry)entry).fullInclusionPatternChars();
+						char[][] exclusionPatterns = ((ClasspathEntry)entry).fullExclusionPatternChars();
+						indexManager.indexSourceFolder(this.project, path, inclusionPatterns, exclusionPatterns);
+						break;
+				}
+			}
+		}
+	}
+

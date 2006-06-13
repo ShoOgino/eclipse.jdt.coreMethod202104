@@ -1,0 +1,47 @@
+	/*
+	 * Reads the classpath file entries of this project's .classpath file.
+	 * This includes the output entry.
+	 * As a side effect, unknown elements are stored in the given map (if not null)
+	 * Throws exceptions if the file cannot be accessed or is malformed.
+	 */
+	public IClasspathEntry[] readFileEntriesWithException(Map unknownElements) throws CoreException, IOException, AssertionFailedException {
+		String xmlClasspath;
+		IFile rscFile = this.project.getFile(JavaProject.CLASSPATH_FILENAME);
+		if (rscFile.exists()) {
+			byte[] bytes = Util.getResourceContentsAsByteArray(rscFile);
+			try {
+				xmlClasspath = new String(bytes, org.eclipse.jdt.internal.compiler.util.Util.UTF_8); // .classpath always encoded with UTF-8
+			} catch (UnsupportedEncodingException e) {
+				Util.log(e, "Could not read .classpath with UTF-8 encoding"); //$NON-NLS-1$
+				// fallback to default
+				xmlClasspath = new String(bytes);
+			}
+		} else {
+			// when a project is imported, we get a first delta for the addition of the .project, but the .classpath is not accessible
+			// so default to using java.io.File
+			// see https://bugs.eclipse.org/bugs/show_bug.cgi?id=96258
+			URI location = rscFile.getLocationURI();
+			if (location == null)
+				throw new IOException("Cannot obtain a location URI for " + rscFile); //$NON-NLS-1$
+			File file = Util.toLocalFile(location, null/*no progress monitor available*/);
+			if (file == null)
+				throw new IOException("Unable to fetch file from " + location); //$NON-NLS-1$
+			byte[] bytes;
+			try {
+				bytes = org.eclipse.jdt.internal.compiler.util.Util.getFileByteContent(file);
+			} catch (IOException e) {
+				if (!file.exists())
+					return defaultClasspath();
+				throw e;
+			}
+			try {
+				xmlClasspath = new String(bytes, org.eclipse.jdt.internal.compiler.util.Util.UTF_8); // .classpath always encoded with UTF-8
+			} catch (UnsupportedEncodingException e) {
+				Util.log(e, "Could not read .classpath with UTF-8 encoding"); //$NON-NLS-1$
+				// fallback to default
+				xmlClasspath = new String(bytes);
+			}
+		}
+		return decodeClasspath(xmlClasspath, unknownElements);
+	}
+

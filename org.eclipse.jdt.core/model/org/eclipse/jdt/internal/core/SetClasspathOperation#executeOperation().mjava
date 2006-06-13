@@ -2,51 +2,20 @@
 	 * Sets the classpath of the pre-specified project.
 	 */
 	protected void executeOperation() throws JavaModelException {
-		// project reference updated - may throw an exception if unable to write .project file
-		updateProjectReferencesIfNecessary();
-
-		// classpath file updated - may throw an exception if unable to write .classpath file
-		saveClasspathIfNecessary();
-		
-		// perform classpath and output location updates, if exception occurs in classpath update,
-		// make sure the output location is updated before surfacing the exception (in case the output
-		// location update also throws an exception, give priority to the classpath update one).
-		JavaModelException originalException = null;
-
+		if (isCanceled()) 
+			return;
 		try {
-			if (this.newRawPath == DO_NOT_UPDATE_PROJECT_REFS) this.newRawPath = project.getRawClasspath();
-			if (this.newRawPath != DO_NOT_SET_ENTRIES){
-				updateClasspath();
-				project.updatePackageFragmentRoots();
-				JavaModelManager.getJavaModelManager().getDeltaProcessor().addForRefresh(project);
-			}
-
-		} catch(JavaModelException e){
-			originalException = e;
-			throw e;
-
-		} finally { // if traversed by an exception we still need to update the output location when necessary
-
-			try {
-				if (this.newOutputLocation != DO_NOT_SET_OUTPUT) updateOutputLocation();
-
-			} catch(JavaModelException e){
-				if (originalException != null) throw originalException; 
-				throw e;
-			} finally {
-				// ensures the project is getting rebuilt if only variable is modified
-				if (!this.identicalRoots && this.canChangeResources) {
-					try {
-						this.project.getProject().touch(this.progressMonitor);
-					} catch (CoreException e) {
-						if (JavaModelManager.CP_RESOLVE_VERBOSE){
-							Util.verbose("CPContainer INIT - FAILED to touch project: "+ this.project.getElementName(), System.err); //$NON-NLS-1$
-							e.printStackTrace();
-						}
-					}
-				}				
-			}
+			// set raw classpath and null out resolved info
+			this.project.getPerProjectInfo().setClasspath(this.newRawClasspath, this.newOutputLocation, JavaModelStatus.VERIFIED_OK/*format is ok*/, null, null, null);
+			
+			// if needed, generate delta, update project ref, create markers, ...
+			classpathChanged(this.project);
+			
+			// write .classpath file
+			if (this.canChangeResources && this.project.saveClasspath(this.newRawClasspath, this.newOutputLocation))
+				setAttribute(HAS_MODIFIED_RESOURCE_ATTR, TRUE);
+		} finally {		
+			done();
 		}
-		done();
 	}
 

@@ -33,9 +33,32 @@
 							try {
 								stopDeltas();
 								checkProjectsBeingAddedOrRemoved(delta);
+								
+								// generate classpath change deltas
+								if (this.classpathChanges.size() > 0) {
+									boolean hasDelta = this.currentDelta != null;
+									JavaElementDelta javaDelta = currentDelta();
+									Iterator changes = this.classpathChanges.values().iterator();
+									while (changes.hasNext()) {
+										ClasspathChange change = (ClasspathChange) changes.next();
+										if (change.generateDelta(javaDelta)) {
+											hasDelta = true;
+											change.requestIndexing();
+											this.state.addClasspathValidation(change.project);
+											this.state.addProjectReferenceChange(change.project, change.oldResolvedClasspath);
+										}
+									}
+									this.classpathChanges.clear();
+									if (!hasDelta)
+										this.currentDelta = null;
+								}
+								
+								// generate external archive change deltas
 								if (this.refreshedElements != null) {
 									createExternalArchiveDelta(null);
 								}
+								
+								// generate Java deltas from resource changes
 								IJavaElementDelta translatedDelta = processResourceDelta(delta);
 								if (translatedDelta != null) { 
 									registerJavaModelDelta(translatedDelta);
@@ -55,27 +78,46 @@
 						} finally {
 							// workaround for bug 15168 circular errors not reported 
 							this.state.resetOldJavaProjectNames();
-							this.removedRoots = null;
+							this.oldRoots = null;
 						}
 					}
 					return;
 					
 				case IResourceChangeEvent.PRE_BUILD :
-				    DeltaProcessingState.ProjectUpdateInfo[] updates = this.state.removeAllProjectUpdates();
-					if (updates != null) {
-					    for (int i = 0, length = updates.length; i < length; i++) {
+					if(!isAffectedBy(delta))
+						return; // avoid populating for SYNC or MARKER deltas
+
+					// create classpath markers if necessary
+					validateClasspaths(delta);
+					ClasspathValidation[] validations = this.state.removeClasspathValidations();
+					if (validations != null) {
+						for (int i = 0, length = validations.length; i < length; i++) {
+							ClasspathValidation validation = validations[i];
+							validation.validate();
+						}
+						// update all cycle markers since the classpath changes may have affected cycles
+						try {
+							JavaProject.validateCycles(null);
+						} catch (JavaModelException e) {
+							// a project no longer exist
+						}
+					}
+					
+					// update project references if necessary
+				    ProjectReferenceChange[] projectRefChanges = this.state.removeProjectReferenceChanges();
+					if (projectRefChanges != null) {
+					    for (int i = 0, length = projectRefChanges.length; i < length; i++) {
 					        try {
-						        updates[i].updateProjectReferencesIfNecessary();
+						        projectRefChanges[i].updateProjectReferencesIfNecessary();
 					        } catch(JavaModelException e) {
-					            // do nothing
+					            // project doesn't exist any longer, continue with next one
 					        }
 					    }
 					}
-					// this.processPostChange = false;
-					if(isAffectedBy(delta)) { // avoid populating for SYNC or MARKER deltas
-						updateClasspathMarkers(delta, updates);
-						JavaBuilder.buildStarting();
-					}
+					
+					JavaModel.flushExternalFileCache();
+					JavaBuilder.buildStarting();
+					
 					// does not fire any deltas
 					return;
 

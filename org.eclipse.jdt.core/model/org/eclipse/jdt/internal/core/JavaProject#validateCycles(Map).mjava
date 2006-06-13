@@ -1,0 +1,60 @@
+	/*
+	 * Detect cycles in the classpath of the workspace's projects
+	 * and create markers if necessary.
+	 * @param preferredClasspaths Map
+	 * @throws JavaModelException
+	 */
+	public static void validateCycles(Map preferredClasspaths) throws JavaModelException {
+
+		//long start = System.currentTimeMillis();
+
+		IWorkspaceRoot workspaceRoot = ResourcesPlugin.getWorkspace().getRoot();
+		IProject[] rscProjects = workspaceRoot.getProjects();
+		int length = rscProjects.length;
+		JavaProject[] projects = new JavaProject[length];
+				
+		HashSet cycleParticipants = new HashSet();
+		HashSet traversed = new HashSet();
+		
+		// compute cycle participants
+		ArrayList prereqChain = new ArrayList();
+		for (int i = 0; i < length; i++){
+			if (hasJavaNature(rscProjects[i])) {
+				JavaProject project = (projects[i] = (JavaProject)JavaCore.create(rscProjects[i]));
+				if (!traversed.contains(project.getPath())){
+					prereqChain.clear();
+					project.updateCycleParticipants(prereqChain, cycleParticipants, workspaceRoot, traversed, preferredClasspaths);
+				}
+			}
+		}
+		//System.out.println("updateAllCycleMarkers: " + (System.currentTimeMillis() - start) + " ms");
+
+		for (int i = 0; i < length; i++){
+			JavaProject project = projects[i];
+			if (project != null) {
+				if (cycleParticipants.contains(project.getPath())){
+					IMarker cycleMarker = project.getCycleMarker();
+					String circularCPOption = project.getOption(JavaCore.CORE_CIRCULAR_CLASSPATH, true);
+					int circularCPSeverity = JavaCore.ERROR.equals(circularCPOption) ? IMarker.SEVERITY_ERROR : IMarker.SEVERITY_WARNING;
+					if (cycleMarker != null) {
+						// update existing cycle marker if needed
+						try {
+							int existingSeverity = ((Integer)cycleMarker.getAttribute(IMarker.SEVERITY)).intValue();
+							if (existingSeverity != circularCPSeverity) {
+								cycleMarker.setAttribute(IMarker.SEVERITY, circularCPSeverity);
+							}
+						} catch (CoreException e) {
+							throw new JavaModelException(e);
+						}
+					} else {
+						// create new marker
+						project.createClasspathProblemMarker(
+							new JavaModelStatus(IJavaModelStatusConstants.CLASSPATH_CYCLE, project)); 
+					}
+				} else {
+					project.flushClasspathProblemMarkers(true, false);
+				}			
+			}
+		}
+	}
+

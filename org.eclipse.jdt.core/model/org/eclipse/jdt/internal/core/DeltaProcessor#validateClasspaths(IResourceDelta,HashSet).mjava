@@ -1,0 +1,70 @@
+	private void validateClasspaths(IResourceDelta delta, HashSet affectedProjects) {
+		IResource resource = delta.getResource();
+		boolean processChildren = false;
+		switch (resource.getType()) {
+			case IResource.ROOT :
+				if (delta.getKind() == IResourceDelta.CHANGED) {
+					processChildren = true;
+				}
+				break;
+			case IResource.PROJECT :
+				IProject project = (IProject)resource;
+				int kind = delta.getKind();
+				boolean isJavaProject = JavaProject.hasJavaNature(project);
+				switch (kind) {
+					case IResourceDelta.ADDED:
+						processChildren = isJavaProject;
+						affectedProjects.add(project.getFullPath());
+						break;
+					case IResourceDelta.CHANGED:
+						processChildren = isJavaProject;
+						if ((delta.getFlags() & IResourceDelta.OPEN) != 0) {
+							// project opened or closed: remember  project and its dependents
+							affectedProjects.add(project.getFullPath());
+							if (isJavaProject) {
+								JavaProject javaProject = (JavaProject)JavaCore.create(project);
+								this.state.addClasspathValidation(javaProject); // in case .classpath got modified while closed
+							}
+						} else if ((delta.getFlags() & IResourceDelta.DESCRIPTION) != 0) {
+							boolean wasJavaProject = this.state.findJavaProject(project.getName()) != null;
+							if (wasJavaProject && !isJavaProject) {
+								// project no longer has Java nature, discard Java related obsolete markers
+								JavaProject javaProject = (JavaProject)JavaCore.create(project);
+								this.state.addClasspathValidation(javaProject); 
+
+								affectedProjects.add(project.getFullPath());
+							} if (isJavaProject) {
+								// check if all entries exist
+								JavaProject javaProject = (JavaProject)JavaCore.create(project);
+								this.state.addClasspathValidation(javaProject); 
+							}
+						} else if (isJavaProject) {
+							// check if all entries exist
+							JavaProject javaProject = (JavaProject)JavaCore.create(project);
+							this.state.addClasspathValidation(javaProject); 
+						}
+						break;
+					case IResourceDelta.REMOVED:
+						affectedProjects.add(project.getFullPath());
+						break;
+				}
+				break;
+			case IResource.FILE :
+				/* check classpath file change */
+				IFile file = (IFile) resource;
+				if (file.getName().equals(JavaProject.CLASSPATH_FILENAME)) {
+					affectedProjects.add(file.getProject().getFullPath());
+					JavaProject javaProject = (JavaProject)JavaCore.create(file.getProject());
+					this.state.addClasspathValidation(javaProject); 
+					break;
+				}
+				break;
+		}
+		if (processChildren) {
+			IResourceDelta[] children = delta.getAffectedChildren();
+			for (int i = 0; i < children.length; i++) {
+				validateClasspaths(children[i], affectedProjects);
+			}
+		}
+	}
+
