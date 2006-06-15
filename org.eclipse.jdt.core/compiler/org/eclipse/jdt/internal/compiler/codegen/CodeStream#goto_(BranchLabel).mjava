@@ -10,7 +10,16 @@ final public void goto_(BranchLabel label) {
 	if (classFileOffset >= bCodeStream.length) {
 		resizeByteArray();
 	}
-	this.inlineForwardReferencesFromLabelsTargeting(label, position);
+	boolean chained = this.inlineForwardReferencesFromLabelsTargeting(label, position);
+	if (DEBUG && chained) {
+		if (DEBUG) {
+			if (this.lastAbruptCompletion == this.position) {
+				System.out.println("\t\t\t\t<branch chaining - goto eliminated : "+this.position+","+label+">");//$NON-NLS-1$//$NON-NLS-2$//$NON-NLS-3$				
+			} else {
+				System.out.println("\t\t\t\t<branch chaining - goto issued : "+this.position+","+label+">");//$NON-NLS-1$//$NON-NLS-2$//$NON-NLS-3$
+			}
+		}		
+	}
 	/*
 	 Possible optimization for code such as:
 	 public Object foo() {
@@ -27,19 +36,22 @@ final public void goto_(BranchLabel label) {
 	}
 	The goto around the else block for the first if will
 	be unreachable, because the thenClause of the second if
-	returns.
-	See inlineForwardReferencesFromLabelsTargeting defined
-	on the Label class for the remaining part of this
-	optimization.
-	 if (!lbl.isBranchTarget(position)) {
-		switch(bCodeStream[classFileOffset-1]) {
-			case Opcodes.OPC_return :
-			case Opcodes.OPC_areturn:
-				return;
-		}
+	returns. Also see 114894
 	}*/
+	if (chained && this.lastAbruptCompletion == this.position) {
+		if (label.position != Label.POS_NOT_SET) { // ensure existing forward references are updated
+			int[] forwardRefs = label.forwardReferences();
+			for (int i = 0, max = label.forwardReferenceCount(); i < max; i++) {
+				this.writePosition(label, forwardRefs[i]);
+			}				
+			this.countLabels = 0; // backward jump, no further chaining allowed
+		}
+//		this.lastAbruptCompletion = -1;
+		return;
+	}
 	position++;
 	bCodeStream[classFileOffset++] = Opcodes.OPC_goto;
 	label.branch();
+	this.lastAbruptCompletion = this.position;
 }
 
