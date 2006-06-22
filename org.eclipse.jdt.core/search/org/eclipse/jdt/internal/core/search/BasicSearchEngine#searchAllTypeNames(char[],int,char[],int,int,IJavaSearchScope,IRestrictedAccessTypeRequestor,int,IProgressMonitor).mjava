@@ -8,8 +8,9 @@
 	 */
 	public void searchAllTypeNames(
 		final char[] packageName, 
+		final int packageMatchRule, 
 		final char[] typeName,
-		final int matchRule, 
+		final int typeMatchRule, 
 		int searchFor, 
 		IJavaSearchScope scope, 
 		final IRestrictedAccessTypeRequestor nameRequestor,
@@ -19,8 +20,9 @@
 		if (VERBOSE) {
 			Util.verbose("BasicSearchEngine.searchAllTypeNames(char[], char[], int, int, IJavaSearchScope, IRestrictedAccessTypeRequestor, int, IProgressMonitor)"); //$NON-NLS-1$
 			Util.verbose("	- package name: "+(packageName==null?"null":new String(packageName))); //$NON-NLS-1$ //$NON-NLS-2$
+			Util.verbose("	- match rule: "+getMatchRuleString(packageMatchRule)); //$NON-NLS-1$
 			Util.verbose("	- type name: "+(typeName==null?"null":new String(typeName))); //$NON-NLS-1$ //$NON-NLS-2$
-			Util.verbose("	- match rule: "+getMatchRuleString(matchRule)); //$NON-NLS-1$
+			Util.verbose("	- match rule: "+getMatchRuleString(typeMatchRule)); //$NON-NLS-1$
 			Util.verbose("	- search for: "+searchFor); //$NON-NLS-1$
 			Util.verbose("	- scope: "+scope); //$NON-NLS-1$
 		}
@@ -28,6 +30,7 @@
 		// Return on invalid combination of package and type names
 		if (packageName == null || packageName.length == 0) {
 			if (typeName != null && typeName.length == 0) {
+				// TODO (frederic) Throw a JME instead?
 				if (VERBOSE) {
 					Util.verbose("	=> return no result due to invalid empty values for package and type names!"); //$NON-NLS-1$
 				}
@@ -35,6 +38,7 @@
 			}
 		}
 
+		// Create pattern
 		IndexManager indexManager = JavaModelManager.getJavaModelManager().getIndexManager();
 		final char typeSuffix;
 		switch(searchFor){
@@ -60,12 +64,19 @@
 				typeSuffix = IIndexConstants.TYPE_SUFFIX;
 				break;
 		}
-		final TypeDeclarationPattern pattern = new TypeDeclarationPattern(
-			packageName,
-			null, // do find member types
-			typeName,
-			typeSuffix,
-			matchRule);
+		final TypeDeclarationPattern pattern = packageMatchRule == SearchPattern.R_EXACT_MATCH
+			? new TypeDeclarationPattern(
+				packageName,
+				null,
+				typeName,
+				typeSuffix,
+				typeMatchRule)
+			: new QualifiedTypeDeclarationPattern(
+				packageName,
+				packageMatchRule,
+				typeName,
+				typeSuffix,
+				typeMatchRule);
 
 		// Get working copy path(s). Store in a single string in case of only one to optimize comparison in requestor
 		final HashSet workingCopyPaths = new HashSet();
@@ -182,7 +193,7 @@
 							} else /*if (type.isInterface())*/ {
 								kind = TypeDeclaration.INTERFACE_DECL;
 							}
-							if (match(typeSuffix, packageName, typeName, matchRule, kind, packageDeclaration, simpleName)) {
+							if (match(typeSuffix, packageName, typeName, typeMatchRule, kind, packageDeclaration, simpleName)) {
 								nameRequestor.acceptType(type.getFlags(), packageDeclaration, simpleName, enclosingTypeNames, path, null);
 							}
 						}
@@ -198,13 +209,13 @@
 									return false; // no local/anonymous type
 								}
 								public boolean visit(TypeDeclaration typeDeclaration, CompilationUnitScope compilationUnitScope) {
-									if (match(typeSuffix, packageName, typeName, matchRule, TypeDeclaration.kind(typeDeclaration.modifiers), packageDeclaration, typeDeclaration.name)) {
+									if (match(typeSuffix, packageName, typeName, typeMatchRule, TypeDeclaration.kind(typeDeclaration.modifiers), packageDeclaration, typeDeclaration.name)) {
 										nameRequestor.acceptType(typeDeclaration.modifiers, packageDeclaration, typeDeclaration.name, CharOperation.NO_CHAR_CHAR, path, null);
 									}
 									return true;
 								}
 								public boolean visit(TypeDeclaration memberTypeDeclaration, ClassScope classScope) {
-									if (match(typeSuffix, packageName, typeName, matchRule, TypeDeclaration.kind(memberTypeDeclaration.modifiers), packageDeclaration, memberTypeDeclaration.name)) {
+									if (match(typeSuffix, packageName, typeName, typeMatchRule, TypeDeclaration.kind(memberTypeDeclaration.modifiers), packageDeclaration, memberTypeDeclaration.name)) {
 										// compute encloising type names
 										TypeDeclaration enclosing = memberTypeDeclaration.enclosingType;
 										char[][] enclosingTypeNames = CharOperation.NO_CHAR_CHAR;
