@@ -2,15 +2,15 @@
 	 * Given some type expectation, and type variable bounds, perform some inference.
 	 * Returns true if still had unresolved type variable at the end of the operation
 	 */
-	private ParameterizedGenericMethodBinding inferFromExpectedType(Scope scope, TypeBinding expectedType, Map collectedSubstitutes, TypeBinding[] substitutes) {
+	private ParameterizedGenericMethodBinding inferFromExpectedType(Scope scope, TypeBinding expectedType, InferenceContext inferenceContext) {
 	    TypeVariableBinding[] originalVariables = this.originalMethod.typeVariables; // immediate parent (could be a parameterized method)
 		int varLength = originalVariables.length;
 		
 		computeSubstitutes: {
 		    // infer from expected return type
 			if (expectedType != null) {
-			    this.returnType.collectSubstitutes(scope, expectedType, collectedSubstitutes, CONSTRAINT_SUPER);
-				if (collectedSubstitutes.get(TypeBinding.VOID) != null) return null; // impossible substitution
+			    this.returnType.collectSubstitutes(scope, expectedType, inferenceContext, TypeConstants.CONSTRAINT_SUPER);
+			    if (inferenceContext.status == InferenceContext.FAILED) return null; // impossible substitution
 			}
 		    // infer from bounds of type parameters
 			for (int i = 0; i < varLength; i++) {
@@ -19,31 +19,28 @@
 				boolean argAlreadyInferred = argument != originalVariable;
 				if (originalVariable.firstBound == originalVariable.superclass) {
 					TypeBinding substitutedBound = Scope.substitute(this, originalVariable.superclass);
-					argument.collectSubstitutes(scope, substitutedBound, collectedSubstitutes, CONSTRAINT_SUPER);
-					if (collectedSubstitutes.get(TypeBinding.VOID) != null) return null; // impossible substitution
+					argument.collectSubstitutes(scope, substitutedBound, inferenceContext, TypeConstants.CONSTRAINT_SUPER);
+					if (inferenceContext.status == InferenceContext.FAILED) return null; // impossible substitution
 					// JLS 15.12.2.8 claims reverse inference shouldn't occur, however it improves inference
 					// e.g. given: <E extends Object, S extends Collection<E>> S test1(S param)
 					//                   invocation: test1(new Vector<String>())    will infer: S=Vector<String>  and with code below: E=String
 					if (argAlreadyInferred) {
-						substitutedBound.collectSubstitutes(scope, argument, collectedSubstitutes, CONSTRAINT_EXTENDS);
-						if (collectedSubstitutes.get(TypeBinding.VOID) != null) return null; // impossible substitution
+						substitutedBound.collectSubstitutes(scope, argument, inferenceContext, TypeConstants.CONSTRAINT_EXTENDS);
+						if (inferenceContext.status == InferenceContext.FAILED) return null; // impossible substitution
 					}
 				}
 				for (int j = 0, max = originalVariable.superInterfaces.length; j < max; j++) {
 					TypeBinding substitutedBound = Scope.substitute(this, originalVariable.superInterfaces[j]);
-					argument.collectSubstitutes(scope, substitutedBound, collectedSubstitutes, CONSTRAINT_SUPER);
-					if (collectedSubstitutes.get(TypeBinding.VOID) != null) return null; // impossible substitution
+					argument.collectSubstitutes(scope, substitutedBound, inferenceContext, TypeConstants.CONSTRAINT_SUPER);
+					if (inferenceContext.status == InferenceContext.FAILED) return null; // impossible substitution
 					// JLS 15.12.2.8 claims reverse inference shouldn't occur, however it improves inference
 					if (argAlreadyInferred) {
-						substitutedBound.collectSubstitutes(scope, argument, collectedSubstitutes, CONSTRAINT_EXTENDS);
-						if (collectedSubstitutes.get(TypeBinding.VOID) != null) return null; // impossible substitution
+						substitutedBound.collectSubstitutes(scope, argument, inferenceContext, TypeConstants.CONSTRAINT_EXTENDS);
+						if (inferenceContext.status == InferenceContext.FAILED) return null; // impossible substitution
 					}
 				}
 			}
-			substitutes = resolveSubstituteConstraints(scope, originalVariables, substitutes, true/*consider Ti<:Uk*/, collectedSubstitutes);
-			if (substitutes == null) 
-				return null; // incompatible
-			if (substitutes.length == 0) {
+			if (inferenceContext.status == InferenceContext.RAW_SUBSTITUTION) {
 		    	// raw generic method inferred
 		    	this.isRaw = true;
 				this.isUnchecked = false;
@@ -51,12 +48,14 @@
 		    		this.typeArguments[i] = originalVariables[i].upperBound();
 		    	}
 		    	break computeSubstitutes;
-			}
+			}		
+			if (!resolveSubstituteConstraints(scope, originalVariables, inferenceContext, true/*consider Ti<:Uk*/)) 
+				return null; // incompatible
 			// this.typeArguments = substitutes; - no op since side effects got performed during #resolveSubstituteConstraints
 	    	for (int i = 0; i < varLength; i++) {
-	    		TypeBinding substitute = substitutes[i];
+	    		TypeBinding substitute = inferenceContext.substitutes[i];
 	    		if (substitute != null) {
-	    			this.typeArguments[i] = substitutes[i];
+	    			this.typeArguments[i] = inferenceContext.substitutes[i];
 	    		} else {
 	    			// remaining unresolved variable are considered to be Object (or their bound actually)
 		    		this.typeArguments[i] = originalVariables[i].upperBound();

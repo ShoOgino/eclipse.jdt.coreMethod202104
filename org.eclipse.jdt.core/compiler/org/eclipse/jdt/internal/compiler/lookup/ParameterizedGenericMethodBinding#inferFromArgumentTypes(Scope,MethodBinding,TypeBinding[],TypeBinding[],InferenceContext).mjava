@@ -1,0 +1,71 @@
+	/**
+	 * Collect argument type mapping, handling varargs
+	 */
+	private static ParameterizedGenericMethodBinding inferFromArgumentTypes(Scope scope, MethodBinding originalMethod, TypeBinding[] arguments, TypeBinding[] parameters, InferenceContext inferenceContext) {
+
+		if (originalMethod.isVarargs()) {
+			int paramLength = parameters.length;
+			int minArgLength = paramLength - 1;
+			int argLength = arguments.length;
+			// process mandatory arguments
+			for (int i = 0; i < minArgLength; i++) {
+				parameters[i].collectSubstitutes(scope, arguments[i], inferenceContext, TypeConstants.CONSTRAINT_EXTENDS);
+				if (inferenceContext.status == InferenceContext.FAILED) return null; // impossible substitution
+			}
+			// process optional arguments
+			if (minArgLength < argLength) {
+				TypeBinding varargType = parameters[minArgLength]; // last arg type - as is ?
+				TypeBinding lastArgument = arguments[minArgLength];
+				checkVarargDimension: {
+					if (paramLength == argLength) {
+						if (lastArgument == TypeBinding.NULL) break checkVarargDimension;
+						switch (lastArgument.dimensions()) {
+							case 0 :
+								break; // will remove one dim
+							case 1 :
+								if (!lastArgument.leafComponentType().isBaseType()) break checkVarargDimension;
+								break; // will remove one dim
+							default :
+								break checkVarargDimension;
+						}
+					}
+					// eliminate one array dimension
+					varargType = ((ArrayBinding)varargType).elementsType(); 
+				}
+				for (int i = minArgLength; i < argLength; i++) {
+					varargType.collectSubstitutes(scope, arguments[i], inferenceContext, TypeConstants.CONSTRAINT_EXTENDS);
+					if (inferenceContext.status == InferenceContext.FAILED) return null; // impossible substitution
+				}
+			}
+		} else {
+			int paramLength = parameters.length;
+			for (int i = 0; i < paramLength; i++) {
+				parameters[i].collectSubstitutes(scope, arguments[i], inferenceContext, TypeConstants.CONSTRAINT_EXTENDS);
+				if (inferenceContext.status == InferenceContext.FAILED) return null; // impossible substitution
+			}
+		}
+		if (inferenceContext.status == InferenceContext.RAW_SUBSTITUTION) {
+			// raw generic method inferred
+			return scope.environment().createParameterizedGenericMethod(originalMethod, (RawTypeBinding)null);
+		}
+		TypeVariableBinding[] originalVariables = originalMethod.typeVariables;
+		if (!resolveSubstituteConstraints(scope, originalVariables , inferenceContext, false/*ignore Ti<:Uk*/)) 
+			return null; // impossible substitution
+
+		// apply inferred variable substitutions - replacing unresolved variable with original ones in param method
+		TypeBinding[] inferredSustitutes = inferenceContext.substitutes;
+		TypeBinding[] actualSubstitutes = inferredSustitutes;
+		for (int i = 0, varLength = originalVariables.length; i < varLength; i++) {
+			if (inferredSustitutes[i] == null) {
+				if (actualSubstitutes == inferredSustitutes) {
+					System.arraycopy(inferredSustitutes, 0, actualSubstitutes = new TypeBinding[varLength], 0, i); // clone to replace null with original variable in param method
+				}
+				actualSubstitutes[i] = originalVariables[i];
+			} else if (actualSubstitutes != inferredSustitutes) {
+				actualSubstitutes[i] = inferredSustitutes[i];
+			}
+		}
+		ParameterizedGenericMethodBinding paramMethod = scope.environment().createParameterizedGenericMethod(originalMethod, actualSubstitutes);
+		return paramMethod;
+	}
+
