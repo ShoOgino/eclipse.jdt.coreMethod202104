@@ -1,0 +1,69 @@
+public void generateOptimizedStringConcatenationCreation(BlockScope blockScope, 
+		CodeStream codeStream, int typeID) {
+	// keep implementation in sync with BinaryExpression
+	// #generateOptimizedStringConcatenationCreation
+	if (this.referencesTable == null) {
+		super.generateOptimizedStringConcatenationCreation(blockScope, 
+			codeStream,	typeID);
+	} else {
+		if ((((this.bits & ASTNode.OperatorMASK) >> ASTNode.OperatorSHIFT) == 
+				OperatorIds.PLUS) && 
+					((this.bits & ASTNode.ReturnTypeIDMASK) == 
+						TypeIds.T_JavaLangString) && 
+					this.constant == Constant.NotAConstant) {
+			int pc = codeStream.position;
+			BinaryExpression cursor = this.referencesTable[this.arity - 1];
+				// silence warnings
+			int restart = 0;
+			for (restart = this.arity - 1; restart >= 0; restart--) {
+				if (((((cursor = this.referencesTable[restart]).bits & 
+						ASTNode.OperatorMASK) >> ASTNode.OperatorSHIFT) == 
+							OperatorIds.PLUS) && 
+						((cursor.bits & ASTNode.ReturnTypeIDMASK) == 
+							TypeIds.T_JavaLangString)) {
+					if (cursor.constant != Constant.NotAConstant) {
+						codeStream.newStringContatenation(); // new: java.lang.StringBuffer
+						codeStream.dup();
+						codeStream.ldc(cursor.constant.stringValue());
+						codeStream.invokeStringConcatenationStringConstructor();
+						// invokespecial: java.lang.StringBuffer.<init>(Ljava.lang.String;)V
+						break;
+					}
+				} else {
+					cursor.generateOptimizedStringConcatenationCreation(blockScope, 
+						codeStream, cursor.implicitConversion & 
+							TypeIds.COMPILE_TYPE_MASK);
+					break;
+				}
+			}
+			restart++;
+			if (restart == 0) { // reached the leftmost expression
+				cursor.left.generateOptimizedStringConcatenationCreation(
+					blockScope,
+					codeStream,
+					this.left.implicitConversion & TypeIds.COMPILE_TYPE_MASK);
+			}
+			int pcAux;
+			for (int i = restart; i < this.arity; i++) {
+				codeStream.recordPositionsFrom(pc, 
+					(cursor = this.referencesTable[i]).left.sourceStart);
+				pcAux = codeStream.position;
+				cursor.right.generateOptimizedStringConcatenation(blockScope, 
+					codeStream,	cursor.right.implicitConversion & 
+						TypeIds.COMPILE_TYPE_MASK);
+				codeStream.recordPositionsFrom(pcAux, cursor.right.sourceStart);
+			}
+			codeStream.recordPositionsFrom(pc, this.left.sourceStart);
+			pc = codeStream.position;
+			this.right.generateOptimizedStringConcatenation(
+				blockScope,
+				codeStream,
+				this.right.implicitConversion & TypeIds.COMPILE_TYPE_MASK);
+			codeStream.recordPositionsFrom(pc, this.right.sourceStart);
+		} else {
+			super.generateOptimizedStringConcatenationCreation(blockScope, 
+				codeStream, typeID);
+		}
+	}
+}
+
