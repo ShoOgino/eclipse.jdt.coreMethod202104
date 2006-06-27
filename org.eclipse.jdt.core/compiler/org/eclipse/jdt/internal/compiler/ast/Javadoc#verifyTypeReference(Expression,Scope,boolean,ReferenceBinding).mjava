@@ -1,0 +1,42 @@
+	private void verifyTypeReference(Expression reference, Scope scope, boolean source15, ReferenceBinding resolvedType) {
+		if (resolvedType.isValidBinding()) {
+			int scopeModifiers = -1;
+
+			// member types
+			if (resolvedType.isMemberType()) {
+				ReferenceBinding topLevelType = resolvedType;
+				int depth = 0;
+				while (topLevelType.enclosingType() != null) {
+					topLevelType = topLevelType.enclosingType();
+					depth++;
+				}
+				ClassScope topLevelScope = scope.classScope();
+				// when scope is not on compilation unit type, then inner class may not be visible...
+				if (topLevelScope.parent.kind != Scope.COMPILATION_UNIT_SCOPE ||
+					!CharOperation.equals(topLevelType.sourceName, topLevelScope.referenceContext.name)) {
+					topLevelScope = topLevelScope.outerMostClassScope();
+					if (reference instanceof JavadocSingleTypeReference) {
+						// inner class single reference can only be done in same unit
+						if ((!source15 && depth == 1) || topLevelType != topLevelScope.referenceContext.binding) {
+							if (scopeModifiers == -1) scopeModifiers = scope.getDeclarationModifiers();
+							scope.problemReporter().javadocInvalidMemberTypeQualification(reference.sourceStart, reference.sourceEnd, scopeModifiers);
+						}
+					} else if (reference instanceof JavadocQualifiedTypeReference) {
+						JavadocQualifiedTypeReference qualifiedTypeReference = (JavadocQualifiedTypeReference) reference;
+						// inner class qualified reference can only be done in same package
+						if ((qualifiedTypeReference.tokens.length != resolvedType.enclosingType().compoundName.length+1) && topLevelType.getPackage() != topLevelScope.referenceContext.binding.getPackage()) {
+							if (scopeModifiers == -1) scopeModifiers = scope.getDeclarationModifiers();
+							scope.problemReporter().javadocInvalidMemberTypeQualification(reference.sourceStart, reference.sourceEnd, scopeModifiers);
+						}
+					}
+				}
+			}
+
+			// reference must have enough visibility to be used
+			if (!canBeSeen(scope.problemReporter().options.reportInvalidJavadocTagsVisibility, resolvedType)) {
+				if (scopeModifiers == -1) scopeModifiers = scope.getDeclarationModifiers();
+				scope.problemReporter().javadocNotVisibleReference(reference.sourceStart, reference.sourceEnd, scopeModifiers);
+			}
+		}
+	}
+
