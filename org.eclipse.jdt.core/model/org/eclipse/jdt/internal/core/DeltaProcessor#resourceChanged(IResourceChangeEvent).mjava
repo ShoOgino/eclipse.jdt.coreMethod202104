@@ -41,10 +41,13 @@
 									Iterator changes = this.classpathChanges.values().iterator();
 									while (changes.hasNext()) {
 										ClasspathChange change = (ClasspathChange) changes.next();
-										if (change.generateDelta(javaDelta)) {
+										int result = change.generateDelta(javaDelta);
+										if ((result & ClasspathChange.HAS_DELTA) != 0) {
 											hasDelta = true;
 											change.requestIndexing();
 											this.state.addClasspathValidation(change.project);
+										}
+										if ((result & ClasspathChange.HAS_PROJECT_CHANGE) != 0) {
 											this.state.addProjectReferenceChange(change.project, change.oldResolvedClasspath);
 										}
 									}
@@ -88,18 +91,12 @@
 						return; // avoid populating for SYNC or MARKER deltas
 
 					// create classpath markers if necessary
-					validateClasspaths(delta);
+					boolean needCycleValidation = validateClasspaths(delta);
 					ClasspathValidation[] validations = this.state.removeClasspathValidations();
 					if (validations != null) {
 						for (int i = 0, length = validations.length; i < length; i++) {
 							ClasspathValidation validation = validations[i];
 							validation.validate();
-						}
-						// update all cycle markers since the classpath changes may have affected cycles
-						try {
-							JavaProject.validateCycles(null);
-						} catch (JavaModelException e) {
-							// a project no longer exist
 						}
 					}
 					
@@ -113,6 +110,15 @@
 					            // project doesn't exist any longer, continue with next one
 					        }
 					    }
+					}
+					
+					if (needCycleValidation || projectRefChanges != null) {
+						// update all cycle markers since the project references changes may have affected cycles
+						try {
+							JavaProject.validateCycles(null);
+						} catch (JavaModelException e) {
+							// a project no longer exists
+						}
 					}
 					
 					JavaModel.flushExternalFileCache();
