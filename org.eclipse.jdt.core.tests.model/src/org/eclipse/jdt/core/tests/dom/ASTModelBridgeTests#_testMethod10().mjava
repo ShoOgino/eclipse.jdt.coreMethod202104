@@ -1,0 +1,37 @@
+	/*
+	 * Ensures that getting the IJavaElement of an IBinding representing a method in an anonymous type
+	 * doesn't throw a ClassCastException if there is a syntax error.
+	 * (regression test for bug 149853 CCE in IMethodBinding#getJavaElement() for recovered anonymous type)
+	 */
+	public void _testMethod10() throws CoreException {
+		try {
+			// use a compilation unit instead of a working copy to use the ASTParser instead of reconcile
+			createFile(
+				"/P/src/Test.java",
+				"public class X {\n" + 
+				"        void test() {\n" + 
+				"                new Object() {\n" + 
+				"                        /*start*/public void yes() {\n" + 
+				"                                System.out.println(\"hello world\");\n" + 
+				"                        }/*end*/\n" + 
+				"                } // missing semicolon;\n" + 
+				"        }\n" + 
+				"}"
+			);
+			ICompilationUnit cu = getCompilationUnit("/P/src/Test.java");
+			
+			ASTNode node = buildAST(null/*use existing contents*/, cu, false/*don't report errors*/, true/*statement recovery*/);
+			IBinding binding = ((MethodDeclaration) node).resolveBinding();
+			assertNotNull("No binding", binding);
+			IJavaElement element = binding.getJavaElement();
+			assertElementEquals(
+				"Unexpected Java element",
+				"yes() [in <anonymous #1> [in test() [in X [in Test.java [in <default> [in src [in P]]]]]]]",
+				element
+			);
+			assertTrue("Element should exist", element.exists());
+		} finally {
+			deleteFile("/P/src/Test.java");
+		}
+	}
+
