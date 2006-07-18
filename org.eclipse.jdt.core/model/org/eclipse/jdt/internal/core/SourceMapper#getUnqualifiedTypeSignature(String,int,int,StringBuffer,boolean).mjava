@@ -1,0 +1,77 @@
+	private int getUnqualifiedTypeSignature(String qualifiedTypeSig, int start, int length, StringBuffer unqualifiedTypeSig, boolean noDollar) {
+		char firstChar = qualifiedTypeSig.charAt(start);
+		int end = start + 1;
+		boolean sigStart = false;
+		firstPass: for (int i = start; i < length; i++) {
+			char current = qualifiedTypeSig.charAt(i);
+			switch (current) {
+				case Signature.C_ARRAY :
+				case Signature.C_SUPER:
+				case Signature.C_EXTENDS:
+					unqualifiedTypeSig.append(current);
+					start = i + 1;
+					end = start + 1;
+					firstChar = qualifiedTypeSig.charAt(start);
+					break;
+				case Signature.C_RESOLVED :
+				case Signature.C_UNRESOLVED :
+				case Signature.C_TYPE_VARIABLE :
+					if (!sigStart) {
+						start = ++i;
+						sigStart = true;
+					}
+					break;
+				case Signature.C_NAME_END:
+				case Signature.C_GENERIC_START :
+					end = i;
+					break firstPass;
+				case Signature.C_STAR :
+					unqualifiedTypeSig.append(current);
+					start = i + 1;
+					end = start + 1;
+					firstChar = qualifiedTypeSig.charAt(start);
+					break;
+				case Signature.C_GENERIC_END :
+					return i;
+				case Signature.C_DOT:
+					start = ++i;
+					break;
+			}
+		}
+		switch (firstChar) {
+			case Signature.C_RESOLVED :
+			case Signature.C_UNRESOLVED :
+			case Signature.C_TYPE_VARIABLE :
+				unqualifiedTypeSig.append(Signature.C_UNRESOLVED);
+				if (noDollar) {
+					int lastDollar = qualifiedTypeSig.lastIndexOf('$', end);
+					if (lastDollar > start)
+						start = lastDollar + 1;
+				}
+				for (int i = start; i < length; i++) {
+					char current = qualifiedTypeSig.charAt(i);
+					switch (current) {
+						case Signature.C_GENERIC_START:
+							unqualifiedTypeSig.append(current);
+							i++;
+							do {
+								i = getUnqualifiedTypeSignature(qualifiedTypeSig, i, length, unqualifiedTypeSig, noDollar);
+							} while (qualifiedTypeSig.charAt(i) != Signature.C_GENERIC_END);
+							unqualifiedTypeSig.append(Signature.C_GENERIC_END);
+							break;
+						case Signature.C_NAME_END:
+							unqualifiedTypeSig.append(current);
+							return i + 1;
+						default:
+							unqualifiedTypeSig.append(current);
+							break;
+					}
+				}
+				return length;
+			default :
+				// primitive type or wildcard
+				unqualifiedTypeSig.append(qualifiedTypeSig.substring(start, end));
+				return end;
+		}
+	}
+

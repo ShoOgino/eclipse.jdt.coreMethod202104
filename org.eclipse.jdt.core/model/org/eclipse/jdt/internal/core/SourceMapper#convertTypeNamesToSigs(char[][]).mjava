@@ -12,14 +12,41 @@
 			return CharOperation.NO_STRINGS;
 		String[] typeSigs = new String[n];
 		for (int i = 0; i < n; ++i) {
-			String typeSig = Signature.createTypeSignature(typeNames[i], false);
-			int lastIndex = typeSig.lastIndexOf('.');
-			if (lastIndex == -1) {
-				typeSigs[i] = typeSig;
+			char[] typeSig = Signature.createCharArrayTypeSignature(typeNames[i], false);
+			
+			// transforms signatures that contains a qualification into unqualified signatures
+			// e.g. "QX<+QMap.Entry;>;" becomes "QX<+QEntry;>;"
+			StringBuffer simpleTypeSig = null;
+			int start = 0;
+			int dot = -1;
+			int length = typeSig.length;
+			for (int j = 0; j < length; j++) {
+				switch (typeSig[j]) {
+					case Signature.C_UNRESOLVED:
+						if (simpleTypeSig != null)
+							simpleTypeSig.append(typeSig, start, j-start);
+						start = j;
+						break;
+					case Signature.C_DOT:
+						dot = j;
+						break;
+					case Signature.C_GENERIC_START:
+					case Signature.C_NAME_END:
+						if (dot > start) {
+							if (simpleTypeSig == null)
+								simpleTypeSig = new StringBuffer().append(typeSig, 0, start);
+							simpleTypeSig.append(Signature.C_UNRESOLVED);
+							simpleTypeSig.append(typeSig, dot+1, j-dot-1);
+							start = j;
+						}
+						break;
+				}
+			}
+			if (simpleTypeSig == null) {
+				typeSigs[i] = new String(typeSig);
 			} else {
-				int arrayEnd = 0;
-				while(typeSig.charAt(arrayEnd) == Signature.C_ARRAY) arrayEnd++;
-				typeSigs[i] = typeSig.substring(0, arrayEnd) + Signature.C_UNRESOLVED + typeSig.substring(lastIndex + 1, typeSig.length());
+				simpleTypeSig.append(typeSig, start, length-start);
+				typeSigs[i] = simpleTypeSig.toString();
 			}
 		}
 		return typeSigs;
