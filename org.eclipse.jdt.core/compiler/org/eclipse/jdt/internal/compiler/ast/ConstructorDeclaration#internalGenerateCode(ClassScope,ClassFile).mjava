@@ -1,99 +1,98 @@
-	private void internalGenerateCode(ClassScope classScope, ClassFile classFile) {
+private void internalGenerateCode(ClassScope classScope, ClassFile classFile) {
+	classFile.generateMethodInfoHeader(this.binding);
+	int methodAttributeOffset = classFile.contentsOffset;
+	int attributeNumber = classFile.generateMethodInfoAttribute(this.binding);
+	if ((!this.binding.isNative()) && (!this.binding.isAbstract())) {
 		
-		classFile.generateMethodInfoHeader(binding);
-		int methodAttributeOffset = classFile.contentsOffset;
-		int attributeNumber = classFile.generateMethodInfoAttribute(this.binding);
-		if ((!binding.isNative()) && (!binding.isAbstract())) {
+		TypeDeclaration declaringType = classScope.referenceContext;
+		int codeAttributeOffset = classFile.contentsOffset;
+		classFile.generateCodeAttributeHeader();
+		CodeStream codeStream = classFile.codeStream;
+		codeStream.reset(this, classFile);
+
+		// initialize local positions - including initializer scope.
+		ReferenceBinding declaringClass = this.binding.declaringClass;
+
+		int enumOffset = declaringClass.isEnum() ? 2 : 0; // String name, int ordinal
+		int argSlotSize = 1 + enumOffset; // this==aload0
+
+		if (declaringClass.isNestedType()){
+			NestedTypeBinding nestedType = (NestedTypeBinding) declaringClass;
+			this.scope.extraSyntheticArguments = nestedType.syntheticOuterLocalVariables();
+			this.scope.computeLocalVariablePositions(// consider synthetic arguments if any
+				nestedType.enclosingInstancesSlotSize + 1 + enumOffset,
+				codeStream);
+			argSlotSize += nestedType.enclosingInstancesSlotSize;
+			argSlotSize += nestedType.outerLocalVariablesSlotSize;
+		} else {
+			this.scope.computeLocalVariablePositions(1 + enumOffset,  codeStream);
+		}
 			
-			TypeDeclaration declaringType = classScope.referenceContext;
-			int codeAttributeOffset = classFile.contentsOffset;
-			classFile.generateCodeAttributeHeader();
-			CodeStream codeStream = classFile.codeStream;
-			codeStream.reset(this, classFile);
-
-			// initialize local positions - including initializer scope.
-			ReferenceBinding declaringClass = binding.declaringClass;
-
-			int enumOffset = declaringClass.isEnum() ? 2 : 0; // String name, int ordinal
-			int argSlotSize = 1 + enumOffset; // this==aload0
-
-			if (declaringClass.isNestedType()){
-				NestedTypeBinding nestedType = (NestedTypeBinding) declaringClass;
-				this.scope.extraSyntheticArguments = nestedType.syntheticOuterLocalVariables();
-				scope.computeLocalVariablePositions(// consider synthetic arguments if any
-					nestedType.enclosingInstancesSlotSize + 1 + enumOffset,
-					codeStream);
-				argSlotSize += nestedType.enclosingInstancesSlotSize;
-				argSlotSize += nestedType.outerLocalVariablesSlotSize;
-			} else {
-				scope.computeLocalVariablePositions(1 + enumOffset,  codeStream);
+		if (this.arguments != null) {
+			for (int i = 0, max = this.arguments.length; i < max; i++) {
+				// arguments initialization for local variable debug attributes
+				LocalVariableBinding argBinding;
+				codeStream.addVisibleLocalVariable(argBinding = this.arguments[i].binding);
+				argBinding.recordInitializationStartPC(0);
+				TypeBinding argType;
+				if ((argType = argBinding.type) == TypeBinding.LONG || (argType == TypeBinding.DOUBLE)) {
+					argSlotSize += 2;
+				} else {
+					argSlotSize++;
+				}
 			}
-				
-			if (arguments != null) {
-				for (int i = 0, max = arguments.length; i < max; i++) {
-					// arguments initialization for local variable debug attributes
-					LocalVariableBinding argBinding;
-					codeStream.addVisibleLocalVariable(argBinding = arguments[i].binding);
-					argBinding.recordInitializationStartPC(0);
-					TypeBinding argType;
-					if ((argType = argBinding.type) == TypeBinding.LONG || (argType == TypeBinding.DOUBLE)) {
-						argSlotSize += 2;
-					} else {
-						argSlotSize++;
+		}
+		
+		MethodScope initializerScope = declaringType.initializerScope;
+		initializerScope.computeLocalVariablePositions(argSlotSize, codeStream); // offset by the argument size (since not linked to method scope)
+
+		boolean needFieldInitializations = this.constructorCall == null || this.constructorCall.accessMode != ExplicitConstructorCall.This;
+
+		// post 1.4 target level, synthetic initializations occur prior to explicit constructor call
+		boolean preInitSyntheticFields = this.scope.compilerOptions().targetJDK >= ClassFileConstants.JDK1_4;
+
+		if (needFieldInitializations && preInitSyntheticFields){
+			generateSyntheticFieldInitializationsIfNecessary(this.scope, codeStream, declaringClass);
+		}			
+		// generate constructor call
+		if (this.constructorCall != null) {
+			this.constructorCall.generateCode(this.scope, codeStream);
+		}
+		// generate field initialization - only if not invoking another constructor call of the same class
+		if (needFieldInitializations) {
+			if (!preInitSyntheticFields){
+				generateSyntheticFieldInitializationsIfNecessary(this.scope, codeStream, declaringClass);
+			}
+			// generate user field initialization
+			if (declaringType.fields != null) {
+				for (int i = 0, max = declaringType.fields.length; i < max; i++) {
+					FieldDeclaration fieldDecl;
+					if (!(fieldDecl = declaringType.fields[i]).isStatic()) {
+						fieldDecl.generateCode(initializerScope, codeStream);
 					}
 				}
 			}
-			
-			MethodScope initializerScope = declaringType.initializerScope;
-			initializerScope.computeLocalVariablePositions(argSlotSize, codeStream); // offset by the argument size (since not linked to method scope)
-
-			boolean needFieldInitializations = constructorCall == null || constructorCall.accessMode != ExplicitConstructorCall.This;
-
-			// post 1.4 target level, synthetic initializations occur prior to explicit constructor call
-			boolean preInitSyntheticFields = scope.compilerOptions().targetJDK >= ClassFileConstants.JDK1_4;
-
-			if (needFieldInitializations && preInitSyntheticFields){
-				generateSyntheticFieldInitializationsIfNecessary(scope, codeStream, declaringClass);
-			}			
-			// generate constructor call
-			if (constructorCall != null) {
-				constructorCall.generateCode(scope, codeStream);
-			}
-			// generate field initialization - only if not invoking another constructor call of the same class
-			if (needFieldInitializations) {
-				if (!preInitSyntheticFields){
-					generateSyntheticFieldInitializationsIfNecessary(scope, codeStream, declaringClass);
-				}
-				// generate user field initialization
-				if (declaringType.fields != null) {
-					for (int i = 0, max = declaringType.fields.length; i < max; i++) {
-						FieldDeclaration fieldDecl;
-						if (!(fieldDecl = declaringType.fields[i]).isStatic()) {
-							fieldDecl.generateCode(initializerScope, codeStream);
-						}
-					}
-				}
-			}
-			// generate statements
-			if (statements != null) {
-				for (int i = 0, max = statements.length; i < max; i++) {
-					statements[i].generateCode(scope, codeStream);
-				}
-			}
-			if (this.needFreeReturn) {
-				codeStream.return_();
-			}
-			// local variable attributes
-			codeStream.exitUserScope(scope);
-			codeStream.recordPositionsFrom(0, this.bodyEnd);
-			classFile.completeCodeAttribute(codeAttributeOffset);
-			attributeNumber++;
 		}
-		classFile.completeMethodInfo(methodAttributeOffset, attributeNumber);
-
-		// if a problem got reported during code gen, then trigger problem method creation
-		if (ignoreFurtherInvestigation) {
-			throw new AbortMethod(scope.referenceCompilationUnit().compilationResult, null);
+		// generate statements
+		if (this.statements != null) {
+			for (int i = 0, max = this.statements.length; i < max; i++) {
+				this.statements[i].generateCode(this.scope, codeStream);
+			}
 		}
+		if (this.needFreeReturn) {
+			codeStream.return_();
+		}
+		// local variable attributes
+		codeStream.exitUserScope(this.scope);
+		codeStream.recordPositionsFrom(0, this.bodyEnd);
+		classFile.completeCodeAttribute(codeAttributeOffset);
+		attributeNumber++;
 	}
+	classFile.completeMethodInfo(methodAttributeOffset, attributeNumber);
+
+	// if a problem got reported during code gen, then trigger problem method creation
+	if (this.ignoreFurtherInvestigation) {
+		throw new AbortMethod(this.scope.referenceCompilationUnit().compilationResult, null);
+	}
+}
 
