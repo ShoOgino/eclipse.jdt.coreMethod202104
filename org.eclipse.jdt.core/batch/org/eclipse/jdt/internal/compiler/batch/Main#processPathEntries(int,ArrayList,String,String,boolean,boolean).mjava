@@ -1,0 +1,127 @@
+private void processPathEntries(final int defaultSize, final ArrayList paths, 
+			final String currentPath, String customEncoding, boolean isSourceOnly,
+			boolean rejectDestinationPathOnJars) 
+		throws InvalidInputException {
+	String currentClasspathName = null;
+	String currentDestinationPath = null;
+	ArrayList currentRuleSpecs = new ArrayList(defaultSize);
+	StringTokenizer tokenizer = new StringTokenizer(currentPath,
+			File.pathSeparator + "[]", true); //$NON-NLS-1$
+	// state machine
+	final int start = 0; 
+	final int readyToClose = 1;
+	// 'path' 'path1[rule];path2'
+	final int readyToCloseEndingWithRules = 2;
+	// 'path[rule]' 'path1;path2[rule]'
+	final int readyToCloseOrOtherEntry = 3;
+	// 'path[rule];' 'path;' 'path1;path2;'
+	final int rulesNeedAnotherRule = 4;
+	// 'path[rule1;'
+	final int rulesStart = 5;
+	// 'path[' 'path1;path2['
+	final int rulesReadyToClose = 6;
+	// 'path[rule' 'path[rule1;rule2'
+	final int destinationPathReadyToClose = 7;
+	// 'path[-d bin'
+	final int readyToCloseEndingWithDestinationPath = 8;
+	// 'path[-d bin]' 'path[rule][-d bin]'
+	final int destinatonPathStart = 9;
+	// 'path[rule]['
+	final int error = 99;
+	int state = start;
+	String token = null;
+	while (tokenizer.hasMoreTokens() && state != error) {
+		token = tokenizer.nextToken();
+		if (token.equals(File.pathSeparator)) {
+			switch (state) {
+			case start:
+			case readyToCloseOrOtherEntry:
+				break;
+			case readyToClose:
+			case readyToCloseEndingWithRules:
+			case readyToCloseEndingWithDestinationPath:
+				state = readyToCloseOrOtherEntry;
+				addNewEntry(paths, currentClasspathName, currentRuleSpecs, 
+						customEncoding, currentDestinationPath, isSourceOnly,
+						rejectDestinationPathOnJars);
+				currentRuleSpecs.clear();
+				break;
+			case rulesReadyToClose:
+				state = rulesNeedAnotherRule;
+				break;
+			case destinationPathReadyToClose:
+				throw new InvalidInputException(
+					Main.bind("configure.incorrectDestinationPathEntry", //$NON-NLS-1$ 
+						currentPath));				
+			default:
+				state = error;
+			}
+		} else if (token.equals("[")) { //$NON-NLS-1$
+			switch (state) {
+			case readyToClose:
+				state = rulesStart;
+				break;
+			case readyToCloseEndingWithRules:
+				state = destinatonPathStart;
+				break;
+			default:
+				state = error;
+			}
+		} else if (token.equals("]")) { //$NON-NLS-1$
+			switch (state) {
+			case rulesReadyToClose:
+				state = readyToCloseEndingWithRules;
+				break;
+			case destinationPathReadyToClose:
+				state = readyToCloseEndingWithDestinationPath;
+				break;
+			default:
+				state = error;
+			}
+		} else {
+			// regular word
+			switch (state) {
+			case start:
+			case readyToCloseOrOtherEntry:
+				state = readyToClose;
+				currentClasspathName = token;
+				break;
+			case rulesStart:
+				if (token.startsWith("-d ")) { //$NON-NLS-1$
+					currentDestinationPath = token.substring(3).trim();
+					state = destinationPathReadyToClose;
+					break;
+				} // else we proceed with a rule
+			case rulesNeedAnotherRule:
+				state = rulesReadyToClose;
+				currentRuleSpecs.add(token);
+				break;
+			case destinatonPathStart:
+				if (!token.startsWith("-d ")) { //$NON-NLS-1$
+					state = error;
+				} else {
+					currentDestinationPath = token.substring(3).trim();
+					state = destinationPathReadyToClose;
+				}
+				break;
+			default:
+				state = error;
+			}
+		}
+	}
+	switch(state) {
+		case readyToCloseOrOtherEntry:
+			break;
+		case readyToClose:
+		case readyToCloseEndingWithRules:
+		case readyToCloseEndingWithDestinationPath:
+			addNewEntry(paths, currentClasspathName, currentRuleSpecs, 
+				customEncoding, currentDestinationPath, isSourceOnly,
+				rejectDestinationPathOnJars);
+			break;
+		default :
+			// we go on anyway
+			this.logger.logIncorrectClasspath(currentPath);
+	}
+}
+
