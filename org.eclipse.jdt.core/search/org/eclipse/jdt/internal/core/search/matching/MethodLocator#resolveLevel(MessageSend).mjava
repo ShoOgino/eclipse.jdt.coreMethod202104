@@ -26,17 +26,30 @@ protected int resolveLevel(MessageSend messageSend) {
 	if (qualifiedPattern == null) return methodLevel; // since any declaring class will do
 
 	int declaringLevel;
-	if (isVirtualInvoke(method, messageSend) && !(messageSend.actualReceiverType instanceof ArrayBinding)) {
-		declaringLevel = resolveLevelAsSubtype(qualifiedPattern, method.declaringClass);
+	if (isVirtualInvoke(method, messageSend) && (messageSend.actualReceiverType instanceof ReferenceBinding)) {
+		ReferenceBinding methodReceiverType = (ReferenceBinding) messageSend.actualReceiverType;
+		declaringLevel = resolveLevelAsSubtype(qualifiedPattern, methodReceiverType);
 		if (declaringLevel == IMPOSSIBLE_MATCH) {
 			if (method.declaringClass == null || this.allSuperDeclaringTypeNames == null) {
 				declaringLevel = INACCURATE_MATCH;
 			} else {
-				char[][] compoundName = method.declaringClass.compoundName;
-				for (int i = 0, max = this.allSuperDeclaringTypeNames.length; i < max; i++)
-					if (CharOperation.equals(this.allSuperDeclaringTypeNames[i], compoundName))
-						return methodLevel; // since this is an ACCURATE_MATCH so return the possibly weaker match
+				char[][] compoundName = methodReceiverType.compoundName;
+				for (int i = 0, max = this.allSuperDeclaringTypeNames.length; i < max; i++) {
+					if (CharOperation.equals(this.allSuperDeclaringTypeNames[i], compoundName)) {
+						return methodLevel // since this is an ACCURATE_MATCH so return the possibly weaker match
+							| POLYMORPHIC_FLAVOR; // this is a polymorphic method => add flavor to returned level
+					}
+				}
+				if (methodReceiverType.isInterface()) {
+					// all methods interface with same name and parameters are potential matches
+					// see bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=156491
+					return INACCURATE_MATCH | POLYMORPHIC_FLAVOR;
+				}
 			}
+		}
+		if ((declaringLevel & FLAVORS_MASK) != 0) {
+			// level got some flavors => return it
+			return declaringLevel;
 		}
 	} else {
 		declaringLevel = resolveLevelForType(qualifiedPattern, method.declaringClass);
