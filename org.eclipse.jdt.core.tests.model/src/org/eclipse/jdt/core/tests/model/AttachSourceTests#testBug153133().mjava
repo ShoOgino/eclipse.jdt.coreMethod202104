@@ -1,0 +1,45 @@
+/**
+ * @test bug 153133: [model] toggle breakpoint in constructor creates a class load breakpoint
+ * @see "http://bugs.eclipse.org/bugs/show_bug.cgi?id=153133"
+ */
+public void testBug153133() throws JavaModelException {
+	IPackageFragmentRoot root = this.currentProject.getPackageFragmentRoot(this.getFile("/AttachSourceTests/b153133.jar"));
+	assertTrue("Root doesn't exist", root.exists());
+	
+	try {
+		// Get class file type from jar
+		IClassFile cf = root.getPackageFragment("test").getClassFile("Test.class");
+		assertNotNull(cf);
+		final String source = cf.getSource();
+		assertNotNull("No source", source);
+		IJavaElement[] children = cf.getChildren();
+		assertEquals("Wrong number of children", 1, children.length);
+		IJavaElement element = children[0];
+		assertTrue("Not a type", element instanceof IType);
+		IType type = (IType) element;
+		IJavaElement[] members = type.getChildren();
+		final int length = members.length;
+		assertEquals("Wrong number", 7, length);
+		
+		// Need to get type members constructors
+		for (int i = 0; i < length; i++) {
+			assertTrue(members[i] instanceof IMember);
+			if (((IMember)members[i]).getElementType() == IJavaElement.TYPE) {
+				IType typeMember = (IType) members[i];
+				String typeName = typeMember.getElementName();
+				IMethod[] methods = typeMember.getMethods();
+				assertEquals("Expected only one constructor defined in type "+typeName, 1, methods.length);
+				// Verify that source range is valid
+				assertTrue("Expected a constructor instead of a method in type "+typeName, methods[0].isConstructor());
+				IMethod constructor = methods[0];
+				ISourceRange sourceRange = constructor.getSourceRange();
+				assertTrue("Constructor "+constructor.getElementName()+" has invalid offset: "+sourceRange, sourceRange.getOffset() >= 0);
+				assertTrue("Constructor "+constructor.getElementName()+" has invalid length: "+sourceRange, sourceRange.getLength() > 0);
+			}
+		}
+	} finally {
+		removeLibraryEntry(new Path("/JavaSearchBugs/lib/b148215.jar"));
+		root.close();
+	}
+}
+
