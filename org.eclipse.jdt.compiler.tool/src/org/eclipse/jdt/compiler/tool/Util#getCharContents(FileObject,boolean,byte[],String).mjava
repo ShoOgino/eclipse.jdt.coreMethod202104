@@ -1,0 +1,64 @@
+	public static CharSequence getCharContents(FileObject fileObject, boolean ignoreEncodingErrors, byte[] contents, String encoding) throws IOException {
+		if (contents == null) return null;
+		Charset charset = null;
+		try {
+			charset = Charset.forName(encoding);
+		} catch (IllegalCharsetNameException e) {
+			System.err.println("Illegal charset name : " + encoding); //$NON-NLS-1$
+			return null;
+		} catch(UnsupportedCharsetException e) {
+			System.err.println("Unsupported charset : " + encoding); //$NON-NLS-1$
+			return null;
+		}
+		CharsetDecoder charsetDecoder = charset.newDecoder();
+		ByteBuffer byteBuffer = ByteBuffer.allocate(contents.length);
+		byteBuffer.put(contents);
+		byteBuffer.flip();
+		if (ignoreEncodingErrors) {
+			charsetDecoder.onMalformedInput(CodingErrorAction.REPLACE).onUnmappableCharacter(CodingErrorAction.REPLACE);
+			return charsetDecoder.decode(byteBuffer);
+		} else {
+			charsetDecoder.onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT);
+			CharBuffer out = CharBuffer.allocate(contents.length);
+			CoderResult result = null;
+			String replacement = charsetDecoder.replacement();
+			int replacementLength = replacement.length();
+			EncodingErrorCollector collector = null;
+			while (true) {
+				result = charsetDecoder.decode(byteBuffer, out, true);
+    			if (result.isMalformed() || result.isUnmappable()) {
+    				/* treat the error
+    				 * The wrong input character is at out.position
+    				 */
+    				if (collector == null) {
+    					collector = new EncodingErrorCollector(fileObject, encoding);
+    				}
+    				reportEncodingError(collector, out.position(), result.length());
+    				if ((out.position() + replacementLength) >= out.capacity()) {
+    					// resize
+        				CharBuffer temp = CharBuffer.allocate(out.capacity() * 2);
+        				out.flip();
+        				temp.put(out);
+        				out = temp;
+    				}
+    				out.append(replacement);
+    				byteBuffer.position(byteBuffer.position() + result.length());
+    				continue;
+    			}
+    			if (result.isOverflow()) {
+    				CharBuffer temp = CharBuffer.allocate(out.capacity() * 2);
+    				out.flip();
+    				temp.put(out);
+    				out = temp;
+    			} else {
+    				break;
+    			}
+			}
+			out.flip();
+			if (collector != null) {
+				collector.reportAllEncodingErrors(out.toString());
+			}
+			return out;
+		}
+	}
+

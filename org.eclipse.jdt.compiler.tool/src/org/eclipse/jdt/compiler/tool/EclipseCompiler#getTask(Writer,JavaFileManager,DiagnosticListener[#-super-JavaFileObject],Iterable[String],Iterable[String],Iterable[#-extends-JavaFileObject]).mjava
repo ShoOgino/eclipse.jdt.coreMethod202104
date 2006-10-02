@@ -1,0 +1,75 @@
+	/*
+	 * (non-Javadoc)
+	 * 
+	 * @see javax.tools.JavaCompiler#getTask(java.io.Writer,
+	 *      javax.tools.JavaFileManager, javax.tools.DiagnosticListener,
+	 *      java.lang.Iterable, java.lang.Iterable, java.lang.Iterable)
+	 */
+	public CompilationTask getTask(Writer out,
+			JavaFileManager fileManager,
+			DiagnosticListener<? super JavaFileObject> diagnosticListener,
+			Iterable<String> options,
+			Iterable<String> classes,
+			Iterable<? extends JavaFileObject> compilationUnits) {
+		
+		PrintWriter writerOut = null;
+		PrintWriter writerErr = null;
+		if (out == null) {
+			writerOut = new PrintWriter(System.out);
+			writerErr = new PrintWriter(System.err);
+		} else {
+			writerOut = new PrintWriter(out);
+			writerErr = new PrintWriter(out);
+		}
+		this.compilationUnits = compilationUnits;
+		this.diagnosticListener = diagnosticListener;
+		this.fileManager = fileManager;
+
+		this.initialize(writerOut, writerErr, false);
+		
+		for (Iterator<String> iterator = options.iterator(); iterator.hasNext(); ) {
+			fileManager.handleOption(iterator.next(), iterator);
+		}
+		
+		ArrayList<String> allOptions = new ArrayList<String>();
+		for (String option : options) {
+			allOptions.add(option);
+		}
+
+		if (compilationUnits != null) {
+    		for (JavaFileObject javaFileObject : compilationUnits) {
+    			allOptions.add(new File(javaFileObject.toUri()).getAbsolutePath());
+    		}
+		}
+
+		String[] optionsToProcess = new String[allOptions.size()];
+		allOptions.toArray(optionsToProcess);
+		try {
+			this.configure(optionsToProcess);
+		} catch (InvalidInputException e) {
+			throw new RuntimeException(e);
+		}
+		
+		if (this.fileManager instanceof StandardJavaFileManager) {
+			StandardJavaFileManager javaFileManager = (StandardJavaFileManager) this.fileManager;
+
+			Iterable<? extends File> location = javaFileManager.getLocation(StandardLocation.CLASS_OUTPUT);
+			if (location != null) {
+				this.destinationPath = location.iterator().next().getAbsolutePath();
+			}
+		}
+
+		return new CompilationTask() {
+    		public Boolean call() {
+    			// set up compiler with passed options
+    			return EclipseCompiler.this.call() ? Boolean.TRUE : Boolean.FALSE;
+    		}
+    		public void setLocale(Locale locale) {
+    			EclipseCompiler.this.setLocale(locale);
+    		}
+    		public void setProcessors(Iterable<? extends Processor> processors) {
+    			throw new UnsupportedOperationException();
+    		}
+		};
+	}
+
