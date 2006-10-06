@@ -1,0 +1,48 @@
+private IType createTypeFromPath(String resourcePath, String simpleTypeName, char[][] enclosingTypeNames) throws JavaModelException {
+	// path to a file in a directory
+	// Optimization: cache package fragment root handle and package handles
+	int rootPathLength = -1;
+	if (this.lastPkgFragmentRootPath == null 
+		|| !(resourcePath.startsWith(this.lastPkgFragmentRootPath) 
+			&& (rootPathLength = this.lastPkgFragmentRootPath.length()) > 0
+			&& resourcePath.charAt(rootPathLength) == '/')) {
+		IPackageFragmentRoot root= ((JavaSearchScope)scope).packageFragmentRoot(resourcePath);
+		if (root == null) return null;
+		this.lastPkgFragmentRoot = root;
+		this.lastPkgFragmentRootPath = this.lastPkgFragmentRoot.getPath().toString();
+		this.packageHandles = new HashtableOfArrayToObject(5);
+	}
+	// create handle
+	resourcePath = resourcePath.substring(this.lastPkgFragmentRootPath.length() + 1);
+	String[] simpleNames = new Path(resourcePath).segments();
+	String[] pkgName;
+	int length = simpleNames.length-1;
+	if (length > 0) {
+		pkgName = new String[length];
+		System.arraycopy(simpleNames, 0, pkgName, 0, length);
+	} else {
+		pkgName = CharOperation.NO_STRINGS;
+	}
+	IPackageFragment pkgFragment= (IPackageFragment) this.packageHandles.get(pkgName);
+	if (pkgFragment == null) {
+		pkgFragment= ((PackageFragmentRoot) this.lastPkgFragmentRoot).getPackageFragment(pkgName);
+		this.packageHandles.put(pkgName, pkgFragment);
+	}
+	String simpleName= simpleNames[length];
+	if (org.eclipse.jdt.internal.core.util.Util.isJavaLikeFileName(simpleName)) {
+		ICompilationUnit unit= pkgFragment.getCompilationUnit(simpleName);
+		int etnLength = enclosingTypeNames == null ? 0 : enclosingTypeNames.length;
+		IType type = (etnLength == 0) ? unit.getType(simpleTypeName) : unit.getType(new String(enclosingTypeNames[0]));
+		if (etnLength > 0) {
+			for (int i=1; i<etnLength; i++) {
+				type = type.getType(new String(enclosingTypeNames[i]));
+			}
+			type = type.getType(simpleTypeName);
+		}
+		return type;
+	} else {
+		IClassFile classFile= pkgFragment.getClassFile(simpleName);
+		return classFile.getType();
+	}
+}	
+
