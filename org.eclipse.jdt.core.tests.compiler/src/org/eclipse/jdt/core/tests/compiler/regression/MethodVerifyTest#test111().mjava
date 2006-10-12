@@ -1,0 +1,88 @@
+// https://bugs.eclipse.org/bugs/show_bug.cgi?id=159973
+public void test111() {
+	if (this.complianceLevel.compareTo(COMPLIANCE_1_5) >= 0) {
+		Map options = this.getCompilerOptions();
+		options.put(CompilerOptions.OPTION_ReportSyntheticAccessEmulation, CompilerOptions.IGNORE);
+		this.runConformTest(
+			new String[] {
+				"X.java",
+				"public class X {\n" + 
+				"	private interface ReturnBase {\n" + 
+				"	}\n" + 
+				"\n" + 
+				"	private interface ReturnDerived extends ReturnBase {\n" + 
+				"	}\n" + 
+				"\n" + 
+				"	private static class Super<E> {\n" + 
+				"		ReturnBase bar() {\n" + 
+				"			return null;\n" + 
+				"		}\n" + 
+				"	}\n" + 
+				"\n" + 
+				"	private static class Implementation<T> extends Super<T> {\n" + 
+				"		public final ReturnDerived bar() {\n" + 
+				"			return null;\n" + 
+				"		}\n" + 
+				"	}\n" + 
+				"\n" + 
+				"	private static class Child<U> extends Implementation<U> {\n" + 
+				"	}\n" + 
+				"\n" + 
+				"	private static class Grandchild<V> extends Child<V> {\n" + 
+				"	}\n" + 
+				"\n" + 
+				"	public static void main(String[] args) {\n" + 
+				"		new Grandchild();\n" + 
+				"	}\n" + 
+				"}"
+			},
+			"",
+			null,
+			true,
+			null,
+			options,
+			null
+		);
+		File fileX = new File(OUTPUT_DIR + File.separator  +"X$Child.class");
+		IClassFileReader reader = ToolFactory.createDefaultClassFileReader(fileX.getAbsolutePath(), IClassFileReader.ALL_BUT_METHOD_BODIES);
+		IMethodInfo[] methodInfos = reader.getMethodInfos();
+		boolean found = false;
+		for (int i = 0, max = methodInfos.length; i < max; i++) {
+			if (new String(methodInfos[i].getName()).equals("bar")) {
+				found = true;
+				break;
+			}
+		}
+		assertFalse("bar should not be there", found);
+		
+		fileX = new File(OUTPUT_DIR + File.separator  +"X$Grandchild.class");
+		reader = ToolFactory.createDefaultClassFileReader(fileX.getAbsolutePath(), IClassFileReader.ALL_BUT_METHOD_BODIES);
+		methodInfos = reader.getMethodInfos();
+		found = false;
+		for (int i = 0, max = methodInfos.length; i < max; i++) {
+			if (new String(methodInfos[i].getName()).equals("bar")) {
+				found = true;
+				break;
+			}
+		}
+		assertFalse("bar should not be there", found);
+		
+		fileX = new File(OUTPUT_DIR + File.separator  +"X$Implementation.class");
+		reader = ToolFactory.createDefaultClassFileReader(fileX.getAbsolutePath(), IClassFileReader.ALL_BUT_METHOD_BODIES);
+		methodInfos = reader.getMethodInfos();
+		int count = 0;
+		found = false;
+		for (int i = 0, max = methodInfos.length; i < max; i++) {
+			IMethodInfo methodInfo = methodInfos[i];
+			if (new String(methodInfo.getName()).equals("bar")) {
+				count++;
+				if (Flags.isBridge(methodInfo.getAccessFlags())) {
+					found = true;
+				}
+			}
+		}
+		assertEquals("should have two methods bar", 2, count);
+		assertTrue("should have one bridge method", found);
+	}
+}
+
