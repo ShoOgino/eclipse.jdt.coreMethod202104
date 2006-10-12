@@ -1,0 +1,65 @@
+	public void guess(TypeReference typeRef, Scope scope, GuessedTypeRequestor requestor) {
+		this.substituedTypes = new HashMap();
+		this.originalTypes = new HashMap();
+		this.combinationsCount = 1;
+		
+		TypeReference convertedType = convert(typeRef);
+		
+		if(convertedType == null) return;
+		
+		QualifiedTypeReference[] substituedTypeNodes = this.getSubstituedTypes();
+		int length = substituedTypeNodes.length;
+		
+		int[] substitutionsIndexes = new int[substituedTypeNodes.length];
+		char[][][][] subtitutions = new char[substituedTypeNodes.length][][][];
+		char[][][] originalTypeNames = new char[substituedTypeNodes.length][][];
+		for (int i = 0; i < substituedTypeNodes.length; i++) {
+			subtitutions[i] = this.getSubstitution(substituedTypeNodes[i]);
+			originalTypeNames[i] = this.getOriginal(substituedTypeNodes[i]);
+		}
+		
+		ResolutionCleaner resolutionCleaner = new ResolutionCleaner();
+		for (int i = 0; i < this.combinationsCount; i++) {
+			
+			nextSubstitution(substituedTypeNodes, subtitutions, substitutionsIndexes);
+			
+			this.problemFactory.hasProblems = false;
+			this.problemFactory.checkProblems = true;
+			TypeBinding guessedType = null;
+			switch (scope.kind) {
+				case Scope.METHOD_SCOPE :
+				case Scope.BLOCK_SCOPE :
+					resolutionCleaner.cleanUp(convertedType, (BlockScope)scope);
+					convertedType.traverse(resolutionCleaner, (BlockScope)scope);
+					guessedType = convertedType.resolveType((BlockScope)scope);
+					break;
+				case Scope.CLASS_SCOPE :
+					resolutionCleaner.cleanUp(convertedType, (ClassScope)scope);
+					convertedType.traverse(resolutionCleaner, (ClassScope)scope);
+					guessedType = convertedType.resolveType((ClassScope)scope);
+					break;
+			}
+			this.problemFactory.checkProblems = false;
+			if (!this.problemFactory.hasProblems) {
+				if (guessedType != null) {
+					Binding[] missingElements = new Binding[length];
+					int[] missingElementsStarts = new int[length];
+					int[] missingElementsEnds = new int[length];
+					
+					if(computeMissingElements(
+							substituedTypeNodes,
+							originalTypeNames,
+							missingElements,
+							missingElementsStarts,
+							missingElementsEnds)) {
+						requestor.accept(
+								guessedType.capture(scope, typeRef.sourceEnd),
+								missingElements,
+								missingElementsStarts,
+								missingElementsEnds);
+					}
+				}
+			}
+		}
+	}
+

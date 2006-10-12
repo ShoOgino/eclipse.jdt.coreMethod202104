@@ -1,0 +1,80 @@
+	private void findFieldsAndMethodsFromMissingReturnType(
+		char[] token,
+		TypeBinding[] arguments,
+		Scope scope,
+		InvocationSite invocationSite,
+		boolean insideTypeAnnotation) {
+
+		boolean staticsOnly = false;
+		Scope currentScope = scope;
+
+		done : while (true) { // done when a COMPILATION_UNIT_SCOPE is found
+
+			switch (currentScope.kind) {
+
+				case Scope.METHOD_SCOPE :
+					// handle the error case inside an explicit constructor call (see MethodScope>>findField)
+					MethodScope methodScope = (MethodScope) currentScope;
+					staticsOnly |= methodScope.isStatic | methodScope.isConstructorCall;
+
+				case Scope.BLOCK_SCOPE :
+					break;
+
+				case Scope.CLASS_SCOPE :
+					ClassScope classScope = (ClassScope) currentScope;
+					SourceTypeBinding enclosingType = classScope.referenceContext.binding;
+					if(!insideTypeAnnotation) {
+						
+						AbstractMethodDeclaration[] methods = classScope.referenceContext.methods;
+						
+						int methodsCount = methods == null ? 0 : methods.length;
+						for (int i = 0; i < methodsCount; i++) {
+							AbstractMethodDeclaration methodDeclaration = methods[i];
+							if (methodDeclaration instanceof MethodDeclaration &&
+									CharOperation.equals(methodDeclaration.selector, token)) {
+								MethodDeclaration method = (MethodDeclaration) methodDeclaration;
+								if (methodDeclaration.binding == null) {
+									Argument[] parameters = method.arguments;
+									int parametersLength = parameters == null ? 0 : parameters.length;
+									int argumentsLength = arguments == null ? 0 : arguments.length;
+									
+									if (parametersLength == 0) {
+										if (argumentsLength == 0) {
+											findFieldsAndMethodsFromMissingType(
+													this.completionToken,
+													method.returnType, 
+													currentScope, 
+													invocationSite,
+													scope);
+											break done;
+										}
+									} else {
+										TypeBinding[] parametersBindings = new TypeBinding[parametersLength];
+										for (int j = 0; j < parametersLength; j++) {
+											parametersBindings[j] = parameters[j].type.resolvedType;
+										}
+										if(areParametersCompatibleWith(parametersBindings, arguments, parameters[parametersLength - 1].isVarArgs())) {
+											findFieldsAndMethodsFromMissingType(
+													this.completionToken,
+													method.returnType, 
+													currentScope,
+													invocationSite,
+													scope);
+											break done;
+										}
+									}
+								}
+								
+							}
+						}
+					}
+					staticsOnly |= enclosingType.isStatic();
+					insideTypeAnnotation = false;
+					break;
+				case Scope.COMPILATION_UNIT_SCOPE :
+					break done;
+			}
+			currentScope = currentScope.parent;
+		}
+	}
+

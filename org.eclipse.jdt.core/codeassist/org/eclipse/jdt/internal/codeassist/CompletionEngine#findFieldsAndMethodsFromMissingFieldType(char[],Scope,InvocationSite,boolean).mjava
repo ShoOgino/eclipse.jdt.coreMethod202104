@@ -1,0 +1,54 @@
+	private void findFieldsAndMethodsFromMissingFieldType(
+		char[] token,
+		Scope scope,
+		InvocationSite invocationSite,
+		boolean insideTypeAnnotation) {
+
+		boolean staticsOnly = false;
+		Scope currentScope = scope;
+
+		done : while (true) { // done when a COMPILATION_UNIT_SCOPE is found
+
+			switch (currentScope.kind) {
+
+				case Scope.METHOD_SCOPE :
+					// handle the error case inside an explicit constructor call (see MethodScope>>findField)
+					MethodScope methodScope = (MethodScope) currentScope;
+					staticsOnly |= methodScope.isStatic | methodScope.isConstructorCall;
+
+				case Scope.BLOCK_SCOPE :
+					break;
+
+				case Scope.CLASS_SCOPE :
+					ClassScope classScope = (ClassScope) currentScope;
+					SourceTypeBinding enclosingType = classScope.referenceContext.binding;
+					if(!insideTypeAnnotation) {
+						
+						FieldDeclaration[] fields = classScope.referenceContext.fields;
+						
+						int fieldsCount = fields == null ? 0 : fields.length;
+						for (int i = 0; i < fieldsCount; i++) {
+							FieldDeclaration fieldDeclaration = fields[i];
+							if (CharOperation.equals(fieldDeclaration.name, token)) {
+								if (fieldDeclaration.binding == null) {
+									findFieldsAndMethodsFromMissingType(
+											this.completionToken,
+											fieldDeclaration.type, 
+											currentScope, 
+											invocationSite,
+											scope);
+								}
+								break done;
+							}
+						}
+					}
+					staticsOnly |= enclosingType.isStatic();
+					insideTypeAnnotation = false;
+					break;
+				case Scope.COMPILATION_UNIT_SCOPE :
+					break done;
+			}
+			currentScope = currentScope.parent;
+		}
+	}
+

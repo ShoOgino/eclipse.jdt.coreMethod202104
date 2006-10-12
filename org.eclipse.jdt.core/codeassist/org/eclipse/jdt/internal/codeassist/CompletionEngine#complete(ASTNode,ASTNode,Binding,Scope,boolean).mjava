@@ -27,7 +27,7 @@
 				SourceTypeBinding enclosingType = scope.enclosingSourceType();
 				if (!enclosingType.isAnnotationType()) {
 					if (!this.requestor.isIgnored(CompletionProposal.METHOD_DECLARATION)) {
-						findMethods(this.completionToken,null,null,enclosingType,scope,new ObjectVector(),false,false,true,null,null,false,false,true);
+						findMethods(this.completionToken,null,null,enclosingType,scope,new ObjectVector(),false,false,true,null,null,false,false,true,null, null, null);
 					}
 					if (!this.requestor.isIgnored(CompletionProposal.POTENTIAL_METHOD_DECLARATION)) {
 						proposeNewMethod(this.completionToken, enclosingType);
@@ -49,7 +49,7 @@
 				SourceTypeBinding enclosingType = scope.enclosingSourceType();
 				if (!enclosingType.isAnnotationType()) {
 					if (!this.requestor.isIgnored(CompletionProposal.METHOD_DECLARATION)) {
-						findMethods(this.completionToken,null,null,scope.enclosingSourceType(),scope,new ObjectVector(),false,false,true,null,null,false,false,true);
+						findMethods(this.completionToken,null,null,scope.enclosingSourceType(),scope,new ObjectVector(),false,false,true,null,null,false,false,true,null, null, null);
 					}
 					if (!this.requestor.isIgnored(CompletionProposal.POTENTIAL_METHOD_DECLARATION)) {
 						proposeNewMethod(this.completionToken, scope.enclosingSourceType());
@@ -142,12 +142,49 @@
 			this.completionToken = ref.completionIdentifier;
 			long completionPosition = ref.sourcePositions[ref.sourcePositions.length - 1];
 
-			if (qualifiedBinding instanceof VariableBinding) {
-
+			if (qualifiedBinding.problemId() == ProblemReasons.NotFound) {
+				setSourceRange((int) (completionPosition >>> 32), (int) completionPosition);
+				// complete field members with missing fields type
+				// class X {
+				//   Missing f;
+				//   void foo() {
+				//     f.|
+				//   }
+				// }
+				if (this.assistNodeInJavadoc == 0 &&
+						this.requestor.isAllowingRequiredProposals(CompletionProposal.TYPE_REF)) {
+					if(ref.tokens.length == 1) {
+						findFieldsAndMethodsFromMissingFieldType(ref.tokens[0], scope, ref, insideTypeAnnotation);
+					}
+				}
+			} else if (qualifiedBinding instanceof VariableBinding) {
 				setSourceRange((int) (completionPosition >>> 32), (int) completionPosition);
 				TypeBinding receiverType = ((VariableBinding) qualifiedBinding).type;
 				if (receiverType != null) {
-					findFieldsAndMethods(this.completionToken, receiverType.capture(scope, ref.sourceEnd), scope, ref, scope,false,false);
+					findFieldsAndMethods(this.completionToken, receiverType.capture(scope, ref.sourceEnd), scope, ref, scope,false,false, null, null, null);
+				} else if (this.assistNodeInJavadoc == 0 &&
+						this.requestor.isAllowingRequiredProposals(CompletionProposal.TYPE_REF)) {
+					boolean proposeField = !this.requestor.isIgnored(CompletionProposal.FIELD_REF);
+					boolean proposeMethod = !this.requestor.isIgnored(CompletionProposal.METHOD_REF);
+					if (proposeField || proposeMethod) {
+						if (qualifiedBinding instanceof LocalVariableBinding) {
+							// complete local variable members with missing variables type
+							// class X {
+							//   void foo() {
+							//     Missing f;
+							//     f.|
+							//   }
+							// }
+							LocalVariableBinding localVariableBinding = (LocalVariableBinding) qualifiedBinding;
+							
+							findFieldsAndMethodsFromMissingType(
+									this.completionToken,
+									localVariableBinding.declaration.type,
+									localVariableBinding.declaringScope,
+									ref,
+									scope);
+						}
+					}
 				}
 
 			} else if (qualifiedBinding instanceof ReferenceBinding && !(qualifiedBinding instanceof TypeVariableBinding)) {
@@ -209,7 +246,10 @@
 						ref,
 						scope,
 						false,
-						false);
+						false,
+						null,
+						null,
+						null);
 				}
 
 				if (!isInsideAnnotationAttribute && !this.requestor.isIgnored(CompletionProposal.METHOD_REF)) {
@@ -227,7 +267,10 @@
 						scope,
 						false,
 						false,
-						false);
+						false,
+						null,
+						null,
+						null);
 				}
 
 			} else if (qualifiedBinding instanceof PackageBinding) {
@@ -277,18 +320,41 @@
 
 			this.completionToken = access.token;
 			
-			if (!this.requestor.isIgnored(CompletionProposal.KEYWORD)) {
-				findKeywords(this.completionToken, new char[][]{Keywords.NEW}, false, false);
+			if (qualifiedBinding.problemId() == ProblemReasons.NotFound) {
+				// complete method members with missing return type
+				// class X {
+				//   Missing f() {return null;}
+				//   void foo() {
+				//     f().|
+				//   }
+				// }
+				if (this.assistNodeInJavadoc == 0 &&
+						this.requestor.isAllowingRequiredProposals(CompletionProposal.TYPE_REF)) {
+					ProblemMethodBinding problemMethodBinding = (ProblemMethodBinding) qualifiedBinding;				
+					findFieldsAndMethodsFromMissingReturnType(
+							problemMethodBinding.selector,
+							problemMethodBinding.parameters,
+							scope,
+							access,
+							insideTypeAnnotation);
+				}
+			} else {
+				if (!this.requestor.isIgnored(CompletionProposal.KEYWORD)) {
+					findKeywords(this.completionToken, new char[][]{Keywords.NEW}, false, false);
+				}
+				
+				findFieldsAndMethods(
+					this.completionToken,
+					((TypeBinding) qualifiedBinding).capture(scope, access.receiver.sourceEnd),
+					scope,
+					access,
+					scope,
+					false,
+					access.receiver instanceof SuperReference,
+					null,
+					null,
+					null);
 			}
-			
-			findFieldsAndMethods(
-				this.completionToken,
-				((TypeBinding) qualifiedBinding).capture(scope, access.receiver.sourceEnd),
-				scope,
-				access,
-				scope,
-				false,
-				access.receiver instanceof SuperReference);
 
 		} else if (astNode instanceof CompletionOnMessageSend) {
 			setSourceRange(astNode.sourceStart, astNode.sourceEnd, false);
@@ -315,7 +381,10 @@
 					scope,
 					false,
 					messageSend.receiver instanceof SuperReference,
-					false);
+					false,
+					null,
+					null,
+					null);
 			}
 		} else if (astNode instanceof CompletionOnExplicitConstructorCall) {
 			if (!this.requestor.isIgnored(CompletionProposal.METHOD_REF)) {
@@ -550,7 +619,10 @@
 								scope,
 								false,
 								false,
-								true);
+								false,
+								null,
+								null,
+								null);
 					}
 				}
 			}
@@ -623,7 +695,10 @@
 							fieldRef,
 							scope,
 							false,
-							true);
+							true,
+							null,
+							null,
+							null);
 					}
 
 					if (!this.requestor.isIgnored(CompletionProposal.METHOD_REF)
@@ -641,7 +716,10 @@
 							scope,
 							false,
 							false,
-							true);
+							true,
+							null,
+							null,
+							null);
 						if (fieldRef.receiverType instanceof ReferenceBinding) {
 							ReferenceBinding refBinding = (ReferenceBinding)fieldRef.receiverType;
 							if (this.completionToken == null
@@ -675,7 +753,8 @@
 						findImplicitMessageSends(this.completionToken, argTypes, scope, messageSend, scope);
 					}
 				} else if (!this.requestor.isIgnored(CompletionProposal.METHOD_REF)) {
-					findMethods(this.completionToken,
+					findMethods(
+						this.completionToken,
 						null,
 						argTypes,
 						(ReferenceBinding) ((ReferenceBinding) qualifiedBinding).capture(scope, messageSend.receiver.sourceEnd),
@@ -688,7 +767,10 @@
 						scope,
 						false,
 						messageSend.receiver instanceof SuperReference,
-						true);
+						true,
+						null,
+						null,
+						null);
 				}
 			} else if (astNode instanceof CompletionOnJavadocAllocationExpression) {
 //				setSourceRange(astNode.sourceStart, astNode.sourceEnd, false);
