@@ -1,0 +1,107 @@
+/*
+ * External API in JavaConventions.
+ * This is used to optimize the case where the scanner is used to scan a single identifier.
+ * In this case, the AIOOBE is slower to handle than a bound check
+ */
+public int scanIdentifier() throws InvalidInputException {
+	int whiteStart = 0;
+	while (true) { //loop for jumping over comments
+		this.withoutUnicodePtr = 0;
+		//start with a new token (even comment written with unicode )
+		// ---------Consume white space and handles startPosition---------
+		whiteStart = this.currentPosition;
+		boolean isWhiteSpace, hasWhiteSpaces = false;
+		int offset;
+		int unicodePtr;
+		boolean checkIfUnicode = false;
+		do {
+			unicodePtr = this.withoutUnicodePtr;
+			offset = this.currentPosition;
+			this.startPosition = this.currentPosition;
+			if (this.currentPosition < this.eofPosition) {
+				this.currentCharacter = this.source[this.currentPosition++];
+				checkIfUnicode = this.currentPosition < this.eofPosition
+						&& this.currentCharacter == '\\'
+						&& this.source[this.currentPosition] == 'u';
+			} else if (this.tokenizeWhiteSpace && (whiteStart != this.currentPosition - 1)) {
+				// reposition scanner in case we are interested by spaces as tokens
+				this.currentPosition--;
+				this.startPosition = whiteStart;
+				return TokenNameWHITESPACE;
+			} else {
+				return TokenNameEOF;
+			}
+			if (checkIfUnicode) {
+				isWhiteSpace = jumpOverUnicodeWhiteSpace();
+				offset = this.currentPosition - offset;
+			} else {
+				offset = this.currentPosition - offset;
+				// inline version of:
+				//isWhiteSpace = 
+				//	(this.currentCharacter == ' ') || ScannerHelper.isWhitespace(this.currentCharacter); 
+				switch (this.currentCharacter) {
+					case 10 : /* \ u000a: LINE FEED               */
+					case 12 : /* \ u000c: FORM FEED               */
+					case 13 : /* \ u000d: CARRIAGE RETURN         */
+					case 32 : /* \ u0020: SPACE                   */
+					case 9 : /* \ u0009: HORIZONTAL TABULATION   */
+						isWhiteSpace = true;
+						break;
+					default :
+						isWhiteSpace = false;
+				}
+			}
+			if (isWhiteSpace) {
+				hasWhiteSpaces = true;
+			}
+		} while (isWhiteSpace);
+		if (hasWhiteSpaces) {
+			if (this.tokenizeWhiteSpace) {
+				// reposition scanner in case we are interested by spaces as tokens
+				this.currentPosition-=offset;
+				this.startPosition = whiteStart;
+				if (checkIfUnicode) {
+					this.withoutUnicodePtr = unicodePtr;
+				}
+				return TokenNameWHITESPACE;
+			} else if (checkIfUnicode) {
+				this.withoutUnicodePtr = 0;
+				unicodeStore();
+			} else {
+				this.withoutUnicodePtr = 0;
+			}
+		}
+		char c = this.currentCharacter;
+		if (c < ScannerHelper.MAX_OBVIOUS) {
+			if ((ScannerHelper.OBVIOUS_IDENT_CHAR_NATURES[c] & ScannerHelper.C_IDENT_START) != 0) {
+				return scanIdentifierOrKeywordWithBoundCheck();
+			}
+			return TokenNameERROR;
+		}
+		boolean isJavaIdStart;
+		if (c >= HIGH_SURROGATE_MIN_VALUE && c <= HIGH_SURROGATE_MAX_VALUE) {
+			if (this.complianceLevel < ClassFileConstants.JDK1_5) {
+				throw new InvalidInputException(INVALID_UNICODE_ESCAPE);
+			}
+			// Unicode 4 detection
+			char low = (char) getNextCharWithBoundChecks();
+			if (low < LOW_SURROGATE_MIN_VALUE || low > LOW_SURROGATE_MAX_VALUE) {
+				// illegal low surrogate
+				throw new InvalidInputException(INVALID_LOW_SURROGATE);
+			}
+			isJavaIdStart = ScannerHelper.isJavaIdentifierStart(c, low);
+		} else if (c >= LOW_SURROGATE_MIN_VALUE && c <= LOW_SURROGATE_MAX_VALUE) {
+			if (this.complianceLevel < ClassFileConstants.JDK1_5) {
+				throw new InvalidInputException(INVALID_UNICODE_ESCAPE);
+			}
+			throw new InvalidInputException(INVALID_HIGH_SURROGATE);
+		} else {
+			// optimized case already checked
+			isJavaIdStart = Character.isJavaIdentifierStart(c);
+		}
+		if (isJavaIdStart)
+			return scanIdentifierOrKeywordWithBoundCheck();
+		return TokenNameERROR;
+	}
+}
+
