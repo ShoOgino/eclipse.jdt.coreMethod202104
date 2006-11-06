@@ -1,0 +1,57 @@
+	private char[][] computeAlreadyDefinedName(
+			BlockScope scope,
+			InvocationSite invocationSite) {
+		ArrayList result = new ArrayList();
+		
+		boolean staticsOnly = false;
+
+		Scope currentScope = scope;
+
+		done1 : while (true) { // done when a COMPILATION_UNIT_SCOPE is found
+
+			switch (currentScope.kind) {
+
+				case Scope.METHOD_SCOPE :
+					// handle the error case inside an explicit constructor call (see MethodScope>>findField)
+					MethodScope methodScope = (MethodScope) currentScope;
+					staticsOnly |= methodScope.isStatic | methodScope.isConstructorCall;
+
+				case Scope.BLOCK_SCOPE :
+					BlockScope blockScope = (BlockScope) currentScope;
+
+					next : for (int i = 0, length = blockScope.locals.length; i < length; i++) {
+						LocalVariableBinding local = blockScope.locals[i];
+
+						if (local == null)
+							break next;
+
+						if (local.isSecret())
+							continue next;
+
+						result.add(local.name);
+					}
+					break;
+
+				case Scope.CLASS_SCOPE :
+					ClassScope classScope = (ClassScope) currentScope;
+					SourceTypeBinding enclosingType = classScope.referenceContext.binding;
+					computeAlreadyDefinedName(
+							enclosingType,
+							classScope,
+							staticsOnly,
+							invocationSite,
+							result);
+					staticsOnly |= enclosingType.isStatic();
+					break;
+					
+				case Scope.COMPILATION_UNIT_SCOPE :
+					break done1;
+			}
+			currentScope = currentScope.parent;
+		}
+		
+		if (result.size() == 0) return CharOperation.NO_CHAR_CHAR;
+		
+		return (char[][])result.toArray(new char[result.size()][]);
+	}
+
