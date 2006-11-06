@@ -1,0 +1,57 @@
+	/**
+	 * Validate the given Java type name, either simple or qualified, for the given source and compliance levels.
+	 * For example, <code>"java.lang.Object"</code>, or <code>"Object"</code>.
+	 * <p>
+	 *
+	 * @param name the name of a type
+	 * @param sourceLevel the source level
+	 * @param complianceLevel the compliance level
+	 * @return a status object with code <code>IStatus.OK</code> if
+	 *		the given name is valid as a Java type name, 
+	 *      a status with code <code>IStatus.WARNING</code>
+	 *		indicating why the given name is discouraged, 
+	 *      otherwise a status object indicating what is wrong with 
+	 *      the name
+	 * @since 3.3
+	 */
+	public static IStatus validateJavaTypeName(String name, String sourceLevel, String complianceLevel) {
+		if (name == null) {
+			return new Status(IStatus.ERROR, JavaCore.PLUGIN_ID, -1, Messages.convention_type_nullName, null); 
+		}
+		String trimmed = name.trim();
+		if (!name.equals(trimmed)) {
+			return new Status(IStatus.ERROR, JavaCore.PLUGIN_ID, -1, Messages.convention_type_nameWithBlanks, null); 
+		}
+		int index = name.lastIndexOf('.');
+		char[] scannedID;
+		if (index == -1) {
+			// simple name
+			scannedID = scannedIdentifier(name, sourceLevel, complianceLevel);
+		} else {
+			// qualified name
+			String pkg = name.substring(0, index).trim();
+			IStatus status = validatePackageName(pkg, sourceLevel, complianceLevel);
+			if (!status.isOK()) {
+				return status;
+			}
+			String type = name.substring(index + 1).trim();
+			scannedID = scannedIdentifier(type, sourceLevel, complianceLevel);
+		}
+	
+		if (scannedID != null) {
+			IStatus status = ResourcesPlugin.getWorkspace().validateName(new String(scannedID), IResource.FILE);
+			if (!status.isOK()) {
+				return status;
+			}
+			if (CharOperation.contains('$', scannedID)) {
+				return new Status(IStatus.WARNING, JavaCore.PLUGIN_ID, -1, Messages.convention_type_dollarName, null); 
+			}
+			if ((scannedID.length > 0 && ScannerHelper.isLowerCase(scannedID[0]))) {
+				return new Status(IStatus.WARNING, JavaCore.PLUGIN_ID, -1, Messages.convention_type_lowercaseName, null); 
+			}
+			return JavaModelStatus.VERIFIED_OK;
+		} else {
+			return new Status(IStatus.ERROR, JavaCore.PLUGIN_ID, -1, Messages.bind(Messages.convention_type_invalidName, name), null); 
+		}
+	}
+

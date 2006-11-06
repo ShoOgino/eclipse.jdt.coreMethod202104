@@ -1,0 +1,60 @@
+	/*
+	 * Returns the current identifier extracted by the scanner (without unicode
+	 * escapes) from the given id and for the given source and compliance levels.
+	 * Returns <code>null</code> if the id was not valid
+	 */
+	private static synchronized char[] scannedIdentifier(String id, String sourceLevel, String complianceLevel) {
+		if (id == null) {
+			return null;
+		}
+		String trimmed = id.trim();
+		if (!trimmed.equals(id)) {
+			return null;
+		}
+
+		// Get scanner for given source and compliance levels
+		long lSourceLevel = CompilerOptions.versionToJdkLevel(sourceLevel);
+		long lComplianceLevel = CompilerOptions.versionToJdkLevel(complianceLevel);	
+		int sourceIndex = ((int)(lSourceLevel>>> 16)) - ClassFileConstants.MAJOR_VERSION_1_3 ;
+		int complianceIndex = ((int)(lComplianceLevel >>> 16)) - ClassFileConstants.MAJOR_VERSION_1_3;
+		if (complianceIndex < 0) complianceIndex = 0;
+		if (sourceIndex < 0) sourceIndex = 0;
+		if (sourceIndex > complianceIndex) sourceIndex = complianceIndex;
+		int index = MAP_INDEXES[complianceIndex][sourceIndex];
+		if (SCANNERS[index] == null) {
+			SCANNERS[index] = new Scanner(
+					false /*comment*/,
+					false /*whitespace*/,
+					false /*nls*/,
+					lSourceLevel,
+					lComplianceLevel,
+					null/*taskTag*/,
+					null/*taskPriorities*/,
+					true /*taskCaseSensitive*/);
+		}
+		Scanner scanner = SCANNERS[index];
+
+		try {
+			scanner.setSource(id.toCharArray());
+			int token = scanner.getNextToken();
+			char[] currentIdentifier;
+			try {
+				currentIdentifier = scanner.getCurrentIdentifierSource();
+			} catch (ArrayIndexOutOfBoundsException e) {
+				return null;
+			}
+			int nextToken= scanner.getNextToken();
+			if (token == TerminalTokens.TokenNameIdentifier 
+				&& nextToken == TerminalTokens.TokenNameEOF
+				&& scanner.startPosition == scanner.source.length) { // to handle case where we had an ArrayIndexOutOfBoundsException 
+																     // while reading the last token
+				return currentIdentifier;
+			} else {
+				return null;
+			}
+		}
+		catch (InvalidInputException e) {
+			return null;
+		}
+	}
+
