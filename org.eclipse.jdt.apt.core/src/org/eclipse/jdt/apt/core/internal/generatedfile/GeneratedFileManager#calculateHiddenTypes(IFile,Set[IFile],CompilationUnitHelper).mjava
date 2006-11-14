@@ -1,0 +1,64 @@
+	/**
+	 * Perform the map manipulations necessary to hide types during reconcile that were
+	 * generated during build and thus exist on disk. The basic idea is that the caller
+	 * passes in a set of files generated on the most recent reconcile, and then this
+	 * method hides all the files that were generated on the previous build and that are
+	 * not in the set passed in.
+	 * <p>
+	 * This method does not touch the disk nor create, modify, or discard working copies;
+	 * however, it may call {@link CompilationUnitHelper#createWorkingCopy(IFile)}. 
+	 * <p>
+	 * This method is atomic with regard to data structure integrity.
+	 * 
+	 * @param parentFile
+	 *            only this parent's generated file will be hidden; generated files with
+	 *            more than one parent will be spared.
+	 * @param newlyGeneratedFiles
+	 *            will be spared from being hidden
+	 * @param cuHelper
+	 *            may be used to create a new working copy for a generated file
+	 * @return a list of working copies which need to have their content set to empty by
+	 *         {@link CompilationUnitHelper#updateWorkingCopyContents(String, 
+	 *         ICompilationUnit, WorkingCopyOwner)}.
+	 */
+	private synchronized List<ICompilationUnit> calculateHiddenTypes(IFile parentFile, Set<IFile> newlyGeneratedFiles,
+			CompilationUnitHelper cuHelper)
+	{
+		IPackageFragmentRoot root = _generatedPackageFragmentRoot.get().root;
+		List<ICompilationUnit> toSetBlank = new ArrayList<ICompilationUnit>();
+
+		// Hide types that were generated during build and thus exist on disk.
+		// Only hide them if they have no other parents.
+		Set<IFile> generatedFromBuild = _parentToGenFiles.getValues(parentFile);
+		for (IFile generatedFile : generatedFromBuild) {
+			// spare types generated in the last round
+			if (!newlyGeneratedFiles.contains(generatedFile)) {
+				Set<IFile> parentsOfGeneratedFile = _parentToGenFiles.getKeys(generatedFile);
+				if (parentsOfGeneratedFile.size() == 1 && parentsOfGeneratedFile.contains(parentFile)) {
+					ICompilationUnit workingCopy = _workingCopies.get(generatedFile);
+					if (null != workingCopy) {
+						// move existing WC from _workingCopies to _hidden
+						_workingCopies.remove(generatedFile);
+						boolean removed = _parentToGenWorkingCopies.remove(parentFile, workingCopy);
+						assert removed : "Working copy found in list but not in dependency map: " + workingCopy.getElementName(); //$NON-NLS-1$
+					} else {
+						if (AptPlugin.DEBUG_GFM) AptPlugin.trace( 
+								"creating blank working copy to hide type: " + generatedFile); //$NON-NLS-1$
+						String typeName = getTypeNameForDerivedFile(generatedFile);
+						workingCopy = cuHelper.createWorkingCopy(typeName, root);
+					}
+					if (AptPlugin.DEBUG_GFM_MAPS) AptPlugin.trace(
+							"adding working copy to hidden types list: " + generatedFile); //$NON-NLS-1$
+					assert workingCopy.isWorkingCopy() : 
+						"Attempted to add a non-working copy to hidden types list"; //$NON-NLS-1$
+					_hiddenBuiltTypes.put(generatedFile, workingCopy);
+
+					ICompilationUnit wc = workingCopy;
+					toSetBlank.add(wc);
+				}
+			}
+		}
+		assert checkIntegrity();
+		return toSetBlank;
+	}
+

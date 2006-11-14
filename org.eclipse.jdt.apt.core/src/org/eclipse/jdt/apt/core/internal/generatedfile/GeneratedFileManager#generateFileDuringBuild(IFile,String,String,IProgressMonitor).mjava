@@ -1,157 +1,97 @@
 	/**
-	 * Invoked when a file is generated during a build.  The generated file and intermediate 
-	 * directories will be created if they don't  exist.  This method takes file-system locks, 
-	 * and assumes that the calling method has at some point acquired a workspace-level 
-	 * resource lock.
+	 * Invoked when a file is generated during a build. The generated file and
+	 * intermediate directories will be created if they don't exist. This method takes
+	 * file-system locks, and assumes that the calling method has at some point acquired a
+	 * workspace-level resource lock.
 	 * 
-	 * @param parentFile the parent of the type being generated
-	 * @param typeName the dot-separated java type name of the type being generated
-	 * @param contents the java code contents of the new type .
-	 * @param progressMonitor a progres monitor.  This may be null.
+	 * @param parentFile
+	 *            the parent of the type being generated
+	 * @param typeName
+	 *            the dot-separated java type name of the type being generated
+	 * @param contents
+	 *            the java code contents of the new type .
+	 * @param progressMonitor
+	 *            a progress monitor. This may be null.
 	 * @return - the newly created IFile along with whether it was modified
 	 * @throws CoreException
 	 */
-	public FileGenerationResult generateFileDuringBuild(
-			IFile parentFile,
-			String typeName, 
-			String contents, 
-			IProgressMonitor progressMonitor)
-	throws CoreException
+	public FileGenerationResult generateFileDuringBuild(IFile parentFile, String typeName, String contents,
+			IProgressMonitor progressMonitor) throws CoreException
 	{
-		if( _skipTypeGeneration ) return null;
-		// If the generated package fragment root wasn't set,
-		// then our classpath is incorrect. Add a marker and return
-		else if( _generatedPackageFragmentRoot == null ){			
-			String message = Messages.bind(
-					Messages.GeneratedFileManager_missing_classpath_entry, 
-					new String[] {_snapshotFolderName});
+		if (_skipTypeGeneration)
+			return null;
+		
+		GeneratedPackageFragmentRoot.NameAndRoot gpfr = _generatedPackageFragmentRoot.get();
+		IPackageFragmentRoot root = gpfr.root;
+		if (root == null) {
+			// If the generated package fragment root wasn't set, then our classpath 
+			// is incorrect. Add a marker and return.  We do this here, rather than in
+			// the set() method, because if they're not going to generate any types
+			// then it doesn't matter that the classpath is wrong.
+			String message = Messages.bind(Messages.GeneratedFileManager_missing_classpath_entry,
+					new String[] { gpfr.name });
 			IMarker marker = _jProject.getProject().createMarker(AptPlugin.APT_CONFIG_PROBLEM_MARKER);
-			marker.setAttributes(
-					new String[] {
-						IMarker.MESSAGE, 
-						IMarker.SEVERITY
-					},
-					new Object[] {
-						message,
-						IMarker.SEVERITY_ERROR
-					}
-				);
+			marker.setAttributes(new String[] { IMarker.MESSAGE, IMarker.SEVERITY }, new Object[] { message,
+					IMarker.SEVERITY_ERROR });
 			// disable any future type generation
 			_skipTypeGeneration = true;
 			return null;
 		}
-		
-		try{
-			
-			if( typeName.indexOf('/') != -1 )
-				typeName = typeName.replace('/', '.');
-			int separatorIndex = typeName.lastIndexOf('.');			
-			final String typeSimpleName;
-			final String pkgName;
-			if( separatorIndex == -1 ){
-				pkgName = ""; //$NON-NLS-1$
-				typeSimpleName = typeName;
-			}
-			else{
-				pkgName = typeName.substring(0, separatorIndex);
-				typeSimpleName = typeName.substring(separatorIndex + 1, typeName.length());
-			}
-			
-			// NOTE: Do NOT ever create any type of resource (files, folders) through the
-			// resource API. The resource change event will not go out until the build
-			// is completed. Instead always go through the JavaModel. -theodora
-			IFolder genSrcFolder = (IFolder)_generatedPackageFragmentRoot.getResource();
-			final Set<IContainer> newFolders = getNewPackageFolders(pkgName, genSrcFolder);
-			IPackageFragment pkgFrag = _generatedPackageFragmentRoot.createPackageFragment(pkgName, true, progressMonitor);
-			if( pkgFrag == null ){
-				final Exception e = new IllegalStateException("failed to locate package '" + pkgName + "'");  //$NON-NLS-1$ //$NON-NLS-2$
-				e.printStackTrace();
-				throw e;
-			}			
-			// mark all newly create folders as derived.			
-			markNewFoldersAsDerived((IContainer)pkgFrag.getResource(), newFolders);
-			
-			final String cuName = typeSimpleName + ".java"; //$NON-NLS-1$
-			
-			ICompilationUnit unit = pkgFrag.getCompilationUnit(cuName);
-			IFile file = (IFile)unit.getResource();
-			boolean contentsDiffer = true;
 
-			if (unit.exists()) {
-				InputStream oldData = null;
-				InputStream is = null;
-				try {
-					is = new ByteArrayInputStream( contents.getBytes() );
-					oldData = new BufferedInputStream( ((IFile)unit.getResource()).getContents());
-					contentsDiffer = !FileSystemUtil.compareStreams(oldData, is);
-				}
-				catch (CoreException ce) {
-					// Do nothing. Assume the new content is different
-				}
-				finally {
-					if (oldData != null) {
-						try {
-							oldData.close();
-						} 
-						catch (IOException ioe) 
-						{}
+		// Do the new contents differ from what is already on disk?
+		// We need to know so we can tell the caller whether this is a modification.
+		IFile file = getIFileForTypeName(typeName);
+		boolean contentsDiffer = compareFileContents(contents, file);
+
+		try {
+			if (contentsDiffer) {
+				final String[] names = parseTypeName(typeName);
+				final String pkgName = names[0];
+				final String cuName = names[1];
+				
+				// Get a list of the folders that will have to be created for this package to exist
+				IFolder genSrcFolder = (IFolder) root.getResource();
+				final Set<IFolder> newFolders = computeNewPackageFolders(pkgName, genSrcFolder);
+	
+				// Create the package fragment in the Java Model.  This creates all needed parent folders.
+				IPackageFragment pkgFrag = _CUHELPER.createPackageFragment(pkgName, root, progressMonitor);
+	
+				// Mark all newly created folders (but not pre-existing ones) as derived.  
+				for (IContainer folder : newFolders) {
+					try {
+						folder.setDerived(true);
+					} catch (CoreException e) {
+						AptPlugin.logWarning(e, "Unable to mark generated type folder as derived: " + folder.getName()); //$NON-NLS-1$
+						break;
 					}
-					if (is != null) {
-						try {
-							is.close();
-						} 
-						catch (IOException ioe) 
-						{}
-					}
 				}
-			}	
-			
-			if( contentsDiffer ){
-				if( unit.exists() && unit.isOpen() ){
-					// directly modify the content of the working copy
-					// so that UI will pick up the change.
-					IBuffer buffer = unit.getBuffer();
-					if (buffer == null){
-						throw new IllegalStateException("Unable to update unit for " + cuName); //$NON-NLS-1$
-						
-					}
-					buffer.setContents(contents.toCharArray());
-					buffer.save(progressMonitor, true);
-				}
-				else{
-					ICompilationUnit newUnit = null;
-					newUnit = pkgFrag.createCompilationUnit(cuName, contents, true,
-							progressMonitor);
-					if( newUnit == null ) {				
-						throw new IllegalStateException("Unable to create unit for " + cuName); //$NON-NLS-1$
-					}
-					if( AptPlugin.DEBUG )
-						AptPlugin.trace("generated " + typeName ); //$NON-NLS-1$
-					newUnit.save(progressMonitor, true);
-				}
+	
+				// Save the compilation unit to disk.  How this is done depends on current state.
+				saveCompilationUnit(pkgFrag, cuName, contents, progressMonitor);
 			}
-			
+
+			// during a batch build, parentFile will be null.
+			// Only keep track of ownership in iterative builds
+			if (parentFile != null) {
+				addBuiltFileToMaps(parentFile, file);
+			}
+
 			// Mark the file as derived. Note that certain user actions may have
-			// deleted this file before we get here, so if the file doesn't exist,
-			// marking it derived throws a ResourceException
+			// deleted this file before we get here, so if the file doesn't
+			// exist, marking it derived throws a ResourceException.
 			if (file.exists()) {
 				file.setDerived(true);
 			}
 			// We used to also make the file read-only. This is a bad idea,
 			// as refactorings then fail in the future, which is worse
 			// than allowing a user to modify a generated file.
-			
-			// during a batch build, parentFile will be null.
-			// Only keep track of ownership in iterative builds
-			if( parentFile != null ) {
-				addEntryToFileMaps( parentFile, file );
-			}
+
+			assert checkIntegrity();
+
 			return new FileGenerationResult(file, contentsDiffer);
+		} catch (CoreException e) {
+			AptPlugin.log(e, "Unable to generate type " + typeName); //$NON-NLS-1$
+			return null;
 		}
-		catch(Throwable e){
-			AptPlugin.log(e, "(2)failed to generate type " + typeName); //$NON-NLS-1$
-			e.printStackTrace();
-		}
-		return null; // something failed. The catch block have already logged the error.
-	}	
+	}
 

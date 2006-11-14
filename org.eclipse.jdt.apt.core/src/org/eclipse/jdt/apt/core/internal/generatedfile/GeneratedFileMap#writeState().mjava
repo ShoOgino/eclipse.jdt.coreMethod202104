@@ -1,0 +1,61 @@
+	/**
+	 * Write our dependencies to disk.  If not dirty, nothing is written.
+	 */
+	public synchronized void writeState() {
+		if (!isDirty()) {
+			return;
+		}
+		File file = getStateFile(_proj);
+		if (file == null) {
+			// Cannot write state, as project has been deleted
+			return;
+		}
+		file.delete();
+		
+		DataOutputStream out = null;
+		try {
+			out = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(file)));
+			
+			out.writeInt(SERIALIZATION_VERSION);
+			
+			// Number of parent files
+			Set<IFile> parents = getKeySet();
+			out.writeInt(parents.size());
+			
+			// for each parent...
+			for (IFile parent : parents) {
+				
+				// ...parent name
+				out.writeUTF(convertIFileToPath(parent));
+				
+				Set<IFile> children = getValues(parent);
+				
+				// ...number of children
+				out.writeInt(children.size());
+				
+				// for each child...
+				for (IFile child : children) {
+					// ...child name.
+					out.writeUTF(convertIFileToPath(child));
+				}
+			}
+			// our serialized and in-memory states are now identical
+			clearDirtyBit();
+		}
+		catch (IOException ioe) {
+			// We can safely continue without having written our dependencies.
+			AptPlugin.log(ioe, "Could not serialize APT dependencies"); //$NON-NLS-1$
+		}
+		finally {
+			if (out != null) {
+				try {
+					out.flush();
+					out.close();
+				}
+				catch (IOException ioe) {
+					AptPlugin.log(ioe, "Failed to write the APT dependency state to disk"); //$NON-NLS-1$
+				}
+			}
+		}
+	}
+

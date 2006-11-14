@@ -1,0 +1,61 @@
+	/**
+	 * Write <code>contents</code> to disk in the form of a compilation unit named
+	 * <code>name</code> under package fragment <code>pkgFrag</code>. The way in
+	 * which the write is done depends on whether there is an existing file, and on
+	 * whether the compilation unit is a working copy.
+	 * <p>
+	 * The working copy is used in reconcile. In principle changing the contents during
+	 * build should be a problem, since the Java builder is based on file contents rather
+	 * than on the current Java Model. However, annotation processors get their type info
+	 * from the Java Model even during build, so there is in general no difference between
+	 * build and reconcile. This causes certain bugs (if a build is performed while there
+	 * is unsaved content in editors), so it may change in the future, and this routine
+	 * will need to be fixed. - WHarley 11/06
+	 * <p>
+	 * This method touches the disk and modifies working copies. It can only be called
+	 * during build, not during reconcile, and it should not be called while holding any
+	 * locks (other than the workspace rules held by the build).
+	 * 
+	 * @param pkgFrag
+	 *            the package fragment in which the type will be created. The fragment's
+	 *            folders must already exist on disk.
+	 * @param cuName
+	 *            the simple name of the type, with extension, such as 'Obj.java'
+	 * @param contents
+	 *            the text of the compilation unit
+	 * @param progressMonitor
+	 */
+	private void saveCompilationUnit(IPackageFragment pkgFrag, final String cuName, String contents,
+			IProgressMonitor progressMonitor)
+	{
+		ICompilationUnit unit = pkgFrag.getCompilationUnit(cuName);
+		boolean isWorkingCopy = unit.isWorkingCopy();
+		if (isWorkingCopy && unit.getResource().exists()) {
+			// If we have a working copy and it has a file, all we
+			// need to do is update its contents and commit it.
+			_CUHELPER.commitNewContents(unit, contents, progressMonitor);
+			if (AptPlugin.DEBUG_GFM) AptPlugin.trace( 
+					"Committed existing working copy during build: " + unit.getElementName()); //$NON-NLS-1$
+		}
+		else {
+			if (isWorkingCopy) {
+				// See https://bugs.eclipse.org/bugs/show_bug.cgi?id=163906 -
+				// commitWorkingCopy() fails if file does not already exist.
+				Set<ICompilationUnit> toDiscard = discardWorkingCopy(unit);
+				for (ICompilationUnit cuToDiscard : toDiscard) {
+					_CUHELPER.discardWorkingCopy(cuToDiscard);
+					if (AptPlugin.DEBUG_GFM) AptPlugin.trace( 
+							"Discarded working copy during build: " + unit.getElementName()); //$NON-NLS-1$
+				}
+			}
+			try {
+				unit = pkgFrag.createCompilationUnit(cuName, contents, true, progressMonitor);
+			} catch (JavaModelException e) {
+				AptPlugin.log(e, "Unable to create compilation unit on disk: " +  //$NON-NLS-1$
+						cuName + " in pkg fragment: " + pkgFrag.getElementName()); //$NON-NLS-1$
+			}
+			if (AptPlugin.DEBUG_GFM) AptPlugin.trace( 
+					"Created compilation unit during build: " + unit.getElementName()); //$NON-NLS-1$
+		}
+	}
+

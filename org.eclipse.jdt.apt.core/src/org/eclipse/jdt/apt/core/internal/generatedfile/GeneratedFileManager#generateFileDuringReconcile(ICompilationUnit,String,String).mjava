@@ -1,0 +1,43 @@
+	/**
+	 * This function generates a type "in-memory" by creating or updating a working copy
+	 * with the specified contents. The generated-source folder must be configured
+	 * correctly for this to work. This method takes no locks, so it is safe to call when
+	 * holding fine-grained resource locks (e.g., during some reconcile paths). Since this
+	 * only works on an in-memory working copy of the type, the IFile for the generated
+	 * type may not exist on disk. Likewise, the corresponding package directories of
+	 * type-name may not exist on disk.
+	 * 
+	 * TODO: figure out how to create a working copy with a client-specified character set
+	 * 
+	 * @param parentCompilationUnit the parent compilation unit.
+	 * @param typeName the dot-separated java type name for the new type
+	 * @param contents the contents of the new type
+	 * @return The FileGenerationResult. This will return null if the generated source
+	 *         folder is not configured, or if there is some other error during type
+	 *         generation.
+	 * 
+	 */
+	public FileGenerationResult generateFileDuringReconcile(ICompilationUnit parentCompilationUnit, String typeName,
+			String contents) throws CoreException
+	{
+		if (!GENERATE_TYPE_DURING_RECONCILE)
+			return null;
+
+		IFile parentFile = (IFile) parentCompilationUnit.getResource();
+		
+		ICompilationUnit workingCopy = getWorkingCopyForGeneratedFile(parentFile, typeName, _CUHELPER);
+
+		// Update its contents and recursively reconcile
+		boolean modified = _CUHELPER.updateWorkingCopyContents(
+				contents, workingCopy, parentCompilationUnit.getOwner(), RECURSIVE_RECONCILE);
+		if (AptPlugin.DEBUG_GFM) {
+			if (modified)
+				AptPlugin.trace("working copy modified during reconcile: " + typeName); //$NON-NLS-1$
+			else
+				AptPlugin.trace("working copy unmodified during reconcile: " + typeName); //$NON-NLS-1$
+		}
+
+		IFile generatedFile = (IFile) workingCopy.getResource();
+		return new FileGenerationResult(generatedFile, modified);
+	}
+

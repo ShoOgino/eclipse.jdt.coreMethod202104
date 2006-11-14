@@ -1,0 +1,45 @@
+	/**
+	 * Invoked at the end of a reconcile to get rid of any files that are no longer being
+	 * generated. If the file existed on disk, we can't actually delete it, we can only
+	 * create a blank WorkingCopy to hide it. Therefore, we can only remove Java source
+	 * files, not arbitrary files. If the file was generated during reconcile and exists
+	 * only in memory, we can actually remove it altogether.
+	 * 
+	 * @param parentWC
+	 *            the WorkingCopy being reconciled
+	 * @param newlyGeneratedFiles
+	 *            the complete list of files generated during the reconcile (including
+	 *            files that exist on disk as well as files that only exist in memory)
+	 */
+	public void deleteObsoleteTypesAfterReconcile(ICompilationUnit parentWC, Set<IFile> newlyGeneratedFiles)
+	{
+		IFile parentFile = (IFile) parentWC.getResource();
+
+		List<ICompilationUnit> toSetBlank;
+		List<ICompilationUnit> toDiscard;
+		synchronized (this) {
+			if (GENERATE_TYPE_DURING_RECONCILE) {
+				toSetBlank = calculateHiddenTypes(parentFile, newlyGeneratedFiles, _CUHELPER);
+			}
+			else {
+				toSetBlank = Collections.emptyList();
+			}
+			toDiscard = calculateObsoleteWorkingCopies(parentFile, newlyGeneratedFiles);
+		}
+
+		for (ICompilationUnit wcToDiscard : toDiscard) {
+			if (AptPlugin.DEBUG_GFM) AptPlugin.trace(
+					"discarded obsolete working copy during reconcile: " + wcToDiscard.getElementName()); //$NON-NLS-1$
+			_CUHELPER.discardWorkingCopy(wcToDiscard);
+		}
+
+		WorkingCopyOwner workingCopyOwner = parentWC.getOwner();
+		for (ICompilationUnit wcToSetBlank : toSetBlank) {
+			if (AptPlugin.DEBUG_GFM) AptPlugin.trace(
+					"hiding file with blank working copy during reconcile: " + wcToSetBlank.getElementName()); //$NON-NLS-1$
+			_CUHELPER.updateWorkingCopyContents("", wcToSetBlank, workingCopyOwner, RECURSIVE_RECONCILE); //$NON-NLS-1$
+		}
+
+		assert checkIntegrity();
+	}
+
