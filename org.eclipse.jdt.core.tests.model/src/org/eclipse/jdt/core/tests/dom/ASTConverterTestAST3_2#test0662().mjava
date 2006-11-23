@@ -1,0 +1,65 @@
+	/**
+	 * http://dev.eclipse.org/bugs/show_bug.cgi?id=144858
+	 * TODO (frederic) check that keys are different (PR 149590) 
+	 */
+	public void test0662() throws JavaModelException {
+		ICompilationUnit workingCopy = null;
+		try {
+			String contents =
+				"public class X {\n" + 
+				"        public static void main(String[] args) {\n" + 
+				"                int x = x = 0;\n" + 
+				"                if (true) {\n" + 
+				"                        int x = x = 1;\n" + 
+				"                }\n" + 
+				"        }\n" + 
+				"}";
+			workingCopy = getWorkingCopy("/Converter/src/X.java", true/*resolve*/);
+			ASTNode node = buildAST(
+				contents,
+				workingCopy,
+				false);
+			assertEquals("Not a compilation unit", ASTNode.COMPILATION_UNIT, node.getNodeType());
+			CompilationUnit unit = (CompilationUnit) node;
+			String expectedLog =
+				"The assignment to variable x has no effect\n" + 
+				"Duplicate local variable x\n" + 
+				"The assignment to variable x has no effect";
+			assertProblemsSize(unit, 3, expectedLog);
+			node = getASTNode(unit, 0, 0, 0);
+			assertEquals("Not a variable declaration statement", ASTNode.VARIABLE_DECLARATION_STATEMENT, node.getNodeType());
+			VariableDeclarationStatement statement = (VariableDeclarationStatement) node;
+			List  fragments = statement.fragments();
+			assertEquals("Wrong size", 1, fragments.size());
+			VariableDeclarationFragment fragment = (VariableDeclarationFragment) fragments.get(0);
+			IVariableBinding variableBinding = fragment.resolveBinding();
+			assertNotNull("No binding", variableBinding);
+			assertEquals("Wrong name", "x", variableBinding.getName());
+			// (PR 149590) 
+			// String key = variableBinding.getKey();
+			
+			node = getASTNode(unit, 0, 0, 1);
+			assertEquals("Not an if statement", ASTNode.IF_STATEMENT, node.getNodeType());
+			IfStatement ifStatement = (IfStatement) node;
+			Block block = (Block) ifStatement.getThenStatement();
+			List statements = block.statements();
+			assertEquals("Wrong size", 1, statements.size());
+			Statement statement2 = (Statement) statements.get(0);
+			assertEquals("Not a variable declaration statement", ASTNode.VARIABLE_DECLARATION_STATEMENT, statement2.getNodeType());
+			statement = (VariableDeclarationStatement) statement2;
+			fragments = statement.fragments();
+			assertEquals("Wrong size", 1, fragments.size());
+			fragment = (VariableDeclarationFragment) fragments.get(0);
+			variableBinding = fragment.resolveBinding();
+			assertNotNull("No binding", variableBinding);
+			assertEquals("Wrong name", "x", variableBinding.getName());
+			
+			// (PR 149590) 
+			// String key2 = variableBinding.getKey();
+			//assertFalse("Keys should not be equals", key2.equals(key));
+		} finally {
+			if (workingCopy != null)
+				workingCopy.discardWorkingCopy();
+		}
+	}
+
