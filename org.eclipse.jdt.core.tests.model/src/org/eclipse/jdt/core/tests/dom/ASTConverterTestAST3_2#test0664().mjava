@@ -1,0 +1,59 @@
+	/**
+	 * http://dev.eclipse.org/bugs/show_bug.cgi?id=165662
+	 */
+	public void test0664() throws JavaModelException {
+		ICompilationUnit workingCopy = null;
+		try {
+			String contents =
+				"public class X {\n" + 
+				"  void foo() {\n" + 
+				"     class Local {\n" + 
+				"        void foo() {}\n" + 
+				"     }\n" + 
+				"     {\n" + 
+				"        class Local {\n" + 
+				"                Local(int i) {\n" + 
+				"                        this.init(i);\n" + 
+				"                }\n" + 
+				"				 void init(int i) {}\n" +
+				"        }\n" + 
+				"        Local l = new Local(0);\n" + 
+				"     }\n" + 
+				"  }\n" + 
+				"}";
+			workingCopy = getWorkingCopy("/Converter/src/X.java", true/*resolve*/);
+			ASTNode node = buildAST(
+				contents,
+				workingCopy,
+				false);
+			assertEquals("Not a compilation unit", ASTNode.COMPILATION_UNIT, node.getNodeType());
+			CompilationUnit unit = (CompilationUnit) node;
+			String expectedLog = "Duplicate nested type Local";
+			assertProblemsSize(unit, 1, expectedLog);
+			node = getASTNode(unit, 0, 0, 0);
+			assertEquals("Not a type declaration statement", ASTNode.TYPE_DECLARATION_STATEMENT, node.getNodeType());
+			TypeDeclarationStatement statement = (TypeDeclarationStatement) node;
+			ITypeBinding typeBinding = statement.resolveBinding();
+			assertNotNull("No binding", typeBinding);
+			String key = typeBinding.getKey();
+			assertNotNull("No key", key);
+			
+			node = getASTNode(unit, 0, 0, 1);
+			assertEquals("Not a block", ASTNode.BLOCK, node.getNodeType());
+			Block block = (Block) node;
+			List statements = block.statements();
+			assertEquals("wrong size", 2, statements.size());
+			Statement statement2 = (Statement) statements.get(0);
+			assertEquals("Not a type declaration statement", ASTNode.TYPE_DECLARATION_STATEMENT, statement2.getNodeType());
+			statement = (TypeDeclarationStatement) statement2;
+			typeBinding = statement.resolveBinding();
+			assertNotNull("No binding", typeBinding);
+			String key2 = typeBinding.getKey();
+			assertNotNull("No key2", key2);
+			assertFalse("Keys should not be equals", key.equals(key2));
+		} finally {
+			if (workingCopy != null)
+				workingCopy.discardWorkingCopy();
+		}
+	}
+
