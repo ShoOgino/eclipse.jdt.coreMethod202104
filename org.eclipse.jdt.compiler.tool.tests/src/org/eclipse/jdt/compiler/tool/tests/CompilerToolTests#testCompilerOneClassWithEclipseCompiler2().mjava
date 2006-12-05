@@ -1,0 +1,75 @@
+	public void testCompilerOneClassWithEclipseCompiler2() {
+		String tmpFolder = System.getProperty("java.io.tmpdir");
+		File inputFile = new File(tmpFolder, "X.java");
+		BufferedWriter writer = null;
+		try {
+			writer = new BufferedWriter(new FileWriter(inputFile));
+			writer.write(
+				"package p;\n" +
+				"public class X {}");
+			writer.flush();
+			writer.close();
+		} catch (IOException e) {
+			// ignore
+		} finally {
+			if (writer != null) {
+				try {
+					writer.close();
+				} catch (IOException e) {
+					// ignore
+				}
+			}
+		}
+		// System compiler
+		StandardJavaFileManager manager = Compiler.getStandardFileManager(null, Locale.getDefault(), Charset.defaultCharset());
+
+		ForwardingJavaFileManager<StandardJavaFileManager> forwardingJavaFileManager = new ForwardingJavaFileManager<StandardJavaFileManager>(manager) {
+			@Override
+			public JavaFileObject getJavaFileForOutput(Location location,
+					String className,
+					Kind kind,
+					FileObject sibling) throws IOException {
+				
+				System.out.println("EC: Create .class file for " + className + " in location " + location + " with sibling " + sibling.toUri());
+				JavaFileObject javaFileForOutput = super.getJavaFileForOutput(location, className, kind, sibling);
+				System.out.println(javaFileForOutput.toUri());
+				return javaFileForOutput;
+			}
+		};
+		// create new list containing inputfile
+		List<File> files = new ArrayList<File>();
+		files.add(inputFile);
+		Iterable<? extends JavaFileObject> units = manager.getJavaFileObjectsFromFiles(files);
+		StringWriter stringWriter = new StringWriter();
+		PrintWriter printWriter = new PrintWriter(stringWriter);
+		
+		List<String> options = new ArrayList<String>();
+		options.add("-d");
+		options.add(tmpFolder);
+ 		CompilationTask task = Compiler.getTask(printWriter, forwardingJavaFileManager, null, options, null, units);
+ 		// check the classpath location
+ 		assertTrue("Has no location CLASS_OUPUT", forwardingJavaFileManager.hasLocation(StandardLocation.CLASS_OUTPUT));
+		Boolean result = task.call();
+		printWriter.flush();
+		printWriter.close();
+ 		if (!result.booleanValue()) {
+ 			System.err.println("Compilation failed: " + stringWriter.getBuffer().toString());
+ 	 		assertTrue("Compilation failed ", false);
+ 		}
+		
+		stringWriter = new StringWriter();
+		printWriter = new PrintWriter(stringWriter);
+		task = Compiler.getTask(printWriter, forwardingJavaFileManager, null, options, null, units);
+ 		// check the classpath location
+ 		assertTrue("Has no location CLASS_OUPUT", forwardingJavaFileManager.hasLocation(StandardLocation.CLASS_OUTPUT));
+		result = task.call();		
+		printWriter.flush();
+		printWriter.close();
+ 		if (!result.booleanValue()) {
+ 			System.err.println("Compilation failed: " + stringWriter.getBuffer().toString());
+ 	 		assertTrue("Compilation failed ", false);
+ 		}
+		// check that the .class file exist for X
+		assertTrue("delete failed", inputFile.delete());		
+	}
+
