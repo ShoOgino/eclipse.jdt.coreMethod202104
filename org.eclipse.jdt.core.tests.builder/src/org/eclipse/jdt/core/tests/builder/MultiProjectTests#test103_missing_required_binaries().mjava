@@ -1,0 +1,57 @@
+// https://bugs.eclipse.org/bugs/show_bug.cgi?id=164622
+public void test103_missing_required_binaries() throws JavaModelException {
+
+	IPath p1 = env.addProject("P1");
+	env.addExternalJars(p1, Util.getJavaClassLibs());
+	// remove old package fragment root so that names don't collide
+	env.removePackageFragmentRoot(p1, "");
+	IPath root1 = env.addPackageFragmentRoot(p1, "src");
+	env.setOutputFolder(p1, "bin");
+
+	IPath p2 = env.addProject("P2");
+	env.addExternalJars(p2, Util.getJavaClassLibs());
+	env.removePackageFragmentRoot(p2, "");
+	IPath root2 = env.addPackageFragmentRoot(p2, "src");
+	env.addRequiredProject(p2, p1);
+	env.setOutputFolder(p2, "bin");
+	
+	IPath p3 = env.addProject("P3");
+	env.addExternalJars(p3, Util.getJavaClassLibs());
+	env.removePackageFragmentRoot(p3, "");
+	IPath root3 = env.addPackageFragmentRoot(p3, "src");
+	env.addRequiredProject(p3, p1);
+	env.addRequiredProject(p3, p2);
+	env.setOutputFolder(p3, "bin");
+	
+	env.addClass(root1, "", "I",
+		"public interface I {\n" +
+		"  void foo();\n" +
+		"}\n"
+		);
+		
+	env.addClass(root2, "", "X",
+		"public abstract class X implements I {\n" +
+		"}\n"
+		);
+
+	IPath y = env.addClass(root3, "", "Y",
+		"public abstract class Y extends X {\n" +
+		"  X m = new X();\n" +  // error!
+		"  void bar() {\n" +
+		"    this.m.foo();\n" +
+		"  }\n" +
+		"}\n"
+		);
+
+	try {
+		fullBuild();
+		expectingOnlySpecificProblemsFor(p3, new Problem[]{
+			new Problem("p3", 
+				"Cannot instantiate the type X", 
+				y, 48, 49, CategorizedProblem.CAT_TYPE),
+		});
+	} finally {
+		env.setBuildOrder(null);
+	}
+}
+
