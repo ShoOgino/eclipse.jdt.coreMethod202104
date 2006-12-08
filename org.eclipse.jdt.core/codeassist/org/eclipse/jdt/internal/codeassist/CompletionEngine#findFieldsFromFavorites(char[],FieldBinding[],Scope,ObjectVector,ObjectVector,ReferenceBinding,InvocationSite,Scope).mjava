@@ -1,0 +1,75 @@
+	private void findFieldsFromFavorites(
+			char[] fieldName,
+			FieldBinding[] fields,
+			Scope scope,
+			ObjectVector fieldsFound,
+			ObjectVector localsFound,
+			ReferenceBinding receiverType,
+			InvocationSite invocationSite,
+			Scope invocationScope) {
+		
+		char[] typeName = CharOperation.concatWith(receiverType.compoundName, '.');
+
+		int fieldLength = fieldName.length;
+		next : for (int f = fields.length; --f >= 0;) {			
+			FieldBinding field = fields[f];
+
+			if (field.isSynthetic())	continue next;
+			
+			// only static fields must be proposed
+			if (!field.isStatic()) continue next;
+
+			if (fieldLength > field.name.length) continue next;
+
+			if (!CharOperation.prefixEquals(fieldName, field.name, false /* ignore case */)
+					&& !(this.options.camelCaseMatch && CharOperation.camelCaseMatch(fieldName, field.name)))	continue next;
+
+			if (this.options.checkDeprecation &&
+					field.isViewedAsDeprecated() &&
+					!scope.isDefinedInSameUnit(field.declaringClass))
+				continue next;
+			
+			if (this.options.checkVisibility
+				&& !field.canBeSeenBy(receiverType, invocationSite, scope))	continue next;
+			
+			for (int i = fieldsFound.size; --i >= 0;) {
+				Object[] other = (Object[])fieldsFound.elementAt(i);
+				FieldBinding otherField = (FieldBinding) other[0];
+				
+				if (field == otherField) continue next;
+			}
+			
+			fieldsFound.add(new Object[]{field, receiverType});
+			
+			char[] completion = CharOperation.concat(typeName, field.name, '.');
+
+			int relevance = computeBaseRelevance();
+			relevance += computeRelevanceForInterestingProposal(field);
+			if (fieldName != null) relevance += computeRelevanceForCaseMatching(fieldName, field.name);
+			relevance += computeRelevanceForExpectingType(field.type);
+			relevance += computeRelevanceForStatic(true, true);
+			relevance += computeRelevanceForRestrictions(IAccessRule.K_ACCESSIBLE);
+			
+			this.noProposal = false;
+			
+			if (!this.isIgnored(CompletionProposal.FIELD_REF)) {
+				CompletionProposal proposal = this.createProposal(CompletionProposal.FIELD_REF, this.actualCompletionPosition);
+				proposal.setDeclarationSignature(getSignature(field.declaringClass));
+				proposal.setSignature(getSignature(field.type));
+				proposal.setDeclarationPackageName(field.declaringClass.qualifiedPackageName());
+				proposal.setDeclarationTypeName(field.declaringClass.qualifiedSourceName());
+				proposal.setPackageName(field.type.qualifiedPackageName());
+				proposal.setTypeName(field.type.qualifiedSourceName()); 
+				proposal.setName(field.name);
+				proposal.setCompletion(completion);
+				proposal.setFlags(field.modifiers);
+				proposal.setReplaceRange(this.startPosition - this.offset, this.endPosition - this.offset);
+				proposal.setRelevance(relevance);
+				this.requestor.accept(proposal);
+				if(DEBUG) {
+					this.printDebug(proposal);
+				}
+			}
+		}
+	}
+

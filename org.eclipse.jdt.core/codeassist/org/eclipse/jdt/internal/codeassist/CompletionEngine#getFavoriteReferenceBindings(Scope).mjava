@@ -1,0 +1,70 @@
+	private ImportBinding[] getFavoriteReferenceBindings(Scope scope) {
+		if (this.favoriteReferenceBindings != null) return this.favoriteReferenceBindings;
+		
+		String[] favoriteReferences = this.requestor.getFavoriteReferences();
+		
+		if (favoriteReferences == null || favoriteReferences.length == 0) return null;
+		
+		ImportBinding[] resolvedImports = new ImportBinding[favoriteReferences.length];
+		
+		int count = 0;
+		next : for (int i = 0; i < favoriteReferences.length; i++) {
+			String favoriteReference = favoriteReferences[i];
+			
+			int length;
+			if (favoriteReference == null || (length = favoriteReference.length()) == 0) continue next;
+			
+			boolean onDemand = favoriteReference.charAt(length - 1) == '*';
+			
+			char[][] compoundName = CharOperation.splitOn('.', favoriteReference.toCharArray());
+			if (onDemand) {
+				compoundName = CharOperation.subarray(compoundName, 0, compoundName.length - 1);
+			}
+			
+			// remove duplicate and conflicting
+			for (int j = 0; j < count; j++) {
+				ImportReference f = resolvedImports[j].reference;
+				
+				if (CharOperation.equals(f.tokens, compoundName)) continue next;
+				
+				if (!onDemand && !f.onDemand) {
+					if (CharOperation.equals(f.tokens[f.tokens.length - 1], compoundName[compoundName.length - 1]))
+						continue next;
+				}
+			}
+			
+			boolean isStatic = this.compilerOptions.sourceLevel > ClassFileConstants.JDK1_4;
+			
+			ImportReference importReference =
+				new ImportReference(
+						compoundName,
+						new long[compoundName.length],
+						onDemand,
+						isStatic ? ClassFileConstants.AccStatic : ClassFileConstants.AccDefault);
+			
+			Binding importBinding = this.unitScope.findImport(compoundName, isStatic, onDemand);
+			
+			if (!importBinding.isValidBinding()) {
+				continue next;
+			}
+			
+			if (onDemand) {
+				if (importReference.isStatic() && importBinding instanceof PackageBinding) {
+					importReference.modifiers = importReference.modifiers & ~ClassFileConstants.AccStatic;
+				}
+			} else {
+				if (importBinding instanceof PackageBinding) {
+					continue next;
+				}
+			}
+			
+			resolvedImports[count++] =
+				new ImportBinding(compoundName, onDemand, importBinding, importReference);
+		}
+		
+		if (resolvedImports.length > count)
+			System.arraycopy(resolvedImports, 0, resolvedImports = new ImportBinding[count], 0, count);
+		
+		return this.favoriteReferenceBindings = resolvedImports;
+	}
+

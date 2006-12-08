@@ -1,0 +1,75 @@
+	private void findFieldsAndMethodsFromFavorites(
+			char[] token,
+			Scope scope,
+			InvocationSite invocationSite,
+			Scope invocationScope,
+			ObjectVector localsFound,
+			ObjectVector fieldsFound,
+			ObjectVector methodsFound) {
+		
+		ImportBinding[] favoriteBindings = getFavoriteReferenceBindings(invocationScope);
+		
+		if (favoriteBindings != null && favoriteBindings.length > 0) {
+			for (int i = 0; i < favoriteBindings.length; i++) {
+				ImportBinding favoriteBinding = favoriteBindings[i];
+				switch (favoriteBinding.resolvedImport.kind()) {
+					case Binding.FIELD:
+						FieldBinding fieldBinding = (FieldBinding) favoriteBinding.resolvedImport;
+						findFieldsFromFavorites(
+								token,
+								new FieldBinding[]{fieldBinding},
+								scope,
+								fieldsFound,
+								localsFound,
+								fieldBinding.declaringClass,
+								invocationSite,
+								invocationScope);
+						break;
+					case Binding.METHOD:
+						MethodBinding methodBinding = (MethodBinding) favoriteBinding.resolvedImport;
+						MethodBinding[] methods = methodBinding.declaringClass.availableMethods();
+						long range;
+						if ((range = ReferenceBinding.binarySearch(methodBinding.selector, methods)) >= 0) {
+							int start = (int) range, end = (int) (range >> 32);
+							int length = end - start + 1;
+							System.arraycopy(methods, start, methods = new MethodBinding[length], 0, length);
+						} else {
+							methods = Binding.NO_METHODS;			
+						}
+						findLocalMethodsFromFavorites(
+								token,
+								methods,
+								scope,
+								methodsFound,
+								methodBinding.declaringClass,
+								invocationSite,
+								invocationScope);
+						break;
+					case Binding.TYPE:
+						ReferenceBinding referenceBinding = (ReferenceBinding) favoriteBinding.resolvedImport;
+						if(favoriteBinding.onDemand) {
+							findFieldsFromFavorites(
+									token,
+									referenceBinding.availableFields(),
+									scope,
+									fieldsFound,
+									localsFound,
+									referenceBinding,
+									invocationSite,
+									invocationScope);
+							
+							findLocalMethodsFromFavorites(
+									token,
+									referenceBinding.availableMethods(),
+									scope,
+									methodsFound,
+									referenceBinding,
+									invocationSite,
+									invocationScope);
+						}
+						break;
+				}
+			}
+		}
+	}
+
