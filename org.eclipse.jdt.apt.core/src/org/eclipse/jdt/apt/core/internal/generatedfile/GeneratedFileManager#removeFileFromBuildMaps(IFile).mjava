@@ -1,0 +1,38 @@
+	/**
+	 * Remove a file from the build-time dependency maps, and calculate the consequences
+	 * of the removal. This is called in response to a file being deleted by the
+	 * environment.
+	 * <p>
+	 * This operation affects the maps only. This operation is atomic with respect to map
+	 * integrity. This operation does not touch the disk nor create, update, or discard
+	 * any working copies.
+	 * 
+	 * @param f
+	 *            can be a parent, generated, both, or neither.
+	 * @return a list of generated files that are no longer relevant and must be deleted.
+	 *         This operation must be done by the caller without holding any locks. The
+	 *         list may be empty but will not be null.
+	 */
+	private synchronized List<IFile> removeFileFromBuildMaps(IFile f)
+	{
+		List<IFile> toDelete = new ArrayList<IFile>();
+		// Is this file the sole parent of files generated during build?
+		// If so, add them to the deletion list. Then remove the file from
+		// the build dependency list.
+		Set<IFile> childFiles = _buildDeps.getValues(f);
+		for (IFile childFile : childFiles) {
+			Set<IFile> parentFiles = _buildDeps.getKeys(childFile);
+			if (parentFiles.size() == 1 && parentFiles.contains(f)) {
+				toDelete.add(childFile);
+			}
+		}
+		boolean removed = _buildDeps.removeKey(f);
+		if (removed) {
+			if (AptPlugin.DEBUG_GFM_MAPS) AptPlugin.trace( 
+					"removed parent file from build dependencies: " + f); //$NON-NLS-1$
+		}
+
+		assert checkIntegrity();
+		return toDelete;
+	}
+

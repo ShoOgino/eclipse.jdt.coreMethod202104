@@ -4,32 +4,93 @@
 	 */
 	private synchronized boolean checkIntegrity() throws IllegalStateException
 	{
-		if (ENABLE_INTEGRITY_CHECKS) {
-			// Every working copy in the working copy dependency map should be
-			// in the
-			// _workingCopies list and should not be in the _hiddenBuiltTypes
-			// list.
-			for (ICompilationUnit wc : _parentToGenWorkingCopies.getValueSet()) {
-				if (!_workingCopies.containsValue(wc)) {
-					String s = "Dependency map contains a working copy that is not in the regular list: " + //$NON-NLS-1$
-							wc.getElementName();
-					AptPlugin.log(new IllegalStateException(s), s);
-				}
-				if (_hiddenBuiltTypes.containsValue(wc)) {
-					String s = "Dependency map contains a working copy that is on the hidden list: " + //$NON-NLS-1$
-							wc.getElementName();
-					AptPlugin.log(new IllegalStateException(s), s);
-				}
+		if (!ENABLE_INTEGRITY_CHECKS) {
+			return true;
+		}
+		
+		// There is a 1:1 correspondence between values in _reconcileDeps and
+		// keys in _reconcileGenTypes.
+		Set<IFile> depChildren = _reconcileDeps.getValueSet(); // copy - safe to modify
+		Set<IFile> genTypes = _reconcileGenTypes.keySet(); // not a copy!
+		List<IFile> extraFiles = new ArrayList<IFile>(); 
+		for (IFile f : genTypes) {
+			if (!depChildren.remove(f)) {
+				extraFiles.add(f);
 			}
-			// Every entry in the hidden type list should be a working copy
-			for (ICompilationUnit hidden : _hiddenBuiltTypes.values()) {
-				if (!hidden.isWorkingCopy()) {
-					String s = "Hidden list contains a compilation unit that is not a working copy: " + //$NON-NLS-1$
-							hidden.getElementName();
-					AptPlugin.log(new IllegalStateException(s), s);
+		}
+		if (!extraFiles.isEmpty()) {
+			logExtraFiles("File(s) in reconcile-generated list but not in reconcile dependency map: ", //$NON-NLS-1$
+					extraFiles);
+		}
+		if (!depChildren.isEmpty()) {
+			logExtraFiles("File(s) in reconcile dependency map but not in reconcile-generated list: ", //$NON-NLS-1$
+					depChildren);
+		}
+		
+		// Every key in _hiddenBuiltTypes must be a value in _reconcileNonDeps.
+		List<IFile> extraHiddenTypes = new ArrayList<IFile>();
+		for (IFile hidden : _hiddenBuiltTypes.keySet()) {
+			if (!_reconcileNonDeps.containsValue(hidden)) {
+				extraHiddenTypes.add(hidden);
+			}
+		}
+		if (!extraHiddenTypes.isEmpty()) {
+			logExtraFiles("File(s) in hidden types list but not in reconcile-obsoleted list: ", //$NON-NLS-1$
+					extraHiddenTypes);
+		}
+		
+		// There can be no parent/child pairs that exist in both _reconcileDeps
+		// and _reconcileNonDeps.
+		Map<IFile, IFile> reconcileOverlaps = new HashMap<IFile, IFile>();
+		for (IFile parent : _reconcileNonDeps.getKeySet()) {
+			for (IFile child : _reconcileNonDeps.getValues(parent)) {
+				if (_reconcileDeps.containsKeyValuePair(parent, child)) {
+					reconcileOverlaps.put(parent, child);
 				}
 			}
 		}
+		if (!reconcileOverlaps.isEmpty()) {
+			logExtraFilePairs("Entries exist in both reconcile map and reconcile-obsoleted maps: ",  //$NON-NLS-1$
+					reconcileOverlaps);
+		}
+		
+		// Every parent/child pair in _reconcileNonDeps must have a matching
+		// parent/child pair in _buildDeps.
+		Map<IFile, IFile> extraNonDeps = new HashMap<IFile, IFile>();
+		for (IFile parent : _reconcileNonDeps.getKeySet()) {
+			for (IFile child : _reconcileNonDeps.getValues(parent)) {
+				if (!_buildDeps.containsKeyValuePair(parent, child)) {
+					extraNonDeps.put(parent, child);
+				}
+			}
+		}
+		if (!extraNonDeps.isEmpty()) {
+			logExtraFilePairs("Entries exist in reconcile-obsoleted map but not in build map: ", //$NON-NLS-1$
+					extraNonDeps);
+		}
+		
+		// Values in _hiddenBuiltTypes must not be null
+		List<IFile> nullHiddenTypes = new ArrayList<IFile>();
+		for (Map.Entry<IFile, ICompilationUnit> entry : _hiddenBuiltTypes.entrySet()) {
+			if (entry.getValue() == null) {
+				nullHiddenTypes.add(entry.getKey());
+			}
+		}
+		if (!nullHiddenTypes.isEmpty()) {
+			logExtraFiles("Null entries in hidden type list: ", nullHiddenTypes); //$NON-NLS-1$
+		}
+		
+		// Values in _reconcileGenTypes must not be null
+		List<IFile> nullReconcileTypes = new ArrayList<IFile>();
+		for (Map.Entry<IFile, ICompilationUnit> entry : _reconcileGenTypes.entrySet()) {
+			if (entry.getValue() == null) {
+				nullReconcileTypes.add(entry.getKey());
+			}
+		}
+		if (!nullReconcileTypes.isEmpty()) {
+			logExtraFiles("Null entries in reconcile type list: ", nullReconcileTypes); //$NON-NLS-1$
+		}
+			
 		return true;
 	}
 

@@ -1,0 +1,44 @@
+	/**
+	 * Remove the generated children of a working copy from the reconcile dependency maps.
+	 * Typically invoked when a working copy of a parent file has been discarded by the
+	 * editor; in this case we want to remove any generated working copies that it
+	 * parented.
+	 * <p>
+	 * This method does not touch disk nor create, modify, or discard working copies. This
+	 * method is atomic with regard to data structure integrity.
+	 * 
+	 * @param file
+	 *            a file representing a working copy that is not necessarily a parent or
+	 *            generated file
+	 * @return a list of generated working copies that are no longer referenced and should
+	 *         be discarded by calling
+	 *         {@link CompilationUnitHelper#discardWorkingCopy(ICompilationUnit)}
+	 */
+	private synchronized List<ICompilationUnit> removeFileFromReconcileMaps(IFile file)
+	{
+		List<ICompilationUnit> toDiscard = new ArrayList<ICompilationUnit>();
+		// remove all the orphaned children
+		Set<IFile> genFiles = _reconcileDeps.getValues(file);
+		for (IFile child : genFiles) {
+			if (hasNoOtherReconcileParents(child, file)) {
+				ICompilationUnit childWC = _reconcileGenTypes.remove(child);
+				assert null != childWC : "Every value in _reconcileDeps must be a key in _reconcileGenTypes"; //$NON-NLS-1$
+				toDiscard.add(childWC);
+			}
+		}
+		_reconcileDeps.removeKey(file);
+
+		// remove obsolete entries in non-generated list
+		Set<IFile> nonGenFiles = _reconcileNonDeps.getValues(file);
+		for (IFile child : nonGenFiles) {
+			ICompilationUnit hidingWC = _hiddenBuiltTypes.remove(child);
+			if (null != hidingWC) {
+				toDiscard.add(hidingWC);
+			}
+		}
+		_reconcileNonDeps.removeKey(file);
+		
+		assert checkIntegrity();
+		return toDiscard;
+	}
+

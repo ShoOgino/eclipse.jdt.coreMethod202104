@@ -1,0 +1,75 @@
+	/**
+		 * Calculate what needs to happen to working copies after a reconcile in order to get
+		 * rid of any no-longer-generated files. If there's an existing generated file, we
+		 * need to hide it with a blank working copy; if there's no existing file, we need to
+		 * get rid of any generated working copy.
+		 * <p>
+		 * A case to keep in mind: the user imports a project with already-existing generated
+		 * files, but without a serialized build dependency map.  Then they edit a parent
+		 * file, causing a generated type to disappear.  We need to discover and hide the
+		 * generated file on disk, even though it is not in the build-time dependency map.
+		 * 
+		 * @param parentFile
+		 *            the parent type being reconciled, which need not exist on disk.
+		 * @param newlyGeneratedFiles
+		 *            the set of files generated in the last reconcile
+		 * @param toSetBlank
+		 *            a list, to which this will add files that the caller must then set blank
+		 *            with {@link CompilationUnitHelper#updateWorkingCopyContents(String, 
+		 *            ICompilationUnit, WorkingCopyOwner, boolean)}
+		 * @param toDiscard
+		 *            a list, to which this will add files that the caller must then discard
+		 *            with {@link CompilationUnitHelper#discardWorkingCopy(ICompilationUnit)}.
+		 */
+		private synchronized void computeObsoleteReconcileTypes(
+				IFile parentFile, Set<IFile> newlyGeneratedFiles, 
+				CompilationUnitHelper cuh,
+				List<ICompilationUnit> toSetBlank, List<ICompilationUnit> toDiscard) 
+		{
+			// Get types previously but no longer generated during reconcile
+			Set<IFile> obsoleteFiles = _reconcileDeps.getValues(parentFile);
+			Map<IFile, ICompilationUnit> typesToDiscard = new HashMap<IFile, ICompilationUnit>();
+			obsoleteFiles.removeAll(newlyGeneratedFiles);
+			for (IFile obsoleteFile : obsoleteFiles) {
+				_reconcileDeps.remove(parentFile, obsoleteFile);
+				if (_reconcileDeps.getKeys(obsoleteFile).isEmpty()) {
+					ICompilationUnit wc = _reconcileGenTypes.remove(obsoleteFile);
+					assert wc != null : 
+						"Value in reconcile deps missing from reconcile type list: " + obsoleteFile; //$NON-NLS-1$
+					typesToDiscard.put(obsoleteFile, wc);
+				}
+			}
+			
+			Set<IFile> builtChildren = _buildDeps.getValues(parentFile);
+			builtChildren.removeAll(newlyGeneratedFiles);
+			for (IFile builtChild : builtChildren) {
+				_reconcileNonDeps.put(parentFile, builtChild);
+				// If it's on typesToDiscard there are no other reconcile-time parents.
+				// If there are no other parents that are not masked by a nonDep entry...
+				boolean foundOtherParent = false;
+				Set<IFile> parents = _buildDeps.getKeys(builtChild);
+				parents.remove(parentFile);
+				for (IFile otherParent : parents) {
+					if (!_reconcileNonDeps.containsKeyValuePair(otherParent, builtChild)) {
+						foundOtherParent = true;
+						break;
+					}
+				}
+				if (!foundOtherParent) {
+					ICompilationUnit wc = typesToDiscard.remove(builtChild);
+					if (wc == null) {
+						IPackageFragmentRoot root = _generatedPackageFragmentRoot.get().root;
+						String typeName = getTypeNameForDerivedFile(builtChild);
+						wc = cuh.getWorkingCopy(typeName, root);
+					}
+					_hiddenBuiltTypes.put(builtChild, wc);
+					toSetBlank.add(wc);
+				}
+			}
+		
+			// discard any working copies that we're not setting blank
+			toDiscard.addAll(typesToDiscard.values());
+			
+			assert checkIntegrity();
+		}
+
