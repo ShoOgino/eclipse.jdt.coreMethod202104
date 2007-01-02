@@ -1,0 +1,56 @@
+	@Override
+	public ProcessorInfo discoverNextProcessor() {
+		if (null != _setProcessors) {
+			// If setProcessors() was called, use that list until it's empty and then stop.
+			if (_setProcessorIter.hasNext()) {
+				Processor p = _setProcessorIter.next();
+				p.init(_processingEnv);
+				ProcessorInfo pi = new ProcessorInfo(p);
+				_processors.add(pi);
+				return pi;
+			}
+			return null;
+		}
+		
+		if (null != _commandLineProcessors) {
+			// If there was a -processor option, iterate over processor names, 
+			// creating and initializing processors, until no more names are found, then stop.
+			if (_commandLineProcessorIter.hasNext()) {
+				String proc = _commandLineProcessorIter.next();
+				try {
+					Class<?> clazz = _procLoader.loadClass(proc);
+					Object o = clazz.newInstance();
+					Processor p = (Processor) o;
+					p.init(_processingEnv);
+					ProcessorInfo pi = new ProcessorInfo(p);
+					_processors.add(pi);
+					return pi;
+				} catch (Exception e) {
+					// TODO: better error handling
+					throw new AbortCompilation(null, e);
+				}
+			}
+			return null;
+		}
+		
+		// if no processors were explicitly specified with setProcessors() 
+		// or the command line, search the processor path with ServiceLoader.
+		if (null == _serviceLoader ) {
+			_serviceLoader = ServiceLoader.load(Processor.class, _procLoader);
+			_serviceLoaderIter = _serviceLoader.iterator();
+		}
+		try {
+			if (_serviceLoaderIter.hasNext()) {
+				Processor p = _serviceLoaderIter.next();
+				p.init(_processingEnv);
+				ProcessorInfo pi = new ProcessorInfo(p);
+				_processors.add(pi);
+				return pi;
+			}
+		} catch (ServiceConfigurationError e) {
+			// TODO: better error handling
+			throw new AbortCompilation(null, e);
+		}
+		return null;
+	}
+
