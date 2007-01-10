@@ -9,10 +9,19 @@ public void analyseCode(ClassScope classScope, InitializationFlowContext initial
 	int nonStaticFieldInfoReachMode = flowInfo.reachMode();
 	flowInfo.setReachMode(initialReachMode);
 	
-	if (this.binding != null && !this.binding.isUsed() && (this.binding.isPrivate() || (this.binding.declaringClass.tagBits & (TagBits.IsAnonymousType|TagBits.IsLocalType)) == TagBits.IsLocalType)) {
-		if (!classScope.referenceCompilationUnit().compilationResult.hasSyntaxError) {
-			this.scope.problemReporter().unusedPrivateConstructor(this);
+	checkUnused: {
+		MethodBinding constructorBinding;
+		if ((constructorBinding = this.binding) == null) break checkUnused;
+		if (this.isDefaultConstructor) break checkUnused;
+		if (constructorBinding.isUsed()) break checkUnused;
+		if (constructorBinding.isPrivate()) {
+			if ((this.binding.declaringClass.tagBits & TagBits.HasNonPrivateConstructor) == 0)
+				break checkUnused; // tolerate as known pattern to block instantiation
+		} else if ((this.binding.declaringClass.tagBits & (TagBits.IsAnonymousType|TagBits.IsLocalType)) != TagBits.IsLocalType) {
+			break checkUnused;
 		}
+		// complain unused
+		this.scope.problemReporter().unusedPrivateConstructor(this);
 	}
 		
 	// check constructor recursion, once all constructor got resolved
