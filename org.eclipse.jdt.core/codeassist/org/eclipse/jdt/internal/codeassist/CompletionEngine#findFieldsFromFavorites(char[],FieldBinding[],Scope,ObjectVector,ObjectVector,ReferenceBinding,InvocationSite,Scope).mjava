@@ -41,8 +41,6 @@
 			
 			fieldsFound.add(new Object[]{field, receiverType});
 			
-			char[] completion = CharOperation.concat(typeName, field.name, '.');
-
 			int relevance = computeBaseRelevance();
 			relevance += computeRelevanceForInterestingProposal(field);
 			if (fieldName != null) relevance += computeRelevanceForCaseMatching(fieldName, field.name);
@@ -50,24 +48,92 @@
 			relevance += computeRelevanceForStatic(true, true);
 			relevance += computeRelevanceForRestrictions(IAccessRule.K_ACCESSIBLE);
 			
+			CompilationUnitDeclaration cu = this.unitScope.referenceContext;
+			int importStart = cu.types[0].declarationSourceStart;
+			int importEnd = importStart;
+			
 			this.noProposal = false;
 			
-			if (!this.isIgnored(CompletionProposal.FIELD_REF)) {
-				CompletionProposal proposal = this.createProposal(CompletionProposal.FIELD_REF, this.actualCompletionPosition);
-				proposal.setDeclarationSignature(getSignature(field.declaringClass));
-				proposal.setSignature(getSignature(field.type));
-				proposal.setDeclarationPackageName(field.declaringClass.qualifiedPackageName());
-				proposal.setDeclarationTypeName(field.declaringClass.qualifiedSourceName());
-				proposal.setPackageName(field.type.qualifiedPackageName());
-				proposal.setTypeName(field.type.qualifiedSourceName()); 
-				proposal.setName(field.name);
-				proposal.setCompletion(completion);
-				proposal.setFlags(field.modifiers);
-				proposal.setReplaceRange(this.startPosition - this.offset, this.endPosition - this.offset);
-				proposal.setRelevance(relevance);
-				this.requestor.accept(proposal);
-				if(DEBUG) {
-					this.printDebug(proposal);
+			if (this.compilerOptions.complianceLevel < ClassFileConstants.JDK1_5 ||
+					!this.options.suggestStaticImport) {
+				if (!this.isIgnored(CompletionProposal.FIELD_REF, CompletionProposal.TYPE_IMPORT)) {
+					char[] completion = CharOperation.concat(receiverType.sourceName, field.name, '.');
+					
+					CompletionProposal proposal = this.createProposal(CompletionProposal.FIELD_REF, this.actualCompletionPosition);
+					proposal.setDeclarationSignature(getSignature(field.declaringClass));
+					proposal.setSignature(getSignature(field.type));
+					proposal.setDeclarationPackageName(field.declaringClass.qualifiedPackageName());
+					proposal.setDeclarationTypeName(field.declaringClass.qualifiedSourceName());
+					proposal.setPackageName(field.type.qualifiedPackageName());
+					proposal.setTypeName(field.type.qualifiedSourceName()); 
+					proposal.setName(field.name);
+					proposal.setCompletion(completion);
+					proposal.setFlags(field.modifiers);
+					proposal.setReplaceRange(this.startPosition - this.offset, this.endPosition - this.offset);
+					proposal.setRelevance(relevance);
+					
+					char[] typeImportCompletion = createImportCharArray(typeName, false, false);
+					
+					CompletionProposal typeImportProposal = this.createProposal(CompletionProposal.TYPE_IMPORT, this.actualCompletionPosition);
+					typeImportProposal.nameLookup = this.nameEnvironment.nameLookup;
+					typeImportProposal.completionEngine = this;
+					char[] packageName = receiverType.qualifiedPackageName();
+					typeImportProposal.setDeclarationSignature(packageName);
+					typeImportProposal.setSignature(getSignature(receiverType));
+					typeImportProposal.setPackageName(packageName);
+					typeImportProposal.setTypeName(receiverType.qualifiedSourceName());
+					typeImportProposal.setCompletion(typeImportCompletion);
+					typeImportProposal.setFlags(receiverType.modifiers);
+					typeImportProposal.setAdditionalFlags(CompletionFlags.Default);
+					typeImportProposal.setReplaceRange(importStart - this.offset, importEnd - this.offset);
+					typeImportProposal.setRelevance(relevance);
+					
+					proposal.setRequiredProposals(new CompletionProposal[]{typeImportProposal});
+					
+					this.requestor.accept(proposal);
+					if(DEBUG) {
+						this.printDebug(proposal);
+					}
+				}
+			} else {
+				if (!this.isIgnored(CompletionProposal.FIELD_REF, CompletionProposal.FIELD_IMPORT)) {
+					char[] completion = field.name;
+					
+					CompletionProposal proposal = this.createProposal(CompletionProposal.FIELD_REF, this.actualCompletionPosition);
+					proposal.setDeclarationSignature(getSignature(field.declaringClass));
+					proposal.setSignature(getSignature(field.type));
+					proposal.setDeclarationPackageName(field.declaringClass.qualifiedPackageName());
+					proposal.setDeclarationTypeName(field.declaringClass.qualifiedSourceName());
+					proposal.setPackageName(field.type.qualifiedPackageName());
+					proposal.setTypeName(field.type.qualifiedSourceName()); 
+					proposal.setName(field.name);
+					proposal.setCompletion(completion);
+					proposal.setFlags(field.modifiers);
+					proposal.setReplaceRange(this.startPosition - this.offset, this.endPosition - this.offset);
+					proposal.setRelevance(relevance);
+					
+					char[] fieldImportCompletion = createImportCharArray(CharOperation.concat(typeName, field.name, '.'), true, false);
+
+					CompletionProposal fieldImportProposal = this.createProposal(CompletionProposal.FIELD_IMPORT, this.actualCompletionPosition);
+					fieldImportProposal.setDeclarationSignature(getSignature(field.declaringClass));
+					fieldImportProposal.setSignature(getSignature(field.type));
+					fieldImportProposal.setDeclarationPackageName(field.declaringClass.qualifiedPackageName());
+					fieldImportProposal.setDeclarationTypeName(field.declaringClass.qualifiedSourceName());
+					fieldImportProposal.setPackageName(field.type.qualifiedPackageName());
+					fieldImportProposal.setTypeName(field.type.qualifiedSourceName()); 
+					fieldImportProposal.setName(field.name);
+					fieldImportProposal.setCompletion(fieldImportCompletion);
+					fieldImportProposal.setFlags(field.modifiers);
+					fieldImportProposal.setAdditionalFlags(CompletionFlags.StaticImport);
+					fieldImportProposal.setReplaceRange(importStart - this.offset, importEnd - this.offset);
+					fieldImportProposal.setRelevance(relevance);
+					
+					proposal.setRequiredProposals(new CompletionProposal[]{fieldImportProposal});
+					
+					this.requestor.accept(proposal);
+					if(DEBUG) {
+						this.printDebug(proposal);
+					}
 				}
 			}
 		}
