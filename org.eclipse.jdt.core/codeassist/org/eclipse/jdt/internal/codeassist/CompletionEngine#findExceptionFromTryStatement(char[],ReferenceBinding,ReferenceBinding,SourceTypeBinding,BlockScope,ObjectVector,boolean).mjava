@@ -1,0 +1,176 @@
+	private void findExceptionFromTryStatement(
+			char[] typeName,
+			ReferenceBinding exceptionType,
+			ReferenceBinding receiverType,
+			SourceTypeBinding invocationType, 
+			BlockScope scope, 
+			ObjectVector typesFound,
+			boolean searchSuperClasses) {
+		
+		if (isForbidden(exceptionType)) {
+			this.knownTypes.put(CharOperation.concat(exceptionType.qualifiedPackageName(), exceptionType.qualifiedSourceName(), '.'), this);
+			return;
+		}
+		
+		if (searchSuperClasses) {
+			ReferenceBinding javaLangThrowable = scope.getJavaLangThrowable();
+			if (exceptionType != javaLangThrowable) {
+				ReferenceBinding superClass = exceptionType.superclass();
+				while(superClass != null && superClass != javaLangThrowable) {
+					findExceptionFromTryStatement(typeName, superClass, receiverType, invocationType, scope, typesFound, false);
+					superClass = superClass.superclass();
+				}
+			}
+		}
+		
+		if (typeName.length > exceptionType.sourceName.length)
+			return;
+
+		if (!CharOperation.prefixEquals(typeName, exceptionType.sourceName, false/* ignore case */)
+				&& !(this.options.camelCaseMatch && CharOperation.camelCaseMatch(typeName, exceptionType.sourceName)))
+			return;
+
+		if (this.options.checkDeprecation &&
+				exceptionType.isViewedAsDeprecated() &&
+				!scope.isDefinedInSameUnit(exceptionType))
+			return;
+		
+		if (this.options.checkVisibility) {
+			if (invocationType != null && !exceptionType.canBeSeenBy(receiverType, invocationType)) {
+				return;
+			} else if(invocationType == null && !exceptionType.canBeSeenBy(this.unitScope.fPackage)) {
+				return;
+			}
+		}
+
+		for (int j = typesFound.size; --j >= 0;) {
+			ReferenceBinding otherType = (ReferenceBinding) typesFound.elementAt(j);
+
+			if (exceptionType == otherType)
+				return;
+
+			if (CharOperation.equals(exceptionType.sourceName, otherType.sourceName, true)) {
+
+				if (exceptionType.enclosingType().isSuperclassOf(otherType.enclosingType()))
+					return;
+
+				if (otherType.enclosingType().isInterface())
+					if (exceptionType.enclosingType()
+						.implementsInterface(otherType.enclosingType(), true))
+						return;
+
+				if (exceptionType.enclosingType().isInterface())
+					if (otherType.enclosingType()
+						.implementsInterface(exceptionType.enclosingType(), true))
+						return;
+			}
+		}
+
+		typesFound.add(exceptionType);
+		
+		char[] completionName = exceptionType.sourceName();
+		
+		boolean isQualified = false;
+		
+		if(!this.insideQualifiedReference) {
+			isQualified = true;
+			
+			char[] memberPackageName = exceptionType.qualifiedPackageName();
+			char[] memberTypeName = exceptionType.sourceName();
+			char[] memberEnclosingTypeNames = null;
+			
+			ReferenceBinding enclosingType = exceptionType.enclosingType();
+			if (enclosingType != null) {
+				memberEnclosingTypeNames = exceptionType.enclosingType().qualifiedSourceName();
+			}
+			
+			Scope currentScope = scope;
+			done : while (currentScope != null) { // done when a COMPILATION_UNIT_SCOPE is found
+
+				switch (currentScope.kind) {
+
+					case Scope.METHOD_SCOPE :
+					case Scope.BLOCK_SCOPE :
+						BlockScope blockScope = (BlockScope) currentScope;
+
+						for (int j = 0, length = blockScope.subscopeCount; j < length; j++) {
+
+							if (blockScope.subscopes[j] instanceof ClassScope) {
+								SourceTypeBinding localType =
+									((ClassScope) blockScope.subscopes[j]).referenceContext.binding;
+								
+								if (localType == exceptionType) {
+									isQualified = false;
+									break done;
+								}
+							}
+						}
+						break;
+
+					case Scope.CLASS_SCOPE :
+						SourceTypeBinding type = ((ClassScope)currentScope).referenceContext.binding;
+						ReferenceBinding[] memberTypes = type.memberTypes();
+						if (memberTypes != null) {
+							for (int j = 0; j < memberTypes.length; j++) {
+								if (memberTypes[j] == exceptionType) {
+									isQualified = false;
+									break done;
+								}
+							}
+						}
+						
+						
+						break;
+
+					case Scope.COMPILATION_UNIT_SCOPE :
+						SourceTypeBinding[] types = ((CompilationUnitScope)currentScope).topLevelTypes;
+						if (types != null) {
+							for (int j = 0; j < types.length; j++) {
+								if (types[j] == exceptionType) {
+									isQualified = false;
+									break done;
+								}
+							}
+						}
+						break done;
+				}
+				currentScope = currentScope.parent;
+			}
+			
+			if (isQualified && mustQualifyType(memberPackageName, memberTypeName, memberEnclosingTypeNames, exceptionType.modifiers)) {
+				if (memberPackageName == null || memberPackageName.length == 0)
+					if (this.unitScope != null && this.unitScope.fPackage.compoundName != CharOperation.NO_CHAR_CHAR)
+						return; // ignore types from the default package from outside it
+			} else {
+				isQualified = false;
+			}
+			
+			if (isQualified) {
+				completionName =
+					CharOperation.concat(
+							memberPackageName,
+							CharOperation.concat(
+									memberEnclosingTypeNames,
+									memberTypeName,
+									'.'),
+							'.');
+			}
+		}
+		
+		int relevance = computeBaseRelevance();
+		relevance += computeRelevanceForInterestingProposal();
+		relevance += computeRelevanceForCaseMatching(typeName, exceptionType.sourceName);
+		relevance += computeRelevanceForExpectingType(exceptionType);
+		relevance += computeRelevanceForRestrictions(IAccessRule.K_ACCESSIBLE);
+		if(!insideQualifiedReference) {
+			relevance += computeRelevanceForQualification(isQualified);
+		}
+		relevance += computeRelevanceForClass();
+		relevance += computeRelevanceForException();
+			
+		this.noProposal = false;
+		if(!this.requestor.isIgnored(CompletionProposal.TYPE_REF)) {
+			createTypeProposal(exceptionType, exceptionType.qualifiedSourceName(), IAccessRule.K_ACCESSIBLE, completionName, relevance);
+		}
+	}
+
