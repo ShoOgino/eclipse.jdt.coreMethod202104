@@ -4,193 +4,32 @@
 	 * @param source
 	 */
 	private String processElement(ICompilationUnit unit, char[] source) {
+		Document document = new Document(new String(source));
 		CompilerOptions options = new CompilerOptions(unit.getJavaProject().getOptions(true));
 		ASTParser parser = ASTParser.newParser(this.apiLevel);
 		parser.setCompilerOptions(options.getMap());
 		parser.setSource(source);
 		parser.setKind(ASTParser.K_COMPILATION_UNIT);
 		parser.setResolveBindings(false);
-		org.eclipse.jdt.core.dom.CompilationUnit domUnit = (org.eclipse.jdt.core.dom.CompilationUnit) parser.createAST(null);
-		domUnit.accept(new ASTVisitor() {
-			public boolean visit(org.eclipse.jdt.core.dom.CompilationUnit compilationUnit) {
-				List types = compilationUnit.types();
-				for (Iterator iter = types.iterator(); iter.hasNext();) {
-					AbstractTypeDeclaration typeDeclaration = (AbstractTypeDeclaration) iter.next();
-					typeDeclaration.setProperty(CompilationUnitSorter.RELATIVE_ORDER, new Integer(typeDeclaration.getStartPosition()));
-					compilationUnit.setProperty(CONTAINS_MALFORMED_NODES, Boolean.valueOf(isMalformed(typeDeclaration)));
-				}
-				return true;
-			}
-			public boolean visit(AnnotationTypeDeclaration annotationTypeDeclaration) {
-				List bodyDeclarations = annotationTypeDeclaration.bodyDeclarations();
-				for (Iterator iter = bodyDeclarations.iterator(); iter.hasNext();) {
-					BodyDeclaration bodyDeclaration = (BodyDeclaration) iter.next();
-					bodyDeclaration.setProperty(CompilationUnitSorter.RELATIVE_ORDER, new Integer(bodyDeclaration.getStartPosition()));
-					annotationTypeDeclaration.setProperty(CONTAINS_MALFORMED_NODES, Boolean.valueOf(isMalformed(bodyDeclaration)));
-				}
-				return true;
-			}
-
-			public boolean visit(AnonymousClassDeclaration anonymousClassDeclaration) {
-				List bodyDeclarations = anonymousClassDeclaration.bodyDeclarations();
-				for (Iterator iter = bodyDeclarations.iterator(); iter.hasNext();) {
-					BodyDeclaration bodyDeclaration = (BodyDeclaration) iter.next();
-					bodyDeclaration.setProperty(CompilationUnitSorter.RELATIVE_ORDER, new Integer(bodyDeclaration.getStartPosition()));
-					anonymousClassDeclaration.setProperty(CONTAINS_MALFORMED_NODES, Boolean.valueOf(isMalformed(bodyDeclaration)));
-				}
-				return true;
-			}
-			
-			public boolean visit(TypeDeclaration typeDeclaration) {
-				List bodyDeclarations = typeDeclaration.bodyDeclarations();
-				for (Iterator iter = bodyDeclarations.iterator(); iter.hasNext();) {
-					BodyDeclaration bodyDeclaration = (BodyDeclaration) iter.next();
-					bodyDeclaration.setProperty(CompilationUnitSorter.RELATIVE_ORDER, new Integer(bodyDeclaration.getStartPosition()));
-					typeDeclaration.setProperty(CONTAINS_MALFORMED_NODES, Boolean.valueOf(isMalformed(bodyDeclaration)));
-				}
-				return true;
-			}
-
-			public boolean visit(EnumDeclaration enumDeclaration) {
-				List bodyDeclarations = enumDeclaration.bodyDeclarations();
-				for (Iterator iter = bodyDeclarations.iterator(); iter.hasNext();) {
-					BodyDeclaration bodyDeclaration = (BodyDeclaration) iter.next();
-					bodyDeclaration.setProperty(CompilationUnitSorter.RELATIVE_ORDER, new Integer(bodyDeclaration.getStartPosition()));
-					enumDeclaration.setProperty(CONTAINS_MALFORMED_NODES, Boolean.valueOf(isMalformed(bodyDeclaration)));
-				}
-				List enumConstants = enumDeclaration.enumConstants();
-				for (Iterator iter = enumConstants.iterator(); iter.hasNext();) {
-					EnumConstantDeclaration enumConstantDeclaration = (EnumConstantDeclaration) iter.next();
-					enumConstantDeclaration.setProperty(CompilationUnitSorter.RELATIVE_ORDER, new Integer(enumConstantDeclaration.getStartPosition()));
-					enumDeclaration.setProperty(CONTAINS_MALFORMED_NODES, Boolean.valueOf(isMalformed(enumConstantDeclaration)));
-				}				
-				return true;
-			}
-		});
-		final AST localAst = domUnit.getAST();
-		final ASTRewrite rewriter = ASTRewrite.create(localAst);
-		RangeMarker[] markers = null;
+		org.eclipse.jdt.core.dom.CompilationUnit ast = (org.eclipse.jdt.core.dom.CompilationUnit) parser.createAST(null);
+        
+		ASTRewrite rewriter= sortCompilationUnit(ast, null);
+		if (rewriter == null)
+			return document.get();
 		
-		final boolean needPositionsMapping = this.positions != null;
-		if (needPositionsMapping) {
-			markers = new RangeMarker[this.positions.length];
-			for (int i= 0; i < this.positions.length; i++) {
-				markers[i]= new RangeMarker(this.positions[i], 0);
-			}
-		}
-		String generatedSource = new String(source);
-		Document document = new Document(generatedSource);
-		domUnit.accept(new ASTVisitor() {
-			public boolean visit(org.eclipse.jdt.core.dom.CompilationUnit compilationUnit) {
-				if (checkMalformedNodes(compilationUnit)) {
-					return true; // abort sorting of current element
-				}
-				ListRewrite listRewrite = rewriter.getListRewrite(compilationUnit, org.eclipse.jdt.core.dom.CompilationUnit.TYPES_PROPERTY);
-				List types = compilationUnit.types();
-				final int length = types.size();
-				if (length > 1) {
-					final List myCopy = new ArrayList();
-					myCopy.addAll(types);
-					Collections.sort(myCopy, SortElementsOperation.this.comparator);
-					for (int i = 0; i < length; i++) {
-						listRewrite.replace((ASTNode) types.get(i), rewriter.createMoveTarget((ASTNode) myCopy.get(i)), null);
-					}
-				}
-				return true;
-			}
-			public boolean visit(AnnotationTypeDeclaration annotationTypeDeclaration) {
-				if (checkMalformedNodes(annotationTypeDeclaration)) {
-					return true; // abort sorting of current element
-				}
-				ListRewrite listRewrite = rewriter.getListRewrite(annotationTypeDeclaration, AnnotationTypeDeclaration.BODY_DECLARATIONS_PROPERTY);
-				List bodyDeclarations = annotationTypeDeclaration.bodyDeclarations();
-				final int length = bodyDeclarations.size();
-				if (length > 1) {
-					final List myCopy = new ArrayList();
-					myCopy.addAll(bodyDeclarations);
-					Collections.sort(myCopy, SortElementsOperation.this.comparator);
-					for (int i = 0; i < length; i++) {
-						listRewrite.replace((ASTNode) bodyDeclarations.get(i), rewriter.createMoveTarget((ASTNode) myCopy.get(i)), null);
-					}
-				}
-				return true;
-			}
-
-			public boolean visit(AnonymousClassDeclaration anonymousClassDeclaration) {
-				if (checkMalformedNodes(anonymousClassDeclaration)) {
-					return true; // abort sorting of current element
-				}
-				ListRewrite listRewrite = rewriter.getListRewrite(anonymousClassDeclaration, AnonymousClassDeclaration.BODY_DECLARATIONS_PROPERTY);
-				List bodyDeclarations = anonymousClassDeclaration.bodyDeclarations();
-				final int length = bodyDeclarations.size();
-				if (length > 1) {
-					final List myCopy = new ArrayList();
-					myCopy.addAll(bodyDeclarations);
-					Collections.sort(myCopy, SortElementsOperation.this.comparator);
-					for (int i = 0; i < length; i++) {
-						listRewrite.replace((ASTNode) bodyDeclarations.get(i), rewriter.createMoveTarget((ASTNode) myCopy.get(i)), null);
-					}
-				}
-				return true;
-			}
-			
-			public boolean visit(TypeDeclaration typeDeclaration) {
-				if (checkMalformedNodes(typeDeclaration)) {
-					return true; // abort sorting of current element
-				}
-				ListRewrite listRewrite = rewriter.getListRewrite(typeDeclaration, TypeDeclaration.BODY_DECLARATIONS_PROPERTY);
-				List bodyDeclarations = typeDeclaration.bodyDeclarations();
-				final int length = bodyDeclarations.size();
-				if (length > 1) {
-					final List myCopy = new ArrayList();
-					myCopy.addAll(bodyDeclarations);
-					Collections.sort(myCopy, SortElementsOperation.this.comparator);
-					for (int i = 0; i < length; i++) {
-						listRewrite.replace((ASTNode) bodyDeclarations.get(i), rewriter.createMoveTarget((ASTNode) myCopy.get(i)), null);
-					}
-				}
-				return true;
-			}
-
-			public boolean visit(EnumDeclaration enumDeclaration) {
-				if (checkMalformedNodes(enumDeclaration)) {
-					return true; // abort sorting of current element
-				}
-				ListRewrite listRewrite = rewriter.getListRewrite(enumDeclaration, EnumDeclaration.BODY_DECLARATIONS_PROPERTY);
-				List bodyDeclarations = enumDeclaration.bodyDeclarations();
-				int length = bodyDeclarations.size();
-				if (length > 1) {
-					final List myCopy = new ArrayList();
-					myCopy.addAll(bodyDeclarations);
-					Collections.sort(myCopy, SortElementsOperation.this.comparator);
-					for (int i = 0; i < length; i++) {
-						listRewrite.replace((ASTNode) bodyDeclarations.get(i), rewriter.createMoveTarget((ASTNode) myCopy.get(i)), null);
-					}
-				}
-				listRewrite = rewriter.getListRewrite(enumDeclaration, EnumDeclaration.ENUM_CONSTANTS_PROPERTY);
-				List enumConstants = enumDeclaration.enumConstants();
-				length = enumConstants.size();
-				if (length > 1) {
-					final List myCopy = new ArrayList();
-					myCopy.addAll(enumConstants);
-					Collections.sort(myCopy, SortElementsOperation.this.comparator);
-					for (int i = 0; i < length; i++) {
-						listRewrite.replace((ASTNode) enumConstants.get(i), rewriter.createMoveTarget((ASTNode) myCopy.get(i)), null);
-					}
-				}
-				return true;
-			}
-		});			
 		TextEdit edits = rewriter.rewriteAST(document, null);
-		if (needPositionsMapping) {
-			for (int i = 0, max = markers.length; i < max; i++) {
+		
+		RangeMarker[] markers = null;
+		if (this.positions != null) {
+			markers = new RangeMarker[this.positions.length];
+			for (int i = 0, max = this.positions.length; i < max; i++) {
+				markers[i]= new RangeMarker(this.positions[i], 0);
 				insert(edits, markers[i]);
 			}
 		}
 		try {
 			edits.apply(document, TextEdit.UPDATE_REGIONS);
-			generatedSource = document.get();
-			if (needPositionsMapping) {
+			if (this.positions != null) {
 				for (int i= 0, max = markers.length; i < max; i++) {
 					this.positions[i]= markers[i].getOffset();
 				}
@@ -198,6 +37,6 @@
 		} catch (BadLocationException e) {
 			// ignore
 		}
-		return generatedSource;
+		return document.get();
 	}
 

@@ -1,0 +1,134 @@
+	private ASTRewrite sortCompilationUnit(org.eclipse.jdt.core.dom.CompilationUnit ast, final TextEditGroup group) {
+		ast.accept(new ASTVisitor() {
+			public boolean visit(org.eclipse.jdt.core.dom.CompilationUnit compilationUnit) {
+				List types = compilationUnit.types();
+				for (Iterator iter = types.iterator(); iter.hasNext();) {
+					AbstractTypeDeclaration typeDeclaration = (AbstractTypeDeclaration) iter.next();
+					typeDeclaration.setProperty(CompilationUnitSorter.RELATIVE_ORDER, new Integer(typeDeclaration.getStartPosition()));
+					compilationUnit.setProperty(CONTAINS_MALFORMED_NODES, Boolean.valueOf(isMalformed(typeDeclaration)));
+				}
+				return true;
+			}
+			public boolean visit(AnnotationTypeDeclaration annotationTypeDeclaration) {
+				List bodyDeclarations = annotationTypeDeclaration.bodyDeclarations();
+				for (Iterator iter = bodyDeclarations.iterator(); iter.hasNext();) {
+					BodyDeclaration bodyDeclaration = (BodyDeclaration) iter.next();
+					bodyDeclaration.setProperty(CompilationUnitSorter.RELATIVE_ORDER, new Integer(bodyDeclaration.getStartPosition()));
+					annotationTypeDeclaration.setProperty(CONTAINS_MALFORMED_NODES, Boolean.valueOf(isMalformed(bodyDeclaration)));
+				}
+				return true;
+			}
+
+			public boolean visit(AnonymousClassDeclaration anonymousClassDeclaration) {
+				List bodyDeclarations = anonymousClassDeclaration.bodyDeclarations();
+				for (Iterator iter = bodyDeclarations.iterator(); iter.hasNext();) {
+					BodyDeclaration bodyDeclaration = (BodyDeclaration) iter.next();
+					bodyDeclaration.setProperty(CompilationUnitSorter.RELATIVE_ORDER, new Integer(bodyDeclaration.getStartPosition()));
+					anonymousClassDeclaration.setProperty(CONTAINS_MALFORMED_NODES, Boolean.valueOf(isMalformed(bodyDeclaration)));
+				}
+				return true;
+			}
+			
+			public boolean visit(TypeDeclaration typeDeclaration) {
+				List bodyDeclarations = typeDeclaration.bodyDeclarations();
+				for (Iterator iter = bodyDeclarations.iterator(); iter.hasNext();) {
+					BodyDeclaration bodyDeclaration = (BodyDeclaration) iter.next();
+					bodyDeclaration.setProperty(CompilationUnitSorter.RELATIVE_ORDER, new Integer(bodyDeclaration.getStartPosition()));
+					typeDeclaration.setProperty(CONTAINS_MALFORMED_NODES, Boolean.valueOf(isMalformed(bodyDeclaration)));
+				}
+				return true;
+			}
+
+			public boolean visit(EnumDeclaration enumDeclaration) {
+				List bodyDeclarations = enumDeclaration.bodyDeclarations();
+				for (Iterator iter = bodyDeclarations.iterator(); iter.hasNext();) {
+					BodyDeclaration bodyDeclaration = (BodyDeclaration) iter.next();
+					bodyDeclaration.setProperty(CompilationUnitSorter.RELATIVE_ORDER, new Integer(bodyDeclaration.getStartPosition()));
+					enumDeclaration.setProperty(CONTAINS_MALFORMED_NODES, Boolean.valueOf(isMalformed(bodyDeclaration)));
+				}
+				List enumConstants = enumDeclaration.enumConstants();
+				for (Iterator iter = enumConstants.iterator(); iter.hasNext();) {
+					EnumConstantDeclaration enumConstantDeclaration = (EnumConstantDeclaration) iter.next();
+					enumConstantDeclaration.setProperty(CompilationUnitSorter.RELATIVE_ORDER, new Integer(enumConstantDeclaration.getStartPosition()));
+					enumDeclaration.setProperty(CONTAINS_MALFORMED_NODES, Boolean.valueOf(isMalformed(enumConstantDeclaration)));
+				}				
+				return true;
+			}
+		});
+		
+		final ASTRewrite rewriter= ASTRewrite.create(ast.getAST()); 
+		final boolean[] hasChanges= new boolean[] {false}; 
+		
+		ast.accept(new ASTVisitor() {
+		
+			private void sortElements(List elements, ListRewrite listRewrite) {
+				if (elements.size() == 0)
+					return;
+				
+				final List myCopy = new ArrayList();
+				myCopy.addAll(elements);
+				Collections.sort(myCopy, SortElementsOperation.this.comparator);
+				
+				for (int i = 0; i < elements.size(); i++) {
+					ASTNode oldNode= (ASTNode) elements.get(i);
+					ASTNode newNode= (ASTNode) myCopy.get(i);
+					if (oldNode != newNode) {
+						listRewrite.replace(oldNode, rewriter.createMoveTarget(newNode), group);
+						hasChanges[0]= true;
+					}
+				}
+			}
+
+			public boolean visit(org.eclipse.jdt.core.dom.CompilationUnit compilationUnit) {
+				if (checkMalformedNodes(compilationUnit)) {
+					return true; // abort sorting of current element
+				}
+				
+				sortElements(compilationUnit.types(), rewriter.getListRewrite(compilationUnit, org.eclipse.jdt.core.dom.CompilationUnit.TYPES_PROPERTY));
+				return true;
+			}
+
+			public boolean visit(AnnotationTypeDeclaration annotationTypeDeclaration) {
+				if (checkMalformedNodes(annotationTypeDeclaration)) {
+					return true; // abort sorting of current element
+				}
+				
+				sortElements(annotationTypeDeclaration.bodyDeclarations(), rewriter.getListRewrite(annotationTypeDeclaration, AnnotationTypeDeclaration.BODY_DECLARATIONS_PROPERTY));
+				return true;
+			}
+
+			public boolean visit(AnonymousClassDeclaration anonymousClassDeclaration) {
+				if (checkMalformedNodes(anonymousClassDeclaration)) {
+					return true; // abort sorting of current element
+				}
+				
+				sortElements(anonymousClassDeclaration.bodyDeclarations(), rewriter.getListRewrite(anonymousClassDeclaration, AnonymousClassDeclaration.BODY_DECLARATIONS_PROPERTY));	
+				return true;
+			}
+			
+			public boolean visit(TypeDeclaration typeDeclaration) {
+				if (checkMalformedNodes(typeDeclaration)) {
+					return true; // abort sorting of current element
+				}
+				
+				sortElements(typeDeclaration.bodyDeclarations(), rewriter.getListRewrite(typeDeclaration, TypeDeclaration.BODY_DECLARATIONS_PROPERTY));
+				return true;
+			}
+
+			public boolean visit(EnumDeclaration enumDeclaration) {
+				if (checkMalformedNodes(enumDeclaration)) {
+					return true; // abort sorting of current element
+				}
+				
+				sortElements(enumDeclaration.bodyDeclarations(), rewriter.getListRewrite(enumDeclaration, EnumDeclaration.BODY_DECLARATIONS_PROPERTY));
+				sortElements(enumDeclaration.enumConstants(), rewriter.getListRewrite(enumDeclaration, EnumDeclaration.ENUM_CONSTANTS_PROPERTY));
+				return true;
+			}
+		});
+		
+		if (!hasChanges[0])
+			return null;
+		
+		return rewriter;
+	}
+
