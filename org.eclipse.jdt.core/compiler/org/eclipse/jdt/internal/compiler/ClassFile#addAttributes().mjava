@@ -64,65 +64,6 @@
 			contents[contentsOffset++] = 0;
 			attributeNumber++;
 		}
-		// Inner class attribute
-		if (numberOfInnerClasses != 0) {
-			// Generate the inner class attribute
-			int exSize = 8 * numberOfInnerClasses + 8;
-			if (exSize + contentsOffset >= this.contents.length) {
-				resizeContents(exSize);
-			}
-			// Now we now the size of the attribute and the number of entries
-			// attribute name
-			int attributeNameIndex =
-				constantPool.literalIndex(AttributeNamesConstants.InnerClassName);
-			contents[contentsOffset++] = (byte) (attributeNameIndex >> 8);
-			contents[contentsOffset++] = (byte) attributeNameIndex;
-			int value = (numberOfInnerClasses << 3) + 2;
-			contents[contentsOffset++] = (byte) (value >> 24);
-			contents[contentsOffset++] = (byte) (value >> 16);
-			contents[contentsOffset++] = (byte) (value >> 8);
-			contents[contentsOffset++] = (byte) value;
-			contents[contentsOffset++] = (byte) (numberOfInnerClasses >> 8);
-			contents[contentsOffset++] = (byte) numberOfInnerClasses;
-			for (int i = 0; i < numberOfInnerClasses; i++) {
-				ReferenceBinding innerClass = innerClassesBindings[i];
-				int accessFlags = innerClass.getAccessFlags();
-				int innerClassIndex = constantPool.literalIndexForType(innerClass.constantPoolName());
-				// inner class index
-				contents[contentsOffset++] = (byte) (innerClassIndex >> 8);
-				contents[contentsOffset++] = (byte) innerClassIndex;
-				// outer class index: anonymous and local have no outer class index
-				if (innerClass.isMemberType()) {
-					// member or member of local
-					int outerClassIndex = constantPool.literalIndexForType(innerClass.enclosingType().constantPoolName());
-					contents[contentsOffset++] = (byte) (outerClassIndex >> 8);
-					contents[contentsOffset++] = (byte) outerClassIndex;
-				} else {
-					// equals to 0 if the innerClass is not a member type
-					contents[contentsOffset++] = 0;
-					contents[contentsOffset++] = 0;
-				}
-				// name index
-				if (!innerClass.isAnonymousType()) {
-					int nameIndex = constantPool.literalIndex(innerClass.sourceName());
-					contents[contentsOffset++] = (byte) (nameIndex >> 8);
-					contents[contentsOffset++] = (byte) nameIndex;
-				} else {
-					// equals to 0 if the innerClass is an anonymous type
-					contents[contentsOffset++] = 0;
-					contents[contentsOffset++] = 0;
-				}
-				// access flag
-				if (innerClass.isAnonymousType()) {
-					accessFlags &= ~ClassFileConstants.AccFinal;
-				} else if (innerClass.isMemberType() && innerClass.isInterface()) {
-					accessFlags |= ClassFileConstants.AccStatic; // implicitely static
-				}
-				contents[contentsOffset++] = (byte) (accessFlags >> 8);
-				contents[contentsOffset++] = (byte) accessFlags;
-			}
-			attributeNumber++;
-		}
 		// add signature attribute
 		char[] genericSignature = referenceBinding.genericSignature();
 		if (genericSignature != null) {
@@ -171,7 +112,7 @@
 			if (this.referenceBinding instanceof LocalTypeBinding) {
 				MethodBinding methodBinding = ((LocalTypeBinding) this.referenceBinding).enclosingMethod;
 				if (methodBinding != null) {
-					int enclosingMethodIndex = constantPool.literalIndexForNameAndType(methodBinding.selector, methodBinding.signature());
+					int enclosingMethodIndex = constantPool.literalIndexForNameAndType(methodBinding.selector, methodBinding.signature(this));
 					methodIndexByte1 = (byte) (enclosingMethodIndex >> 8);
 					methodIndexByte2 = (byte) enclosingMethodIndex;
 				}
@@ -204,6 +145,75 @@
 			contents[contentsOffset++] = 0;
 			contents[contentsOffset++] = 0;
 			contents[contentsOffset++] = 0;
+			attributeNumber++;
+		}
+		// Inner class attribute
+		int numberOfInnerClasses = this.innerClassesBindings == null ? 0 : this.innerClassesBindings.size();
+		if (numberOfInnerClasses != 0) {
+			ReferenceBinding[] innerClasses = new ReferenceBinding[numberOfInnerClasses];
+			this.innerClassesBindings.toArray(innerClasses);
+			Arrays.sort(innerClasses, new Comparator() {
+				public int compare(Object o1, Object o2) {
+					TypeBinding binding1 = (TypeBinding) o1;
+					TypeBinding binding2 = (TypeBinding) o2;
+					return CharOperation.compareTo(binding1.constantPoolName(), binding2.constantPoolName());
+				}
+			});
+			// Generate the inner class attribute
+			int exSize = 8 * numberOfInnerClasses + 8;
+			if (exSize + contentsOffset >= this.contents.length) {
+				resizeContents(exSize);
+			}
+			// Now we now the size of the attribute and the number of entries
+			// attribute name
+			int attributeNameIndex =
+				constantPool.literalIndex(AttributeNamesConstants.InnerClassName);
+			contents[contentsOffset++] = (byte) (attributeNameIndex >> 8);
+			contents[contentsOffset++] = (byte) attributeNameIndex;
+			int value = (numberOfInnerClasses << 3) + 2;
+			contents[contentsOffset++] = (byte) (value >> 24);
+			contents[contentsOffset++] = (byte) (value >> 16);
+			contents[contentsOffset++] = (byte) (value >> 8);
+			contents[contentsOffset++] = (byte) value;
+			contents[contentsOffset++] = (byte) (numberOfInnerClasses >> 8);
+			contents[contentsOffset++] = (byte) numberOfInnerClasses;
+			for (int i = 0; i < numberOfInnerClasses; i++) {
+				ReferenceBinding innerClass = innerClasses[i];
+				int accessFlags = innerClass.getAccessFlags();
+				int innerClassIndex = constantPool.literalIndexForType(innerClass.constantPoolName());
+				// inner class index
+				contents[contentsOffset++] = (byte) (innerClassIndex >> 8);
+				contents[contentsOffset++] = (byte) innerClassIndex;
+				// outer class index: anonymous and local have no outer class index
+				if (innerClass.isMemberType()) {
+					// member or member of local
+					int outerClassIndex = constantPool.literalIndexForType(innerClass.enclosingType().constantPoolName());
+					contents[contentsOffset++] = (byte) (outerClassIndex >> 8);
+					contents[contentsOffset++] = (byte) outerClassIndex;
+				} else {
+					// equals to 0 if the innerClass is not a member type
+					contents[contentsOffset++] = 0;
+					contents[contentsOffset++] = 0;
+				}
+				// name index
+				if (!innerClass.isAnonymousType()) {
+					int nameIndex = constantPool.literalIndex(innerClass.sourceName());
+					contents[contentsOffset++] = (byte) (nameIndex >> 8);
+					contents[contentsOffset++] = (byte) nameIndex;
+				} else {
+					// equals to 0 if the innerClass is an anonymous type
+					contents[contentsOffset++] = 0;
+					contents[contentsOffset++] = 0;
+				}
+				// access flag
+				if (innerClass.isAnonymousType()) {
+					accessFlags &= ~ClassFileConstants.AccFinal;
+				} else if (innerClass.isMemberType() && innerClass.isInterface()) {
+					accessFlags |= ClassFileConstants.AccStatic; // implicitely static
+				}
+				contents[contentsOffset++] = (byte) (accessFlags >> 8);
+				contents[contentsOffset++] = (byte) accessFlags;
+			}
 			attributeNumber++;
 		}
 		// update the number of attributes
