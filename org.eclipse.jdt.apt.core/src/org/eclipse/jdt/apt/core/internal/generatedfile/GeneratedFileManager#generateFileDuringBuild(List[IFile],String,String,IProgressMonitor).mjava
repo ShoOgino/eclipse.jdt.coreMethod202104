@@ -1,0 +1,99 @@
+	/**
+	 * Invoked when a file is generated during a build. The generated file and
+	 * intermediate directories will be created if they don't exist. This method takes
+	 * file-system locks, and assumes that the calling method has at some point acquired a
+	 * workspace-level resource lock.
+	 * 
+	 * @param parentFiles
+	 *            the parent or parents of the type being generated.  May be empty, and/or
+	 *            may contain null entries, but must not itself be null.
+	 * @param typeName
+	 *            the dot-separated java type name of the type being generated
+	 * @param contents
+	 *            the java code contents of the new type .
+	 * @param progressMonitor
+	 *            a progress monitor. This may be null.
+	 * @return - the newly created IFile along with whether it was modified
+	 * @throws CoreException
+	 */
+	public FileGenerationResult generateFileDuringBuild(List<IFile> parentFiles, String typeName, String contents,
+			IProgressMonitor progressMonitor) throws CoreException
+	{
+		if (_skipTypeGeneration)
+			return null;
+		
+		GeneratedPackageFragmentRoot.NameAndRoot gpfr = _generatedPackageFragmentRoot.get();
+		IPackageFragmentRoot root = gpfr.root;
+		if (root == null) {
+			// If the generated package fragment root wasn't set, then our classpath 
+			// is incorrect. Add a marker and return.  We do this here, rather than in
+			// the set() method, because if they're not going to generate any types
+			// then it doesn't matter that the classpath is wrong.
+			String message = Messages.bind(Messages.GeneratedFileManager_missing_classpath_entry,
+					new String[] { gpfr.name });
+			IMarker marker = _jProject.getProject().createMarker(AptPlugin.APT_CONFIG_PROBLEM_MARKER);
+			marker.setAttributes(new String[] { IMarker.MESSAGE, IMarker.SEVERITY }, new Object[] { message,
+					IMarker.SEVERITY_ERROR });
+			// disable any future type generation
+			_skipTypeGeneration = true;
+			return null;
+		}
+
+		// Do the new contents differ from what is already on disk?
+		// We need to know so we can tell the caller whether this is a modification.
+		IFile file = getIFileForTypeName(typeName);
+		boolean contentsDiffer = compareFileContents(contents, file);
+
+		try {
+			if (contentsDiffer) {
+				final String[] names = parseTypeName(typeName);
+				final String pkgName = names[0];
+				final String cuName = names[1];
+				
+				// Get a list of the folders that will have to be created for this package to exist
+				IFolder genSrcFolder = (IFolder) root.getResource();
+				final Set<IFolder> newFolders = computeNewPackageFolders(pkgName, genSrcFolder);
+	
+				// Create the package fragment in the Java Model.  This creates all needed parent folders.
+				IPackageFragment pkgFrag = _CUHELPER.createPackageFragment(pkgName, root, progressMonitor);
+	
+				// Mark all newly created folders (but not pre-existing ones) as derived.  
+				for (IContainer folder : newFolders) {
+					try {
+						folder.setDerived(true);
+					} catch (CoreException e) {
+						AptPlugin.logWarning(e, "Unable to mark generated type folder as derived: " + folder.getName()); //$NON-NLS-1$
+						break;
+					}
+				}
+				
+				saveCompilationUnit(pkgFrag, cuName, contents, progressMonitor);
+			}
+
+			// during a batch build, parentFile will be null.
+			// Only keep track of ownership in iterative builds
+			for (IFile parentFile : parentFiles) {
+				if (parentFile != null) {
+					addBuiltFileToMaps(parentFile, file);
+				}
+			}
+
+			// Mark the file as derived. Note that certain user actions may have
+			// deleted this file before we get here, so if the file doesn't
+			// exist, marking it derived throws a ResourceException.
+			if (file.exists()) {
+				file.setDerived(true);
+			}
+			// We used to also make the file read-only. This is a bad idea,
+			// as refactorings then fail in the future, which is worse
+			// than allowing a user to modify a generated file.
+
+			assert checkIntegrity();
+
+			return new FileGenerationResult(file, contentsDiffer);
+		} catch (CoreException e) {
+			AptPlugin.log(e, "Unable to generate type " + typeName); //$NON-NLS-1$
+			return null;
+		}
+	}
+

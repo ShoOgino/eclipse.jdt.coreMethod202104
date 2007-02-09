@@ -1,0 +1,43 @@
+	private static void loadJava6Factories(IExtension extension, IConfigurationElement factories) {
+		if (!AptPlugin.canRunJava6Processors()) {
+			return;
+		}
+		
+		// Get enableDefault.  If the attribute is missing, default to true.
+		String enableDefaultStr = factories.getAttribute("enableDefault"); //$NON-NLS-1$
+		boolean enableDefault = true;
+		if ("false".equals(enableDefaultStr)) { //$NON-NLS-1$
+			enableDefault = false;
+		}
+		
+		// Create and cache a PluginFactoryContainer for this plugin.
+		String pluginId = extension.getNamespaceIdentifier();
+		//TODO: level problem.  In the extension point, enableDefault is associated with element, not ext point.
+		PluginFactoryContainer pfc = new PluginFactoryContainer(pluginId, enableDefault);
+		PLUGIN_CONTAINER_MAP.put(pluginId, pfc);
+		
+		// Iterate over the children of the "java6processors" element to find all the ones named "java6processor".
+		for (IConfigurationElement factory : factories.getChildren()) {
+			if (!"java6processor".equals(factory.getName())) { //$NON-NLS-1$
+				continue;
+			}
+			String factoryName = null;
+			try {
+				factoryName = factory.getAttribute("class"); //$NON-NLS-1$
+				Object execExt = factory.createExecutableExtension("class"); //$NON-NLS-1$ - attribute name
+				Class<?> clazz = execExt.getClass();
+				if (AptPlugin.getJava6ProcessorClass().isInstance(execExt)){
+					assert(clazz.getName().equals(factoryName));
+					IServiceFactory isf = new ClassServiceFactory(clazz);
+					PLUGIN_JAVA6_FACTORY_MAP.put( factoryName, isf );
+					pfc.addFactoryName(factoryName, AptPlugin.JAVA6_FACTORY_NAME);
+				}
+				else {
+					reportFailureToLoadProcessor(null, factoryName, extension.getNamespaceIdentifier());
+				}
+			} catch(CoreException e) {
+				reportFailureToLoadProcessor(e, factoryName, extension.getNamespaceIdentifier());
+			}
+		}
+	}
+
