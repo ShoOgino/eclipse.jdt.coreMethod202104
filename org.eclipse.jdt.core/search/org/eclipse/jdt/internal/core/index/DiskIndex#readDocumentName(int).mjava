@@ -10,20 +10,32 @@ synchronized String readDocumentName(int docNumber) throws IOException {
 		int numberOfBytes = (isLastChunk ? this.startOfCategoryTables : this.chunkOffsets[chunkNumber + 1]) - start;
 		if (numberOfBytes < 0)
 			throw new IllegalArgumentException();
-		byte[] bytes = new byte[numberOfBytes];
+		this.streamBuffer = new byte[numberOfBytes];
+		this.bufferIndex = 0;
 		FileInputStream file = new FileInputStream(this.indexFile);
 		try {
 			file.skip(start);
-			if (file.read(bytes, 0, numberOfBytes) != numberOfBytes)
+			if (file.read(this.streamBuffer, 0, numberOfBytes) != numberOfBytes)
 				throw new IOException();
-		} finally {
+		}
+		catch (IOException ioe) {
+			this.streamBuffer = null;
+			throw ioe;
+		}
+		finally {
 			file.close();
 		}
-		DataInputStream stream = new DataInputStream(new ByteArrayInputStream(bytes));
 		int numberOfNames = isLastChunk ? this.sizeOfLastChunk : CHUNK_SIZE;
 		chunk = this.cachedChunks[chunkNumber] = new String[numberOfNames];
-		readChunk(chunk, stream, 0, numberOfNames);
+		try {
+			readChunk(chunk, null, 0, numberOfNames);
+		}
+		catch (IOException ioe) {
+			this.streamBuffer = null;
+			throw ioe;
+		}
 	}
+	this.streamBuffer = null;
 	return chunk[docNumber - (chunkNumber * CHUNK_SIZE)];
 }
 

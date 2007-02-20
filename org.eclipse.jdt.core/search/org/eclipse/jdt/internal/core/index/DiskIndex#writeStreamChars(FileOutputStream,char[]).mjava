@@ -1,0 +1,88 @@
+/**
+ * Writes a string to the given output stream using UTF-8 
+ * encoding in a machine-independent manner. 
+ * <p>
+ * First, two bytes of the array are giving the number of bytes to 
+ * follow. This value is the number of bytes actually written out, 
+ * not the length of the string. Following the length, each character 
+ * of the string is put in the bytes array, in sequence, using the UTF-8
+ * encoding for the character.
+ * </p>
+ * <p>
+ * Then the entire byte array is written to the output stream
+ * using {@link OutputStream#write(byte[], int, int)} method.
+ * </p>
+ *
+ * @param array char array to be written.
+ * @exception  IOException  if an I/O error occurs while writting
+ * 	the bytes array to the stream.
+ */
+private void writeStreamChars(FileOutputStream stream, char[] array) throws IOException {
+	int length= array.length;
+	this.streamBuffer[this.bufferIndex++] = (byte) ((length >>> 8) & 0xFF); // store chars array length instead of bytes
+	if (this.bufferIndex == BUFFER_WRITE_SIZE) { // write bytes array on stream if buffer is full
+		stream.write(this.streamBuffer, 0, BUFFER_WRITE_SIZE);
+		this.bufferIndex = 0;
+	}
+	this.streamBuffer[this.bufferIndex++] = (byte) (length & 0xFF); // this will allow to read it faster
+	if (this.bufferIndex == BUFFER_WRITE_SIZE) { // write bytes array on stream if buffer is full
+		stream.write(this.streamBuffer, 0, BUFFER_WRITE_SIZE);
+		this.bufferIndex = 0;
+	}
+	int idx = this.bufferIndex;
+	for (int i=0; i<length; i++) {
+		int ch = array[i];
+		if ((ch & 0x007F) == ch) {
+			this.streamBuffer[idx++] = (byte) ch;
+		}
+		else if ((ch & 0x07FF) == ch) {
+			// first two bits are stored in first byte
+			byte b = (byte) (ch >> 6);
+			b &= 0x1F;
+			b |= 0xC0;
+			this.streamBuffer[idx++] = b;
+			if (idx == BUFFER_WRITE_SIZE) { // write bytes array on stream if buffer is full
+				stream.write(this.streamBuffer, 0, BUFFER_WRITE_SIZE);
+				idx = 0;
+				this.bufferIndex -= BUFFER_WRITE_SIZE;
+			}
+			// last six bits are stored in second byte
+			b = (byte) (ch & 0x3F);
+			b |= 0x80;
+			this.streamBuffer[idx++] = b;
+		} else {
+			// first four bits are stored in first byte
+			byte b = (byte) (ch >> 12);
+			b &= 0x0F;
+			b |= 0xE0;
+			this.streamBuffer[idx++] = b;
+			if (idx == BUFFER_WRITE_SIZE) { // write bytes array on stream if buffer is full
+				stream.write(this.streamBuffer, 0, BUFFER_WRITE_SIZE);
+				idx = 0;
+				this.bufferIndex -= BUFFER_WRITE_SIZE;
+			}
+			// six following bits are stored in second byte
+			b = (byte) (ch >> 6);
+			b &= 0x3F;
+			b |= 0x80;
+			this.streamBuffer[idx++] = b;
+			if (idx == BUFFER_WRITE_SIZE) { // write bytes array on stream if buffer is full
+				stream.write(this.streamBuffer, 0, BUFFER_WRITE_SIZE);
+				idx = 0;
+				this.bufferIndex -= BUFFER_WRITE_SIZE;
+			}
+			// last six bits are stored in third byte
+			b = (byte) (ch & 0x3F);
+			b |= 0x80;
+			this.streamBuffer[idx++] = b;
+		}
+		if (idx == BUFFER_WRITE_SIZE) { // write bytes array on stream if buffer is full
+			stream.write(this.streamBuffer, 0, BUFFER_WRITE_SIZE);
+			idx = 0;
+			this.bufferIndex -= BUFFER_WRITE_SIZE;
+		}
+	}
+	this.streamEnd += idx - this.bufferIndex + 2;
+	this.bufferIndex = idx;
+}
+

@@ -1,8 +1,10 @@
 private synchronized HashtableOfObject readCategoryTable(char[] categoryName, boolean readDocNumbers) throws IOException {
 	// result will be null if categoryName is unknown
 	int offset = this.categoryOffsets.get(categoryName);
-	if (offset == HashtableOfIntValues.NO_VALUE)
+	if (offset == HashtableOfIntValues.NO_VALUE) {
 		return null;
+	}
+	this.streamEnd = this.categoryEnds.get(categoryName);
 
 	if (this.categoryTables == null) {
 		this.categoryTables = new HashtableOfObject(3);
@@ -19,14 +21,18 @@ private synchronized HashtableOfObject readCategoryTable(char[] categoryName, bo
 		}
 	}
 
-	DataInputStream stream = new DataInputStream(new BufferedInputStream(new FileInputStream(this.indexFile), 2048));
+	FileInputStream stream = new FileInputStream(this.indexFile);
 	HashtableOfObject categoryTable = null;
 	char[][] matchingWords = null;
 	int count = 0;
 	int firstOffset = -1;
+	this.streamBuffer = new byte[BUFFER_READ_SIZE];
 	try {
 		stream.skip(offset);
-		int size = stream.readInt();
+		int readSize = this.streamEnd - offset;
+		this.bufferIndex = 0;
+		this.streamPos = stream.read(this.streamBuffer, 0, readSize < BUFFER_READ_SIZE ? readSize : BUFFER_READ_SIZE) + offset;
+		int size = readStreamInt(stream);
 		try {
 			if (size < 0) { // DEBUG
 				System.err.println("-------------------- DEBUG --------------------"); //$NON-NLS-1$
@@ -48,8 +54,8 @@ private synchronized HashtableOfObject readCategoryTable(char[] categoryName, bo
 		}
 		int largeArraySize = 256;
 		for (int i = 0; i < size; i++) {
-			char[] word = Util.readUTF(stream);
-			int arrayOffset = stream.readInt();
+			char[] word = readStreamChars(stream);
+			int arrayOffset = readStreamInt(stream);
 			// if arrayOffset is:
 			//		<= 0 then the array size == 1 with the value -> -arrayOffset
 			//		> 1 & < 256 then the size of the array is > 1 & < 256, the document array follows immediately
@@ -57,9 +63,9 @@ private synchronized HashtableOfObject readCategoryTable(char[] categoryName, bo
 			if (arrayOffset <= 0) {
 				categoryTable.put(word, new int[] {-arrayOffset}); // store 1 element array by negating documentNumber
 			} else if (arrayOffset < largeArraySize) {
-				categoryTable.put(word, readDocumentArray(stream, arrayOffset)); // read in-lined array providing size
+				categoryTable.put(word, readStreamDocumentArray(stream, arrayOffset)); // read in-lined array providing size
 			} else {
-				arrayOffset = stream.readInt(); // read actual offset
+				arrayOffset = readStreamInt(stream); // read actual offset
 				if (readDocNumbers) {
 					if (matchingWords == null)
 						matchingWords = new char[size][];
@@ -74,20 +80,35 @@ private synchronized HashtableOfObject readCategoryTable(char[] categoryName, bo
 		// cache the table as long as its not too big
 		// in practice, some tables can be greater than 500K when they contain more than 10K elements
 		this.cachedCategoryName = categoryTable.elementSize < 20000 ? categoryName : null;
-	} finally {
+	}
+	catch (IOException ioe) {
+		this.streamBuffer = null;
+		throw ioe;
+	}
+	finally {
 		stream.close();
 	}
 
 	if (matchingWords != null && count > 0) {
-		stream = new DataInputStream(new BufferedInputStream(new FileInputStream(this.indexFile), 2048));
+		stream = new FileInputStream(this.indexFile);
 		try {
 			stream.skip(firstOffset);
-			for (int i = 0; i < count; i++) // each array follows the previous one
-				categoryTable.put(matchingWords[i], readDocumentArray(stream, stream.readInt()));
-		} finally {
+			int readSize = this.streamEnd - firstOffset;
+			this.bufferIndex = 0;
+			this.streamPos = stream.read(this.streamBuffer, 0, readSize < BUFFER_READ_SIZE ? readSize : BUFFER_READ_SIZE) + firstOffset;
+			for (int i = 0; i < count; i++) { // each array follows the previous one
+				categoryTable.put(matchingWords[i], readStreamDocumentArray(stream, readStreamInt(stream)));
+			}
+		}
+		catch (IOException ioe) {
+			this.streamBuffer = null;
+			throw ioe;
+		}
+		finally {
 			stream.close();
 		}
 	}
+	this.streamBuffer = null;
 	return categoryTable;
 }
 

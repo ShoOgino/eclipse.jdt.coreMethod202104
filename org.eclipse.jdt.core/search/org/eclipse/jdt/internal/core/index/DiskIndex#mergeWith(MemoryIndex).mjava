@@ -18,9 +18,12 @@ DiskIndex mergeWith(MemoryIndex memoryIndex) throws IOException {
 	DiskIndex newDiskIndex = new DiskIndex(this.indexFile.getPath() + ".tmp"); //$NON-NLS-1$
 	try {
 		newDiskIndex.initializeFrom(this, newDiskIndex.indexFile);
-		DataOutputStream stream = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(newDiskIndex.indexFile, false), 2048));
+		FileOutputStream stream = new FileOutputStream(newDiskIndex.indexFile, false);
 		int offsetToHeader = -1;
 		try {
+			newDiskIndex.streamBuffer = new byte[BUFFER_WRITE_SIZE];
+			newDiskIndex.bufferIndex = 0;
+			newDiskIndex.streamEnd = 0;
 			newDiskIndex.writeAllDocumentNames(docNames, stream);
 			docNames = null; // free up the space
 
@@ -40,11 +43,15 @@ DiskIndex mergeWith(MemoryIndex memoryIndex) throws IOException {
 				newDiskIndex.writeCategories(stream);
 			else
 				newDiskIndex.mergeCategories(this, positions, stream);
-			offsetToHeader = stream.size();
+			offsetToHeader = newDiskIndex.streamEnd;
 			newDiskIndex.writeHeaderInfo(stream);
 			positions = null; // free up the space
+			if (newDiskIndex.bufferIndex > 0) {
+				stream.write(newDiskIndex.streamBuffer, 0, newDiskIndex.bufferIndex);
+			}
 		} finally {
 			stream.close();
+			this.streamBuffer = null;
 		}
 		newDiskIndex.writeOffsetToHeader(offsetToHeader);
 

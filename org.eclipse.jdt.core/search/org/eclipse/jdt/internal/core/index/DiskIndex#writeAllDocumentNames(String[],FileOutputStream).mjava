@@ -1,12 +1,12 @@
-private void writeAllDocumentNames(String[] sortedDocNames, DataOutputStream stream) throws IOException {
+private void writeAllDocumentNames(String[] sortedDocNames, FileOutputStream stream) throws IOException {
 	if (sortedDocNames.length == 0)
 		throw new IllegalArgumentException();
 
 	// assume the file was just created by initializeFrom()
 	// in order, write: SIGNATURE & headerInfoOffset place holder, then each compressed chunk of document names
-	stream.writeUTF(SIGNATURE);
-	this.headerInfoOffset = stream.size();
-	stream.writeInt(-1); // will overwrite with correct value later
+	writeStreamChars(stream, SIGNATURE_CHARS);
+	this.headerInfoOffset = this.streamEnd;
+	writeStreamInt(stream, -1); // will overwrite with correct value later
 
 	int size = sortedDocNames.length;
 	this.numberOfChunks = (size / CHUNK_SIZE) + 1;
@@ -20,12 +20,12 @@ private void writeAllDocumentNames(String[] sortedDocNames, DataOutputStream str
 	this.chunkOffsets = new int[this.numberOfChunks];
 	int lastIndex = this.numberOfChunks - 1;
 	for (int i = 0; i < this.numberOfChunks; i++) {
-		this.chunkOffsets[i] = stream.size();
+		this.chunkOffsets[i] = this.streamEnd;
 
 		int chunkSize = i == lastIndex ? this.sizeOfLastChunk : CHUNK_SIZE;
 		int chunkIndex = i * CHUNK_SIZE;
 		String current = sortedDocNames[chunkIndex];
-		stream.writeUTF(current);
+		writeStreamChars(stream, current.toCharArray());
 		for (int j = 1; j < chunkSize; j++) {
 			String next = sortedDocNames[chunkIndex + j];
 			int len1 = current.length();
@@ -45,14 +45,23 @@ private void writeAllDocumentNames(String[] sortedDocNames, DataOutputStream str
 				if (len1 == 0) break; // current is 'xabc', next is 'xyabc'
 			}
 			if (end > 255) end = 255;
-			stream.writeByte(start);
-			stream.writeByte(end);
+			this.streamBuffer[this.bufferIndex++] = (byte) start;
+			if (this.bufferIndex == BUFFER_WRITE_SIZE) { // write bytes array on stream if buffer is full
+				stream.write(this.streamBuffer, 0, BUFFER_WRITE_SIZE);
+				this.bufferIndex = 0;
+			}
+			this.streamBuffer[this.bufferIndex++] = (byte) end;
+			if (this.bufferIndex == BUFFER_WRITE_SIZE) { // write bytes array on stream if buffer is full
+				stream.write(this.streamBuffer, 0, BUFFER_WRITE_SIZE);
+				this.bufferIndex = 0;
+			}
+			this.streamEnd += 2;
 
 			int last = next.length() - end;
-			stream.writeUTF(start < last ? next.substring(start, last) : ""); //$NON-NLS-1$
+			writeStreamChars(stream, (start < last ? CharOperation.subarray(next.toCharArray(), start, last) : CharOperation.NO_CHAR));
 			current = next;
 		}
 	}
-	this.startOfCategoryTables = stream.size() + 1;
+	this.startOfCategoryTables = this.streamEnd + 1;
 }
 
