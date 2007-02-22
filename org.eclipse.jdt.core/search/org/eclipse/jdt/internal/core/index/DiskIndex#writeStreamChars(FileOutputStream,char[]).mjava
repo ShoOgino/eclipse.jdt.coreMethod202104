@@ -18,71 +18,35 @@
  * 	the bytes array to the stream.
  */
 private void writeStreamChars(FileOutputStream stream, char[] array) throws IOException {
-	int length= array.length;
+	if ((this.bufferIndex + 2) >= BUFFER_WRITE_SIZE)  {
+		stream.write(this.streamBuffer, 0, this.bufferIndex);
+		this.bufferIndex = 0;
+	}
+	int length = array.length;
 	this.streamBuffer[this.bufferIndex++] = (byte) ((length >>> 8) & 0xFF); // store chars array length instead of bytes
-	if (this.bufferIndex == BUFFER_WRITE_SIZE) { // write bytes array on stream if buffer is full
-		stream.write(this.streamBuffer, 0, BUFFER_WRITE_SIZE);
-		this.bufferIndex = 0;
-	}
 	this.streamBuffer[this.bufferIndex++] = (byte) (length & 0xFF); // this will allow to read it faster
-	if (this.bufferIndex == BUFFER_WRITE_SIZE) { // write bytes array on stream if buffer is full
-		stream.write(this.streamBuffer, 0, BUFFER_WRITE_SIZE);
-		this.bufferIndex = 0;
-	}
-	int idx = this.bufferIndex;
-	for (int i=0; i<length; i++) {
-		int ch = array[i];
-		if ((ch & 0x007F) == ch) {
-			this.streamBuffer[idx++] = (byte) ch;
+	this.streamEnd += 2;
+
+	// we're assuming that very few char[] are so large that we need to flush the buffer more than once, if at all
+	int totalBytesNeeded = length * 3;
+	if (totalBytesNeeded <= BUFFER_WRITE_SIZE) {
+		if (this.bufferIndex + totalBytesNeeded > BUFFER_WRITE_SIZE) {
+			// flush the buffer now to make sure there is room for the array
+			stream.write(this.streamBuffer, 0, this.bufferIndex);
+			this.bufferIndex = 0;
 		}
-		else if ((ch & 0x07FF) == ch) {
-			// first two bits are stored in first byte
-			byte b = (byte) (ch >> 6);
-			b &= 0x1F;
-			b |= 0xC0;
-			this.streamBuffer[idx++] = b;
-			if (idx == BUFFER_WRITE_SIZE) { // write bytes array on stream if buffer is full
-				stream.write(this.streamBuffer, 0, BUFFER_WRITE_SIZE);
-				idx = 0;
-				this.bufferIndex -= BUFFER_WRITE_SIZE;
-			}
-			// last six bits are stored in second byte
-			b = (byte) (ch & 0x3F);
-			b |= 0x80;
-			this.streamBuffer[idx++] = b;
-		} else {
-			// first four bits are stored in first byte
-			byte b = (byte) (ch >> 12);
-			b &= 0x0F;
-			b |= 0xE0;
-			this.streamBuffer[idx++] = b;
-			if (idx == BUFFER_WRITE_SIZE) { // write bytes array on stream if buffer is full
-				stream.write(this.streamBuffer, 0, BUFFER_WRITE_SIZE);
-				idx = 0;
-				this.bufferIndex -= BUFFER_WRITE_SIZE;
-			}
-			// six following bits are stored in second byte
-			b = (byte) (ch >> 6);
-			b &= 0x3F;
-			b |= 0x80;
-			this.streamBuffer[idx++] = b;
-			if (idx == BUFFER_WRITE_SIZE) { // write bytes array on stream if buffer is full
-				stream.write(this.streamBuffer, 0, BUFFER_WRITE_SIZE);
-				idx = 0;
-				this.bufferIndex -= BUFFER_WRITE_SIZE;
-			}
-			// last six bits are stored in third byte
-			b = (byte) (ch & 0x3F);
-			b |= 0x80;
-			this.streamBuffer[idx++] = b;
-		}
-		if (idx == BUFFER_WRITE_SIZE) { // write bytes array on stream if buffer is full
-			stream.write(this.streamBuffer, 0, BUFFER_WRITE_SIZE);
-			idx = 0;
-			this.bufferIndex -= BUFFER_WRITE_SIZE;
+		writeStreamChars(stream, array, 0, length);
+	} else {
+		int charsPerWrite = BUFFER_WRITE_SIZE / 3;
+		int start = 0;
+		while (start < length) {
+			stream.write(this.streamBuffer, 0, this.bufferIndex);
+			this.bufferIndex = 0;
+			int charsLeftToWrite = length - start;
+			int end = start + (charsPerWrite < charsLeftToWrite ? charsPerWrite : charsLeftToWrite);
+			writeStreamChars(stream, array, start, end);
+			start = end;
 		}
 	}
-	this.streamEnd += idx - this.bufferIndex + 2;
-	this.bufferIndex = idx;
 }
 
