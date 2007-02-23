@@ -1,0 +1,55 @@
+	public BatchProcessingEnvImpl(BaseAnnotationProcessorManager dispatchManager, Main batchCompiler,
+			String[] commandLineArguments) 
+	{
+		super();
+		_compilerOwner = batchCompiler;
+		_compiler = batchCompiler.batchCompiler;
+		_dispatchManager = dispatchManager;
+		Class<?> c = null;
+		try {
+			c = Class.forName("org.eclipse.jdt.internal.compiler.tool.EclipseCompiler"); //$NON-NLS-1$
+		} catch (ClassNotFoundException e) {
+			e.printStackTrace();
+		}
+		Field field = null;
+		JavaFileManager javaFileManager = null;
+		if (c != null) {
+			try {
+				field = c.getField("fileManager"); //$NON-NLS-1$
+			} catch (SecurityException e) {
+				e.printStackTrace();
+			} catch (IllegalArgumentException e) {
+				e.printStackTrace();
+			} catch (NoSuchFieldException e) {
+				e.printStackTrace();
+			}
+		}
+		if (field != null) {
+			try {
+				javaFileManager = (JavaFileManager) field.get(batchCompiler);
+			} catch (IllegalArgumentException e) {
+				e.printStackTrace();
+			} catch (IllegalAccessException e) {
+				e.printStackTrace();
+			}
+		}
+		if (javaFileManager != null) {
+			_fileManager = javaFileManager;
+		} else {
+			String encoding = (String) batchCompiler.options.get(CompilerOptions.OPTION_Encoding);
+			Charset charset = encoding != null ? Charset.forName(encoding) : null;
+			JavaFileManager manager = new EclipseFileManager(batchCompiler, batchCompiler.compilerLocale, charset);
+			ArrayList<String> options = new ArrayList<String>();
+			for (String argument : commandLineArguments) {
+				options.add(argument);
+			}
+			for (Iterator<String> iterator = options.iterator(); iterator.hasNext(); ) {
+				manager.handleOption(iterator.next(), iterator);
+			}
+			_fileManager = manager;
+		}
+		_processorOptions = Collections.unmodifiableMap(parseProcessorOptions(commandLineArguments));
+		_filer = new BatchFilerImpl(_dispatchManager, this);
+		_messager = new BatchMessagerImpl(_compilerOwner.batchCompiler.problemReporter);
+	}
+

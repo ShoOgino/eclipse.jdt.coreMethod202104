@@ -1,0 +1,69 @@
+	private void collectAllMatchingFiles(File file, String normalizedPackageName, Set<Kind> kinds, boolean recurse, ArrayList<JavaFileObject> collector) {
+		if (!isArchive(file)) {
+			// we must have a directory
+			File currentFile = new File(file, normalizedPackageName);
+			if (!currentFile.exists()) return;
+			String path;
+			try {
+				path = currentFile.getCanonicalPath();
+			} catch (IOException e) {
+				return;
+			}
+			if (File.separatorChar == '/') {
+				if (!path.endsWith(normalizedPackageName)) return;
+			} else if (!path.endsWith(normalizedPackageName.replace('/', File.separatorChar))) return;
+   			File[] files = currentFile.listFiles();
+   			if (files != null) {
+   				// this was a directory
+   				for (File f : files) {
+   					if (f.isDirectory() && recurse) {
+   						collectAllMatchingFiles(file, normalizedPackageName + '/' + f.getName(), kinds, recurse, collector);
+   					} else {
+   						final Kind kind = getKind(f);
+   						if (kinds.contains(kind)) {
+   							collector.add(new EclipseFileObject(normalizedPackageName + currentFile.getName(), currentFile.toURI(), kind, this.charset));
+   						}
+   					}
+   				}
+   			}
+			// currentFile is not a directory
+			// check if it matches the criteria
+			final Kind kind = getKind(file);
+			if (kinds.contains(kind)) {
+				collector.add(new EclipseFileObject(normalizedPackageName + currentFile.getName(), currentFile.toURI(), kind, this.charset));
+			}
+		} else {
+			Archive archive = this.getArchive(file);
+			String key = normalizedPackageName;
+			if (!normalizedPackageName.endsWith("/")) {//$NON-NLS-1$
+				key += '/';
+			}
+			// we have an archive file
+			if (recurse) {
+				for (String packageName : archive.allPackages()) {
+					if (packageName.startsWith(key)) {
+						ArrayList<String> types = archive.getTypes(packageName);
+						if (types != null) {
+							for (String typeName : types) {
+		   						final Kind kind = getKind(getExtension(typeName));
+		   						if (kinds.contains(kind)) {
+		   							collector.add(archive.getArchiveFileObject(packageName + typeName, this.charset));
+		   						}
+							}
+						}
+					}
+				}
+			} else {
+				ArrayList<String> types = archive.getTypes(key);
+				if (types != null) {
+					for (String typeName : types) {
+   						final Kind kind = getKind(typeName);
+   						if (kinds.contains(kind)) {
+   							collector.add(archive.getArchiveFileObject(normalizedPackageName + typeName, this.charset));
+   						}
+					}
+				}
+			}
+		}
+	}
+
