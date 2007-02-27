@@ -1,0 +1,41 @@
+	/**
+	 * @bug 75471: [prefs] no re-compile when loading settings
+	 * @test Ensure that changing project preferences is well taking into account while rebuilding project
+	 * @see "https://bugs.eclipse.org/bugs/show_bug.cgi?id=75471"
+	 */
+	public void _testUpdateProjectPreferences() throws JavaModelException {
+		
+		IPath projectPath = env.addProject("Project"); //$NON-NLS-1$
+		env.addExternalJars(projectPath, Util.getJavaClassLibs());
+
+		// remove old package fragment root so that names don't collide
+		env.removePackageFragmentRoot(projectPath, ""); //$NON-NLS-1$
+
+		IPath root = env.addPackageFragmentRoot(projectPath, "src"); //$NON-NLS-1$
+		env.setOutputFolder(projectPath, "bin"); //$NON-NLS-1$
+
+		env.addClass(root, "util", "MyException", //$NON-NLS-1$ //$NON-NLS-2$
+			"package util;\n" + 
+			"public class MyException extends Exception {\n" + 
+			"	private static final long serialVersionUID = 1L;\n" +
+			"}"
+		); //$NON-NLS-1$
+
+		IPath cuPath = env.addClass(root, "p", "Test", //$NON-NLS-1$ //$NON-NLS-2$
+			"package p;\n" + 
+			"import util.MyException;\n" + 
+			"public class Test {\n" + 
+			"}"
+		);
+
+		fullBuild(projectPath);
+		expectingSpecificProblemFor(
+			projectPath,
+			new Problem("", "The import util.MyException is never used", cuPath, 18, 34, CategorizedProblem.CAT_UNNECESSARY_CODE, IMarker.SEVERITY_WARNING)); //$NON-NLS-1$ //$NON-NLS-2$
+
+		IJavaProject project = env.getJavaProject(projectPath);
+		project.setOption(JavaCore.COMPILER_PB_UNUSED_IMPORT, JavaCore.IGNORE);
+		incrementalBuild(projectPath);
+		expectingNoProblems();
+	}
+

@@ -1,0 +1,49 @@
+	public void _testUpdateWkspPreferences() throws JavaModelException {
+		
+		IPath projectPath = env.addProject("Project"); //$NON-NLS-1$
+		env.addExternalJars(projectPath, Util.getJavaClassLibs());
+
+		// remove old package fragment root so that names don't collide
+		env.removePackageFragmentRoot(projectPath, ""); //$NON-NLS-1$
+
+		IPath root = env.addPackageFragmentRoot(projectPath, "src"); //$NON-NLS-1$
+		env.setOutputFolder(projectPath, "bin"); //$NON-NLS-1$
+
+		env.addClass(root, "util", "MyException", //$NON-NLS-1$ //$NON-NLS-2$
+			"package util;\n" + 
+			"public class MyException extends Exception {\n" + 
+			"	private static final long serialVersionUID = 1L;\n" +
+			"}"
+		); //$NON-NLS-1$
+
+		IPath cuPath = env.addClass(root, "p", "Test", //$NON-NLS-1$ //$NON-NLS-2$
+			"package p;\n" + 
+			"import util.MyException;\n" + 
+			"public class Test {\n" + 
+			"}"
+		);
+
+		fullBuild();
+		expectingSpecificProblemFor(
+			projectPath,
+			new Problem("", "The import util.MyException is never used", cuPath, 18, 34, CategorizedProblem.CAT_UNNECESSARY_CODE, IMarker.SEVERITY_WARNING)); //$NON-NLS-1$ //$NON-NLS-2$
+
+		// Save preference
+		JavaModelManager manager = JavaModelManager.getJavaModelManager();
+		IEclipsePreferences preferences = manager.getInstancePreferences();
+		String unusedImport = preferences.get(JavaCore.COMPILER_PB_UNUSED_IMPORT, null);
+		try {
+			// Modify preference
+			preferences.put(JavaCore.COMPILER_PB_UNUSED_IMPORT, JavaCore.IGNORE);
+			incrementalBuild();
+			expectingNoProblems();
+		}
+		finally {
+			if (unusedImport == null) {
+				preferences.remove(JavaCore.COMPILER_PB_UNUSED_IMPORT);
+			} else {
+				preferences.put(JavaCore.COMPILER_PB_UNUSED_IMPORT, unusedImport);
+			}
+		}
+	}
+

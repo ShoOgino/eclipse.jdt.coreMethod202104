@@ -1,0 +1,53 @@
+// https://bugs.eclipse.org/bugs/show_bug.cgi?id=172345
+public void testIncompatibleJdkLEvelOnWksp() throws JavaModelException {
+
+	// Save preference
+	JavaModelManager manager = JavaModelManager.getJavaModelManager();
+	IEclipsePreferences preferences = manager.getInstancePreferences();
+	String incompatibleJdkLevel = preferences.get(JavaCore.CORE_INCOMPATIBLE_JDK_LEVEL, null);
+	try {
+		this.abortOnFailure = false; // NOT sure this test will pass on all releng boxes => do not abort on failures
+		
+		// Create project
+		IPath projectPath = env.addProject("Project");
+		IJavaProject project = env.getJavaProject(projectPath);
+		String[] classlibs = Util.getJavaClassLibs();
+		env.addExternalJars(projectPath, classlibs);
+		
+		// Build it expecting no problem
+		fullBuild();
+		expectingNoProblems();
+
+		// Build incompatible jdk level problem string
+		String jclPath = project.getPackageFragmentRoot(classlibs[0]).getPath().makeRelative().toString();
+		String wkspRuntime = JavaCore.getOption(JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM);
+		
+		// Change workspace  incompatible jdk level preferences to warning, perform incremental build and expect 1 problem
+		preferences.put(JavaCore.CORE_INCOMPATIBLE_JDK_LEVEL, JavaCore.WARNING);
+		incrementalBuild();
+		expectingProblemsFor(
+			projectPath,
+			getJdkLevelProblem(wkspRuntime, jclPath, IMarker.SEVERITY_WARNING)
+		);
+		
+		// Change workspace incompatible jdk level preferences to error, perform incremental build and expect 2 problems
+		preferences.put(JavaCore.CORE_INCOMPATIBLE_JDK_LEVEL, JavaCore.ERROR);
+		incrementalBuild();
+		expectingProblemsFor(
+			projectPath,
+			"Problem : The project cannot be built until build path errors are resolved [ resource : </Project> range : <-1,-1> category : <10> severity : <2>]\n" + 
+			getJdkLevelProblem(wkspRuntime, jclPath, IMarker.SEVERITY_ERROR)
+		);
+		
+		// Remove project to avoid side effect on other tests
+		env.removeProject(projectPath);
+	} finally {
+		// Put back workspace preferences same as before running the test
+		if (incompatibleJdkLevel == null) {
+			preferences.remove(JavaCore.CORE_INCOMPATIBLE_JDK_LEVEL);
+		} else {
+			preferences.put(JavaCore.CORE_INCOMPATIBLE_JDK_LEVEL, incompatibleJdkLevel);
+		}
+	}
+}
+
