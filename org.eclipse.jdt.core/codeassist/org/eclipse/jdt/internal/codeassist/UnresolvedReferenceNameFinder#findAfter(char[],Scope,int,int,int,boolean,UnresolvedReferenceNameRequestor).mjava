@@ -1,4 +1,11 @@
-	private MethodDeclaration find(char[] startWith, Scope s, int from, int to, UnresolvedReferenceNameRequestor nameRequestor) {
+	private MethodDeclaration findAfter(
+			char[] startWith,
+			Scope s,
+			int from,
+			int to,
+			int maxLineCount,
+			boolean outsideEnclosingBlock,
+			UnresolvedReferenceNameRequestor nameRequestor) {
 		this.requestor = nameRequestor;
 		
 		// reinitialize completion scanner to be usable as a normal scanner
@@ -7,28 +14,31 @@
 		// reinitialize completionIdentifier
 		this.completionScanner.prefix = startWith;
 		
-		// compute location of the end of the current block
-		this.completionScanner.resetTo(from + 1, to);
-		this.completionScanner.jumpOverBlock();
-		
-		int blockEnd = this.completionScanner.startPosition - 1;
+		if (!outsideEnclosingBlock) {
+			// compute location of the end of the current block
+			this.completionScanner.resetTo(from + 1, to);
+			this.completionScanner.jumpOverBlock();
+			
+			to = this.completionScanner.startPosition - 1;
+		}
 		
 		int maxEnd =
 			this.completionScanner.getLineEnd(
-					this.completionScanner.getLineNumber(from) + MAX_LINE_COUNT);
+					this.completionScanner.getLineNumber(from) + maxLineCount);
 		
 		int end;
 		if (maxEnd < 0) {
-			end = blockEnd;
+			end = to;
 		} else {
-			end = maxEnd < blockEnd ? maxEnd : blockEnd;
+			end = maxEnd < to ? maxEnd : to;
 		}
 		
 		this.completionScanner.startRecordingIdentifiers();
 		
-		MethodDeclaration fakeMethod = this.parser.parseStatementsAfterCompletion(
+		MethodDeclaration fakeMethod = this.parser.parseSomeStatements(
 				from,
 				end,
+				outsideEnclosingBlock ? FAKE_BLOCKS_COUNT : 0,
 				s.compilationUnitScope().referenceContext);
 		
 		this.completionScanner.stopRecordingIdentifiers();
