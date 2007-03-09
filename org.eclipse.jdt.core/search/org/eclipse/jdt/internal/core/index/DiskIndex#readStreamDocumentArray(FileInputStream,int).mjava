@@ -1,95 +1,42 @@
 private int[] readStreamDocumentArray(FileInputStream stream, int arraySize) throws IOException {
 	int[] indexes = new int[arraySize];
 	if (arraySize == 0) return indexes;
-	int idx = this.bufferIndex;
-	int bufferSize = BUFFER_READ_SIZE;
+
+	int i = 0;
 	switch (this.documentReferenceSize) {
 		case 1 :
-			this.bufferIndex += arraySize;
-			if (this.bufferIndex < bufferSize) {
-				for (int i = 0; i < arraySize; i++) {
-					indexes[i] = streamBuffer[idx++] & 0xFF;
+			while (i < arraySize) {
+				// how many bytes without refilling the buffer?
+				int bytesInBuffer = i + this.bufferEnd - this.bufferIndex;
+				if (bytesInBuffer > arraySize)
+					bytesInBuffer = arraySize;
+				while (i < bytesInBuffer) {
+					indexes[i++] = this.streamBuffer[this.bufferIndex++] & 0xFF;
 				}
-			} else {
-				// set size to read on file
-				int readSize = this.streamEnd == -1 ? BUFFER_READ_SIZE : this.streamEnd - this.streamPos;
-				if (readSize > bufferSize) readSize = bufferSize;
-				// fill indexes array
-				for (int i = 0; i < arraySize; i++) {
-					indexes[i] = streamBuffer[idx++] & 0xFF;
-					if (idx == bufferSize) {
-						this.streamPos += stream.read(this.streamBuffer, 0, readSize);
-						idx = 0;
-					}
-				}
+				if (i < arraySize && stream != null)
+					readStreamBuffer(stream);
 			}
 			break;
 		case 2 :
-			this.bufferIndex += arraySize << 1;
-			if (this.bufferIndex < bufferSize) {
-				for (int i = 0; i < arraySize; i++) {
-					int val = (streamBuffer[idx++]&0xFF)<<8;
-					indexes[i] = val + (streamBuffer[idx++] & 0xFF);
+			while (i < arraySize) {
+				// how many shorts without refilling the buffer?
+				int shortsInBuffer = i + ((this.bufferEnd - this.bufferIndex) / 2);
+				if (shortsInBuffer > arraySize)
+					shortsInBuffer = arraySize;
+				while (i < shortsInBuffer) {
+					int val = (this.streamBuffer[this.bufferIndex++] & 0xFF) << 8;
+					indexes[i++] = val + (this.streamBuffer[this.bufferIndex++] & 0xFF);
 				}
-			} else {
-				// set size to read on file
-				int readSize = this.streamEnd == -1 ? BUFFER_READ_SIZE : this.streamEnd - this.streamPos;
-				if (readSize > bufferSize) readSize = bufferSize;
-				// fill indexes array
-				for (int i = 0; i < arraySize; i++) {
-					int val = (streamBuffer[idx++]&0xFF)<<8;
-					if (idx == bufferSize) {
-						this.streamPos += stream.read(this.streamBuffer, 0, readSize);
-						idx = 0;
-					}
-					indexes[i] = val + (streamBuffer[idx++] & 0xFF);
-					if (idx == bufferSize) {
-						this.streamPos += stream.read(this.streamBuffer, 0, readSize);
-						idx = 0;
-					}
-				}
+				if (i < arraySize && stream != null)
+					readStreamBuffer(stream);
 			}
 			break;
 		default :
-			this.bufferIndex += arraySize << 2;
-			if (this.bufferIndex < bufferSize) {
-				for (int i = 0; i < arraySize; i++) {
-					int val = (streamBuffer[idx++]&0xFF)<<24;
-					val += (streamBuffer[idx++]&0xFF)<<16;
-					val += (streamBuffer[idx++]&0xFF)<<8;
-					indexes[i] += val + (streamBuffer[idx++]&0xFF);
-				}
-			} else {
-				// set size to read on file
-				int readSize = this.streamEnd == -1 ? BUFFER_READ_SIZE : this.streamEnd - this.streamPos;
-				if (readSize > bufferSize) readSize = bufferSize;
-				// fill indexes array
-				for (int i = 0; i < arraySize; i++) {
-					int val = (streamBuffer[idx++]&0xFF)<<24;
-					if (idx == bufferSize) {
-						this.streamPos += stream.read(this.streamBuffer, 0, readSize);
-						idx = 0;
-					}
-					val += (streamBuffer[idx++]&0xFF)<<16;
-					if (idx == bufferSize) {
-						this.streamPos += stream.read(this.streamBuffer, 0, readSize);
-						idx = 0;
-					}
-					val += (streamBuffer[idx++]&0xFF)<<8;
-					if (idx == bufferSize) {
-						this.streamPos += stream.read(this.streamBuffer, 0, readSize);
-						idx = 0;
-					}
-					indexes[i] += val + (streamBuffer[idx++]&0xFF);
-					if (idx == bufferSize) {
-						this.streamPos += stream.read(this.streamBuffer, 0, readSize);
-						idx = 0;
-					}
-				}
+			while (i < arraySize) {
+				indexes[i++] = readStreamInt(stream);
 			}
 			break;
 	}
-	this.bufferIndex = idx; // rsync buffer index
 	return indexes;
 }
 
