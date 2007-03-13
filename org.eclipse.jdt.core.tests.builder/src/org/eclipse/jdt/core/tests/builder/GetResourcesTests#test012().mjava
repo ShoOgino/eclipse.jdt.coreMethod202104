@@ -1,0 +1,52 @@
+	//https://bugs.eclipse.org/bugs/show_bug.cgi?id=6584
+	public void test012() throws JavaModelException {
+		IPath projectPath = env.addProject("Project"); //$NON-NLS-1$
+		env.addExternalJars(projectPath, Util.getJavaClassLibs());
+		fullBuild(projectPath);
+
+		// remove old package fragment root so that names don't collide
+		env.removePackageFragmentRoot(projectPath, ""); //$NON-NLS-1$
+
+		IPath root = env.addPackageFragmentRoot(projectPath, "src"); //$NON-NLS-1$
+		env.setOutputFolder(projectPath, "bin"); //$NON-NLS-1$
+
+		env.addClass(root, "p1", "Hello", //$NON-NLS-1$ //$NON-NLS-2$
+			"package p1;\n"+ //$NON-NLS-1$
+			"public class Hello {\n" +
+			"   public class Z {}\n"+ //$NON-NLS-1$
+			"   public static void main(String args[]) {\n"+ //$NON-NLS-1$
+			"      System.out.println(\"Hello world\");\n"+ //$NON-NLS-1$
+			"   }\n"+ //$NON-NLS-1$
+			"}\n" //$NON-NLS-1$
+		);
+
+		incrementalBuild(projectPath);
+
+		IJavaProject project = env.getJavaProject(projectPath);
+		IPackageFragmentRoot root2 = project.getPackageFragmentRoot(project.getProject().getWorkspace().getRoot().findMember(root.makeAbsolute()));
+		IPackageFragment packageFragment = root2.getPackageFragment("p1");//$NON-NLS-1$
+		IRegion region = JavaCore.newRegion();
+		region.add(packageFragment);
+		IResource[] resources = JavaCore.getGeneratedResources(region, true);
+		assertEquals("Wrong size", 2, resources.length);//$NON-NLS-1$
+		Arrays.sort(resources, COMPARATOR);
+		String actualOutput = getResourceOuput(resources);
+		String expectedOutput =
+			"/Project/bin/p1/Hello.class\n" +
+			"/Project/bin/p1/Hello$Z.class\n";
+		assertEquals("Wrong names", Util.convertToIndependantLineDelimiter(expectedOutput), actualOutput);
+
+		env.addFile(root, "p1/Test.txt", "This is a non-java resource");
+
+		resources = JavaCore.getGeneratedResources(region, true);
+		assertEquals("Wrong size", 2, resources.length);//$NON-NLS-1$
+		Arrays.sort(resources, COMPARATOR);
+		actualOutput = getResourceOuput(resources);
+		expectedOutput =
+			"/Project/bin/p1/Hello.class\n" +
+			"/Project/bin/p1/Hello$Z.class\n";
+		assertEquals("Wrong names", Util.convertToIndependantLineDelimiter(expectedOutput), actualOutput);
+
+		env.removeProject(projectPath);
+	}
+
