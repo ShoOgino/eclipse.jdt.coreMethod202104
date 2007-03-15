@@ -1,0 +1,48 @@
+	public static void resolve(
+		ICompilationUnit[] compilationUnits,
+		String[] bindingKeys,
+		ASTRequestor requestor,
+		int apiLevel,
+		Map options,
+		IJavaProject javaProject,
+		WorkingCopyOwner owner,
+		int flags,
+		IProgressMonitor monitor) {
+
+		CancelableNameEnvironment environment = null;
+		CancelableProblemFactory problemFactory = null;
+		try {
+			if (monitor != null) {
+				int amountOfWork = (compilationUnits.length + bindingKeys.length) * 2; // 1 for beginToCompile, 1 for resolve
+				monitor.beginTask("", amountOfWork); //$NON-NLS-1$
+			}
+			environment = new CancelableNameEnvironment(((JavaProject) javaProject), owner, monitor);
+			problemFactory = new CancelableProblemFactory(monitor);
+			CompilationUnitResolver resolver =
+				new CompilationUnitResolver(
+					environment,
+					getHandlingPolicy(),
+					getCompilerOptions(options, (flags & ICompilationUnit.ENABLE_STATEMENTS_RECOVERY) != 0),
+					getRequestor(),
+					problemFactory,
+					monitor);
+
+			resolver.resolve(compilationUnits, bindingKeys, requestor, apiLevel, options, owner, flags);
+			if (NameLookup.VERBOSE) {
+				System.out.println(Thread.currentThread() + " TIME SPENT in NameLoopkup#seekTypesInSourcePackage: " + environment.nameLookup.timeSpentInSeekTypesInSourcePackage + "ms");  //$NON-NLS-1$ //$NON-NLS-2$
+				System.out.println(Thread.currentThread() + " TIME SPENT in NameLoopkup#seekTypesInBinaryPackage: " + environment.nameLookup.timeSpentInSeekTypesInBinaryPackage + "ms");  //$NON-NLS-1$ //$NON-NLS-2$
+			}
+		} catch (JavaModelException e) {
+			// project doesn't exist -> simple parse without resolving
+			parse(compilationUnits, requestor, apiLevel, options, flags, monitor);
+		} finally {
+			if (monitor != null) monitor.done();
+			if (environment != null) {
+				environment.monitor = null; // don't hold a reference to this external object
+			}
+			if (problemFactory != null) {
+				problemFactory.monitor = null; // don't hold a reference to this external object
+			}
+		}
+	}
+
