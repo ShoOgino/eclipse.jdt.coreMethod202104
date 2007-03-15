@@ -1,8 +1,4 @@
-	public void generateCode(
-		BlockScope currentScope,
-		CodeStream codeStream,
-		boolean valueRequired) {
-			
+	public void generateCode(BlockScope currentScope, CodeStream codeStream, boolean valueRequired) {		
 		int pc = codeStream.position;
 		if (constant != Constant.NotAConstant) {
 			if (valueRequired) {
@@ -25,8 +21,11 @@
 					boolean isFirst = lastFieldBinding == this.binding 
 													&& (this.indexOfFirstFieldBinding == 1 || lastFieldBinding.declaringClass == currentScope.enclosingReceiverType())
 													&& this.otherBindings == null; // could be dup: next.next.next
-					if (valueRequired  || (!isFirst && currentScope.compilerOptions().complianceLevel >= ClassFileConstants.JDK1_4)
-							|| ((implicitConversion & TypeIds.UNBOXING) != 0)) {
+					TypeBinding requiredGenericCast = getGenericCast(this.otherCodegenBindings == null ? 0 : this.otherCodegenBindings.length);
+					if (valueRequired  
+							|| (!isFirst && currentScope.compilerOptions().complianceLevel >= ClassFileConstants.JDK1_4)
+							|| ((implicitConversion & TypeIds.UNBOXING) != 0)
+							|| requiredGenericCast != null) {
 						int lastFieldPc = codeStream.position;
 						if (lastFieldBinding.declaringClass == null) { // array length
 							codeStream.arraylength();
@@ -50,23 +49,21 @@
 							} else {
 								codeStream.invokestatic(accessor);
 							}
-							TypeBinding requiredGenericCast = getGenericCast(this.otherCodegenBindings == null ? 0 : this.otherCodegenBindings.length);
+							if (requiredGenericCast != null) codeStream.checkcast(requiredGenericCast);
 							if (valueRequired) {
-								if (requiredGenericCast != null) codeStream.checkcast(requiredGenericCast);
 								codeStream.generateImplicitConversion(implicitConversion);
 							} else {
-								if ((implicitConversion & TypeIds.UNBOXING) != 0) {
-									codeStream.generateImplicitConversion(implicitConversion);
-								}
-								// could occur if !valueRequired but compliance >= 1.4
-								switch (lastFieldBinding.type.id) {
+								boolean isUnboxing = (implicitConversion & TypeIds.UNBOXING) != 0;
+								// conversion only generated if unboxing
+								if (isUnboxing) codeStream.generateImplicitConversion(implicitConversion);
+								switch (isUnboxing ? postConversionType(currentScope).id : lastFieldBinding.type.id) {
 									case T_long :
 									case T_double :
 										codeStream.pop2();
 										break;
 									default :
 										codeStream.pop();
-								}							
+								}
 							}
 						}
 						
