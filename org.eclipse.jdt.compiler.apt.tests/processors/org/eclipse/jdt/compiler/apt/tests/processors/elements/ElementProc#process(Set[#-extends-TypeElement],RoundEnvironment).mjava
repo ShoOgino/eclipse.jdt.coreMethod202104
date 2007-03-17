@@ -1,4 +1,5 @@
 	// Always return false from this processor, because it supports "*".
+	// The return value does not signify success or failure!
 	@Override
 	public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
 		if (roundEnv.processingOver()) {
@@ -18,60 +19,37 @@
 		}
 		Set<? extends Element> actualRootElements = roundEnv.getRootElements();
 		if (null == actualRootElements) {
-			ElementProc.reportError("getRootElements() returned null");
+			reportError("getRootElements() returned null");
 			return false;
 		}
 		for (Element e : actualRootElements) {
 			String name = e.getSimpleName().toString();
 			if (!expectedRootElementNames.remove(name)) {
-				ElementProc.reportError("Missing root element " + name);
+				reportError("Missing root element " + name);
 			}
 		}
 		if (!expectedRootElementNames.isEmpty()) {
-			ElementProc.reportError("Found extra root elements including " + expectedRootElementNames.iterator().next());
+			reportError("Found extra root elements including " + expectedRootElementNames.iterator().next());
 			return false;
 		}
 		
-		// Check some basic attributes
-		TypeElement elementIA = _elementUtils.getTypeElement("targets.model.pa.IA");
-		if (elementIA == null) {
-			ElementProc.reportError("element IA was not found");
-			return false;
-		}
-		TypeElement elementAB = _elementUtils.getTypeElement("targets.model.pb.AB");
-		if (elementAB == null) {
-			ElementProc.reportError("element AB was not found");
-			return false;
-		}
-		if (elementIA.getKind() != ElementKind.INTERFACE) {
-			ElementProc.reportError("IA claims to not be an interface");
-			return false;
-		}
-		if (elementAB.getKind() != ElementKind.CLASS) {
-			ElementProc.reportError("AB claims to not be a class");
+		if (!collectElements()) {
 			return false;
 		}
 		
-		// Can we look at what interfaces AB implements?
-		List<? extends TypeMirror> ABinterfaces = elementAB.getInterfaces();
-		if (null == ABinterfaces) {
-			ElementProc.reportError("AB.getInterfaces() returned null");
+		if (!examineABInterfaces()) {
 			return false;
 		}
-		boolean foundIAinterface = false;
-		for (TypeMirror type : ABinterfaces) {
-			Element decl = _typeUtils.asElement(type);
-			if (null == decl) {
-				ElementProc.reportError("One of AB's interfaces, " + type.toString() + ", produced null from Types.asElement()");
-				return false;
-			}
-			if (elementIA.equals(decl)) {
-				foundIAinterface = true;
-				break;
-			}
+		
+		if (!examineDHierarchy()) {
+			return false;
 		}
-		if (!foundIAinterface) {
-			ElementProc.reportError("AB does not have IA as an interface");
+		
+		if (!examineAMethodsAndFields()) {
+			return false;
+		}
+		
+		if (!examinePBPackage()) {
 			return false;
 		}
 		
