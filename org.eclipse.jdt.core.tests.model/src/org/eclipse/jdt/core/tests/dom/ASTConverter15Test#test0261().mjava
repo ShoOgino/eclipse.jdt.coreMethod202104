@@ -1,0 +1,269 @@
+	/*
+	 * https://bugs.eclipse.org/bugs/show_bug.cgi?id=179065 
+	 */
+	public void test0261() throws JavaModelException {
+		this.workingCopy = getWorkingCopy("/Converter15/src/X.java", true/*resolve*/);
+		String contents =
+			"@interface Annot {\n" + 
+			"	public boolean booleanValue() default true;\n" + 
+			"\n" + 
+			"	public byte byteValue() default 0;\n" + 
+			"\n" + 
+			"	public char charValue() default \' \';\n" + 
+			"\n" + 
+			"	public double doubleValue() default 0.0;\n" + 
+			"\n" + 
+			"	public float floatValue() default 0.0f;\n" + 
+			"\n" + 
+			"	public int intValue() default 1;\n" + 
+			"\n" + 
+			"	public long longValue() default Long.MAX_VALUE;\n" + 
+			"\n" + 
+			"	public short shortValue() default 127;\n" + 
+			"\n" + 
+			"	public String stringValue() default \"\";\n" + 
+			"\n" + 
+			"	public E enumValue() default E.A;\n" + 
+			"\n" + 
+			"	public Class classValue() default String.class;\n" + 
+			"\n" + 
+			"	@Deprecated public Ann annotationValue() default @Ann();\n" + 
+			"\n" + 
+			"	public boolean[] booleanArrayValue() default { true, false };\n" + 
+			"\n" + 
+			"	public byte[] byteArrayValue() default { 0, 1 };\n" + 
+			"\n" + 
+			"	public char[] charArrayValue() default { \'#\' };\n" + 
+			"\n" + 
+			"	@Deprecated public double[] doubleArrayValue() default { 2.0 };\n" + 
+			"\n" + 
+			"	public float[] floatArrayValue() default { 1.0f };\n" + 
+			"\n" + 
+			"	public int[] intArrayValue() default { 0, 1 };\n" + 
+			"\n" + 
+			"	public long[] longArrayValue() default { Long.MIN_VALUE };\n" + 
+			"\n" + 
+			"	public short[] shortArrayValue() default { 127 };\n" + 
+			"\n" + 
+			"	public String[] stringArrayValue() default { \"Hello\", \"World\" };\n" + 
+			"\n" + 
+			"	public E[] enumArrayValue() default { E.A, E.B };\n" + 
+			"\n" + 
+			"	public Class[] classArrayValue() default { Object.class, Annot.class };\n" + 
+			"\n" + 
+			"	public Ann[] annotationArrayValue() default {};\n" + 
+			"}\n" + 
+			"\n" + 
+			"enum E {\n" + 
+			"	A, B, C, D\n" + 
+			"}\n" + 
+			"\n" + 
+			"@interface Ann {}\n" + 
+			"\n" + 
+			"@Annot(\n" +
+			"	booleanValue = true,\n" +
+			"	byteValue = (byte) 1,\n" +
+			"	charValue = \' \',\n" +
+			"	doubleValue = 4.0,\n" +
+			"	floatValue = 3.0f,\n" +
+			"	intValue = 1,\n" +
+			"	longValue = 65535L,\n" +
+			"	shortValue = (short) 128,\n" +
+			"	stringValue = \"SUCCESS\",\n" +
+			"	enumValue = E.B,\n" +
+			"	classValue = Object.class,\n" +
+			"	annotationValue = @Ann())\n" + 
+			"public class X {\n" + 
+			"}";
+		ASTNode node = buildAST(
+				contents,
+				this.workingCopy,
+				0);
+		assertEquals("Not a compilation unit", ASTNode.COMPILATION_UNIT, node.getNodeType());
+		CompilationUnit unit = (CompilationUnit) node;
+		String expectedProblems =
+			"Class is a raw type. References to generic type Class<T> should be parameterized\n" + 
+			"Class is a raw type. References to generic type Class<T> should be parameterized";
+		assertProblemsSize(unit, 2, expectedProblems);
+		node = getASTNode(unit, 3);
+		assertEquals("Not a type declaration unit", ASTNode.TYPE_DECLARATION, node.getNodeType());
+		TypeDeclaration typeDeclaration = (TypeDeclaration) node;
+		List modifiers = typeDeclaration.modifiers();
+		assertEquals("wrong size", 2, modifiers.size());
+		IExtendedModifier modifier = (IExtendedModifier) modifiers.get(0);
+		assertTrue("Not an annotation", modifier.isAnnotation());
+		Annotation annotation = (Annotation) modifier;
+		assertEquals("Not a normal annotation", ASTNode.NORMAL_ANNOTATION, annotation.getNodeType());
+		NormalAnnotation normalAnnotation = (NormalAnnotation) annotation;
+		IAnnotationBinding annotationBinding = normalAnnotation.resolveAnnotationBinding();
+		assertEquals("Wrong size", 0, annotationBinding.getAnnotations().length);
+		IJavaElement javaElement = annotationBinding.getJavaElement();
+		assertNotNull("No java element", javaElement);
+		assertEquals("Wrong kind", IBinding.ANNOTATION, annotationBinding.getKind());
+		assertNull("No key", annotationBinding.getKey());
+		assertEquals("Wrong modifier", Modifier.NONE, annotationBinding.getModifiers());
+		assertFalse("Not a deprecated annotation", annotationBinding.isDeprecated());
+		IMemberValuePairBinding[] declaredMemberValuePairs = annotationBinding.getDeclaredMemberValuePairs();
+		assertEquals("Wrong size", 12, declaredMemberValuePairs.length);
+
+		IMemberValuePairBinding pairBinding = declaredMemberValuePairs[0];
+		assertEquals("Wrong name", "booleanValue", pairBinding.getName());
+		Object value = pairBinding.getValue();
+		assertTrue("Not a Boolean", value instanceof Boolean);
+		assertEquals("Wrong value", Boolean.TRUE, value);
+		assertTrue("Not the default value", pairBinding.isDefault());
+		IMethodBinding methodBinding = pairBinding.getMethodBinding();
+		assertNotNull("No method binding", methodBinding);
+		assertEquals("Wrong name", "booleanValue", methodBinding.getName());
+		Object defaultValue = methodBinding.getDefaultValue();
+		assertTrue("Different values", value.equals(defaultValue));
+		assertFalse("Is deprecated", pairBinding.isDeprecated());
+		
+		pairBinding = declaredMemberValuePairs[1];
+		assertEquals("Wrong name", "byteValue", pairBinding.getName());
+		value = pairBinding.getValue();
+		assertTrue("Not a Byte", value instanceof Byte);
+		assertEquals("Wrong value", new Byte((byte) 1), value);
+		assertFalse("The default value", pairBinding.isDefault());
+		methodBinding = pairBinding.getMethodBinding();
+		assertNotNull("No method binding", methodBinding);
+		assertEquals("Wrong name", "byteValue", methodBinding.getName());
+		defaultValue = methodBinding.getDefaultValue();
+		assertFalse("Same values", value.equals(defaultValue));
+		assertFalse("Is deprecated", pairBinding.isDeprecated());
+
+		pairBinding = declaredMemberValuePairs[2];
+		assertEquals("Wrong name", "charValue", pairBinding.getName());
+		value = pairBinding.getValue();
+		assertTrue("Not a Character", value instanceof Character);
+		assertEquals("Wrong value", new Character(' '), value);
+		assertTrue("Not the default value", pairBinding.isDefault());
+		methodBinding = pairBinding.getMethodBinding();
+		assertNotNull("No method binding", methodBinding);
+		assertEquals("Wrong name", "charValue", methodBinding.getName());
+		defaultValue = methodBinding.getDefaultValue();
+		assertTrue("Different values", value.equals(defaultValue));
+		assertFalse("Is deprecated", pairBinding.isDeprecated());
+
+		pairBinding = declaredMemberValuePairs[3];
+		assertEquals("Wrong name", "doubleValue", pairBinding.getName());
+		value = pairBinding.getValue();
+		assertTrue("Not a Double", value instanceof Double);
+		assertEquals("Wrong value", new Double(4.0), value);
+		assertFalse("The default value", pairBinding.isDefault());
+		methodBinding = pairBinding.getMethodBinding();
+		assertNotNull("No method binding", methodBinding);
+		assertEquals("Wrong name", "doubleValue", methodBinding.getName());
+		defaultValue = methodBinding.getDefaultValue();
+		assertFalse("Same values", value.equals(defaultValue));
+		assertFalse("Is deprecated", pairBinding.isDeprecated());
+
+		pairBinding = declaredMemberValuePairs[4];
+		assertEquals("Wrong name", "floatValue", pairBinding.getName());
+		value = pairBinding.getValue();
+		assertTrue("Not a Float", value instanceof Float);
+		assertEquals("Wrong value", new Float(3.0f), value);
+		assertFalse("The default value", pairBinding.isDefault());
+		methodBinding = pairBinding.getMethodBinding();
+		assertNotNull("No method binding", methodBinding);
+		assertEquals("Wrong name", "floatValue", methodBinding.getName());
+		defaultValue = methodBinding.getDefaultValue();
+		assertFalse("Same values", value.equals(defaultValue));
+		assertFalse("Is deprecated", pairBinding.isDeprecated());
+
+		pairBinding = declaredMemberValuePairs[5];
+		assertEquals("Wrong name", "intValue", pairBinding.getName());
+		value = pairBinding.getValue();
+		assertTrue("Not an Integer", value instanceof Integer);
+		assertEquals("Wrong value", new Integer(1), value);
+		assertTrue("Not the default value", pairBinding.isDefault());
+		methodBinding = pairBinding.getMethodBinding();
+		assertNotNull("No method binding", methodBinding);
+		assertEquals("Wrong name", "intValue", methodBinding.getName());
+		defaultValue = methodBinding.getDefaultValue();
+		assertTrue("Different values", value.equals(defaultValue));
+		assertFalse("Is deprecated", pairBinding.isDeprecated());
+
+		pairBinding = declaredMemberValuePairs[6];
+		assertEquals("Wrong name", "longValue", pairBinding.getName());
+		value = pairBinding.getValue();
+		assertTrue("Not a Long", value instanceof Long);
+		assertEquals("Wrong value", new Long(65535L), value);
+		assertFalse("The default value", pairBinding.isDefault());
+		methodBinding = pairBinding.getMethodBinding();
+		assertNotNull("No method binding", methodBinding);
+		assertEquals("Wrong name", "longValue", methodBinding.getName());
+		defaultValue = methodBinding.getDefaultValue();
+		assertFalse("Same values", value.equals(defaultValue));
+		assertFalse("Is deprecated", pairBinding.isDeprecated());
+
+		pairBinding = declaredMemberValuePairs[7];
+		assertEquals("Wrong name", "shortValue", pairBinding.getName());
+		value = pairBinding.getValue();
+		assertTrue("Not a Short", value instanceof Short);
+		assertEquals("Wrong value", new Short((short) 128), value);
+		assertFalse("The default value", pairBinding.isDefault());
+		methodBinding = pairBinding.getMethodBinding();
+		assertNotNull("No method binding", methodBinding);
+		assertEquals("Wrong name", "shortValue", methodBinding.getName());
+		defaultValue = methodBinding.getDefaultValue();
+		assertFalse("Same values", value.equals(defaultValue));
+		assertFalse("Is deprecated", pairBinding.isDeprecated());
+
+		pairBinding = declaredMemberValuePairs[8];
+		assertEquals("Wrong name", "stringValue", pairBinding.getName());
+		value = pairBinding.getValue();
+		assertTrue("Not a String", value instanceof String);
+		assertEquals("Wrong value", "SUCCESS", value);
+		assertFalse("The default value", pairBinding.isDefault());
+		methodBinding = pairBinding.getMethodBinding();
+		assertNotNull("No method binding", methodBinding);
+		assertEquals("Wrong name", "stringValue", methodBinding.getName());
+		defaultValue = methodBinding.getDefaultValue();
+		assertFalse("Same values", value.equals(defaultValue));
+		assertFalse("Is deprecated", pairBinding.isDeprecated());
+
+		pairBinding = declaredMemberValuePairs[9];
+		assertEquals("Wrong name", "enumValue", pairBinding.getName());
+		value = pairBinding.getValue();
+		assertTrue("Not an IVariableBinding", value instanceof IVariableBinding);
+		IVariableBinding variableBinding = (IVariableBinding) value;
+		assertEquals("Wrong value", "B", variableBinding.getName());
+		assertFalse("The default value", pairBinding.isDefault());
+		methodBinding = pairBinding.getMethodBinding();
+		assertNotNull("No method binding", methodBinding);
+		assertEquals("Wrong name", "enumValue", methodBinding.getName());
+		defaultValue = methodBinding.getDefaultValue();
+		assertFalse("Same values", value.equals(defaultValue));
+		assertFalse("Is deprecated", pairBinding.isDeprecated());
+
+		pairBinding = declaredMemberValuePairs[10];
+		assertEquals("Wrong name", "classValue", pairBinding.getName());
+		value = pairBinding.getValue();
+		assertTrue("Not an ITypeBinding", value instanceof ITypeBinding);
+		ITypeBinding typeBinding = (ITypeBinding) value;
+		assertEquals("Wrong value", "java.lang.Object", typeBinding.getQualifiedName());
+		assertFalse("The default value", pairBinding.isDefault());
+		methodBinding = pairBinding.getMethodBinding();
+		assertNotNull("No method binding", methodBinding);
+		assertEquals("Wrong name", "classValue", methodBinding.getName());
+		defaultValue = methodBinding.getDefaultValue();
+		assertFalse("Same values", value.equals(defaultValue));
+		assertFalse("Is deprecated", pairBinding.isDeprecated());
+
+		pairBinding = declaredMemberValuePairs[11];
+		assertEquals("Wrong name", "annotationValue", pairBinding.getName());
+		value = pairBinding.getValue();
+		assertTrue("Not an IAnnotationBinding", value instanceof IAnnotationBinding);
+		IAnnotationBinding annotationBinding2 = (IAnnotationBinding) value;
+		assertEquals("Wrong value", "Ann", annotationBinding2.getName());
+		assertTrue("The default value", pairBinding.isDefault());
+		methodBinding = pairBinding.getMethodBinding();
+		assertNotNull("No method binding", methodBinding);
+		assertEquals("Wrong name", "annotationValue", methodBinding.getName());
+		defaultValue = methodBinding.getDefaultValue();
+		assertTrue("not a IBinding", defaultValue instanceof IBinding);
+		assertTrue("Same values", annotationBinding2.isEqualTo((IBinding) defaultValue));
+		assertTrue("Not deprecated", pairBinding.isDeprecated());
+	}
+
