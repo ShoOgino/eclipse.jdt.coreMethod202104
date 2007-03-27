@@ -9,34 +9,38 @@
 
 			CompilationUnit workingCopy = getWorkingCopy();
 			boolean wasConsistent = workingCopy.isConsistent();
+
+			// check is problem requestor is active
 			IProblemRequestor problemRequestor = workingCopy.getPerWorkingCopyInfo();
-			if (problemRequestor != null) {
+			if (problemRequestor != null) 
 				problemRequestor =  ((JavaModelManager.PerWorkingCopyInfo)problemRequestor).getProblemRequestor();
-			}
+			boolean defaultRequestorIsActive = problemRequestor != null && problemRequestor.isActive();
 			IProblemRequestor ownerProblemRequestor = this.workingCopyOwner.getProblemRequestor(workingCopy);
-			this.resolveBindings |= problemRequestor != null && problemRequestor.isActive();
+			boolean ownerRequestorIsActive = ownerProblemRequestor != null && ownerProblemRequestor != problemRequestor && ownerProblemRequestor.isActive();
+			this.requestorIsActive = defaultRequestorIsActive || ownerRequestorIsActive;
 
 			// create the delta builder (this remembers the current content of the cu)
 			this.deltaBuilder = new JavaElementDeltaBuilder(workingCopy);
 
 			// make working copy consistent if needed and compute AST if needed
-			makeConsistent(workingCopy, problemRequestor);
+			makeConsistent(workingCopy);
 
 			// notify reconcile participants only if working copy was not consistent or if forcing problem detection
 			// (see https://bugs.eclipse.org/bugs/show_bug.cgi?id=177319)
-			if (!wasConsistent || ((this.reconcileFlags & ICompilationUnit.FORCE_PROBLEM_DETECTION) != 0))
-			notifyParticipants(workingCopy);
+			if (!wasConsistent || ((this.reconcileFlags & ICompilationUnit.FORCE_PROBLEM_DETECTION) != 0)) {
+				notifyParticipants(workingCopy);
 
-			// recreate ast if needed
-			if (this.ast == null && (this.astLevel > ICompilationUnit.NO_AST || this.resolveBindings))
-				makeConsistent(workingCopy, problemRequestor);
+				// recreate ast if one participant reset it
+				if (this.ast == null)
+					makeConsistent(workingCopy);
+			}
 
 			// report problems
 			if (this.problems != null && (((this.reconcileFlags & ICompilationUnit.FORCE_PROBLEM_DETECTION) != 0) || !wasConsistent)) {
-				if (problemRequestor != null) {
+				if (defaultRequestorIsActive) {
 					reportProblems(workingCopy, problemRequestor);
 				}
-				if (ownerProblemRequestor != null && ownerProblemRequestor != problemRequestor) {
+				if (ownerRequestorIsActive) {
 					reportProblems(workingCopy, ownerProblemRequestor);
 				}
 			}
