@@ -1,106 +1,106 @@
-	public TypeBinding getOtherFieldBindings(BlockScope scope) {
-		// At this point restrictiveFlag may ONLY have two potential value : FIELD LOCAL (i.e cast <<(VariableBinding) binding>> is valid)
-		int length = tokens.length;
-		FieldBinding field;
-		if ((bits & Binding.FIELD) != 0) {
-			field = (FieldBinding) this.binding;
-			if (!field.isStatic()) {
-				//must check for the static status....
-				if (indexOfFirstFieldBinding > 1  //accessing to a field using a type as "receiver" is allowed only with static field
-						 || scope.methodScope().isStatic) { 	// the field is the first token of the qualified reference....
-					scope.problemReporter().staticFieldAccessToNonStaticVariable(this, field);
-					return null;
-				 }
-			} else {
+public TypeBinding getOtherFieldBindings(BlockScope scope) {
+	// At this point restrictiveFlag may ONLY have two potential value : FIELD LOCAL (i.e cast <<(VariableBinding) binding>> is valid)
+	int length = this.tokens.length;
+	FieldBinding field;
+	if ((this.bits & Binding.FIELD) != 0) {
+		field = (FieldBinding) this.binding;
+		if (!field.isStatic()) {
+			//must check for the static status....
+			if (this.indexOfFirstFieldBinding > 1  //accessing to a field using a type as "receiver" is allowed only with static field
+					 || scope.methodScope().isStatic) { 	// the field is the first token of the qualified reference....
+				scope.problemReporter().staticFieldAccessToNonStaticVariable(this, field);
+				return null;
+			 }
+		} else {
+			// indirect static reference ?
+			if (this.indexOfFirstFieldBinding > 1 
+					&& field.declaringClass != this.actualReceiverType
+					&& field.declaringClass.canBeSeenBy(scope)) {
+				scope.problemReporter().indirectAccessToStaticField(this, field);
+			}
+		}
+		// only last field is actually a write access if any
+		if (isFieldUseDeprecated(field, scope, (this.bits & ASTNode.IsStrictlyAssigned) != 0 && this.indexOfFirstFieldBinding == length))
+			scope.problemReporter().deprecatedField(field, this);
+	} else {
+		field = null;
+	}
+	TypeBinding type = ((VariableBinding) this.binding).type;
+	int index = this.indexOfFirstFieldBinding;
+	if (index == length) { //	restrictiveFlag == FIELD
+		this.constant = ((FieldBinding) this.binding).constant();
+		// perform capture conversion if read access
+		return (type != null && (this.bits & ASTNode.IsStrictlyAssigned) == 0)
+				? type.capture(scope, this.sourceEnd)
+				: type;
+	}
+	// allocation of the fieldBindings array	and its respective constants
+	int otherBindingsLength = length - index;
+	this.otherCodegenBindings = this.otherBindings = new FieldBinding[otherBindingsLength];
+	this.otherDepths = new int[otherBindingsLength];
+	
+	// fill the first constant (the one of the binding)
+	this.constant = ((VariableBinding) this.binding).constant();
+	// save first depth, since will be updated by visibility checks of other bindings
+	int firstDepth = (this.bits & ASTNode.DepthMASK) >> ASTNode.DepthSHIFT;
+	// iteration on each field	
+	while (index < length) {
+		char[] token = this.tokens[index];
+		if (type == null)
+			return null; // could not resolve type prior to this point
+
+		this.bits &= ~ASTNode.DepthMASK; // flush previous depth if any		
+		FieldBinding previousField = field;
+		field = scope.getField(type.capture(scope, (int)this.sourcePositions[index]), token, this);
+		int place = index - this.indexOfFirstFieldBinding;
+		this.otherBindings[place] = field;
+		this.otherDepths[place] = (this.bits & ASTNode.DepthMASK) >> ASTNode.DepthSHIFT;
+		if (field.isValidBinding()) {
+			// set generic cast of for previous field (if any)
+			if (previousField != null) {
+				TypeBinding fieldReceiverType = type;
+				TypeBinding receiverErasure = type.erasure();
+				if (receiverErasure instanceof ReferenceBinding) {
+					if (receiverErasure.findSuperTypeWithSameErasure(field.declaringClass) == null) {
+						fieldReceiverType = field.declaringClass; // handle indirect inheritance thru variable secondary bound
+					}
+				}				
+				FieldBinding originalBinding = previousField.original();
+			    if ((originalBinding.type.tagBits &  TagBits.HasTypeVariable) != 0 && fieldReceiverType.id != TypeIds.T_JavaLangObject) {
+			    	setGenericCast(index-1,originalBinding.type.genericCast(fieldReceiverType)); // type cannot be base-type even in boxing case
+			    }
+		    }
+			// only last field is actually a write access if any
+			if (isFieldUseDeprecated(field, scope, (this.bits & ASTNode.IsStrictlyAssigned) !=0 && index+1 == length)) {
+				scope.problemReporter().deprecatedField(field, this);
+			}
+			// constant propagation can only be performed as long as the previous one is a constant too.
+			if (this.constant != Constant.NotAConstant) {
+				this.constant = field.constant();					
+			}
+
+			if (field.isStatic()) {
+				// static field accessed through receiver? legal but unoptimal (optional warning)
+				scope.problemReporter().nonStaticAccessToStaticField(this, field);
 				// indirect static reference ?
-				if (indexOfFirstFieldBinding > 1 
-						&& field.declaringClass != actualReceiverType
-						&& field.declaringClass.canBeSeenBy(scope)) {
+				if (field.declaringClass != type) {
 					scope.problemReporter().indirectAccessToStaticField(this, field);
 				}
 			}
-			// only last field is actually a write access if any
-			if (isFieldUseDeprecated(field, scope, (this.bits & IsStrictlyAssigned) != 0 && indexOfFirstFieldBinding == length))
-				scope.problemReporter().deprecatedField(field, this);
+			type = field.type;
+			index++;
 		} else {
-			field = null;
+			this.constant = Constant.NotAConstant; //don't fill other constants slots...
+			scope.problemReporter().invalidField(this, field, index, type);
+			setDepth(firstDepth);
+			return null;
 		}
-		TypeBinding type = ((VariableBinding) binding).type;
-		int index = indexOfFirstFieldBinding;
-		if (index == length) { //	restrictiveFlag == FIELD
-			this.constant = ((FieldBinding) binding).constant();
-			// perform capture conversion if read access
-			return (type != null && (this.bits & IsStrictlyAssigned) == 0)
-					? type.capture(scope, this.sourceEnd)
-					: type;
-		}
-		// allocation of the fieldBindings array	and its respective constants
-		int otherBindingsLength = length - index;
-		otherCodegenBindings = otherBindings = new FieldBinding[otherBindingsLength];
-		otherDepths = new int[otherBindingsLength];
-		
-		// fill the first constant (the one of the binding)
-		this.constant = ((VariableBinding) binding).constant();
-		// save first depth, since will be updated by visibility checks of other bindings
-		int firstDepth = (bits & DepthMASK) >> DepthSHIFT;
-		// iteration on each field	
-		while (index < length) {
-			char[] token = tokens[index];
-			if (type == null)
-				return null; // could not resolve type prior to this point
-
-			bits &= ~DepthMASK; // flush previous depth if any		
-			FieldBinding previousField = field;
-			field = scope.getField(type.capture(scope, (int)this.sourcePositions[index]), token, this);
-			int place = index - indexOfFirstFieldBinding;
-			otherBindings[place] = field;
-			otherDepths[place] = (bits & DepthMASK) >> DepthSHIFT;
-			if (field.isValidBinding()) {
-				// set generic cast of for previous field (if any)
-				if (previousField != null) {
-					TypeBinding fieldReceiverType = type;
-					TypeBinding receiverErasure = type.erasure();
-					if (receiverErasure instanceof ReferenceBinding) {
-						if (receiverErasure.findSuperTypeWithSameErasure(field.declaringClass) == null) {
-							fieldReceiverType = field.declaringClass; // handle indirect inheritance thru variable secondary bound
-						}
-					}				
-					FieldBinding originalBinding = previousField.original();
-				    if ((originalBinding.type.tagBits &  TagBits.HasTypeVariable) != 0 && fieldReceiverType.id != T_JavaLangObject) {
-				    	setGenericCast(index-1,originalBinding.type.genericCast(fieldReceiverType)); // type cannot be base-type even in boxing case
-				    }
-			    }
-				// only last field is actually a write access if any
-				if (isFieldUseDeprecated(field, scope, (this.bits & IsStrictlyAssigned) !=0 && index+1 == length)) {
-					scope.problemReporter().deprecatedField(field, this);
-				}
-				// constant propagation can only be performed as long as the previous one is a constant too.
-				if (this.constant != Constant.NotAConstant) {
-					this.constant = field.constant();					
-				}
-
-				if (field.isStatic()) {
-					// static field accessed through receiver? legal but unoptimal (optional warning)
-					scope.problemReporter().nonStaticAccessToStaticField(this, field);
-					// indirect static reference ?
-					if (field.declaringClass != type) {
-						scope.problemReporter().indirectAccessToStaticField(this, field);
-					}
-				}
-				type = field.type;
-				index++;
-			} else {
-				constant = Constant.NotAConstant; //don't fill other constants slots...
-				scope.problemReporter().invalidField(this, field, index, type);
-				setDepth(firstDepth);
-				return null;
-			}
-		}
-		setDepth(firstDepth);
-		type = (otherBindings[otherBindingsLength - 1]).type;
-		// perform capture conversion if read access
-		return (type != null && (this.bits & IsStrictlyAssigned) == 0)
-				? type.capture(scope, this.sourceEnd)
-				: type;		
 	}
+	setDepth(firstDepth);
+	type = (this.otherBindings[otherBindingsLength - 1]).type;
+	// perform capture conversion if read access
+	return (type != null && (this.bits & ASTNode.IsStrictlyAssigned) == 0)
+			? type.capture(scope, this.sourceEnd)
+			: type;		
+}
 

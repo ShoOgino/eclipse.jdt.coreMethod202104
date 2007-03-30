@@ -1,58 +1,52 @@
-	/**
-	 * index is <0 to denote write access emulation
-	 */
-	public void manageSyntheticAccessIfNecessary(
-			BlockScope currentScope,
-			FieldBinding fieldBinding,
-			TypeBinding lastReceiverType,
-			int index,
-			FlowInfo flowInfo) {
+/**
+ * index is <0 to denote write access emulation
+ */
+public void manageSyntheticAccessIfNecessary(BlockScope currentScope, FieldBinding fieldBinding, TypeBinding lastReceiverType, 	int index, FlowInfo flowInfo) {
+	if ((flowInfo.tagBits & FlowInfo.UNREACHABLE) != 0)	return;
+	// index == 0 denotes the first fieldBinding, index > 0 denotes one of the 'otherBindings', index < 0 denotes a write access (to last binding)
+	if (fieldBinding.constant() != Constant.NotAConstant)
+		return;
 
-		if ((flowInfo.tagBits & FlowInfo.UNREACHABLE) != 0)	return;
-		// index == 0 denotes the first fieldBinding, index > 0 denotes one of the 'otherBindings', index < 0 denotes a write access (to last binding)
-		if (fieldBinding.constant() != Constant.NotAConstant)
+	// if field from parameterized type got found, use the original field at codegen time
+	FieldBinding originalField = fieldBinding.original();
+	if (originalField != fieldBinding) {
+		setCodegenBinding(index < 0 ? (this.otherBindings == null ? 0 : this.otherBindings.length) : index, originalField);
+	}
+	
+	if (fieldBinding.isPrivate()) { // private access
+	    FieldBinding someCodegenBinding = getCodegenBinding(index < 0 ? (this.otherBindings == null ? 0 : this.otherBindings.length) : index);
+		if (someCodegenBinding.declaringClass != currentScope.enclosingSourceType()) {
+		    setSyntheticAccessor(fieldBinding, index, 
+		            ((SourceTypeBinding) someCodegenBinding.declaringClass).addSyntheticMethod(someCodegenBinding, index >= 0 /*read-access?*/));
+			currentScope.problemReporter().needToEmulateFieldAccess(someCodegenBinding, this, index >= 0 /*read-access?*/);
 			return;
-
-		// if field from parameterized type got found, use the original field at codegen time
-		FieldBinding originalField = fieldBinding.original();
-		if (originalField != fieldBinding) {
-			setCodegenBinding(index < 0 ? (this.otherBindings == null ? 0 : this.otherBindings.length) : index, originalField);
 		}
+	} else if (fieldBinding.isProtected()){
+	    int depth = (index == 0 || (index < 0 && this.otherDepths == null))
+	    		? (this.bits & ASTNode.DepthMASK) >> ASTNode.DepthSHIFT 
+	    		 : this.otherDepths[index < 0 ? this.otherDepths.length-1 : index-1];
 		
-		if (fieldBinding.isPrivate()) { // private access
+		// implicit protected access 
+		if (depth > 0 && (fieldBinding.declaringClass.getPackage() != currentScope.enclosingSourceType().getPackage())) {
 		    FieldBinding someCodegenBinding = getCodegenBinding(index < 0 ? (this.otherBindings == null ? 0 : this.otherBindings.length) : index);
-			if (someCodegenBinding.declaringClass != currentScope.enclosingSourceType()) {
-			    setSyntheticAccessor(fieldBinding, index, 
-			            ((SourceTypeBinding) someCodegenBinding.declaringClass).addSyntheticMethod(someCodegenBinding, index >= 0 /*read-access?*/));
-				currentScope.problemReporter().needToEmulateFieldAccess(someCodegenBinding, this, index >= 0 /*read-access?*/);
-				return;
-			}
-		} else if (fieldBinding.isProtected()){
-		    int depth = (index == 0 || (index < 0 && this.otherDepths == null))
-		    		? (bits & DepthMASK) >> DepthSHIFT 
-		    		 : otherDepths[index < 0 ? otherDepths.length-1 : index-1];
-			
-			// implicit protected access 
-			if (depth > 0 && (fieldBinding.declaringClass.getPackage() != currentScope.enclosingSourceType().getPackage())) {
-			    FieldBinding someCodegenBinding = getCodegenBinding(index < 0 ? (this.otherBindings == null ? 0 : this.otherBindings.length) : index);
-			    setSyntheticAccessor(fieldBinding, index, 
-			            ((SourceTypeBinding) currentScope.enclosingSourceType().enclosingTypeAt(depth)).addSyntheticMethod(someCodegenBinding, index >= 0 /*read-access?*/));
-				currentScope.problemReporter().needToEmulateFieldAccess(someCodegenBinding, this, index >= 0 /*read-access?*/);
-				return;
-			}
+		    setSyntheticAccessor(fieldBinding, index, 
+		            ((SourceTypeBinding) currentScope.enclosingSourceType().enclosingTypeAt(depth)).addSyntheticMethod(someCodegenBinding, index >= 0 /*read-access?*/));
+			currentScope.problemReporter().needToEmulateFieldAccess(someCodegenBinding, this, index >= 0 /*read-access?*/);
+			return;
 		}
-		// if the binding declaring class is not visible, need special action
-		// for runtime compatibility on 1.2 VMs : change the declaring class of the binding
-		// NOTE: from target 1.2 on, field's declaring class is touched if any different from receiver type
-		// and not from Object or implicit static field access.	
-		if (fieldBinding.declaringClass != lastReceiverType
-				&& !lastReceiverType.isArrayType()
-				&& fieldBinding.declaringClass != null // array.length
-				&& fieldBinding.constant() == Constant.NotAConstant) {
-			CompilerOptions options = currentScope.compilerOptions();
-			if ((options.targetJDK >= ClassFileConstants.JDK1_2
-					&& (options.complianceLevel >= ClassFileConstants.JDK1_4 || !(index <= 1 &&  indexOfFirstFieldBinding == 1 && fieldBinding.isStatic()))
-					&& fieldBinding.declaringClass.id != T_JavaLangObject) // no change for Object fields
+	}
+	// if the binding declaring class is not visible, need special action
+	// for runtime compatibility on 1.2 VMs : change the declaring class of the binding
+	// NOTE: from target 1.2 on, field's declaring class is touched if any different from receiver type
+	// and not from Object or implicit static field access.	
+	if (fieldBinding.declaringClass != lastReceiverType
+			&& !lastReceiverType.isArrayType()
+			&& fieldBinding.declaringClass != null // array.length
+			&& fieldBinding.constant() == Constant.NotAConstant) {
+		CompilerOptions options = currentScope.compilerOptions();
+		if ((options.targetJDK >= ClassFileConstants.JDK1_2
+				&& (options.complianceLevel >= ClassFileConstants.JDK1_4 || !(index <= 1 &&  this.indexOfFirstFieldBinding == 1 && fieldBinding.isStatic()))
+				&& fieldBinding.declaringClass.id != TypeIds.T_JavaLangObject) // no change for Object fields
 				|| !fieldBinding.declaringClass.canBeSeenBy(currentScope)) {
 	
 		    setCodegenBinding(
@@ -60,7 +54,7 @@
 		            currentScope.enclosingSourceType().getUpdatedFieldBinding(
 		                    getCodegenBinding(index < 0 ? (this.otherBindings == null ? 0 : this.otherBindings.length) : index), 
 		                    (ReferenceBinding)lastReceiverType.erasure()));
-			}
-		}			
-	}
+		}
+	}			
+}
 
