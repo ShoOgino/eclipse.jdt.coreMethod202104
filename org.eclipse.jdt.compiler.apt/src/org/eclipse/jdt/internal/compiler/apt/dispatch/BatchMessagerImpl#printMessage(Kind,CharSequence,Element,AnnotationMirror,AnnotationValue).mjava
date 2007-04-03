@@ -7,6 +7,7 @@
 		ReferenceContext referenceContext = null;
 		int startPosition = 0;
 		int endPosition = 0;
+		CategorizedProblem problem = null;
 		if (e != null) {
 			switch(e.getKind()) {
 				case ANNOTATION_TYPE :
@@ -45,6 +46,22 @@
 				case EXCEPTION_PARAMETER :
 					break;
 				case FIELD :
+					VariableElementImpl variableElementImpl = (VariableElementImpl) e;
+					binding = variableElementImpl._binding;
+					if (binding instanceof FieldBinding) {
+						FieldBinding fieldBinding = (FieldBinding) binding;
+						FieldDeclaration fieldDeclaration = fieldBinding.sourceField();
+						if (fieldDeclaration != null) {
+							ReferenceBinding declaringClass = fieldBinding.declaringClass;
+							if (declaringClass instanceof SourceTypeBinding) {
+								SourceTypeBinding sourceTypeBinding = (SourceTypeBinding) declaringClass;
+								TypeDeclaration typeDeclaration = (TypeDeclaration) sourceTypeBinding.scope.referenceContext();
+								referenceContext = typeDeclaration;
+							}
+							startPosition = fieldDeclaration.sourceStart;
+							endPosition = fieldDeclaration.sourceEnd;
+						}
+					}
 					break;
 				case INSTANCE_INIT :
 				case STATIC_INIT :
@@ -67,23 +84,33 @@
 					int columnNumber = startPosition >= 0
 							? Util.searchColumnNumber(result.getLineSeparatorPositions(), lineNumber,startPosition)
 							: 0;
-					result.record(new BatchAptProblem(
-							result.fileName, 
+					problem = new BatchAptProblem(
+							result.fileName,
 							String.valueOf(builder),
 							0,
-							new String[0],
+							NO_ARGUMENTS,
 							ProblemSeverities.Error,
 							startPosition,
 							endPosition,
 							lineNumber,
-							columnNumber),
-						referenceContext);
+							columnNumber);
 				} else {
-					// TODO (olivier) need a way to find a context to report the error
-					_compiler.globalErrorsCount++;
+					problem = new BatchAptProblem(
+							null,
+							String.valueOf(builder),
+							0,
+							NO_ARGUMENTS,
+							ProblemSeverities.Error,
+							startPosition,
+							endPosition,
+							0,
+							1);
 				}
 				break;
+			case MANDATORY_WARNING :
 			case WARNING :
+			case NOTE :
+			case OTHER :
 				if (referenceContext != null) {
 					CompilationResult result = referenceContext.compilationResult();
 					int lineNumber = startPosition >= 0
@@ -92,22 +119,32 @@
 					int columnNumber = startPosition >= 0
 							? Util.searchColumnNumber(result.getLineSeparatorPositions(), lineNumber,startPosition)
 							: 0;
-					result.record(new BatchAptProblem(
-							result.fileName, 
+					problem = new BatchAptProblem(
+							result.fileName,
 							String.valueOf(builder),
 							0,
-							new String[0],
+							NO_ARGUMENTS,
 							ProblemSeverities.Warning,
 							startPosition,
 							endPosition,
 							lineNumber,
-							columnNumber),
-						referenceContext);
+							columnNumber);
 				} else {
-					// TODO (olivier) need a way to find a context to report the warning
-					_compiler.globalWarningsCount++;
+					problem = new BatchAptProblem(
+							null,
+							String.valueOf(builder),
+							0,
+							NO_ARGUMENTS,
+							ProblemSeverities.Warning,
+							startPosition,
+							endPosition,
+							0,
+							1);
 				}
 				break;
+		}
+		if (problem != null) {
+			this._compiler.addExtraProblems(problem);
 		}
 	}
 
