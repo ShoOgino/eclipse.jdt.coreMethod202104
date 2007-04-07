@@ -3,13 +3,13 @@
 			// Get default previous end
 			ASTNode parent = node.getParent();
 			int previousEnd = parent.getStartPosition();
-
+			
 			// Look for sibling node
-			ASTNode sibling = (ASTNode) this.waitingSiblings.get(parent);
+ 			ASTNode sibling = parent == this.topSiblingParent ? (ASTNode) this.siblings[this.siblingPtr] : null;
 			if (sibling != null) {
 				// Found one previous sibling, so compute its trailing comments using current node start position
 				try {
-					previousEnd = storeTrailingComments(sibling, node.getStartPosition(), false);
+					previousEnd = storeTrailingComments(sibling, node.getStartPosition(), false, this.parentLineRange[this.siblingPtr]);
 				} catch (Exception ex) {
 					// Give up extended ranges at this level if unexpected exception happens...
 				}
@@ -21,14 +21,37 @@
 			}
 
 			// Compute leading comments for current node
+			int[] previousLineRange = this.siblingPtr > -1 ? this.parentLineRange[this.siblingPtr] : new int[] {1, DefaultCommentMapper.this.scanner.linePtr+1};
 			try {
-				storeLeadingComments(node, previousEnd);
+				storeLeadingComments(node, previousEnd, previousLineRange);
 			} catch (Exception ex) {
 				// Give up extended ranges at this level if unexpected exception happens...
 			}
 			
 			// Store current node as waiting sibling for its parent
-			this.waitingSiblings.put(parent, node);
+			if (this.topSiblingParent != parent) {
+				if (this.siblings.length == ++this.siblingPtr) {
+					System.arraycopy(this.siblings, 0, this.siblings = new ASTNode[this.siblingPtr*2], 0, this.siblingPtr);
+					System.arraycopy(this.parentLineRange, 0, this.parentLineRange = new int[this.siblingPtr*2][], 0, this.siblingPtr);
+				}
+				if (this.topSiblingParent == null) {
+					// node is a CompilationUnit
+					this.parentLineRange[this.siblingPtr] = previousLineRange;
+				} else {
+					int parentStart = parent.getStartPosition();
+					int firstLine = getLineNumber(parentStart, previousLineRange);
+					int lastLine = getLineNumber(parentStart + parent.getLength() - 1, previousLineRange);
+					if (this.parentLineRange[this.siblingPtr] == null) {
+						this.parentLineRange[this.siblingPtr] = new int[] {firstLine, lastLine};
+					} else {
+						int[] lineRange = this.parentLineRange[this.siblingPtr];
+						lineRange[0] = firstLine;
+						lineRange[1] = lastLine;
+					}
+				}
+				this.topSiblingParent = parent;
+			}
+			this.siblings[this.siblingPtr] = node;
 
 			// We're always ok to visit sub-levels
 			return true;
