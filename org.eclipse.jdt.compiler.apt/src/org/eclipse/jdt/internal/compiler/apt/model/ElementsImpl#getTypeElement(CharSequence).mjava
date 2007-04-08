@@ -4,16 +4,32 @@
 	@Override
 	public TypeElement getTypeElement(CharSequence name) {
 		LookupEnvironment le = _env.getLookupEnvironment();
-		//TODO: do this the right way - this is a hack to test if it works
-		String qname = name.toString();
-		String parts[] = qname.split("\\."); //$NON-NLS-1$
-		int length = parts.length;
-		char[][] compoundName = new char[length][];
-		for (int i = 0; i < length; i++) {
-			compoundName[i] = parts[i].toCharArray();
-		}
+		final char[][] compoundName = CharOperation.splitOn('.', name.toString().toCharArray());
 		ReferenceBinding binding = le.getType(compoundName);
-		if (binding == null) {
+		// If we didn't find the binding, maybe it's a nested type;
+		// try finding the top-level type and then working downwards.
+		if (null == binding) {
+			ReferenceBinding topLevelBinding = null;
+			int topLevelSegments = compoundName.length; 
+			while (--topLevelSegments > 0) {
+				char[][] topLevelName = new char[topLevelSegments][];
+				for (int i = 0; i < topLevelSegments; ++i) {
+					topLevelName[i] = compoundName[i];
+				}
+				topLevelBinding = le.getType(topLevelName);
+				if (null != topLevelBinding) {
+					break;
+				}
+			}
+			if (null == topLevelBinding) {
+				return null;
+			}
+			binding = topLevelBinding;
+			for (int i = topLevelSegments; null != binding && i < compoundName.length; ++i) {
+				binding = binding.getMemberType(compoundName[i]);
+			}
+		}
+		if (null == binding) {
 			return null;
 		}
 		return new TypeElementImpl(binding);
