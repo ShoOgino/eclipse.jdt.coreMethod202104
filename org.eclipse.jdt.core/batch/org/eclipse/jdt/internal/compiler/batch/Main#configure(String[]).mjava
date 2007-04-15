@@ -23,6 +23,7 @@ public void configure(String[] argv) throws InvalidInputException {
 	final int INSIDE_PROCESSOR_PATH_start = 17;
 	final int INSIDE_PROCESSOR_start = 18;
 	final int INSIDE_S_start = 19;
+	final int INSIDE_CLASS_NAMES = 20;
 
 	final int DEFAULT = 0;
 	ArrayList bootclasspaths = new ArrayList(DEFAULT_SIZE_CLASSPATH);
@@ -32,7 +33,10 @@ public void configure(String[] argv) throws InvalidInputException {
 	ArrayList extdirsClasspaths = null;
 	ArrayList endorsedDirClasspaths = null;
 
-	int index = -1, filesCount = 0, argCount = argv.length;
+	int index = -1;
+	int filesCount = 0;
+	int classCount = 0;
+	int argCount = argv.length;
 	int mode = DEFAULT;
 	this.repetitions = 0;
 	boolean printUsageRequired = false;
@@ -581,6 +585,10 @@ public void configure(String[] argv) throws InvalidInputException {
 					mode = DEFAULT;
 					continue;
 				}
+				if (currentArg.equals("-classNames")) { //$NON-NLS-1$
+					mode = INSIDE_CLASS_NAMES;
+					continue;
+				}
 				break;
 			case INSIDE_TARGET :
 				if (this.didSpecifyTarget) {
@@ -735,6 +743,25 @@ public void configure(String[] argv) throws InvalidInputException {
 				// nothing to do here. This is consumed again by the AnnotationProcessorManager
 				mode = DEFAULT;
 				continue;
+			case INSIDE_CLASS_NAMES :
+				tokenizer = new StringTokenizer(currentArg, ","); //$NON-NLS-1$
+				if (this.classNames == null) {
+					this.classNames = new String[DEFAULT_SIZE_CLASSPATH];
+				}
+				while (tokenizer.hasMoreTokens()) {
+					if (this.classNames.length == classCount) {
+						// resize
+						System.arraycopy(
+							this.classNames,
+							0,
+							(this.classNames = new String[classCount * 2]),
+							0,
+							classCount);
+					}
+					this.classNames[classCount++] = tokenizer.nextToken();
+				}
+				mode = DEFAULT;
+				continue;
 		}
 
 		// default is input directory, if no custom destination path exists
@@ -754,7 +781,7 @@ public void configure(String[] argv) throws InvalidInputException {
 		File dir = new File(currentSourceDirectory);
 		if (!dir.isDirectory()) {
 			throw new InvalidInputException(
-				this.bind("configure.directoryNotExist", currentSourceDirectory)); //$NON-NLS-1$
+				this.bind("configure.unrecognizedOption", currentSourceDirectory)); //$NON-NLS-1$
 		}
 		String[] result = FileFinder.find(dir, SuffixConstants.SUFFIX_STRING_JAVA);
 		if (NONE.equals(customDestinationPath)) {
@@ -807,7 +834,7 @@ public void configure(String[] argv) throws InvalidInputException {
 		continue;
 	}
 
-	if (printUsageRequired || filesCount == 0) {
+	if (printUsageRequired || (filesCount == 0 && classCount == 0)) {
 		if (usageSection ==  null) {
 			printUsage(); // default
 		} else {
@@ -845,6 +872,15 @@ public void configure(String[] argv) throws InvalidInputException {
 			filesCount);
 	}
 
+	if (classCount != 0) {
+		System.arraycopy(
+			this.classNames,
+			0,
+			(this.classNames = new String[classCount]),
+			0,
+			classCount);
+	}
+	
 	setPaths(bootclasspaths,
 			sourcepathClasspathArg,
 			sourcepathClasspaths,
