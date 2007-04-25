@@ -1,0 +1,59 @@
+	/*
+	 * Used by getAnnotation(), which returns a reflective proxy of the annotation class.  When processors then
+	 * invoke methods such as value() on the annotation proxy, this method is called.
+	 * <p>
+	 * A challenge here is that the processor was not necessarily compiled against the same annotation
+	 * definition that the compiler is looking at right now, not to mention that the annotation itself
+	 * may be defective in source.  So the actual type of the value may be quite different than the
+	 * type expected by the caller, which will result in a ClassCastException, which is ugly for the
+	 * processor to try to catch.  So we try to catch and correct this type mismatch where possible.
+	 * <p>
+	 * @see java.lang.reflect.InvocationHandler#invoke(java.lang.Object, java.lang.reflect.Method, java.lang.Object[])
+	 */
+	@Override
+	public Object invoke(Object proxy, Method method, Object[] args) throws Throwable
+	{
+        final String methodName = method.getName();
+        if ( args == null || args.length == 0 ) {
+            if( methodName.equals("hashCode") ) { //$NON-NLS-1$
+                return new Integer( hashCode() );
+            }
+            else if( methodName.equals("toString") ) { //$NON-NLS-1$
+                return toString();
+            }
+            else if( methodName.equals("annotationType")) { //$NON-NLS-1$
+            	return proxy.getClass().getInterfaces()[0];
+            }
+        }
+        else if ( args.length == 1 && methodName.equals("equals") ) { //$NON-NLS-1$
+            return new Boolean( equals( args[0] ) );
+        }
+        
+        // If it's not one of the above methods, it must be an annotation member, so it cannot take any arguments
+        if ( args != null && args.length != 0 ) {
+            throw new NoSuchMethodException("method " + method.getName() + formatArgs(args) + " does not exist on annotation " + toString()); //$NON-NLS-1$ //$NON-NLS-2$
+        }
+        final MethodBinding methodBinding = getMethodBinding(methodName);
+        if ( methodBinding == null ) {
+            throw new NoSuchMethodException("method " + method.getName() + "() does not exist on annotation" + toString()); //$NON-NLS-1$ //$NON-NLS-2$
+        }
+
+        Object actualValue = null;
+        boolean foundMethod = false;
+        ElementValuePair[] pairs = _binding.getElementValuePairs();
+		for (ElementValuePair pair : pairs) {
+			if (methodName.equals(new String(pair.getName()))) {
+				actualValue = pair.getValue();
+				foundMethod = true;
+				break;
+			}
+		}
+		if (!foundMethod) {
+			// couldn't find explicit value; see if there's a default
+			actualValue = methodBinding.getDefaultValue(); 
+		}
+		Class<?> expectedType = method.getReturnType();
+		TypeBinding actualType = methodBinding.returnType;
+        return getReflectionValue(actualValue, actualType, expectedType);
+	}
+

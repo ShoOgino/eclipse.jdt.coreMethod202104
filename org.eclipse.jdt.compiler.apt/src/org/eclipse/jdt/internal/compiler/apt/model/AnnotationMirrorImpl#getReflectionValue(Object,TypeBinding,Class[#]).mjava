@@ -1,0 +1,91 @@
+	/**
+	 * Convert an annotation member value from JDT into Reflection, and from whatever its actual type
+	 * is into whatever type the reflective invoker of a method is expecting.
+	 * 
+	 * @param annoValue the value as represented by {@link ElementValuePair#getValue()}
+	 * @param actualType the return type of the corresponding {@link MethodBinding}
+	 * @param expectedType the type that the reflective method invoker is expecting
+	 * @return an object of the expected type representing the annotation member value, 
+	 * or an appropriate dummy value (such as null) if no value is available
+	 */
+	private Object getReflectionValue(Object actualValue, TypeBinding actualType, Class<?> expectedType)
+	{
+		if (null == expectedType) {
+			// With no expected type, we can't even guess at a conversion
+			return null;
+		}
+		if (null == actualValue) {
+			// Return a type-appropriate equivalent of null
+			return Factory.getMatchingDummyValue(expectedType);
+		}
+		if (expectedType.isEnum()) {
+			Object returnVal = null;
+	        if (actualType != null && actualType.isEnum() && actualValue instanceof FieldBinding) {
+	        	
+	        	FieldBinding binding = (FieldBinding)actualValue;
+	        	try {
+	        		Field returnedField = null;
+	        		returnedField = expectedType.getField( new String(binding.name) );
+	        		if (null != returnedField) {
+	        			returnVal = returnedField.get(null);
+	        		}
+	        	}
+	        	catch (NoSuchFieldException nsfe) {
+	        		// return null
+	        	}
+	        	catch (IllegalAccessException iae) {
+	        		// return null
+	        	}
+	        }
+	        return null == returnVal ? Factory.getMatchingDummyValue(expectedType) : returnVal;
+		}
+		else if (Class.class.equals(expectedType)) {
+			// package the Class-valued return as a MirroredTypeException
+			if (actualValue instanceof TypeBinding) {
+				TypeMirror mirror = _env.getFactory().newTypeMirror((TypeBinding)actualValue);
+				throw new MirroredTypeException(mirror);
+			}
+			else {
+				// TODO: actual value is not a TypeBinding.  Should we return a TypeMirror around an ErrorType?
+				return null;
+			}
+		}
+		else if (expectedType.isArray()) {
+			if (Class.class.equals(expectedType.getComponentType())) {
+				// package Class[]-valued return as a MirroredTypesException
+				if (actualType.isArrayType() && actualValue instanceof Object[] &&
+						((ArrayBinding)actualType).leafComponentType.erasure().id == TypeIds.T_JavaLangClass) {
+					Object[] bindings = (Object[])actualValue;
+					List<TypeMirror> mirrors = new ArrayList<TypeMirror>(bindings.length);
+					for (int i = 0; i < bindings.length; ++i) {
+						if (bindings[i] instanceof TypeBinding) {
+							mirrors.add(_env.getFactory().newTypeMirror((TypeBinding)bindings[i]));
+						}
+					}
+					throw new MirroredTypesException(mirrors);
+				}
+				// TODO: actual value is not a TypeBinding[].  Should we return a TypeMirror[] around an ErrorType?
+				return null;
+			}
+			// Handle arrays of types other than Class, e.g., int[], MyEnum[], ...
+			// TODO: if we have a solo actual value, arrayify it (see org.eclipse.jdt.apt.core AnnotationInvocationHandler)
+			return null;
+		}
+		else if (expectedType.isAnnotation()) {
+			// member value is expected to be an annotation type.  Wrap it in an Annotation proxy.
+			if (actualType.isAnnotationType() && actualValue instanceof AnnotationBinding) {
+				AnnotationMirrorImpl annoMirror =
+					(AnnotationMirrorImpl)_env.getFactory().newAnnotationMirror((AnnotationBinding)actualValue);
+				return Proxy.newProxyInstance(expectedType.getClassLoader(),
+						new Class[]{ expectedType }, annoMirror );
+			}
+			else {
+				return null;
+			}
+		}
+		else {
+			// if the type is not primitive or String, this will return a dummy value.
+			return convertJDTPrimitiveToReflectionType(actualValue, expectedType);
+		}
+	}
+
