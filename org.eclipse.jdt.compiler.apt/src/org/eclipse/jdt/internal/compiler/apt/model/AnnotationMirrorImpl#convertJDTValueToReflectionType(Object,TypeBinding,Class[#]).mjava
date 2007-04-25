@@ -1,0 +1,81 @@
+	/**
+	 * Convert a JDT annotation value as obtained from ElementValuePair.getValue()
+	 * (e.g., IntConstant, FieldBinding, etc.) to the type expected by a reflective
+	 * method invocation (e.g., int, an enum constant, etc.).
+	 * @return a value of type {@code expectedType}, or a dummy value of that type if
+	 * the actual value cannot be converted.
+	 */
+	private Object convertJDTValueToReflectionType(Object jdtValue, TypeBinding actualType, Class<?> expectedType) {
+		if (expectedType.isPrimitive() || String.class.equals(expectedType)) {
+			if (jdtValue instanceof Constant) {
+				if (boolean.class.equals(expectedType)) {
+					return ((Constant)jdtValue).booleanValue();
+				}
+				else if (byte.class.equals(expectedType)) {
+					return ((Constant)jdtValue).byteValue();
+				}
+				else if (char.class.equals(expectedType)) {
+					return ((Constant)jdtValue).charValue();
+				}
+				else if (double.class.equals(expectedType)) {
+					return ((Constant)jdtValue).doubleValue();
+				}
+				else if (float.class.equals(expectedType)) {
+					return ((Constant)jdtValue).floatValue();
+				}
+				else if (int.class.equals(expectedType)) {
+					return ((Constant)jdtValue).intValue();
+				}
+				else if (long.class.equals(expectedType)) {
+					return ((Constant)jdtValue).longValue();
+				}
+				else if (short.class.equals(expectedType)) {
+					return ((Constant)jdtValue).shortValue();
+				}
+				else if (String.class.equals(expectedType)) {
+					return ((Constant)jdtValue).stringValue();
+				}
+			}
+			// Primitive or string is expected, but our actual value cannot be coerced into one.
+			// TODO: if the actual value is an array of primitives, should we unpack the first one?
+			return Factory.getMatchingDummyValue(expectedType);
+		}
+		else if (expectedType.isEnum()) {
+			Object returnVal = null;
+	        if (actualType != null && actualType.isEnum() && jdtValue instanceof FieldBinding) {
+	        	
+	        	FieldBinding binding = (FieldBinding)jdtValue;
+	        	try {
+	        		Field returnedField = null;
+	        		returnedField = expectedType.getField( new String(binding.name) );
+	        		if (null != returnedField) {
+	        			returnVal = returnedField.get(null);
+	        		}
+	        	}
+	        	catch (NoSuchFieldException nsfe) {
+	        		// return null
+	        	}
+	        	catch (IllegalAccessException iae) {
+	        		// return null
+	        	}
+	        }
+	        return null == returnVal ? Factory.getMatchingDummyValue(expectedType) : returnVal;
+		}
+		else if (expectedType.isAnnotation()) {
+			// member value is expected to be an annotation type.  Wrap it in an Annotation proxy.
+			if (actualType.isAnnotationType() && jdtValue instanceof AnnotationBinding) {
+				AnnotationMirrorImpl annoMirror =
+					(AnnotationMirrorImpl)_env.getFactory().newAnnotationMirror((AnnotationBinding)jdtValue);
+				return Proxy.newProxyInstance(expectedType.getClassLoader(),
+						new Class[]{ expectedType }, annoMirror );
+			}
+			else {
+				// No way to cast a non-annotation value to an annotation type; return null to caller
+				return null;
+			}
+		}
+		else {
+			return Factory.getMatchingDummyValue(expectedType);
+		}
+	}
+

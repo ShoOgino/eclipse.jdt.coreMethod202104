@@ -1,0 +1,100 @@
+	/**
+	 * Convert an array of JDT types as obtained from ElementValuePair.getValue()
+	 * (e.g., an Object[] containing IntConstant elements) to the type expected by
+	 * a reflective method invocation (e.g., int[]).
+	 * <p>
+	 * This does not handle arrays of Class, but it does handle primitives, enum constants,
+	 * and types such as String.
+	 * @param jdtValue the actual value returned by ElementValuePair.getValue() or MethodBinding.getDefault()
+	 * @param jdtType the return type of the annotation method binding
+	 * @param expectedType the type that the invoker of the method is expecting; must be an array type
+	 * @return an Object which is, e.g., an int[]; or null, if an array cannot be created.
+	 */
+	private Object convertJDTArrayToReflectionArray(Object jdtValue, TypeBinding jdtType, Class<?> expectedType)
+	{
+		assert null != expectedType && expectedType.isArray();
+		if (!jdtType.isArrayType() || !(jdtValue instanceof Object[])) {
+			// TODO: wrap solo element into one-length array
+			return null;
+		}
+		TypeBinding jdtLeafType = jdtType.leafComponentType();
+		Object[] jdtArray = (Object[])jdtValue;
+		Class<?> expectedLeafType = expectedType.getComponentType();
+        final int length = jdtArray.length;
+        final Object returnArray = Array.newInstance(expectedLeafType, length);
+        for (int i = 0; i < length; ++i) {
+        	Object jdtElementValue = jdtArray[i];
+    		if (expectedLeafType.isPrimitive() || String.class.equals(expectedLeafType)) {
+    			if (jdtElementValue instanceof Constant) {
+    				if (boolean.class.equals(expectedLeafType)) {
+    					Array.setBoolean(returnArray, i, ((Constant)jdtElementValue).booleanValue());
+    				}
+    				else if (byte.class.equals(expectedLeafType)) {
+    					Array.setByte(returnArray, i, ((Constant)jdtElementValue).byteValue());
+    				}
+    				else if (char.class.equals(expectedLeafType)) {
+    					Array.setChar(returnArray, i, ((Constant)jdtElementValue).charValue());
+    				}
+    				else if (double.class.equals(expectedLeafType)) {
+    					Array.setDouble(returnArray, i, ((Constant)jdtElementValue).doubleValue());
+    				}
+    				else if (float.class.equals(expectedLeafType)) {
+    					Array.setFloat(returnArray, i, ((Constant)jdtElementValue).floatValue());
+    				}
+    				else if (int.class.equals(expectedLeafType)) {
+    					Array.setInt(returnArray, i, ((Constant)jdtElementValue).intValue());
+    				}
+    				else if (long.class.equals(expectedLeafType)) {
+    					Array.setLong(returnArray, i, ((Constant)jdtElementValue).longValue());
+    				}
+    				else if (short.class.equals(expectedLeafType)) {
+    					Array.setShort(returnArray, i, ((Constant)jdtElementValue).shortValue());
+    				}
+    				else if (String.class.equals(expectedLeafType)) {
+    					Array.set(returnArray, i, ((Constant)jdtElementValue).stringValue());
+    				}
+    			}
+    			else {
+	    			// Primitive or string is expected, but our actual value cannot be coerced into one.
+	    			// TODO: if the actual value is an array of primitives, should we unpack the first one?
+	    			Factory.setArrayMatchingDummyValue(returnArray, i, expectedLeafType);
+    			}
+    		}
+    		else if (expectedLeafType.isEnum()) {
+    			Object returnVal = null;
+    	        if (jdtLeafType != null && jdtLeafType.isEnum() && jdtElementValue instanceof FieldBinding) {
+    	        	FieldBinding binding = (FieldBinding)jdtElementValue;
+    	        	try {
+    	        		Field returnedField = null;
+    	        		returnedField = expectedLeafType.getField( new String(binding.name) );
+    	        		if (null != returnedField) {
+    	        			returnVal = returnedField.get(null);
+    	        		}
+    	        	}
+    	        	catch (NoSuchFieldException nsfe) {
+    	        		// return null
+    	        	}
+    	        	catch (IllegalAccessException iae) {
+    	        		// return null
+    	        	}
+    	        }
+    	        Array.set(returnArray, i, returnVal);
+    		}
+    		else if (expectedLeafType.isAnnotation()) {
+    			// member value is expected to be an annotation type.  Wrap it in an Annotation proxy.
+    			Object returnVal = null;
+    			if (jdtLeafType.isAnnotationType() && jdtElementValue instanceof AnnotationBinding) {
+    				AnnotationMirrorImpl annoMirror =
+    					(AnnotationMirrorImpl)_env.getFactory().newAnnotationMirror((AnnotationBinding)jdtElementValue);
+    				returnVal = Proxy.newProxyInstance(expectedLeafType.getClassLoader(),
+    						new Class[]{ expectedLeafType }, annoMirror );
+    			}
+    	        Array.set(returnArray, i, returnVal);
+    		}
+    		else {
+    			Array.set(returnArray, i, null);
+    		}
+        }
+		return returnArray;
+	}
+
