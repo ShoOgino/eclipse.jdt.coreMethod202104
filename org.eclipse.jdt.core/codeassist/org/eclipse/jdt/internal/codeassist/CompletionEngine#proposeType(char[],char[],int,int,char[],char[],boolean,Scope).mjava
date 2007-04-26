@@ -1,4 +1,4 @@
-	private void proposeType(char[] packageName, char[] simpleTypeName, int modifiers, int accessibility, char[] typeName, char[] fullyQualifiedName, boolean isQualified) {
+	private void proposeType(char[] packageName, char[] simpleTypeName, int modifiers, int accessibility, char[] typeName, char[] fullyQualifiedName, boolean isQualified, Scope scope) {
 		char[] completionName = fullyQualifiedName;
 		if(isQualified) {
 			if (packageName == null || packageName.length == 0)
@@ -6,6 +6,34 @@
 					return; // ignore types from the default package from outside it
 		} else {
 			completionName = simpleTypeName;
+		}
+		
+		TypeBinding guessedType = null;
+		if ((modifiers & ClassFileConstants.AccAnnotation) != 0 &&
+				this.assistNodeIsAnnotation &&
+				(this.targetedElement & TagBits.AnnotationTargetMASK) != 0) {
+			char[][] cn = CharOperation.splitOn('.', fullyQualifiedName);
+			
+			TypeReference ref;
+			if (cn.length == 1) {
+				ref = new SingleTypeReference(simpleTypeName, 0);
+			} else {
+				ref = new QualifiedTypeReference(cn,new long[cn.length]);
+			}
+			
+			switch (scope.kind) {
+				case Scope.METHOD_SCOPE :
+				case Scope.BLOCK_SCOPE :
+					guessedType = ref.resolveType((BlockScope)scope);
+					break;
+				case Scope.CLASS_SCOPE :
+					guessedType = ref.resolveType((ClassScope)scope);
+					break;
+			}
+			
+			if (!guessedType.isValidBinding()) return;
+			
+			if (!hasPossibleAnnotationTarget(guessedType, scope)) return;
 		}
 
 		int relevance = computeBaseRelevance();
@@ -21,6 +49,7 @@
 			case ClassFileConstants.AccAnnotation:
 			case ClassFileConstants.AccAnnotation | ClassFileConstants.AccInterface:
 				relevance += computeRelevanceForAnnotation();
+				if (guessedType != null) relevance += computeRelevanceForAnnotationTarget(guessedType);
 				relevance += computeRelevanceForInterface();
 				break;
 			case ClassFileConstants.AccEnum:
