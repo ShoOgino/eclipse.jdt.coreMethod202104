@@ -4,48 +4,53 @@ void checkAgainstInheritedMethods(MethodBinding currentMethod, MethodBinding[] m
 		return; // do not repoort against subsequent inherited methods
 	}
 	CompilerOptions options = type.scope.compilerOptions();
+	// need to find the overridden methods to avoid blaming this type for issues which are already reported against a supertype
+	// but cannot ignore an overridden inherited method completely when it comes to checking for bridge methods
+	int[] overriddenInheritedMethods = findOverriddenInheritedMethods(methods, length);
 	nextMethod : for (int i = length; --i >= 0;) {
 		MethodBinding inheritedMethod = methods[i];
-		if (currentMethod.isStatic() != inheritedMethod.isStatic()) {  // Cannot override a static method or hide an instance method
-			problemReporter(currentMethod).staticAndInstanceConflict(currentMethod, inheritedMethod);
-			continue nextMethod;
-		}
-
-		// want to tag currentMethod even if return types are not equal
-		if (inheritedMethod.isAbstract()) {
-			if (inheritedMethod.declaringClass.isInterface()) {
-				currentMethod.modifiers |= ExtraCompilerModifiers.AccImplementing;
-			} else {
-				currentMethod.modifiers |= ExtraCompilerModifiers.AccImplementing | ExtraCompilerModifiers.AccOverriding;
-			}
-// with the above change an abstract method is tagged as implementing the inherited abstract method
-//		if (!currentMethod.isAbstract() && inheritedMethod.isAbstract()) {
-//			if ((currentMethod.modifiers & CompilerModifiers.AccOverriding) == 0)
-//				currentMethod.modifiers |= CompilerModifiers.AccImplementing;
-		} else {
-			currentMethod.modifiers |= ExtraCompilerModifiers.AccOverriding;
-		}
-
-		if (!areReturnTypesCompatible(currentMethod, inheritedMethod))
-			if (reportIncompatibleReturnTypeError(currentMethod, inheritedMethod))
+		if (overriddenInheritedMethods == null || overriddenInheritedMethods[i] == 0) {
+			if (currentMethod.isStatic() != inheritedMethod.isStatic()) {  // Cannot override a static method or hide an instance method
+				problemReporter(currentMethod).staticAndInstanceConflict(currentMethod, inheritedMethod);
 				continue nextMethod;
+			}
 
-		if (currentMethod.thrownExceptions != Binding.NO_EXCEPTIONS)
-			checkExceptions(currentMethod, inheritedMethod);
-		if (inheritedMethod.isFinal())
-			problemReporter(currentMethod).finalMethodCannotBeOverridden(currentMethod, inheritedMethod);
-		if (!isAsVisible(currentMethod, inheritedMethod))
-			problemReporter(currentMethod).visibilityConflict(currentMethod, inheritedMethod);
-		if (options.reportDeprecationWhenOverridingDeprecatedMethod && inheritedMethod.isViewedAsDeprecated()) {
-			if (!currentMethod.isViewedAsDeprecated() || options.reportDeprecationInsideDeprecatedCode) {
-				// check against the other inherited methods to see if they hide this inheritedMethod
-				ReferenceBinding declaringClass = inheritedMethod.declaringClass;
-				if (declaringClass.isInterface())
-					for (int j = length; --j >= 0;)
-						if (i != j && methods[j].declaringClass.implementsInterface(declaringClass, false))
-							continue nextMethod;
-
-				problemReporter(currentMethod).overridesDeprecatedMethod(currentMethod, inheritedMethod);
+			// want to tag currentMethod even if return types are not equal
+			if (inheritedMethod.isAbstract()) {
+				if (inheritedMethod.declaringClass.isInterface()) {
+					currentMethod.modifiers |= ExtraCompilerModifiers.AccImplementing;
+				} else {
+					currentMethod.modifiers |= ExtraCompilerModifiers.AccImplementing | ExtraCompilerModifiers.AccOverriding;
+				}
+//			with the above change an abstract method is tagged as implementing the inherited abstract method
+//			if (!currentMethod.isAbstract() && inheritedMethod.isAbstract()) {
+//				if ((currentMethod.modifiers & CompilerModifiers.AccOverriding) == 0)
+//					currentMethod.modifiers |= CompilerModifiers.AccImplementing;
+			} else {
+				currentMethod.modifiers |= ExtraCompilerModifiers.AccOverriding;
+			}
+	
+			if (!areReturnTypesCompatible(currentMethod, inheritedMethod))
+				if (reportIncompatibleReturnTypeError(currentMethod, inheritedMethod))
+					continue nextMethod;
+	
+			if (currentMethod.thrownExceptions != Binding.NO_EXCEPTIONS)
+				checkExceptions(currentMethod, inheritedMethod);
+			if (inheritedMethod.isFinal())
+				problemReporter(currentMethod).finalMethodCannotBeOverridden(currentMethod, inheritedMethod);
+			if (!isAsVisible(currentMethod, inheritedMethod))
+				problemReporter(currentMethod).visibilityConflict(currentMethod, inheritedMethod);
+			if (options.reportDeprecationWhenOverridingDeprecatedMethod && inheritedMethod.isViewedAsDeprecated()) {
+				if (!currentMethod.isViewedAsDeprecated() || options.reportDeprecationInsideDeprecatedCode) {
+					// check against the other inherited methods to see if they hide this inheritedMethod
+					ReferenceBinding declaringClass = inheritedMethod.declaringClass;
+					if (declaringClass.isInterface())
+						for (int j = length; --j >= 0;)
+							if (i != j && methods[j].declaringClass.implementsInterface(declaringClass, false))
+								continue nextMethod;
+	
+					problemReporter(currentMethod).overridesDeprecatedMethod(currentMethod, inheritedMethod);
+				}
 			}
 		}
 		checkForBridgeMethod(currentMethod, inheritedMethod, allInheritedMethods);
