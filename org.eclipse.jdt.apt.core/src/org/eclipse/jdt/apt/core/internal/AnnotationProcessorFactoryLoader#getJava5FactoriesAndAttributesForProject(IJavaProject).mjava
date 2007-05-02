@@ -5,17 +5,24 @@
      * containers in <code>jproj</code>.  The map is unmodifiable, and may be empty but 
      * will not be null.
      */
-    public synchronized Map<AnnotationProcessorFactory, FactoryPath.Attributes> 
+    public Map<AnnotationProcessorFactory, FactoryPath.Attributes> 
     	getJava5FactoriesAndAttributesForProject(IJavaProject jproj){
     	
-    	Map<AnnotationProcessorFactory, FactoryPath.Attributes> factories = _project2Java5Factories.get(jproj);
-    	if( factories != null )
-    		return Collections.unmodifiableMap(factories);
+    	// We can't create problem markers inside synchronization -- see https://bugs.eclipse.org/bugs/show_bug.cgi?id=184923
+    	LoadFailureHandler failureHandler = new LoadFailureHandler(jproj);
     	
-    	// Load the project
-		FactoryPath fp = FactoryPathUtil.getFactoryPath(jproj);
-		Map<FactoryContainer, FactoryPath.Attributes> containers = fp.getEnabledContainers();
-		loadFactories(containers, jproj);
+    	synchronized (this) {
+	    	Map<AnnotationProcessorFactory, FactoryPath.Attributes> factories = _project2Java5Factories.get(jproj);
+	    	if( factories != null )
+	    		return Collections.unmodifiableMap(factories);
+	    	
+	    	// Load the project
+			FactoryPath fp = FactoryPathUtil.getFactoryPath(jproj);
+			Map<FactoryContainer, FactoryPath.Attributes> containers = fp.getEnabledContainers();
+			loadFactories(containers, jproj, failureHandler);
+    	}
+    	
+    	failureHandler.reportFailureMarkers();
 		return Collections.unmodifiableMap(_project2Java5Factories.get(jproj));
     	
     }

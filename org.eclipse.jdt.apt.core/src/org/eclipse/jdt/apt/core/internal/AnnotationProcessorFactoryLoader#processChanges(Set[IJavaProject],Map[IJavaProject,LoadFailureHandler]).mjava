@@ -4,7 +4,7 @@
 	 * This will cause build problem markers to be removed and regenerated,
 	 * and factory class caches to be cleared.
 	 */
-	private void processChanges(Set<IJavaProject> affected) {
+	private void processChanges(Set<IJavaProject> affected, Map<IJavaProject,LoadFailureHandler> handlers) {
 		for (IJavaProject jproj : affected) {
 			removeAptBuildProblemMarkers(jproj);
 			uncacheProject(jproj);
@@ -13,12 +13,19 @@
 		// is called.  But we have to do it then, because things might
 		// have changed in the interim; and if we don't do it here, then
 		// we'll have an empty _resources2Project cache, so we'll ignore
-		// all resource changes until the next build.  Is that a problem?   
+		// all resource changes until the next build.  Is that a problem?
 		for (IJavaProject jproj : affected) {
 			if (jproj.exists()) {
 				Set<FactoryContainer> badContainers = verifyFactoryPath(jproj);
 				if (badContainers != null) {
-					reportMissingFactoryContainers(badContainers, jproj);
+					LoadFailureHandler handler = handlers.get(jproj);
+					if (handler == null) {
+						handler = new LoadFailureHandler(jproj);
+						handlers.put(jproj, handler);
+					}
+					for (FactoryContainer container : badContainers) {
+						handler.addMissingLibrary(container.getId());
+					}
 				}
 			}
 		}
