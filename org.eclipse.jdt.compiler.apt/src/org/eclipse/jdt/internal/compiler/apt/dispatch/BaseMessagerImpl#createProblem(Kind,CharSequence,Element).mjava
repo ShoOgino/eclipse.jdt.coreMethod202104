@@ -1,12 +1,12 @@
 	/**
-	 * @param kind
-	 * @param msg
-	 * @param e
-	 * @param referenceContext
+	 * Create a CategorizedProblem that can be reported to an ICompilerRequestor, etc.
+	 * 
+	 * @param e the element against which to report the message.  If the element is not
+	 * in the set of elements being compiled in the current round, the reference context
+	 * and filename will be set to null.
 	 * @return
 	 */
-	public static CategorizedProblem createProblem(Kind kind, CharSequence msg, Element e) {
-		CategorizedProblem problem = null;
+	public static AptProblem createProblem(Kind kind, CharSequence msg, Element e) {
 		ReferenceContext referenceContext = null;
 		int startPosition = 0;
 		int endPosition = 0;
@@ -76,77 +76,40 @@
 			}
 		}
 		StringBuilder builder = new StringBuilder(msg);
+		int lineNumber = 0;
+		int columnNumber = 1;
+		char[] fileName = null;
+		if (referenceContext != null) {
+			CompilationResult result = referenceContext.compilationResult();
+			fileName = result.fileName;
+			int[] lineEnds = null;
+			lineNumber = startPosition >= 0
+					? Util.getLineNumber(startPosition, lineEnds = result.getLineSeparatorPositions(), 0, lineEnds.length-1)
+					: 0;
+			columnNumber = startPosition >= 0
+					? Util.searchColumnNumber(result.getLineSeparatorPositions(), lineNumber,startPosition)
+					: 0;
+		}
+		int severity;
 		switch(kind) {
 			case ERROR :
-				if (referenceContext != null) {
-					CompilationResult result = referenceContext.compilationResult();
-					int[] lineEnds = null;
-					int lineNumber = startPosition >= 0
-							? Util.getLineNumber(startPosition, lineEnds = result.getLineSeparatorPositions(), 0, lineEnds.length-1)
-							: 0;
-					int columnNumber = startPosition >= 0
-							? Util.searchColumnNumber(result.getLineSeparatorPositions(), lineNumber,startPosition)
-							: 0;
-					problem = new BatchAptProblem(
-							result.fileName,
-							String.valueOf(builder),
-							0,
-							NO_ARGUMENTS,
-							ProblemSeverities.Error,
-							startPosition,
-							endPosition,
-							lineNumber,
-							columnNumber);
-				} else {
-					problem = new BatchAptProblem(
-							null,
-							String.valueOf(builder),
-							0,
-							NO_ARGUMENTS,
-							ProblemSeverities.Error,
-							startPosition,
-							endPosition,
-							0,
-							1);
-				}
+				severity = ProblemSeverities.Error;
 				break;
-			case MANDATORY_WARNING :
-			case WARNING :
-			case NOTE :
-			case OTHER :
-				if (referenceContext != null) {
-					CompilationResult result = referenceContext.compilationResult();
-					int[] lineEnds = null;
-					int lineNumber = startPosition >= 0
-							? Util.getLineNumber(startPosition, lineEnds = result.getLineSeparatorPositions(), 0, lineEnds.length-1)
-							: 0;
-					int columnNumber = startPosition >= 0
-							? Util.searchColumnNumber(result.getLineSeparatorPositions(), lineNumber,startPosition)
-							: 0;
-					problem = new BatchAptProblem(
-							result.fileName,
-							String.valueOf(builder),
-							0,
-							NO_ARGUMENTS,
-							ProblemSeverities.Warning,
-							startPosition,
-							endPosition,
-							lineNumber,
-							columnNumber);
-				} else {
-					problem = new BatchAptProblem(
-							null,
-							String.valueOf(builder),
-							0,
-							NO_ARGUMENTS,
-							ProblemSeverities.Warning,
-							startPosition,
-							endPosition,
-							0,
-							1);
-				}
+			default :
+				// There is no "INFO" equivalent in JDT
+				severity = ProblemSeverities.Warning;
 				break;
 		}
-		return problem;
+		return new AptProblem(
+				referenceContext,
+				fileName,
+				String.valueOf(builder),
+				0,
+				NO_ARGUMENTS,
+				severity,
+				startPosition,
+				endPosition,
+				lineNumber,
+				columnNumber);
 	}
 
