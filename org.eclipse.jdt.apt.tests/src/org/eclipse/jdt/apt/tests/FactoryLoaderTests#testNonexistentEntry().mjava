@@ -1,0 +1,42 @@
+	// Test what happens when the factory path contains a jar file that can't be found.
+	public void testNonexistentEntry() throws Exception {
+		LoaderTestAnnotationProcessor.clearLoaded();
+		IProject project = env.getProject( getProjectName() );
+		fullBuild( project.getFullPath() );
+		expectingNoProblems();
+		assertFalse(LoaderTestAnnotationProcessor.isLoaded());
+		
+		IJavaProject jproj = env.getJavaProject( getProjectName() );
+		IFactoryPath ifp = AptConfig.getFactoryPath(jproj);
+		
+		// add bogus entry to factory list, and rebuild.
+		File bogusJar = new File("bogusJar.jar"); // assumed to not exist
+		ifp.addExternalJar(bogusJar);
+		
+		// verify that a problem marker was added.
+		AptConfig.setFactoryPath(jproj, ifp);
+		fullBuild( project.getFullPath() );
+		IMarker[] markers = getAllAPTMarkers(_projectPath);
+		assertEquals(1, markers.length);
+		assertEquals(AptPlugin.APT_LOADER_PROBLEM_MARKER, markers[0].getType());
+		String message = markers[0].getAttribute(IMarker.MESSAGE, "");
+		assertTrue(message.contains("bogusJar.jar"));
+		
+		// remove bogus entry, add _extJar to the factory list as an external jar, and rebuild.
+		ifp.removeExternalJar(bogusJar);
+		ifp.addExternalJar(_extJar);
+		AptConfig.setFactoryPath(jproj, ifp);
+		
+		// rebuild and verify that the processor was loaded and the problems were removed.
+		LoaderTestAnnotationProcessor.clearLoaded();
+		fullBuild( project.getFullPath() );
+		expectingNoProblems();
+		assertTrue(LoaderTestAnnotationProcessor.isLoaded());
+		
+		// Verify that we were able to run the ColorAnnotationProcessor successfully
+		assertTrue(ColorAnnotationProcessor.wasSuccessful());
+		
+		// restore to the original
+		AptConfig.setFactoryPath(jproj, ifp);
+	}
+
