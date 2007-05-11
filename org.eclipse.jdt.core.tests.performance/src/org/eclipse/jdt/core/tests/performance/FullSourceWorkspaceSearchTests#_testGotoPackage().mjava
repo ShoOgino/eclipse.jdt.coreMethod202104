@@ -1,0 +1,48 @@
+	/**
+	 * Performance tests for search: Simulate a Goto Package action.
+	 * This action searches all package declarations on the entire workspace.
+	 * Not activated, as this is more a JDT/UI performance tests, but released
+	 * to keep a trace in the repository...
+	 */
+	public void _testGotoPackage() throws CoreException {
+		tagAsSummary("Search package declarations", true); // put in fingerprint
+
+		// Wait for indexing end
+		AbstractJavaModelTests.waitUntilIndexesReady();
+
+		// Warm up
+		IJavaSearchScope scope = SearchEngine.createWorkspaceScope();
+		String name = "*";
+		final List packageList= new ArrayList();
+		SearchRequestor requestor = new SearchRequestor() {
+			public void acceptSearchMatch(SearchMatch match) throws CoreException {
+				IJavaElement enclosingElement= (IJavaElement) match.getElement();
+				enclosingElement.getElementName();
+				IPackageFragment pkg= (IPackageFragment) enclosingElement;
+				if (pkg.getCompilationUnits().length == 0 && pkg.getClassFiles().length == 0) {
+					return;
+				}
+				packageList.add(enclosingElement);
+			}
+		};
+		for (int i=0 ; i<WARMUP_COUNT; i++) {
+			search(name, PACKAGE, DECLARATIONS, scope, requestor);
+			if (i==0) {
+				System.out.println("	- "+INT_FORMAT.format(packageList.size())+" package declarations in workspace.");
+			}
+		}
+
+		// Measures
+		for (int i=0; i<MEASURES_COUNT; i++) {
+			cleanCategoryTableCache(false, scope, new JavaSearchResultCollector());
+			runGc();
+			startMeasuring();
+			search(name, PACKAGE, DECLARATIONS, scope, requestor);
+			stopMeasuring();
+		}
+		
+		// Commit
+		commitMeasurements();
+		assertPerformance();
+	}
+
