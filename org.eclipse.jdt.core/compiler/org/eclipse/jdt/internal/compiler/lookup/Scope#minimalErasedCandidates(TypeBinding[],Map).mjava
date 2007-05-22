@@ -31,9 +31,7 @@
 		TypeBinding leafType = firstType.leafComponentType();
 		TypeBinding firstErasure = (leafType.isTypeVariable() || leafType.isWildcard()/*&& !leafType.isCapture()*/) ? firstType : firstType.erasure();
 		if (firstErasure != firstType) {
-			Set someInvocations = new HashSet(1);
-			someInvocations.add(firstType);
-			allInvocations.put(firstErasure, someInvocations);
+			allInvocations.put(firstErasure, firstType);
 		}						
 		typesToVisit.add(firstType);
 		int max = 1;
@@ -93,9 +91,7 @@
 						max++;
 						TypeBinding superTypeErasure = (firstBound.isTypeVariable() || firstBound.isWildcard() /*&& !itsInterface.isCapture()*/) ? superType : superType.erasure();
 						if (superTypeErasure != superType) {
-							Set someInvocations = new HashSet(1);
-							someInvocations.add(superType);
-							allInvocations.put(superTypeErasure, someInvocations);
+							allInvocations.put(superTypeErasure, superType);
 						}						
 					}
 					continue;
@@ -112,9 +108,7 @@
 						max++;
 						TypeBinding superTypeErasure = (itsInterface.isTypeVariable() || itsInterface.isWildcard() /*&& !itsInterface.isCapture()*/) ? superType : superType.erasure();
 						if (superTypeErasure != superType) {
-							Set someInvocations = new HashSet(1);
-							someInvocations.add(superType);
-							allInvocations.put(superTypeErasure, someInvocations);
+							allInvocations.put(superTypeErasure, superType);
 						}						
 					}
 				}
@@ -127,9 +121,7 @@
 					max++;
 					TypeBinding superTypeErasure = (itsSuperclass.isTypeVariable() || itsSuperclass.isWildcard() /*&& !itsSuperclass.isCapture()*/) ? superType : superType.erasure();
 					if (superTypeErasure != superType) {
-						Set someInvocations = new HashSet(1);
-						someInvocations.add(superType);
-						allInvocations.put(superTypeErasure, someInvocations);
+						allInvocations.put(superTypeErasure, superType);
 					}
 				}
 			}
@@ -158,10 +150,27 @@
 						continue nextSuperType;
 					}
 					// record invocation
-					Set someInvocations = (Set) allInvocations.get(erasedSuperType);
-					if (someInvocations == null) someInvocations = new HashSet(1);
-					someInvocations.add(match);
-					allInvocations.put(erasedSuperType, someInvocations);
+					Object invocationData = allInvocations.get(erasedSuperType);
+					if (invocationData == null) {
+						allInvocations.put(erasedSuperType, match); // no array for singleton
+					} else if (invocationData instanceof TypeBinding) {
+						if (match != invocationData) {
+							// using an array to record invocations in order (188103)
+							TypeBinding[] someInvocations = { (TypeBinding) invocationData, match, };
+							allInvocations.put(erasedSuperType, someInvocations);
+						}
+					} else { // using an array to record invocations in order (188103)
+						TypeBinding[] someInvocations = (TypeBinding[]) invocationData;
+						checkExisting: {
+							int invocLength = someInvocations.length;
+							for (int k = 0; k < invocLength; k++) {
+								if (someInvocations[k] == match) break checkExisting;
+							}
+							System.arraycopy(someInvocations, 0, someInvocations = new TypeBinding[invocLength+1], 0, invocLength);
+							allInvocations.put(erasedSuperType, someInvocations);
+							someInvocations[invocLength] = match;
+						}
+					}
 				}
 				continue nextOtherType;
 			}
@@ -184,10 +193,27 @@
 					}
 				}
 				// record invocation
-				Set someInvocations = (Set) allInvocations.get(erasedSuperType);
-				if (someInvocations == null) someInvocations = new HashSet(1);
-				someInvocations.add(match);
-				allInvocations.put(erasedSuperType, someInvocations);
+				Object invocationData = allInvocations.get(erasedSuperType);
+				if (invocationData == null) {
+					allInvocations.put(erasedSuperType, match); // no array for singleton
+				} else if (invocationData instanceof TypeBinding) {
+					if (match != invocationData) {
+						// using an array to record invocations in order (188103)
+						TypeBinding[] someInvocations = { (TypeBinding) invocationData, match, };
+						allInvocations.put(erasedSuperType, someInvocations);
+					}
+				} else { // using an array to record invocations in order (188103)
+					TypeBinding[] someInvocations = (TypeBinding[]) invocationData;
+					checkExisting: {
+						int invocLength = someInvocations.length;
+						for (int k = 0; k < invocLength; k++) {
+							if (someInvocations[k] == match) break checkExisting;
+						}
+						System.arraycopy(someInvocations, 0, someInvocations = new TypeBinding[invocLength+1], 0, invocLength);
+						allInvocations.put(erasedSuperType, someInvocations);
+						someInvocations[invocLength] = match;
+					}
+				}
 			}				
 		}
 		// eliminate non minimal super types
