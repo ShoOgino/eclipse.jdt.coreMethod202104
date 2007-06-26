@@ -1,21 +1,43 @@
 boolean checkInheritedReturnTypes(MethodBinding[] methods, int length) {
-	if (methods[0].declaringClass.isClass())
-		return super.checkInheritedReturnTypes(methods, length);
-
+	// assumes length > 1
 	// its possible in 1.5 that A is compatible with B & C, but B is not compatible with C
-	for (int i = 0, l = length - 1; i < l;) {
+	int[] areIncompatible = null;
+	// abstract classes must check every method against each other
+	for (int i = 0, l = this.type.isAbstract() ? length - 2 : 0; i <= l;) {
 		MethodBinding method = methods[i++];
-		nextMethod : for (int j = i; j <= l; j++) {
+		nextMethod : for (int j = i; j < length; j++) {
 			if (!areReturnTypesCompatible(method, methods[j])) {
 				if (this.type.isInterface())
 					for (int m = length; --m >= 0;)
 						if (methods[m].declaringClass.id == TypeIds.T_JavaLangObject)
 							continue nextMethod; // do not complain since the super interface already got blamed
-				problemReporter().inheritedMethodsHaveIncompatibleReturnTypes(this.type, methods, length);
-				return false;
+				// check to see if this is just a warning, if so report it & skip to next method
+				if (isUnsafeReturnTypeOverride(method, methods[j])) {
+					problemReporter(method).unsafeReturnTypeOverride(method, methods[j], this.type);
+					continue nextMethod;
+				}
+				if (areIncompatible == null)
+					areIncompatible = new int[length];
+				areIncompatible[i - 1] = -1;
+				areIncompatible[j] = -1;
 			}
 		}
 	}
-	return true;
+	if (areIncompatible == null)
+		return true;
+
+	int count = 0;
+	for (int i = 0; i < length; i++)
+		if (areIncompatible[i] == -1) count++;
+	if (count == length) {
+		problemReporter().inheritedMethodsHaveIncompatibleReturnTypes(this.type, methods, length);
+		return false;
+	}
+	MethodBinding[] methodsToReport = new MethodBinding[count];
+	for (int i = 0, index = 0; i < length; i++)
+		if (areIncompatible[i] == -1)
+			methodsToReport[index++] = methods[i];
+	problemReporter().inheritedMethodsHaveIncompatibleReturnTypes(this.type, methodsToReport, count);
+	return false;
 }
 
