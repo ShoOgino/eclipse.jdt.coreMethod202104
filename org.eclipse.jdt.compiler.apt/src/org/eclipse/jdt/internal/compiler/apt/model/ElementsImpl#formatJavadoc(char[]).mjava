@@ -1,7 +1,7 @@
 	/**
 	 * Strip the comment characters from a javadoc comment. Assume the comment is already
 	 * missing its closing delimiter.
-	 * 
+	 *
 	 * We mainly do not attempt to emulate the baroque behavior of javac with respect to
 	 * treatment of whitespace. The rules here are simpler: eliminate the opening and
 	 * closing delimiter, and eliminate [whitespace plus stars] at the beginning of each
@@ -11,12 +11,12 @@
 	 * after the delimiter, but no non-whitespace chars, then delete the whitespace but
 	 * preserve the newline; and so forth.
 	 */
-	public static String formatJavadoc(char[] unparsed)
+	private static String formatJavadoc(char[] unparsed)
 	{
 		if (unparsed == null || unparsed.length < 5) { // delimiters take 5 chars
 			return null;
 		}
-		
+
 		String[] lines = new String(unparsed).split("\n"); //$NON-NLS-1$
 		Matcher delimiterMatcher = INITIAL_DELIMITER.matcher(lines[0]);
 		if (!delimiterMatcher.find()) {
@@ -26,38 +26,97 @@
 		lines[0] = lines[0].substring(iOpener);
 		if (lines.length == 1) {
 			// single-line comment.  Should trim(), but javac doesn't.
-			return lines[0];
-		}
-		
-		int firstLine = lines[0].trim().length() > 0 ? 0 : 1;
-		
-		// for each line after the first, including the last, if it starts with whitespace
-		// followed by stars, skip all that. 
-		for (int line = 1; line < lines.length; ++line) {
-			Matcher whitespaceMatcher = INITIAL_WHITESPACE_STARS.matcher(lines[line]);
-			if (whitespaceMatcher.find()) {
-				int firstAfterStars = whitespaceMatcher.end();
-				lines[line] = lines[line].substring(firstAfterStars);
-			}
-		}
-		
-		// If the last line is now empty, skip it
-		int lastLine = lines[lines.length - 1].trim().length() > 0 ? lines.length - 1 : lines.length - 2;
-		
-		StringBuilder sb = new StringBuilder();
-		for (int line = firstLine; line <= lastLine; ++line) {
-			char[] chars = lines[line].toCharArray();
+			// we should however remove the starting whitespaces
+			StringBuilder sb = new StringBuilder();
+			char[] chars = lines[0].toCharArray();
+			boolean startingWhitespaces = true;
 			for (char c : chars) {
-				if (c == '\t') {
-					for (int i = 0; i < 8; i++) {
-						sb.append(' ');
-					}
+				if (Character.isWhitespace(c))
+					if (startingWhitespaces) {
+						continue;
+					} else {
+						sb.append(c);
 				} else {
+					startingWhitespaces = false;
 					sb.append(c);
 				}
 			}
+			return sb.toString();
+		}
+
+		// if the first line ends with spaces after the /** then we want to insert a line separator
+		int firstLine = lines[0].trim().length() > 0 ? 0 : 1;
+
+		// If the last line is now empty, skip it
+		int lastLine = lines[lines.length - 1].trim().length() > 0 ? lines.length - 1 : lines.length - 2;
+
+		StringBuilder sb = new StringBuilder();
+		if (lines[0].length() != 0 && firstLine == 1) {
+			// insert a line separator only if the remaining chars on the line are whitespaces
+			sb.append('\n');
+		}
+		boolean preserveLineSeparator = lines[0].length() == 0;
+		for (int line = firstLine; line <= lastLine; ++line) {
+			char[] chars = lines[line].toCharArray();
+			int starsIndex = getStars(chars);
+			int leadingWhitespaces = 0;
+			boolean recordLeadingWhitespaces = true;
+			for (int i = 0, max = chars.length; i < max; i++) {
+				char c = chars[i];
+				switch(c) {
+					case '\t' :
+						if (starsIndex == -1) {
+							if (recordLeadingWhitespaces) {
+								leadingWhitespaces += 8;
+							} else {
+								sb.append(c);
+							}
+						} else if (i >= starsIndex) {
+							sb.append(c);
+						}
+						break;
+					case ' ' :
+						if (starsIndex == -1) {
+							if (recordLeadingWhitespaces) {
+								leadingWhitespaces++;
+							} else {
+								sb.append(c);
+							}
+						} else if (i >= starsIndex) {
+							sb.append(c);
+						}
+						break;
+					default :
+						// convert leadingwhitespaces to spaces
+						recordLeadingWhitespaces = false;
+						if (leadingWhitespaces != 0) {
+							int numberOfTabs = leadingWhitespaces / 8;
+							if (numberOfTabs != 0) {
+								for (int j = 0, max2 = numberOfTabs; j < max2; j++) {
+									sb.append("        "); //$NON-NLS-1$
+								}
+								if ((leadingWhitespaces % 8) >= 1) {
+									sb.append(' ');
+								}
+							} else if (line != 0) {
+								// we don't want to preserve the leading spaces for the first line
+								for (int j = 0, max2 = leadingWhitespaces; j < max2; j++) {
+									sb.append(' ');
+								}
+							}
+							leadingWhitespaces = 0;
+							sb.append(c);
+						} else if (c != '*' || i > starsIndex) {
+							sb.append(c);
+						}
+				}
+			}
+			
 			// append a newline at the end of each line except the last, even if we skipped the last entirely
-			if (line < lines.length - 1) {
+			int end = lines.length - 1;
+			if (line < end) {
+				sb.append('\n');
+			} else if (preserveLineSeparator && line == end) {
 				sb.append('\n');
 			}
 		}

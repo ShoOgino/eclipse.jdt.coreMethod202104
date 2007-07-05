@@ -22,23 +22,31 @@
 			writerOut = new PrintWriter(out);
 			writerErr = new PrintWriter(out);
 		}
-		this.compilationUnits = compilationUnits;
-		this.diagnosticListener = diagnosticListener;
-		if (fileManager != null) {
-			this.fileManager = fileManager;
+		final Thread currentThread = Thread.currentThread();
+		EclipseCompilerImpl eclipseCompiler = this.threadCache.get(currentThread);
+		if (eclipseCompiler == null) {
+			eclipseCompiler = new EclipseCompilerImpl(writerOut, writerErr, false);
+			this.threadCache.put(currentThread, eclipseCompiler);
 		} else {
-			this.fileManager = this.getStandardFileManager(diagnosticListener, null, null);
+			eclipseCompiler.initialize(writerOut, writerErr, false, null);
+		}
+		final EclipseCompilerImpl eclipseCompiler2 = new EclipseCompilerImpl(writerOut, writerErr, false);
+		eclipseCompiler2.compilationUnits = compilationUnits;
+		eclipseCompiler2.diagnosticListener = diagnosticListener;
+		if (fileManager != null) {
+			eclipseCompiler2.fileManager = fileManager;
+		} else {
+			eclipseCompiler2.fileManager = this.getStandardFileManager(diagnosticListener, null, null);
 		}
 
-		initialize(writerOut, writerErr, false);
-		this.options.put(CompilerOptions.OPTION_Compliance, CompilerOptions.VERSION_1_6);
-		this.options.put(CompilerOptions.OPTION_Source, CompilerOptions.VERSION_1_6);
-		this.options.put(CompilerOptions.OPTION_TargetPlatform, CompilerOptions.VERSION_1_6);
+		eclipseCompiler2.options.put(CompilerOptions.OPTION_Compliance, CompilerOptions.VERSION_1_6);
+		eclipseCompiler2.options.put(CompilerOptions.OPTION_Source, CompilerOptions.VERSION_1_6);
+		eclipseCompiler2.options.put(CompilerOptions.OPTION_TargetPlatform, CompilerOptions.VERSION_1_6);
 
 		ArrayList<String> allOptions = new ArrayList<String>();
 		if (options != null) {
 			for (Iterator<String> iterator = options.iterator(); iterator.hasNext(); ) {
-				this.fileManager.handleOption(iterator.next(), iterator);
+				eclipseCompiler2.fileManager.handleOption(iterator.next(), iterator);
 			}
 			for (String option : options) {
 				allOptions.add(option);
@@ -68,17 +76,17 @@
 		final String[] optionsToProcess = new String[allOptions.size()];
 		allOptions.toArray(optionsToProcess);
 		try {
-			this.configure(optionsToProcess);
+			eclipseCompiler2.configure(optionsToProcess);
 		} catch (InvalidInputException e) {
 			throw new RuntimeException(e);
 		}
 
-		if (this.fileManager instanceof StandardJavaFileManager) {
-			StandardJavaFileManager javaFileManager = (StandardJavaFileManager) this.fileManager;
+		if (eclipseCompiler2.fileManager instanceof StandardJavaFileManager) {
+			StandardJavaFileManager javaFileManager = (StandardJavaFileManager) eclipseCompiler2.fileManager;
 
 			Iterable<? extends File> location = javaFileManager.getLocation(StandardLocation.CLASS_OUTPUT);
 			if (location != null) {
-				this.setDestinationPath(location.iterator().next().getAbsolutePath());
+				eclipseCompiler2.setDestinationPath(location.iterator().next().getAbsolutePath());
 			}
 		}
 
@@ -89,12 +97,12 @@
 				if (this.hasRun) {
 					throw new IllegalStateException("This task has already been run"); //$NON-NLS-1$
 				}
-				Boolean value = EclipseCompiler.this.call() ? Boolean.TRUE : Boolean.FALSE;
+				Boolean value = eclipseCompiler2.call() ? Boolean.TRUE : Boolean.FALSE;
 				this.hasRun = true;
 				return value;
 			}
 			public void setLocale(Locale locale) {
-				EclipseCompiler.this.setLocale(locale);
+				eclipseCompiler2.setLocale(locale);
 			}
 			public void setProcessors(Iterable<? extends Processor> processors) {
 				ArrayList<Processor> temp = new ArrayList<Processor>();
@@ -103,7 +111,7 @@
 				}
 				Processor[] processors2 = new Processor[temp.size()];
 				temp.toArray(processors2);
-				EclipseCompiler.this.processors = processors2;
+				eclipseCompiler2.processors = processors2;
 			}
 		};
 	}
