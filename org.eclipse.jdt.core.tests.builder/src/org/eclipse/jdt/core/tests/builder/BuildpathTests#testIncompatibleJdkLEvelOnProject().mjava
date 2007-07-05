@@ -1,38 +1,50 @@
 // https://bugs.eclipse.org/bugs/show_bug.cgi?id=172345
 public void testIncompatibleJdkLEvelOnProject() throws JavaModelException {
 	this.abortOnFailure = false; // NOT sure this test will pass on releng boxes => do not abort on failures
-	
+
 	// Create project
 	IPath projectPath = env.addProject("Project");
 	IJavaProject project = env.getJavaProject(projectPath);
 	String[] classlibs = Util.getJavaClassLibs();
 	env.addExternalJars(projectPath, classlibs);
-	
+	Arrays.sort(classlibs);
+
 	// Build it expecting no problem
 	fullBuild();
 	expectingNoProblems();
 
 	// Build incompatible jdk level problem string
-	String jclPath = project.getPackageFragmentRoot(classlibs[0]).getPath().makeRelative().toString();
 	String projectRuntime = project.getOption(JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM, true);
 
 	// Change project incompatible jdk level preferences to warning, perform incremental build and expect 1 problem
 	project.setOption(JavaCore.CORE_INCOMPATIBLE_JDK_LEVEL, CompilerOptions.WARNING);
 	incrementalBuild();
+	StringBuffer buffer = new StringBuffer();
+	for (int i = 0, max = classlibs.length; i < max; i++) {
+		if (i>0) buffer.append('\n');
+		buffer.append(getJdkLevelProblem(projectRuntime, project.getPackageFragmentRoot(classlibs[i]).getPath().makeRelative().toString(), IMarker.SEVERITY_WARNING));
+	}
+
 	expectingProblemsFor(
 		projectPath,
-		getJdkLevelProblem(projectRuntime, jclPath, IMarker.SEVERITY_WARNING)
+		String.valueOf(buffer)
 	);
 
 	// Change project incompatible jdk level preferences to error, perform incremental build and expect 2 problems
 	project.setOption(JavaCore.CORE_INCOMPATIBLE_JDK_LEVEL, CompilerOptions.ERROR);
 	incrementalBuild();
+
+	buffer = new StringBuffer();
+	for (int i = 0, max = classlibs.length; i < max; i++) {
+		if (i>0) buffer.append('\n');
+		buffer.append(getJdkLevelProblem(projectRuntime, project.getPackageFragmentRoot(classlibs[i]).getPath().makeRelative().toString(), IMarker.SEVERITY_ERROR));
+	}
 	expectingProblemsFor(
 		projectPath,
-		"Problem : The project cannot be built until build path errors are resolved [ resource : </Project> range : <-1,-1> category : <10> severity : <2>]\n" + 
-		getJdkLevelProblem(projectRuntime, jclPath, IMarker.SEVERITY_ERROR)
+		"Problem : The project cannot be built until build path errors are resolved [ resource : </Project> range : <-1,-1> category : <10> severity : <2>]\n" +
+		String.valueOf(buffer)
 	);
-	
+
 	// Remove project to avoid side effect on other tests
 	env.removeProject(projectPath);
 }

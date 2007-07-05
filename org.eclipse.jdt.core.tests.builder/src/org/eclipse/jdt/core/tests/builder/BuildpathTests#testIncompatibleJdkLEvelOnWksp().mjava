@@ -7,38 +7,52 @@ public void testIncompatibleJdkLEvelOnWksp() throws JavaModelException {
 	String incompatibleJdkLevel = preferences.get(JavaCore.CORE_INCOMPATIBLE_JDK_LEVEL, null);
 	try {
 		this.abortOnFailure = false; // NOT sure this test will pass on all releng boxes => do not abort on failures
-		
+
 		// Create project
 		IPath projectPath = env.addProject("Project");
 		IJavaProject project = env.getJavaProject(projectPath);
 		String[] classlibs = Util.getJavaClassLibs();
 		env.addExternalJars(projectPath, classlibs);
-		
+
 		// Build it expecting no problem
 		fullBuild();
 		expectingNoProblems();
 
 		// Build incompatible jdk level problem string
-		String jclPath = project.getPackageFragmentRoot(classlibs[0]).getPath().makeRelative().toString();
 		String wkspRuntime = JavaCore.getOption(JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM);
-		
+		// sort classlibs
+		Arrays.sort(classlibs);
 		// Change workspace  incompatible jdk level preferences to warning, perform incremental build and expect 1 problem
 		preferences.put(JavaCore.CORE_INCOMPATIBLE_JDK_LEVEL, JavaCore.WARNING);
 		incrementalBuild();
+
+		StringBuffer buffer = new StringBuffer();
+		for (int i = 0, max = classlibs.length; i < max; i++) {
+			if (i>0) buffer.append('\n');
+			buffer.append(getJdkLevelProblem(wkspRuntime, project.getPackageFragmentRoot(classlibs[i]).getPath().makeRelative().toString(), IMarker.SEVERITY_WARNING));
+		}
+
 		expectingProblemsFor(
 			projectPath,
-			getJdkLevelProblem(wkspRuntime, jclPath, IMarker.SEVERITY_WARNING)
+			String.valueOf(buffer)
 		);
-		
+
 		// Change workspace incompatible jdk level preferences to error, perform incremental build and expect 2 problems
 		preferences.put(JavaCore.CORE_INCOMPATIBLE_JDK_LEVEL, JavaCore.ERROR);
 		incrementalBuild();
+
+		buffer = new StringBuffer();
+		for (int i = 0, max = classlibs.length; i < max; i++) {
+			if (i>0) buffer.append('\n');
+			buffer.append(getJdkLevelProblem(wkspRuntime, project.getPackageFragmentRoot(classlibs[i]).getPath().makeRelative().toString(), IMarker.SEVERITY_ERROR));
+		}
+
 		expectingProblemsFor(
 			projectPath,
-			"Problem : The project cannot be built until build path errors are resolved [ resource : </Project> range : <-1,-1> category : <10> severity : <2>]\n" + 
-			getJdkLevelProblem(wkspRuntime, jclPath, IMarker.SEVERITY_ERROR)
+			"Problem : The project cannot be built until build path errors are resolved [ resource : </Project> range : <-1,-1> category : <10> severity : <2>]\n" +
+			String.valueOf(buffer)
 		);
-		
+
 		// Remove project to avoid side effect on other tests
 		env.removeProject(projectPath);
 	} finally {
