@@ -1,0 +1,87 @@
+protected void consumeAnnotationTypeDeclarationHeaderNameWithTypeParameters() {
+	// consumeAnnotationTypeDeclarationHeader ::= Modifiers '@' PushModifiers interface Identifier TypeParameters
+	// consumeAnnotationTypeDeclarationHeader ::= '@' PushModifiers interface Identifier TypeParameters
+	TypeDeclaration annotationTypeDeclaration = new TypeDeclaration(this.compilationUnit.compilationResult);
+	// consume type parameters
+	int length = this.genericsLengthStack[this.genericsLengthPtr--];
+	this.genericsPtr -= length;
+	System.arraycopy(this.genericsStack, this.genericsPtr + 1, annotationTypeDeclaration.typeParameters = new TypeParameter[length], 0, length);
+
+	this.problemReporter().invalidUsageOfTypeParametersForAnnotationDeclaration(annotationTypeDeclaration);
+
+	annotationTypeDeclaration.bodyStart = annotationTypeDeclaration.typeParameters[length-1].declarationSourceEnd + 1;
+	
+//	annotationTypeDeclaration.typeParameters = null;
+
+	this.listTypeParameterLength = 0;
+
+	if (this.nestedMethod[this.nestedType] == 0) {
+		if (this.nestedType != 0) {
+			annotationTypeDeclaration.bits |= ASTNode.IsMemberType;
+		}
+	} else {
+		// Record that the block has a declaration for local types
+		annotationTypeDeclaration.bits |= ASTNode.IsLocalType;
+		markEnclosingMemberWithLocalType();
+		blockReal();
+	}
+
+	//highlight the name of the type
+	long pos = this.identifierPositionStack[this.identifierPtr];
+	annotationTypeDeclaration.sourceEnd = (int) pos;
+	annotationTypeDeclaration.sourceStart = (int) (pos >>> 32);
+	annotationTypeDeclaration.name = this.identifierStack[this.identifierPtr--];
+	this.identifierLengthPtr--;
+
+	//compute the declaration source too
+	// 'interface' push two int positions: the beginning of the class token and its end.
+	// we want to keep the beginning position but get rid of the end position
+	// it is only used for the ClassLiteralAccess positions.
+	this.intPtr--; // remove the start position of the interface token
+	this.intPtr--; // remove the end position of the interface token
+
+	annotationTypeDeclaration.modifiersSourceStart = this.intStack[this.intPtr--];
+	annotationTypeDeclaration.modifiers = this.intStack[this.intPtr--] | ClassFileConstants.AccAnnotation | ClassFileConstants.AccInterface;
+	if (annotationTypeDeclaration.modifiersSourceStart >= 0) {
+		annotationTypeDeclaration.declarationSourceStart = annotationTypeDeclaration.modifiersSourceStart;
+		this.intPtr--; // remove the position of the '@' token as we have modifiers
+	} else {
+		int atPosition = this.intStack[this.intPtr--];
+		// remove the position of the '@' token as we don't have modifiers
+		annotationTypeDeclaration.declarationSourceStart = atPosition;
+	}
+
+	// Store secondary info
+	if ((annotationTypeDeclaration.bits & ASTNode.IsMemberType) == 0 && (annotationTypeDeclaration.bits & ASTNode.IsLocalType) == 0) {
+		if (this.compilationUnit != null && !CharOperation.equals(annotationTypeDeclaration.name, this.compilationUnit.getMainTypeName())) {
+			annotationTypeDeclaration.bits |= ASTNode.IsSecondaryType;
+		}
+	}
+
+	// consume annotations
+	if ((length = this.expressionLengthStack[this.expressionLengthPtr--]) != 0) {
+		System.arraycopy(
+			this.expressionStack, 
+			(this.expressionPtr -= length) + 1, 
+			annotationTypeDeclaration.annotations = new Annotation[length], 
+			0, 
+			length); 
+	}
+	// javadoc
+	annotationTypeDeclaration.javadoc = this.javadoc;
+	this.javadoc = null;	
+	pushOnAstStack(annotationTypeDeclaration);
+	if(!this.statementRecoveryActivated &&
+			options.sourceLevel < ClassFileConstants.JDK1_5 &&
+			this.lastErrorEndPositionBeforeRecovery < this.scanner.currentPosition) {
+		this.problemReporter().invalidUsageOfAnnotationDeclarations(annotationTypeDeclaration);
+	}	
+	
+	// recovery
+	if (this.currentElement != null){ 
+		this.lastCheckPoint = annotationTypeDeclaration.bodyStart;
+		this.currentElement = this.currentElement.add(annotationTypeDeclaration, 0);
+		this.lastIgnoredToken = -1;
+	}
+}
+
