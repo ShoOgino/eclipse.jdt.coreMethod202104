@@ -1,20 +1,37 @@
 /**
- * Answers true if a sub-pattern matches the subpart of the given name using CamelCase rules, or false otherwise.  
- * char[] CamelCase matching does NOT accept explicit wild-cards '*' and '?' and is inherently case sensitive. 
+ * Answers true if a sub-pattern matches the sub-part of the given name using
+ * CamelCase rules, or false otherwise.  char[] CamelCase matching does NOT
+ * accept explicit wild-cards '*' and '?' and is inherently case sensitive. 
  * Can match only subset of name/pattern, considering end positions as non-inclusive.
- * The subpattern is defined by the patternStart and patternEnd positions.
- * <br>
- * CamelCase denotes the convention of writing compound names without spaces, and capitalizing every term.
- * This function recognizes both upper and lower CamelCase, depending whether the leading character is capitalized
- * or not. The leading part of an upper CamelCase pattern is assumed to contain a sequence of capitals which are appearing
- * in the matching name; e.g. 'NPE' will match 'NullPointerException', but not 'NewPerfData'. A lower CamelCase pattern
- * uses a lowercase first character. In Java, type names follow the upper CamelCase convention, whereas method or field
- * names follow the lower CamelCase convention.
- * <br>
- * The pattern may contain lowercase characters, which will be match in a case sensitive way. These characters must
- * appear in sequence in the name. For instance, 'NPExcep' will match 'NullPointerException', but not 'NullPointerExCEPTION'
- * or 'NuPoEx' will match 'NullPointerException', but not 'NoPointerException'.
- * <br><br>
+ * The sub-pattern is defined by the patternStart and patternEnd positions.
+ * <p>
+ * CamelCase denotes the convention of writing compound names without spaces,
+ * and capitalizing every term. This function recognizes both upper and lower
+ * CamelCase, depending whether the leading character is capitalized or not.
+ * The leading part of an upper CamelCase pattern is assumed to contain a
+ * sequence of capitals which are appearing in the matching name; e.g. 'NPE' will
+ * match 'NullPointerException', but not 'NewPerfData'. A lower CamelCase pattern
+ * uses a lowercase first character. In Java, type names follow the upper
+ * CamelCase convention, whereas method or field names follow the lower
+ * CamelCase convention.
+ * <p>
+ * The pattern may contain lowercase characters, which will be matched in a case
+ * sensitive way. These characters must appear in sequence in the name.
+ * For instance, 'NPExcep' will match 'NullPointerException', but not
+ * 'NullPointerExCEPTION' or 'NuPoEx' will match 'NullPointerException', but not
+ * 'NoPointerException'.
+ * <p>
+ * Digit characters are treated in a special way. They can be used in the pattern
+ * but are not always considered as leading character. For instance, both
+ * 'UTF16DSS' and 'UTFDSS' patterns will match 'UTF16DocumentScannerSupport'.
+ * <p>
+ * Digit characters are treated in a special way. They can be used in the pattern
+ * but are not always considered as leading character. For instance, both
+ * 'UTF16DSS' and 'UTFDSS' patterns will match 'UTF16DocumentScannerSupport'.
+ * <p>
+ * This method allows prefix match in Camel Case (see
+ * {@link #camelCaseMatch(char[], int, int, char[], int, int, boolean)}).
+ * <p>
  * Examples:
  * <ol>
  * <li><pre>
@@ -67,6 +84,16 @@
  *    result => false
  * </pre>
  * </li>
+ * <li><pre>
+ *    pattern = { 'I', 'P', 'L', '3' }
+ *    patternStart = 0
+ *    patternEnd = 4
+ *    name = { 'I', 'P', 'e', 'r', 's', 'p', 'e', 'c', 't', 'i', 'v', 'e', 'L', 'i', 's', 't', 'e', 'n', 'e', 'r', '3' }
+ *    nameStart = 0
+ *    nameEnd = 21
+ *    result => true
+ * </pre>
+ * </li>
  * </ol>
  * 
  * @param pattern the given pattern
@@ -75,100 +102,10 @@
  * @param name the given name
  * @param nameStart the start index of the name, inclusive
  * @param nameEnd the end index of the name, exclusive
- * @return true if a sub-pattern matches the subpart of the given name, false otherwise
+ * @return true if a sub-pattern matches the sub-part of the given name, false otherwise
  * @since 3.2
  */
 public static final boolean camelCaseMatch(char[] pattern, int patternStart, int patternEnd, char[] name, int nameStart, int nameEnd) {
-	if (name == null)
-		return false; // null name cannot match
-	if (pattern == null)
-		return true; // null pattern is equivalent to '*'
-	if (patternEnd < 0) 	patternEnd = pattern.length;
-	if (nameEnd < 0) nameEnd = name.length;
-
-	if (patternEnd <= patternStart) return nameEnd <= nameStart;
-	if (nameEnd <= nameStart) return false;
-	// check first pattern char
-	if (name[nameStart] != pattern[patternStart]) {
-		// first char must strictly match (upper/lower)
-		return false;
-	}
-
-	char patternChar, nameChar;
-	int iPattern = patternStart;
-	int iName = nameStart;
-
-	// Main loop is on pattern characters
-	while (true) {
-
-		iPattern++;
-		iName++;
-
-		if (iPattern == patternEnd) {
-			// We have exhausted pattern, so it's a match
-			return true;
-		}
-
-		if (iName == nameEnd){
-			// We have exhausted name (and not pattern), so it's not a match 
-			return false;
-		}
-
-		// For as long as we're exactly matching, bring it on (even if it's a lower case character)
-		if ((patternChar = pattern[iPattern]) == name[iName]) {
-			continue;
-		}
-
-		// If characters are not equals, then it's not a match if patternChar is lowercase
-		if (patternChar < ScannerHelper.MAX_OBVIOUS) {
-			if ((ScannerHelper.OBVIOUS_IDENT_CHAR_NATURES[patternChar] & (ScannerHelper.C_UPPER_LETTER | ScannerHelper.C_DIGIT)) == 0) {
-				return false;
-			}
-		}
-		else if (Character.isJavaIdentifierPart(patternChar) && !Character.isUpperCase(patternChar) && !Character.isDigit(patternChar)) {
-			return false;
-		}
-
-		// patternChar is uppercase, so let's find the next uppercase in name
-		while (true) {
-			if (iName == nameEnd){
-	            //	We have exhausted name (and not pattern), so it's not a match
-				return false;
-			}
-
-			nameChar = name[iName];
-			if (nameChar < ScannerHelper.MAX_OBVIOUS) {
-				int charNature = ScannerHelper.OBVIOUS_IDENT_CHAR_NATURES[nameChar];
-				if ((charNature & (ScannerHelper.C_LOWER_LETTER | ScannerHelper.C_SPECIAL)) != 0) {
-					// nameChar is lowercase    
-					iName++;
-				} else if ((charNature & ScannerHelper.C_DIGIT) != 0) {
-					// nameChar is digit => break if the digit is current pattern character otherwise consume it
-					if (patternChar == nameChar) break;
-					iName++;
-				// nameChar is uppercase...
-				} else  if (patternChar != nameChar) {
-					//.. and it does not match patternChar, so it's not a match
-					return false;
-				} else {
-					//.. and it matched patternChar. Back to the big loop
-					break;
-				}
-			}
-			// Same tests for non-obvious characters
-			else if (Character.isJavaIdentifierPart(nameChar) && !Character.isUpperCase(nameChar)) {
-				iName++;
-			} else if (Character.isDigit(nameChar)) {
-				if (patternChar == nameChar) break;
-				iName++;
-			} else  if (patternChar != nameChar) {
-				return false;
-			} else {
-				break;
-			}
-		}
-		// At this point, either name has been exhausted, or it is at an uppercase letter.
-		// Since pattern is also at an uppercase letter
-	}
-}	
+	return camelCaseMatch(pattern, patternStart, patternEnd, name, nameStart, nameEnd, true/*prefix match*/);
+}
 
