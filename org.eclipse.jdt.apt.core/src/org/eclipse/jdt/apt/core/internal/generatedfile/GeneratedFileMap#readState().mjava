@@ -42,12 +42,40 @@
 					put(parent, child);
 				}
 			}
+			
+			// Now the _flags map:
+			int sizeOfFlags = in.readInt();
+			for (int i = 0; i < sizeOfFlags; ++i) {
+				String childPath = in.readUTF();
+				IFile child = convertPathToIFile(childPath);
+				if (!containsValue(child)) {
+					throw new IOException("Error in generated file attributes: did not expect file " + childPath); //$NON-NLS-1$
+				}
+				
+				int attributeCount = in.readInt();
+				EnumSet<Flags> flags = EnumSet.noneOf(Flags.class);
+				for (int j = 0; j < attributeCount; ++j) {
+					String attr = in.readUTF();
+					Flags f = Flags.valueOf(attr);
+					flags.add(f);
+				}
+				_flags.put(child, flags);
+			}
+			
 			// our serialized and in-memory states are now identical
 			clearDirtyBit();
 		}
 		catch (IOException ioe) {
+			// Avoid partial initialization
+			clear();
 			// We can safely continue without having read our dependencies.
-			AptPlugin.log(ioe, "Could not deserialize APT dependencies"); //$NON-NLS-1$
+			AptPlugin.logWarning(ioe, "Could not read APT dependencies: generated files may not be deleted until the next clean"); //$NON-NLS-1$
+		}
+		catch (IllegalArgumentException iae) {
+			// Avoid partial initialization
+			clear();
+			// We can safely continue without having read our dependencies.
+			AptPlugin.logWarning(iae, "Could not read APT dependencies: generated files may not be deleted until the next clean"); //$NON-NLS-1$
 		}
 		finally {
 			if (in != null) {

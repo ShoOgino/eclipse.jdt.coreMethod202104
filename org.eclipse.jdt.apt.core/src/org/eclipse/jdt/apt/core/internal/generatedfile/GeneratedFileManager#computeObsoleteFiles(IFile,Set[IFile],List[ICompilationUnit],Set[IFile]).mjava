@@ -9,24 +9,36 @@
 	 * @param parentFile only files solely parented by this file will be
 	 * added to the list to be deleted.
 	 * @param newlyGeneratedFiles files on this list will be spared.
+	 * @param toDiscard must be non-null. The caller should pass in an empty
+	 * list; on return the list will contain working copies which the caller
+	 * is responsible for discarding.
+	 * @param toReport must be non-null.  The caller should pass in an empty
+	 * set; on return the set will contain IFiles representing source files
+	 * (but not non-source files such as text or xml files) which are being
+	 * deleted and which should therefore be removed from compilation.
 	 * @return a list of files which the caller should delete, ie by calling
 	 * {@link #deletePhysicalFile(IFile)}.
 	 */
 	private synchronized Set<IFile> computeObsoleteFiles(
 			IFile parentFile, Set<IFile> newlyGeneratedFiles,
-			List<ICompilationUnit> toDiscard)
+			List<ICompilationUnit> toDiscard,
+			Set<IFile> toReport)
 	{
 		Set<IFile> deleted = new HashSet<IFile>();
 		Set<IFile> obsoleteFiles = _buildDeps.getValues(parentFile);
 		// spare all the newly generated files
 		obsoleteFiles.removeAll(newlyGeneratedFiles);
 		for (IFile generatedFile : obsoleteFiles) {
+			boolean isSource = _buildDeps.isSource(generatedFile);
 			_buildDeps.remove(parentFile, generatedFile);
 			if (AptPlugin.DEBUG_GFM_MAPS) AptPlugin.trace(
 					"removed build file dependency: " + parentFile + " -> " + generatedFile); //$NON-NLS-1$ //$NON-NLS-2$
 			// If the file is still parented by any other parent, spare it
 			if (!_buildDeps.containsValue(generatedFile)) {
 				deleted.add(generatedFile);
+				if (isSource) {
+					toReport.add(generatedFile);
+				}
 			}
 		}
 		_clearDuringReconcile.removeAll(deleted);
