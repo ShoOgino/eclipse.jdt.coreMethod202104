@@ -27,7 +27,9 @@
 				return;
 				
 			case IResourceChangeEvent.POST_CHANGE :
-				if (isAffectedBy(delta)) { // avoid populating for SYNC or MARKER deltas
+				HashSet elementsToRefresh = this.state.removeExternalElementsToRefresh();
+				if (isAffectedBy(delta) // avoid populating for SYNC or MARKER deltas
+						|| elementsToRefresh != null) { 
 					try {
 						try {
 							stopDeltas();
@@ -56,8 +58,8 @@
 							}
 							
 							// generate external archive change deltas
-							if (this.refreshedElements != null) {
-								createExternalArchiveDelta(null);
+							if (elementsToRefresh != null) {
+								createExternalArchiveDelta(elementsToRefresh, null);
 							}
 							
 							// generate Java deltas from resource changes
@@ -86,11 +88,10 @@
 				return;
 				
 			case IResourceChangeEvent.PRE_BUILD :
-				if(!isAffectedBy(delta))
-					return; // avoid populating for SYNC or MARKER deltas
+				boolean isAffected = isAffectedBy(delta);
+				boolean needCycleValidation = isAffected && validateClasspaths(delta);
 
 				// create classpath markers if necessary
-				boolean needCycleValidation = validateClasspaths(delta);
 				ClasspathValidation[] validations = this.state.removeClasspathValidations();
 				if (validations != null) {
 					for (int i = 0, length = validations.length; i < length; i++) {
@@ -120,8 +121,10 @@
 					}
 				}
 				
-				JavaModel.flushExternalFileCache();
-				JavaBuilder.buildStarting();
+				if (isAffected) {
+					JavaModel.flushExternalFileCache();
+					JavaBuilder.buildStarting();
+				}
 				
 				// does not fire any deltas
 				return;
