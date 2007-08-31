@@ -5,90 +5,104 @@
  * @return <CODE>int</CODE>
  */
 public int literalIndexForLdc(char[] stringCharArray) {
-	int savedCurrentIndex = this.currentIndex;
-	int savedCurrentOffset = this.currentOffset;
-	int index;
-	if ((index = stringCache.putIfAbsent(stringCharArray, this.currentIndex)) < 0) {
-		// The entry doesn't exit yet
-		this.currentIndex++;
-		// Write the tag first
-		writeU1(StringTag);
-		
-		// Then the string index
-		int stringIndexOffset = this.currentOffset;
-		if (currentOffset + 2 >= poolContent.length) {
-			resizePoolContents(2);
-		}
-		currentOffset+=2;
+    int savedCurrentIndex = this.currentIndex;
+    int savedCurrentOffset = this.currentOffset;
+    int index;
+    if ((index = stringCache.putIfAbsent(stringCharArray, this.currentIndex)) < 0) {
+        if ((index = -index)> 0xFFFF) {
+            this.classFile.referenceBinding.scope.problemReporter().noMoreAvailableSpaceInConstantPool(this.classFile.referenceBinding.scope.referenceType());
+        }
+        // The entry doesn't exit yet
+        this.currentIndex++;
+        // Write the tag first
+        int length = this.offsets.length;
+        if (length <= index) {
+        	// resize
+            System.arraycopy(this.offsets, 0, (this.offsets = new int[index * 2]), 0, length);
+        }
+        this.offsets[index] = this.currentOffset;
+        writeU1(StringTag);
 
-		int stringIndex;
-		if ((stringIndex = UTF8Cache.putIfAbsent(stringCharArray, this.currentIndex)) < 0) {
-			// The entry doesn't exit yet
-			this.currentIndex++;
-			// Write the tag first
-			writeU1(Utf8Tag);
-			// Then the size of the stringName array
-			int lengthOffset = currentOffset;
-			if (currentOffset + 2 >= poolContent.length) {
-				// we need to resize the poolContent array because we won't have
-				// enough space to write the length
-				resizePoolContents(2);
-			}
-			currentOffset += 2;
-			int length = 0;
-			for (int i = 0; i < stringCharArray.length; i++) {
-				char current = stringCharArray[i];
-				if ((current >= 0x0001) && (current <= 0x007F)) {
-					// we only need one byte: ASCII table
-					length++;
-					if (currentOffset + 1 >= poolContent.length) {
-						// we need to resize the poolContent array because we won't have
-						// enough space to write the length
-						resizePoolContents(1);
-					}
-					poolContent[currentOffset++] = (byte)(current);
-				} else
-					if (current > 0x07FF) {
-						// we need 3 bytes
-						length += 3;
-						if (currentOffset + 3 >= poolContent.length) {
-							// we need to resize the poolContent array because we won't have
-							// enough space to write the length
-							resizePoolContents(3);
-						}
-						poolContent[currentOffset++] = (byte) (0xE0 | ((current >> 12) & 0x0F)); // 0xE0 = 1110 0000
-						poolContent[currentOffset++] = (byte) (0x80 | ((current >> 6) & 0x3F)); // 0x80 = 1000 0000
-						poolContent[currentOffset++] = (byte) (0x80 | (current & 0x3F)); // 0x80 = 1000 0000
-					} else {
-						if (currentOffset + 2 >= poolContent.length) {
-							// we need to resize the poolContent array because we won't have
-							// enough space to write the length
-							resizePoolContents(2);
-						}
-						// we can be 0 or between 0x0080 and 0x07FF
-						// In that case we only need 2 bytes
-						length += 2;
-						poolContent[currentOffset++] = (byte) (0xC0 | ((current >> 6) & 0x1F)); // 0xC0 = 1100 0000
-						poolContent[currentOffset++] = (byte) (0x80 | (current & 0x3F)); // 0x80 = 1000 0000
-					}
-			}
-			if (length >= 65535) {
-				this.currentOffset = savedCurrentOffset;
-				this.currentIndex = savedCurrentIndex;
-				this.stringCache.remove(stringCharArray);
-				this.UTF8Cache.remove(stringCharArray);
-				return 0;
-			}
-			poolContent[lengthOffset++] = (byte) (length >> 8);
-			poolContent[lengthOffset] = (byte) length;
-			stringIndex = -stringIndex;
-		}
-		if ((index = -index) > 0xFFFF){
-			this.classFile.referenceBinding.scope.problemReporter().noMoreAvailableSpaceInConstantPool(this.classFile.referenceBinding.scope.referenceType());
-		}
-		poolContent[stringIndexOffset++] = (byte) (stringIndex >> 8);
-		poolContent[stringIndexOffset] = (byte) stringIndex;
-	}
-	return index;
+        // Then the string index
+        int stringIndexOffset = this.currentOffset;
+        if (currentOffset + 2 >= poolContent.length) {
+            resizePoolContents(2);
+        }
+        currentOffset+=2;
+
+        int stringIndex;
+        if ((stringIndex = UTF8Cache.putIfAbsent(stringCharArray, this.currentIndex)) < 0) {
+            if ((stringIndex = -stringIndex)> 0xFFFF) {
+                this.classFile.referenceBinding.scope.problemReporter().noMoreAvailableSpaceInConstantPool(this.classFile.referenceBinding.scope.referenceType());
+            }
+            // The entry doesn't exit yet
+            this.currentIndex++;
+            // Write the tag first
+            length = this.offsets.length;
+            if (length <= stringIndex) {
+            	// resize
+                System.arraycopy(this.offsets, 0, (this.offsets = new int[stringIndex * 2]), 0, length);
+            }
+            this.offsets[stringIndex] = this.currentOffset;
+            writeU1(Utf8Tag);
+            // Then the size of the stringName array
+            int lengthOffset = currentOffset;
+            if (currentOffset + 2 >= poolContent.length) {
+                // we need to resize the poolContent array because we won't have
+                // enough space to write the length
+                resizePoolContents(2);
+            }
+            currentOffset += 2;
+            length = 0;
+            for (int i = 0; i < stringCharArray.length; i++) {
+                char current = stringCharArray[i];
+                if ((current >= 0x0001) && (current <= 0x007F)) {
+                    // we only need one byte: ASCII table
+                    length++;
+                    if (currentOffset + 1 >= poolContent.length) {
+                        // we need to resize the poolContent array because we won't have
+                        // enough space to write the length
+                        resizePoolContents(1);
+                    }
+                    poolContent[currentOffset++] = (byte)(current);
+                } else
+                    if (current > 0x07FF) {
+                        // we need 3 bytes
+                        length += 3;
+                        if (currentOffset + 3 >= poolContent.length) {
+                            // we need to resize the poolContent array because we won't have
+                            // enough space to write the length
+                            resizePoolContents(3);
+                        }
+                        poolContent[currentOffset++] = (byte) (0xE0 | ((current >> 12) & 0x0F)); // 0xE0 = 1110 0000
+                        poolContent[currentOffset++] = (byte) (0x80 | ((current >> 6) & 0x3F)); // 0x80 = 1000 0000
+                        poolContent[currentOffset++] = (byte) (0x80 | (current & 0x3F)); // 0x80 = 1000 0000
+                    } else {
+                        if (currentOffset + 2 >= poolContent.length) {
+                            // we need to resize the poolContent array because we won't have
+                            // enough space to write the length
+                            resizePoolContents(2);
+                        }
+                        // we can be 0 or between 0x0080 and 0x07FF
+                        // In that case we only need 2 bytes
+                        length += 2;
+                        poolContent[currentOffset++] = (byte) (0xC0 | ((current >> 6) & 0x1F)); // 0xC0 = 1100 0000
+                        poolContent[currentOffset++] = (byte) (0x80 | (current & 0x3F)); // 0x80 = 1000 0000
+                    }
+            }
+            if (length >= 65535) {
+                this.currentOffset = savedCurrentOffset;
+                this.currentIndex = savedCurrentIndex;
+                this.stringCache.remove(stringCharArray);
+                this.UTF8Cache.remove(stringCharArray);
+                return 0;
+            }
+            poolContent[lengthOffset++] = (byte) (length >> 8);
+            poolContent[lengthOffset] = (byte) length;
+        }
+        poolContent[stringIndexOffset++] = (byte) (stringIndex >> 8);
+        poolContent[stringIndexOffset] = (byte) stringIndex;
+    }
+    return index;
 }
 
