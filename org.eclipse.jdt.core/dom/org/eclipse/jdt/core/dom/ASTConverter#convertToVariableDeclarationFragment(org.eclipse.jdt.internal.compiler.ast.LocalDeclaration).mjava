@@ -4,26 +4,28 @@
 		name.internalSetIdentifier(new String(localDeclaration.name));
 		name.setSourceRange(localDeclaration.sourceStart, localDeclaration.sourceEnd - localDeclaration.sourceStart + 1);
 		variableDeclarationFragment.setName(name);
-		int start = localDeclaration.sourceEnd;
+		int start = localDeclaration.sourceEnd; 
 		org.eclipse.jdt.internal.compiler.ast.Expression initialization = localDeclaration.initialization;
+		int extraDimension = retrieveExtraDimension(localDeclaration.sourceEnd + 1, this.compilationUnitSourceLength);
+		variableDeclarationFragment.setExtraDimensions(extraDimension);
 		boolean hasInitialization = initialization != null;
+		int end = start;
 		if (hasInitialization) {
 			final Expression expression = convert(initialization);
 			variableDeclarationFragment.setInitializer(expression);
 			start = expression.getStartPosition() + expression.getLength();
-		}
-		int end = retrievePositionBeforeNextCommaOrSemiColon(start, localDeclaration.declarationSourceEnd);
-		if (end == -1) {
-			if (hasInitialization) {
-				// the initiazation sourceEnd is modified during convert(initialization)
-				// see https://bugs.eclipse.org/bugs/show_bug.cgi?id=128961
-				end = start - 1;
+			end = start - 1;
+		} else {
+			// we need to do it even if extendedDimension is null in case of syntax error in an array initializer
+			// start + 1 because we need the exclusive range for retrieveEndOfPotentialExtendedDimensions
+			int possibleEnd = retrieveEndOfPotentialExtendedDimensions(start + 1, localDeclaration.sourceEnd, localDeclaration.declarationSourceEnd);
+			if (possibleEnd != -1) {
+				end = possibleEnd;
 			} else {
-				end = localDeclaration.sourceEnd;
+				variableDeclarationFragment.setFlags(variableDeclarationFragment.getFlags() | ASTNode.MALFORMED);
 			}
 		}
 		variableDeclarationFragment.setSourceRange(localDeclaration.sourceStart, end - localDeclaration.sourceStart + 1);
-		variableDeclarationFragment.setExtraDimensions(retrieveExtraDimension(localDeclaration.sourceEnd + 1, this.compilationUnitSourceLength));
 		if (this.resolveBindings) {
 			recordNodes(variableDeclarationFragment, localDeclaration);
 			recordNodes(name, localDeclaration);
