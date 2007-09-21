@@ -1,0 +1,65 @@
+/**
+ * Compute all the non-java resources according to the given entry names.
+ */
+private Object[] computeNonJavaResources(ArrayList entryNames) {
+	int length = entryNames.size();
+	if (length == 0)
+		return JavaElementInfo.NO_NON_JAVA_RESOURCES;
+	HashMap jarEntries = new HashMap(); // map from IPath to IJarEntryResource
+	HashMap childrenMap = new HashMap(); // map from IPath to ArrayList<IJarEntryResource>
+	ArrayList topJarEntries = new ArrayList();
+	for (int i = 0; i < length; i++) {
+		String resName = (String) entryNames.get(i);
+		// consider that a .java file is not a non-java resource (see bug 12246 Packages view shows .class and .java files when JAR has source)
+		if (!Util.isJavaLikeFileName(resName)) {
+			IPath filePath = new Path(resName);
+			IPath childPath = filePath.removeFirstSegments(this.names.length);
+			JarEntryFile file = new JarEntryFile(filePath.lastSegment());
+			jarEntries.put(childPath, file);
+			if (childPath.segmentCount() == 1) {
+				file.setParent(this);
+				topJarEntries.add(file);
+			} else {
+				IPath parentPath = childPath.removeLastSegments(1);
+				while (parentPath.segmentCount() > 0) {
+					ArrayList parentChildren = (ArrayList) childrenMap.get(parentPath);
+					if (parentChildren == null) {
+						Object dir = new JarEntryDirectory(parentPath.lastSegment());
+						jarEntries.put(parentPath, dir);
+						childrenMap.put(parentPath, parentChildren = new ArrayList());
+						parentChildren.add(childPath);
+						if (parentPath.segmentCount() == 1) {
+							topJarEntries.add(dir);
+							break;
+						}
+						childPath = parentPath;
+						parentPath = childPath.removeLastSegments(1);
+					} else {
+						parentChildren.add(childPath);
+						break; // all parents are already registered
+					}
+				}
+			}
+		}
+	}
+	Iterator entries = childrenMap.entrySet().iterator();
+	while (entries.hasNext()) {
+		Map.Entry entry = (Map.Entry) entries.next();
+		IPath entryPath = (IPath) entry.getKey();
+		ArrayList entryValue =  (ArrayList) entry.getValue();
+		JarEntryDirectory jarEntryDirectory = (JarEntryDirectory) jarEntries.get(entryPath);
+		int size = entryValue.size();
+		IJarEntryResource[] children = new IJarEntryResource[size];
+		for (int i = 0; i < size; i++) {
+			JarEntryResource child = (JarEntryResource) jarEntries.get(entryValue.get(i));
+			child.setParent(jarEntryDirectory);
+			children[i] = child;
+		}
+		jarEntryDirectory.setChildren(children);
+		if (entryPath.segmentCount() == 1) {
+			jarEntryDirectory.setParent(this);
+		}
+	}
+	return topJarEntries.toArray(new Object[topJarEntries.size()]);
+}
+

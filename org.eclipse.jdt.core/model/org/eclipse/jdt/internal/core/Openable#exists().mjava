@@ -2,14 +2,29 @@
  * @see IJavaElement
  */
 public boolean exists() {
-	JavaModelManager manager = JavaModelManager.getJavaModelManager();
-	if (manager.getInfo(this) != null) return true;
-	if (!parentExists()) return false;
-	PackageFragmentRoot root = getPackageFragmentRoot();
-	if (root != null
-			&& (root == this || !root.isArchive())) {
-		return resourceExists();
+	if (JavaModelManager.getJavaModelManager().getInfo(this) != null) 
+		return true;
+	switch (getElementType()) {
+		case IJavaElement.PACKAGE_FRAGMENT:
+			PackageFragmentRoot root = getPackageFragmentRoot();
+			if (root.isArchive()) {
+				// pkg in a jar -> need to open root to know if this pkg exists
+				JarPackageFragmentRootInfo rootInfo;
+				try {
+					rootInfo = (JarPackageFragmentRootInfo) root.getElementInfo();
+				} catch (JavaModelException e) {
+					return false;
+				}
+				return rootInfo.rawPackageInfo.containsKey(((PackageFragment) this).names);
+			}
+			break;
+		case IJavaElement.CLASS_FILE:
+			if (getPackageFragmentRoot().isArchive()) {
+				// class file in a jar -> need to open this class file to know if it exists
+				return super.exists();
+			}
+			break;
 	}
-	return super.exists();
+	return validateExistence(getResource()).isOK();
 }
 

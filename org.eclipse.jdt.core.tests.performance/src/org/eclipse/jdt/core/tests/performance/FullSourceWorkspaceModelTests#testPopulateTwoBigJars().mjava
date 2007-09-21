@@ -1,0 +1,52 @@
+/*
+ * Performance test for the opening of class files in 2 big jars (that each would fill the Java model cache if all pkgs were opened).
+ * (see bug 190094 Java Outline Causes Eclipse Lock-up.)
+ */
+public void testPopulateTwoBigJars() throws CoreException {
+	
+	IJavaProject project = null;
+	try {
+		project = createJavaProject("HugeJarProject");
+		IFile bigJar1 = BIG_PROJECT.getProject().getFile(BIG_JAR1_NAME);
+		IFile bigJar2 = BIG_PROJECT.getProject().getFile(BIG_JAR2_NAME);
+		project.setRawClasspath(
+			new IClasspathEntry[] {
+				JavaCore.newLibraryEntry(bigJar1.getFullPath(), null, null),
+				JavaCore.newLibraryEntry(bigJar2.getFullPath(), null, null),
+			}, null);
+		AbstractJavaModelTests.waitUntilIndexesReady();
+		AbstractJavaModelTests.waitForAutoBuild();
+		IPackageFragmentRoot root1 = project.getPackageFragmentRoot(bigJar1);
+		IPackageFragmentRoot root2 = project.getPackageFragmentRoot(bigJar2);
+		
+		// warm up
+		int max = 20;
+		int warmup = WARMUP_COUNT / 10;
+		for (int i = 0; i < warmup; i++) {
+			project.close();
+			for (int j = 0; j < max; j++) {
+				root1.getPackageFragment("p" + j).open(null);
+				root2.getPackageFragment("q" + j).open(null);
+			}
+		}
+			
+		// measure performance
+		for (int i = 0; i < MEASURES_COUNT; i++) {
+			project.close();
+			runGc();
+			startMeasuring();
+			for (int j = 0; j < max; j++) {
+				root1.getPackageFragment("p" + j).open(null);
+				root2.getPackageFragment("q" + j).open(null);
+			}
+			stopMeasuring();
+		}
+	
+		commitMeasurements();
+		assertPerformance();
+	} finally {
+		if (project != null)
+			project.getProject().delete(false, null);
+	}
+}
+
