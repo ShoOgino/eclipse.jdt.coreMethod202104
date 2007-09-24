@@ -1,11 +1,10 @@
 /**
- * Find supertype which erases to a given type, or null if not found
+ * Find supertype which originates from a given type, or null if not found
  */
-public TypeBinding findSuperTypeWithSameErasure(TypeBinding otherType) {
+public TypeBinding findSuperTypeOriginatingFrom(TypeBinding otherType) {
 	if (this == otherType) return this;
 	if (otherType == null) return null;
-	int kind;
-	switch(kind = kind()) {
+	switch(kind()) {
 		case Binding.ARRAY_TYPE :
 			ArrayBinding arrayType = (ArrayBinding) this;
 			int otherDim = otherType.dimensions();
@@ -22,7 +21,7 @@ public TypeBinding findSuperTypeWithSameErasure(TypeBinding otherType) {
 				return null;
 			}
 			if (!(arrayType.leafComponentType instanceof ReferenceBinding)) return null;
-			TypeBinding leafSuperType = arrayType.leafComponentType.findSuperTypeWithSameErasure(otherType.leafComponentType());
+			TypeBinding leafSuperType = arrayType.leafComponentType.findSuperTypeOriginatingFrom(otherType.leafComponentType());
 			if (leafSuperType == null) return null;
 			return arrayType.environment().createArrayType(leafSuperType, arrayType.dimensions);	
 			
@@ -31,7 +30,7 @@ public TypeBinding findSuperTypeWithSameErasure(TypeBinding otherType) {
 		    	CaptureBinding capture = (CaptureBinding) this;
 		    	TypeBinding captureBound = capture.firstBound;
 		    	if (captureBound instanceof ArrayBinding) {
-		    		TypeBinding match = captureBound.findSuperTypeWithSameErasure(otherType);
+		    		TypeBinding match = captureBound.findSuperTypeOriginatingFrom(otherType);
 		    		if (match != null) return match;
 		    	}
 		    }
@@ -41,35 +40,20 @@ public TypeBinding findSuperTypeWithSameErasure(TypeBinding otherType) {
 		case Binding.GENERIC_TYPE :
 		case Binding.RAW_TYPE :
 		case Binding.WILDCARD_TYPE :
+		case Binding.INTERSECTION_TYPE:
 		    // do not allow type variables/intersection types to match with erasures for free
-			switch(otherType.kind()) {
-				case Binding.PARAMETERIZED_TYPE :
-				case Binding.RAW_TYPE :
-				case Binding.ARRAY_TYPE : 
-					otherType = otherType.erasure();
-			}
+			otherType = otherType.original();
 		    if (this == otherType)
 		    	return this;
-			switch(kind) {
-				case Binding.PARAMETERIZED_TYPE :
-				case Binding.RAW_TYPE :
-				case Binding.ARRAY_TYPE : 
-					if (erasure() == otherType)
-						return this;
-			}
-		    
+		    if (original() == otherType)
+		    	return this;
 		    ReferenceBinding currentType = (ReferenceBinding)this;
 		    if (!otherType.isInterface()) {
 				while ((currentType = currentType.superclass()) != null) {
 					if (currentType == otherType)
 						return currentType;
-					switch(currentType.kind()) {
-						case Binding.PARAMETERIZED_TYPE :
-						case Binding.RAW_TYPE :
-						case Binding.ARRAY_TYPE : 
-							if (currentType.erasure() == otherType)
-								return currentType;
-					}					
+					if (currentType.original() == otherType)
+						return currentType;
 				}
 				return null;
 		    }
@@ -99,13 +83,8 @@ public TypeBinding findSuperTypeWithSameErasure(TypeBinding otherType) {
 				currentType = interfacesToVisit[i];
 				if (currentType == otherType)
 					return currentType;
-				switch(currentType.kind()) {
-					case Binding.PARAMETERIZED_TYPE :
-					case Binding.RAW_TYPE :
-					case Binding.ARRAY_TYPE : 
-						if (currentType.erasure() == otherType)
-							return currentType;
-				}					
+				if (currentType.original() == otherType)
+					return currentType;
 				ReferenceBinding[] itsInterfaces = currentType.superInterfaces();
 				if (itsInterfaces != Binding.NO_SUPERINTERFACES) {
 					int itsLength = itsInterfaces.length;
