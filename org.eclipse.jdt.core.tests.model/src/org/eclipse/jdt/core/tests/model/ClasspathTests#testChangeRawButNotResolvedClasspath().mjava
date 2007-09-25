@@ -1,0 +1,44 @@
+/*
+ * Ensures that changing the raw classpath and the containers so that the resolved classpath doesn't change
+ * generates the correct delta.
+ */
+public void testChangeRawButNotResolvedClasspath() throws CoreException {
+	try {
+		final String containerPath1 = "org.eclipse.jdt.core.tests.model.container/con1";
+		final TestContainer container1 = new TestContainer(
+			new Path(containerPath1), 
+			new IClasspathEntry[] {JavaCore.newLibraryEntry(new Path("/P/lib1.jar"), null, null)});
+		final String containerPath2 = "org.eclipse.jdt.core.tests.model.container/con2";
+		final TestContainer container2 = new TestContainer(
+			new Path(containerPath2), 
+			new IClasspathEntry[] {JavaCore.newLibraryEntry(new Path("/P/lib2.jar"), null, null)});
+		final IJavaProject p = createJavaProject("P", new String[] {}, new String[] {containerPath1, containerPath2}, "");
+		createFile("/P/lib1.jar", "");
+		createFile("/P/lib2.jar", "");
+		JavaCore.setClasspathContainer(container1.getPath(), new IJavaProject[] {p}, new IClasspathContainer[] {container1}, null);
+		JavaCore.setClasspathContainer(container2.getPath(), new IJavaProject[] {p}, new IClasspathContainer[] {container2}, null);
+		
+		startDeltas();
+		IWorkspaceRunnable runnable = new IWorkspaceRunnable() {
+			public void run(IProgressMonitor monitor) throws CoreException {
+				IClasspathEntry[] newRawClasspath = new IClasspathEntry[] {
+					JavaCore.newContainerEntry(new Path(containerPath2)),
+					JavaCore.newContainerEntry(new Path(containerPath1))
+				};
+				p.setRawClasspath(newRawClasspath, monitor);
+				JavaCore.setClasspathContainer(container1.getPath(), new IJavaProject[] {p}, new IClasspathContainer[] {container2}, null);
+				JavaCore.setClasspathContainer(container2.getPath(), new IJavaProject[] {p}, new IClasspathContainer[] {container1}, null);
+			}
+		};
+		JavaCore.run(runnable, null);
+		assertDeltas(
+			"Unexpected delta", 
+			"P[*]: {CONTENT | RAW CLASSPATH CHANGED}\n" + 
+			"	ResourceDelta(/P/.classpath)[*]"
+		);
+	} finally {
+		stopDeltas();
+		deleteProject("P");
+	}
+}
+
