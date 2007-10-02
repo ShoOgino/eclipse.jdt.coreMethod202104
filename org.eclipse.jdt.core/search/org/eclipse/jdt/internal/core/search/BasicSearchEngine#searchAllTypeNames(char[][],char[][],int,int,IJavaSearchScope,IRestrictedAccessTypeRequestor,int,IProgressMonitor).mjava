@@ -8,23 +8,35 @@
 	public void searchAllTypeNames(
 		final char[][] qualifications, 
 		final char[][] typeNames,
-		final int matchRule, 
+		int matchRule, 
 		int searchFor, 
 		IJavaSearchScope scope, 
 		final IRestrictedAccessTypeRequestor nameRequestor,
 		int waitingPolicy,
 		IProgressMonitor progressMonitor)  throws JavaModelException {
 
+		// Validate match rule first
+		int namesLength = typeNames == null ? 0 : typeNames.length;
+		for (int i=0; i<namesLength; i++) {
+			matchRule &= SearchPattern.validateMatchRule(new String(typeNames[i]), matchRule);
+		}
+		final int validatedMatchRule = matchRule;
+		
+		// Debug
 		if (VERBOSE) {
 			Util.verbose("BasicSearchEngine.searchAllTypeNames(char[][], char[][], int, int, IJavaSearchScope, IRestrictedAccessTypeRequestor, int, IProgressMonitor)"); //$NON-NLS-1$
 			Util.verbose("	- package name: "+(qualifications==null?"null":new String(CharOperation.concatWith(qualifications, ',')))); //$NON-NLS-1$ //$NON-NLS-2$
 			Util.verbose("	- type name: "+(typeNames==null?"null":new String(CharOperation.concatWith(typeNames, ',')))); //$NON-NLS-1$ //$NON-NLS-2$
 			Util.verbose("	- match rule: "+matchRule); //$NON-NLS-1$
+			if (validatedMatchRule != matchRule) {
+				Util.verbose("	- validated match rule: "+getMatchRuleString(validatedMatchRule)); //$NON-NLS-1$
+			}
 			Util.verbose("	- search for: "+searchFor); //$NON-NLS-1$
 			Util.verbose("	- scope: "+scope); //$NON-NLS-1$
 		}
 		IndexManager indexManager = JavaModelManager.getIndexManager();
 
+		// Create pattern
 		final char typeSuffix;
 		switch(searchFor){
 			case IJavaSearchConstants.CLASS :
@@ -52,7 +64,7 @@
 				typeSuffix = IIndexConstants.TYPE_SUFFIX;
 				break;
 		}
-		final MultiTypeDeclarationPattern pattern = new MultiTypeDeclarationPattern(qualifications, typeNames, typeSuffix, matchRule);
+		final MultiTypeDeclarationPattern pattern = new MultiTypeDeclarationPattern(qualifications, typeNames, typeSuffix, validatedMatchRule);
 
 		// Get working copy path(s). Store in a single string in case of only one to optimize comparison in requestor
 		final HashSet workingCopyPaths = new HashSet();
@@ -84,7 +96,7 @@
 						break;
 					case 1:
 						if (singleWkcpPath.equals(documentPath)) {
-							return true; // fliter out *the* working copy
+							return true; // filter out *the* working copy
 						}
 						break;
 					default:
@@ -187,14 +199,14 @@
 								}
 								public boolean visit(TypeDeclaration typeDeclaration, CompilationUnitScope compilationUnitScope) {
 									SearchPattern decodedPattern =
-										new QualifiedTypeDeclarationPattern(packageDeclaration, typeDeclaration.name, convertTypeKind(TypeDeclaration.kind(typeDeclaration.modifiers)), matchRule);
+										new QualifiedTypeDeclarationPattern(packageDeclaration, typeDeclaration.name, convertTypeKind(TypeDeclaration.kind(typeDeclaration.modifiers)), validatedMatchRule);
 									if (pattern.matchesDecodedKey(decodedPattern)) {
 										nameRequestor.acceptType(typeDeclaration.modifiers, packageDeclaration, typeDeclaration.name, CharOperation.NO_CHAR_CHAR, path, null);
 									}
 									return true;
 								}
 								public boolean visit(TypeDeclaration memberTypeDeclaration, ClassScope classScope) {
-									// compute encloising type names
+									// compute enclosing type names
 									char[] qualification = packageDeclaration;
 									TypeDeclaration enclosing = memberTypeDeclaration.enclosingType;
 									char[][] enclosingTypeNames = CharOperation.NO_CHAR_CHAR;
@@ -208,7 +220,7 @@
 										}
 									}
 									SearchPattern decodedPattern =
-										new QualifiedTypeDeclarationPattern(qualification, memberTypeDeclaration.name, convertTypeKind(TypeDeclaration.kind(memberTypeDeclaration.modifiers)), matchRule);
+										new QualifiedTypeDeclarationPattern(qualification, memberTypeDeclaration.name, convertTypeKind(TypeDeclaration.kind(memberTypeDeclaration.modifiers)), validatedMatchRule);
 									if (pattern.matchesDecodedKey(decodedPattern)) {
 										nameRequestor.acceptType(memberTypeDeclaration.modifiers, packageDeclaration, memberTypeDeclaration.name, enclosingTypeNames, path, null);
 									}

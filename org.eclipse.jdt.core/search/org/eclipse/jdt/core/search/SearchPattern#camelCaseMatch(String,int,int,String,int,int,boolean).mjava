@@ -26,19 +26,11 @@
  * but are not always considered as leading character. For instance, both
  * 'UTF16DSS' and 'UTFDSS' patterns will match 'UTF16DocumentScannerSupport'.
  * <p>
- * CamelCase may or may not match prefixes depending on the given parameter.
- * When the prefix match parameter is <code>true</code>, the given pattern can
- * match only a prefix of the given name. For instance, 'HM' , 'HaMa' and  'HMap'
- * patterns will all match 'HashMap', 'HatMapper' <b>and</b> 'HashMapEntry'.
- * <br>
- * Reversely, if the prefix match parameter is <code>false</code>, then pattern
- * and name must have <b>exactly</b> the same number of parts, and their last
- * parts must be identical if they contain lowercase characters.
- * For instance, 'HMap' and 'HaMap' patterns will match 'HashMap' but neither
- * 'HashMapEntry' nor 'HatMapper'. Note that when the last part does not contain
- * lowercase characters, then the name may end with lowercase characters.
- * So, 'HM' pattern will match both 'HashMap' <b>and</b> 'HatMapper' but will not
- * match 'HashMapEntry'.
+ * CamelCase can be restricted to match only the same count of parts. When this
+ * restriction is specified the given pattern and the given name must have <b>exactly</b>
+ * the same number of parts (i.e. the same number of uppercase characters).<br>
+ * For instance, 'HM' , 'HaMa' and  'HMap' patterns will match 'HashMap' and
+ * 'HatMapper' <b>but not</b> 'HashMapEntry'.
  * <p>
  * <pre>Examples:<ol>
  * <li>  pattern = "NPE"
@@ -89,14 +81,7 @@
  *  name = "HashMapEntry"
  *  nameStart = 0
  *  nameEnd = 12
- *  result => (prefixMatch == true)</li>
- * <li>  pattern = "HMap"
- *  patternStart = 0
- *  patternEnd = 4
- *  name = "HatMapper"
- *  nameStart = 0
- *  nameEnd = 9
- *  result => (prefixMatch == true)</li>
+ *  result => (samePartCount == false)</li>
  * </ol></pre>
  * 
  * @see CharOperation#camelCaseMatch(char[], int, int, char[], int, int, boolean)
@@ -108,35 +93,29 @@
  * @param name the given name
  * @param nameStart the start index of the name, inclusive
  * @param nameEnd the end index of the name, exclusive
- * @param prefixMatch flag telling whether the pattern can match name prefix or not.
+ * @param samePartCount flag telling whether the pattern and the name should
+ * 	have the same count of parts or not.<br>
+ * 	&nbsp;&nbsp;For example:
  * 	<ul>
- * 		<li>For example, when it's <code>true</code>:<br>
- * 			- <code>HM</code> type string pattern will match
- * 			  <code>HashMap</code> and <code>HtmlMapper</code> types,
- * 			  but not <code>HashMapEntry</code><br>
- * 			- <code>HMap</code> type string pattern will match
- * 			  <code>HashMap</code> type but not <code>HtmlMapper</code>.
- * 		</li>
- * 		<li>and, when it's <code>false</code>:<br>
- * 			- <code>HM</code> type string pattern will match both 
- * 			  <code>HashMap</code> and <code>HtmlMapper</code>
- * 			  and <code>HashMapEntry</code><br>
- * 			- <code>HMap</code> type string pattern will match both
- * 			  <code>HashMap</code> and <code>HtmlMapper</code> types.
- * 		</li>
+ * 		<li>'HM' type string pattern will match 'HashMap' and 'HtmlMapper' types,
+ * 				but not 'HashMapEntry'</li>
+ * 		<li>'HMap' type string pattern will still match previous 'HashMap' and
+ * 				'HtmlMapper' types, but not 'HighMagnitude'</li>
  * 	</ul>
  * @return true if a sub-pattern matches the sub-part of the given name, false otherwise
  * @since 3.4
  */
-public static final boolean camelCaseMatch(String pattern, int patternStart, int patternEnd, String name, int nameStart, int nameEnd, boolean prefixMatch) {
+public static final boolean camelCaseMatch(String pattern, int patternStart, int patternEnd, String name, int nameStart, int nameEnd, boolean samePartCount) {
 
-	/*
+	/* !!!!!!!!!! WARNING !!!!!!!!!!
 	 * The algorithm of this method has been entirely copied from
-	 * CharOperation#camelCaseMatch(char[], int, int, char[], int, int, boolean)
+	 * CharOperation#camelCaseMatch(char[], int, int, char[], int, int, boolean).
 	 * Array lengths have been replaced with call to {@link String#length()} and
 	 * array direct access have been replaced with call to {@link String#charAt(int)}.
-	 * WARNING: Do not change one of these methods without changing the other
-	 * the same way otherwise behavior differences may appear while using them...
+	 * 
+	 * So, do NOT modify this method directly to fix any bug but modify first the
+	 * corresponding CharOperation method and do the copy again to be sure that
+	 * these two methods are kept synchronized.
 	 */
 
 	if (name == null)
@@ -153,7 +132,7 @@ public static final boolean camelCaseMatch(String pattern, int patternStart, int
 		// first char must strictly match (upper/lower)
 		return false;
 	}
-	
+
 	char patternChar, nameChar;
 	int iPattern = patternStart;
 	int iName = nameStart;
@@ -165,29 +144,19 @@ public static final boolean camelCaseMatch(String pattern, int patternStart, int
 		iName++;
 
 		if (iPattern == patternEnd) { // we have exhausted pattern...
-			// it's a match if not exact mode or name is also exhausted
-			if (prefixMatch || iName == nameEnd) return true;
+			// it's a match if the name can have additional parts (i.e. uppercase characters) or is also exhausted
+			if (!samePartCount || iName == nameEnd) return true;
 
-			// it's not a match if last pattern character is a lowercase
-			if ((patternChar = pattern.charAt(iPattern-1)) < ScannerHelper.MAX_OBVIOUS) {
-				if ((ScannerHelper.OBVIOUS_IDENT_CHAR_NATURES[patternChar] & (ScannerHelper.C_UPPER_LETTER | ScannerHelper.C_DIGIT)) == 0) {
-					return false;
-				}
-			}
-			else if (Character.isJavaIdentifierPart(patternChar) && !Character.isUpperCase(patternChar) && !Character.isDigit(patternChar)) {
-				return false;
-			}
-
-			// it's a match only if name has no more uppercase characters (exact mode)
+			// otherwise it's a match only if the name has no more uppercase characters
 			while (true) {
 				if (iName == nameEnd) {
-					// we have exhausted name, so it's a match
+					// we have exhausted the name, so it's a match
 					return true;
 				}
 				nameChar = name.charAt(iName);
+				// test if the name character is uppercase
 				if (nameChar < ScannerHelper.MAX_OBVIOUS) {
 					if ((ScannerHelper.OBVIOUS_IDENT_CHAR_NATURES[nameChar] & ScannerHelper.C_UPPER_LETTER) != 0) {
-						// nameChar is uppercase, so it's not a match
 						return false;
 					}
 				}
@@ -199,7 +168,7 @@ public static final boolean camelCaseMatch(String pattern, int patternStart, int
 		}
 
 		if (iName == nameEnd){
-			// We have exhausted name (and not pattern), so it's not a match 
+			// We have exhausted the name (and not the pattern), so it's not a match 
 			return false;
 		}
 
