@@ -1,0 +1,132 @@
+/**
+ * Returns false if two given types could not intersect as argument types:
+ * List<Throwable> & List<Runnable> --> false
+ * List<? extends Throwable> & List<? extends Runnable> --> true
+ * List<? extends String> & List<? extends Runnable> --> false
+ */
+private boolean isProvablyDistinctTypeArgument(TypeBinding otherArgument, final ParameterizedTypeBinding paramType, final int rank) {
+	if (this == otherArgument)
+		return false;
+	
+	TypeBinding upperBound1 = null;
+	TypeBinding lowerBound1 = null;
+	switch (kind()) {
+		case Binding.WILDCARD_TYPE :
+			WildcardBinding wildcard = (WildcardBinding) this;
+			switch (wildcard.boundKind) {
+				case Wildcard.EXTENDS:
+					upperBound1 = wildcard.bound;
+					break;
+				case Wildcard.SUPER:
+					lowerBound1 = wildcard.bound;
+					break;
+				case Wildcard.UNBOUND:
+					return false;
+			}
+			break;
+		case Binding.INTERSECTION_TYPE :
+			break;
+		case Binding.TYPE_PARAMETER :
+			final TypeVariableBinding variable = (TypeVariableBinding) this;
+			if (variable.firstBound == null) // unbound variable
+				return false;
+			if (variable.isCapture()) {
+				upperBound1 = variable.upperBound();
+				break;
+			}
+			TypeBinding eliminatedType = (paramType.environment.convertEliminatingTypeVariables(variable, paramType.genericType(), rank, null));
+			switch (eliminatedType.kind()) {
+				case Binding.WILDCARD_TYPE :
+				case Binding.INTERSECTION_TYPE :
+					wildcard = (WildcardBinding) eliminatedType;
+					switch (wildcard.boundKind) {
+						case Wildcard.EXTENDS:
+							upperBound1 = wildcard.bound;
+							break;
+						case Wildcard.SUPER:
+							lowerBound1 = wildcard.bound;
+							break;
+						case Wildcard.UNBOUND:
+							return false;
+					}
+					break;
+			}
+			break;
+	}
+	TypeBinding upperBound2 = null;
+	TypeBinding lowerBound2 = null;
+	switch (otherArgument.kind()) {
+		case Binding.WILDCARD_TYPE :
+			WildcardBinding otherWildcard = (WildcardBinding) otherArgument;
+			switch (otherWildcard.boundKind) {
+				case Wildcard.EXTENDS:
+					upperBound2 = otherWildcard.bound;
+					break;
+				case Wildcard.SUPER:
+					lowerBound2 = otherWildcard.bound;
+					break;
+				case Wildcard.UNBOUND:
+					return false;
+			}
+			break;
+		case Binding.INTERSECTION_TYPE :
+			break;
+		case Binding.TYPE_PARAMETER :
+			TypeVariableBinding otherVariable = (TypeVariableBinding) otherArgument;
+			if (otherVariable.firstBound == null) // unbound variable
+				return false;
+			if (otherVariable.isCapture()) {
+				upperBound2 = otherVariable.upperBound(); // TODO need to improve for otherBounds
+				break;
+			} 
+			TypeBinding otherEliminatedType = (paramType.environment.convertEliminatingTypeVariables(otherVariable, paramType.genericType(), rank, null));
+			switch (otherEliminatedType.kind()) {
+				case Binding.WILDCARD_TYPE :
+				case Binding.INTERSECTION_TYPE :
+					otherWildcard = (WildcardBinding) otherEliminatedType;
+					switch (otherWildcard.boundKind) {
+						case Wildcard.EXTENDS:
+							upperBound2 = otherWildcard.bound;
+							break;
+						case Wildcard.SUPER:
+							lowerBound2 = otherWildcard.bound;
+							break;
+						case Wildcard.UNBOUND:
+							return false;
+					}
+					break;
+			}			break;
+	}
+	if (lowerBound1 != null) {
+		if (lowerBound2 != null) {
+			return false; // Object could always be a candidate
+
+		} else if (upperBound2 != null) {
+			return !lowerBound1.isCompatibleWith(upperBound2);
+//			return lowerBound1.isProvableDistinctSubType(upperBound2);
+		} else {
+			return !lowerBound1.isCompatibleWith(otherArgument);
+//			return lowerBound1.isProvableDistinctSubType(otherArgument);
+		}
+	} else if (upperBound1 != null) {
+		if (lowerBound2 != null) {
+			return !lowerBound2.isCompatibleWith(upperBound1);
+			//return lowerBound2.isProvableDistinctSubType(upperBound1);
+		} else if (upperBound2 != null) {
+			return upperBound1.isProvableDistinctSubType(upperBound2) 
+							&& upperBound2.isProvableDistinctSubType(upperBound1);
+		} else {
+			return otherArgument.isProvableDistinctSubType(upperBound1);
+		}
+	} else {
+		if (lowerBound2 != null) {
+			return !lowerBound2.isCompatibleWith(this);
+//			return lowerBound2.isProvableDistinctSubType(this);
+		} else if (upperBound2 != null) {
+			return this.isProvableDistinctSubType(upperBound2);
+		} else {
+			return true; // ground types should have been the same
+		}
+	}
+}
+
