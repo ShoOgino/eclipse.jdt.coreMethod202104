@@ -1,0 +1,39 @@
+private Object getMemberValue(MemberValuePair memberValuePair, Object binaryValue) {
+	if (binaryValue instanceof Constant) {
+		return Util.getAnnotationMemberValue(memberValuePair, (Constant) binaryValue);
+	} else if (binaryValue instanceof IBinaryAnnotation) {
+		memberValuePair.valueKind = IMemberValuePair.K_ANNOTATION;
+		return getAnnotation((IBinaryAnnotation) binaryValue);
+	} else if (binaryValue instanceof ClassSignature) {
+		memberValuePair.valueKind = IMemberValuePair.K_CLASS;
+		char[] className = Signature.toCharArray(CharOperation.replaceOnCopy(((ClassSignature) binaryValue).getTypeName(), '/', '.'));
+		return new String(className);
+	} else if (binaryValue instanceof EnumConstantSignature) {
+		memberValuePair.valueKind = IMemberValuePair.K_QUALIFIED_NAME;
+		EnumConstantSignature enumConstant = (EnumConstantSignature) binaryValue;
+		char[] enumName = Signature.toCharArray(CharOperation.replaceOnCopy(enumConstant.getTypeName(), '/', '.'));
+		char[] qualifiedName = CharOperation.concat(enumName, enumConstant.getEnumConstantName(), '.');
+		return new String(qualifiedName);
+	} else if (binaryValue instanceof Object[]) {
+		memberValuePair.valueKind = -1; // modified below by the first call to getMemberValue(...)
+		Object[] binaryValues = (Object[]) binaryValue;
+		int length = binaryValues.length;
+		Object[] values = new Object[length];
+		for (int i = 0; i < length; i++) {
+			int previousValueKind = memberValuePair.valueKind;
+			Object value = getMemberValue(memberValuePair, binaryValues[i]);
+			if (previousValueKind != IMemberValuePair.K_UNKNOWN && memberValuePair.valueKind != previousValueKind) {
+				// values are heterogeneous, value kind is thus unknown
+				memberValuePair.valueKind = IMemberValuePair.K_UNKNOWN;
+			}
+			values[i] = value;
+		}
+		if (memberValuePair.valueKind == -1)
+			memberValuePair.valueKind = IMemberValuePair.K_UNKNOWN;
+		return values;
+	} else {
+		memberValuePair.valueKind = IMemberValuePair.K_UNKNOWN;
+		return null;
+	}
+}
+

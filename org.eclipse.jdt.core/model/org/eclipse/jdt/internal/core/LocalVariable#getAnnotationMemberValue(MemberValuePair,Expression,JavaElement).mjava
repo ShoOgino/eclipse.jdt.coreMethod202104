@@ -1,0 +1,42 @@
+	/*
+	 * Creates the value wrapper from the given expression, and sets the valueKind on the given memberValuePair
+	 */
+	private Object getAnnotationMemberValue(MemberValuePair memberValuePair, Expression expression, JavaElement parentElement) {
+		if (expression instanceof Literal) {
+			((Literal) expression).computeConstant();
+			return Util.getAnnotationMemberValue(memberValuePair, expression.constant);
+		} else if (expression instanceof org.eclipse.jdt.internal.compiler.ast.Annotation) {
+			memberValuePair.valueKind = IMemberValuePair.K_ANNOTATION;
+			return getAnnotation((org.eclipse.jdt.internal.compiler.ast.Annotation) expression, parentElement);
+		} else if (expression instanceof ClassLiteralAccess) {
+			ClassLiteralAccess classLiteral = (ClassLiteralAccess) expression;
+			char[] typeName = CharOperation.concatWith(classLiteral.type.getTypeName(), '.');
+			memberValuePair.valueKind = IMemberValuePair.K_CLASS;
+			return new String(typeName);
+		} else if (expression instanceof QualifiedNameReference) {
+			char[] qualifiedName = CharOperation.concatWith(((QualifiedNameReference) expression).tokens, '.');
+			memberValuePair.valueKind = IMemberValuePair.K_QUALIFIED_NAME;
+			return new String(qualifiedName);		
+		} else if (expression instanceof ArrayInitializer) {
+			memberValuePair.valueKind = -1; // modified below by the first call to getMemberValue(...)
+			Expression[] expressions = ((ArrayInitializer) expression).expressions;
+			int length = expressions == null ? 0 : expressions.length;
+			Object[] values = new Object[length];
+			for (int i = 0; i < length; i++) {
+				int previousValueKind = memberValuePair.valueKind;
+				Object value = getAnnotationMemberValue(memberValuePair, expressions[i], parentElement);
+				if (previousValueKind != IMemberValuePair.K_UNKNOWN && memberValuePair.valueKind != previousValueKind) {
+					// values are heterogeneous, value kind is thus unknown
+					memberValuePair.valueKind = IMemberValuePair.K_UNKNOWN;
+				}
+				values[i] = value;
+			}
+			if (memberValuePair.valueKind == -1)
+				memberValuePair.valueKind = IMemberValuePair.K_UNKNOWN;
+			return values;
+		} else {
+			memberValuePair.valueKind = IMemberValuePair.K_UNKNOWN;
+			return null;
+		}
+	}
+
