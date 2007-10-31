@@ -3,7 +3,9 @@
 		final int editReplacementLength= edit.replacement.length();
 		final int editOffset= edit.offset;
 		if (editLength != 0) {
-			if (this.textRegionStart <= editOffset && (editOffset + editLength - 1) <= this.textRegionEnd) {
+			
+			IRegion covering = getCoveringRegion(editOffset, (editOffset + editLength - 1));
+			if (covering != null) {
 				if (editReplacementLength != 0 && editLength == editReplacementLength) {
 					for (int i = editOffset, max = editOffset + editLength; i < max; i++) {
 						if (scanner.source[i] != edit.replacement.charAt(i - editOffset)) {
@@ -11,10 +13,12 @@
 						}
 					}
 					return false;
-				} else {
-					return true;
 				}
-			} else if (editOffset + editLength == this.textRegionStart) {
+				return true;
+			}
+
+			IRegion starting = getRegionAt(editOffset + editLength);
+			if (starting != null) {
 				int i = editOffset;
 				for (int max = editOffset + editLength; i < max; i++) {
 					int replacementStringIndex = i - editOffset;
@@ -23,15 +27,39 @@
 					}
 				}
 				if (i - editOffset != editReplacementLength && i != editOffset + editLength - 1) {
-					edit.offset = textRegionStart;
+					edit.offset = starting.getOffset();
 					edit.length = 0;
 					edit.replacement = edit.replacement.substring(i - editOffset);
 					return true;
 				}
 			}
-		} else if (this.textRegionStart <= editOffset && editOffset <= this.textRegionEnd) {
+			
+			return false;
+		}
+		
+		IRegion covering = getCoveringRegion(editOffset, editOffset);
+		if (covering != null) {
 			return true;
-		} else if (editOffset == this.scannerEndPosition && editOffset == this.textRegionEnd + 1) {
+		}
+
+		if (editOffset == this.scannerEndPosition) {
+			int index = Arrays.binarySearch(
+				this.regions,
+				new Region(editOffset, 0),
+				new Comparator() {
+					public int compare(Object o1, Object o2) {
+						IRegion r1 = (IRegion)o1;
+						IRegion r2 = (IRegion)o2;
+						
+						int r1End = r1.getOffset() + r1.getLength();
+						int r2End = r2.getOffset() + r2.getLength();
+						
+						return r1End - r2End;
+					}
+				});
+			if (index < 0) {
+				return false;
+			}
 			return true;
 		}
 		return false;
