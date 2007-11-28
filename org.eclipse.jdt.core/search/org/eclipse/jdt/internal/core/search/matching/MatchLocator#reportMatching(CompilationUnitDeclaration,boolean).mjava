@@ -27,11 +27,13 @@ protected void reportMatching(CompilationUnitDeclaration unit, boolean mustResol
 				// import ref cannot be in the hierarchy of a type
 				if (this.hierarchyResolver != null) continue;
 
-				ImportReference importRef = (ImportReference) node;
-				Binding binding = (importRef.bits & ASTNode.OnDemand) != 0
-					? unitScope.getImport(CharOperation.subarray(importRef.tokens, 0, importRef.tokens.length), true, importRef.isStatic())
-					: unitScope.getImport(importRef.tokens, false, importRef.isStatic());
-				this.patternLocator.matchLevelAndReportImportRef(importRef, binding, this);
+				if (this.patternFineGrain == 0 || (this.patternFineGrain & IJavaSearchConstants.IMPORT_DECLARATION_TYPE_REFERENCE) != 0) {
+					ImportReference importRef = (ImportReference) node;
+					Binding binding = (importRef.bits & ASTNode.OnDemand) != 0
+						? unitScope.getImport(CharOperation.subarray(importRef.tokens, 0, importRef.tokens.length), true, importRef.isStatic())
+						: unitScope.getImport(importRef.tokens, false, importRef.isStatic());
+					this.patternLocator.matchLevelAndReportImportRef(importRef, binding, this);
+				}
 			} else {
 				nodeSet.addMatch(node, this.patternLocator.resolveLevel(node));
 			}
@@ -53,7 +55,7 @@ protected void reportMatching(CompilationUnitDeclaration unit, boolean mustResol
 	boolean matchedUnitContainer = (this.matchContainer & PatternLocator.COMPILATION_UNIT_CONTAINER) != 0;
 
 	// report references in javadoc
-	if (unit.javadoc != null) {
+	if (unit.javadoc != null && this.patternFineGrain == 0) {
 		ASTNode[] nodes = nodeSet.matchingNodes(unit.javadoc.sourceStart, unit.javadoc.sourceEnd);
 		if (nodes != null) {
 			if (!matchedUnitContainer) {
@@ -64,8 +66,9 @@ protected void reportMatching(CompilationUnitDeclaration unit, boolean mustResol
 				for (int i = 0, l = nodes.length; i < l; i++) {
 					ASTNode node = nodes[i];
 					Integer level = (Integer) nodeSet.matchingNodes.removeKey(node);
-					if (encloses(element))
+					if (encloses(element) && this.patternFineGrain == 0) {
 						this.patternLocator.matchReportReference(node, element, null/*no binding*/, level.intValue(), this);
+					}
 				}
 			}
 		}
@@ -85,11 +88,8 @@ protected void reportMatching(CompilationUnitDeclaration unit, boolean mustResol
 			for (int i = 0, l = imports.length; i < l; i++) {
 				ImportReference importRef = imports[i];
 				Integer level = (Integer) nodeSet.matchingNodes.removeKey(importRef);
-				if (level != null) {
-					Binding binding = (importRef.bits & ASTNode.OnDemand) != 0
-						? unitScope.getImport(CharOperation.subarray(importRef.tokens, 0, importRef.tokens.length), true, importRef.isStatic())
-						: unitScope.getImport(importRef.tokens, false, importRef.isStatic());
-					this.patternLocator.matchReportImportRef(importRef, binding, createImportHandle(importRef), level.intValue(), this);
+				if (level != null && (this.patternFineGrain == 0 || (this.patternFineGrain & IJavaSearchConstants.IMPORT_DECLARATION_TYPE_REFERENCE) != 0)) {
+					this.patternLocator.matchReportImportRef(importRef, null /*no binding*/, createImportHandle(importRef), level.intValue(), this);
 				}
 			}
 		}
