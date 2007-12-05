@@ -3,22 +3,19 @@
  * (regression test for bug 35306 Index update request can be incorrectly handled)
  */
 public void testConcurrentJob() throws CoreException, InterruptedException, IOException, TimeOutException {
-	IndexManager indexManager = JavaModelManager.getIndexManager();
 	WaitingJob job = new WaitingJob();
 	try {
 		// setup: suspend indexing and create a project with one empty jar on its classpath
-		indexManager.disable();
-		JavaCore.run(new IWorkspaceRunnable() {
+		job.runAndSuspend(new IWorkspaceRunnable() {
 			public void run(IProgressMonitor monitor) throws CoreException {
-				createJavaProject("P1", new String[] {}, new String[] {"/P1/jclMin.jar"}, "bin");
-				createFile("/P1/jclMin.jar", EMPTY_JAR);
+				JavaCore.run(new IWorkspaceRunnable() {
+					public void run(IProgressMonitor monitor2) throws CoreException {
+						createJavaProject("P1", new String[] {}, new String[] {"/P1/jclMin.jar"}, "bin");
+						createFile("/P1/jclMin.jar", EMPTY_JAR);
+					}
+				}, monitor);
 			}
-		}, null);
-		
-		// add waiting job and wait for it to be executed
-		indexManager.request(job);
-		indexManager.enable();
-		job.startingSem.acquire(30000); // wait for job to start (wait 30s max)
+		});
 				
 		final IJavaProject project = getJavaProject("P1");
 			
@@ -62,7 +59,7 @@ public void testConcurrentJob() throws CoreException, InterruptedException, IOEx
 		getFile("/P1/jclMin.jar").setContents(new FileInputStream(getExternalJCLPathString()), IResource.NONE, null);
 			
 		// resume waiting job
-		job.runningSem.release();
+		job.resume();
 		
 		// wait for concurrent job to finish
 		thread.join(10000); // 10s max
@@ -70,9 +67,8 @@ public void testConcurrentJob() throws CoreException, InterruptedException, IOEx
 		assertTrue("Failed to get all types", success[0]);
 				
 	} finally {
-		job.runningSem.release();
+		job.resume();
 		deleteProject("P1");
-		indexManager.enable();
 	}
 }
 

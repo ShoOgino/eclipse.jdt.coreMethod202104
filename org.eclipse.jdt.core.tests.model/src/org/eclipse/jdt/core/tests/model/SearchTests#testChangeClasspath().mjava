@@ -3,26 +3,23 @@
  * a project causes another request to reindex.
  */
 public void testChangeClasspath() throws CoreException, TimeOutException {
-	IndexManager indexManager = JavaModelManager.getIndexManager();
 	WaitingJob job = new WaitingJob();
 	try {
 		// setup: suspend indexing and create a project (prj=src) with one cu
-		indexManager.disable();
-		JavaCore.run(new IWorkspaceRunnable() {
+		job.runAndSuspend(new IWorkspaceRunnable() {
 			public void run(IProgressMonitor monitor) throws CoreException {
-				createJavaProject("P1");
-				createFile(
-					"/P1/X.java",
-					"public class X {\n" +
-					"}"
-				);
+				JavaCore.run(new IWorkspaceRunnable() {
+					public void run(IProgressMonitor monitor2) throws CoreException {
+						createJavaProject("P1");
+						createFile(
+							"/P1/X.java",
+							"public class X {\n" +
+							"}"
+						);
+					}
+				}, monitor);				
 			}
-		}, null);
-		
-		// add waiting job and wait for it to be executed
-		indexManager.request(job);
-		indexManager.enable();
-		job.startingSem.acquire(30000); // wait for job to start (wait 30s max)
+		});
 		
 		// remove source folder from classpath
 		IJavaProject project = getJavaProject("P1");
@@ -31,7 +28,7 @@ public void testChangeClasspath() throws CoreException, TimeOutException {
 			null);
 			
 		// resume waiting job
-		job.runningSem.release();
+		job.resume();
 		
 		assertAllTypes(
 			"Unexpected all types after removing source folder",
@@ -39,9 +36,8 @@ public void testChangeClasspath() throws CoreException, TimeOutException {
 			""
 		);
 	} finally {
-		job.runningSem.release();
+		job.resume();
 		deleteProject("P1");
-		indexManager.enable();
 	}
 }
 
