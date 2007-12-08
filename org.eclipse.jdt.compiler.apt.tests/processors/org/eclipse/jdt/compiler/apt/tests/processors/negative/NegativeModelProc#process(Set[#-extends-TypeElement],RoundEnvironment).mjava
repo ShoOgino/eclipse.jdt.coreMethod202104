@@ -2,57 +2,38 @@
 	// The return value does not signify success or failure!
 	@Override
 	public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
+		if (!_processorEnabled) {
+			// Disable this processor unless we are intentionally performing the test.
+			return false;
+		}
 		if (roundEnv.processingOver()) {
 			// We're not interested in the postprocessing round.
 			return false;
 		}
-		
-		// Selectively enable just one of the test routines
-		Map<String, String> options = processingEnv.getOptions();
-		if (!options.containsKey(CLASSNAME)) {
-			// Disable this processor unless we are intentionally performing the test.
+		if (_oneTest < 0 || _oneTest > testMethodNames.length) {
+			reportError("Invalid test method specified: " + processingEnv.getOptions().get(CLASSNAME));
 			return false;
 		}
-		String oneTest = options.get(CLASSNAME);
-		if (oneTest != null && oneTest.length() > 0) {
-			int enable = 0;
-			try {
-				enable = Integer.parseInt(oneTest);
+		
+		// Reflectively invoke the specified tests.
+		try {
+			if (_oneTest == 0) {
+				for (Method testMethod : testMethods) {
+					Object success = testMethod.invoke(this);
+					if (!(success instanceof Boolean) || !(Boolean)success) {
+						return false;
+					}
+				}
 			}
-			catch (NumberFormatException e) {
-				reportError("Option value '" + oneTest + "' must be an integer indicating what test to enable");
-				return false;
+			else {
+				Object success = testMethods[_oneTest - 1].invoke(this);
+				if (!(success instanceof Boolean) || !(Boolean)success) {
+					return false;
+				}
 			}
-			if (enable > 5) {
-				reportError("Option value must be an integer 1 to 5");
-				return false;
-			}
-			if (enable >= 1) {
-				testNegative1 = enable == 1;
-				testNegative2 = enable == 2;
-				testNegative3 = enable == 3;
-				testNegative4 = enable == 4;
-				testNegative5 = enable == 5;
-			}
-		}
-		
-		if (testNegative1 && !checkNegative1()) {
-			return false;
-		}
-		
-		if (testNegative2 && !checkNegative2()) {
-			return false;
-		}
-		
-		if (testNegative3 && !checkNegative3()) {
-			return false;
-		}
-		
-		if (testNegative4 && !checkNegative4()) {
-			return false;
-		}
-		
-		if (testNegative5 && !checkNegative5()) {
+		} catch (Exception e) {
+			e.printStackTrace();
+			reportError("Exception thrown while invoking test method: " + e);
 			return false;
 		}
 		
