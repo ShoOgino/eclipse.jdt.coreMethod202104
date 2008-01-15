@@ -4,16 +4,22 @@
 public void locateMatches(SearchDocument[] searchDocuments) throws CoreException {
 	if (this.patternLocator == null) return;
 	int docsLength = searchDocuments.length;
+	int progressLength = docsLength;
 	if (BasicSearchEngine.VERBOSE) {
 		System.out.println("Locating matches in documents ["); //$NON-NLS-1$
 		for (int i = 0; i < docsLength; i++)
 			System.out.println("\t" + searchDocuments[i]); //$NON-NLS-1$
 		System.out.println("]"); //$NON-NLS-1$
 	}
+	IJavaProject[] javaModelProjects = null;
+	if (this.searchPackageDeclaration) {
+		javaModelProjects = JavaModelManager.getJavaModelManager().getJavaModel().getJavaProjects();
+		progressLength += javaModelProjects.length;
+	}
 
 	// init infos for progress increasing
-	int n = docsLength<1000 ? Math.min(Math.max(docsLength/200+1, 2),4) : 5 *(docsLength/1000);
-	this.progressStep = docsLength < n ? 1 : docsLength / n; // step should not be 0
+	int n = progressLength<1000 ? Math.min(Math.max(progressLength/200+1, 2),4) : 5 *(progressLength/1000);
+	this.progressStep = progressLength < n ? 1 : progressLength / n; // step should not be 0
 	this.progressWorked = 0;
 
 	// extract working copies
@@ -54,6 +60,7 @@ public void locateMatches(SearchDocument[] searchDocuments) throws CoreException
 		}); 
 		int displayed = 0; // progress worked displayed
 		String previousPath = null;
+		SearchParticipant searchParticipant = null;
 		for (int i = 0; i < docsLength; i++) {
 			if (this.progressMonitor != null && this.progressMonitor.isCanceled()) {
 				throw new OperationCanceledException();
@@ -61,6 +68,9 @@ public void locateMatches(SearchDocument[] searchDocuments) throws CoreException
 
 			// skip duplicate paths
 			SearchDocument searchDocument = searchDocuments[i];
+			if (searchParticipant == null) {
+				searchParticipant = searchDocument.getParticipant();
+			}
 			searchDocuments[i] = null; // free current document
 			String pathString = searchDocument.getPath();
 			if (i > 0 && pathString.equals(previousPath)) {
@@ -119,7 +129,11 @@ public void locateMatches(SearchDocument[] searchDocuments) throws CoreException
 			} catch (JavaModelException e) {
 				// problem with classpath in last project -> ignore
 			}
-		} 
+		}
+
+		if (this.searchPackageDeclaration) {
+			locatePackageDeclarations(searchParticipant, javaModelProjects);
+		}
 
 	} finally {
 		if (this.progressMonitor != null)
