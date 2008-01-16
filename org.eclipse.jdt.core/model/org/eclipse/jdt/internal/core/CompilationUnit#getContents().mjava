@@ -6,15 +6,47 @@ public char[] getContents() {
 	if (buffer == null) {
 		// no need to force opening of CU to get the content
 		// also this cannot be a working copy, as its buffer is never closed while the working copy is alive
+		IFile file = (IFile) getResource();
+		// Get encoding from file
+		String encoding;
 		try {
-			return Util.getResourceContentsAsCharArray((IFile) getResource());
+			encoding = file.getCharset();
+		} catch(CoreException ce) {
+			// do not use any encoding
+			encoding = null;
+		}
+		try {
+			return Util.getResourceContentsAsCharArray(file, encoding);
 		} catch (JavaModelException e) {
+			if (JavaModelManager.getJavaModelManager().abortOnMissingSource.get() == Boolean.TRUE) {
+				IOException ioException =
+					e.getJavaModelStatus().getCode() == IJavaModelStatusConstants.IO_EXCEPTION ? 
+						(IOException)e.getException() : 
+						new IOException(e.getMessage());
+				throw new AbortCompilationUnit(null, ioException, encoding);
+			} else {
+				Util.log(e, Messages.bind(Messages.file_notFound, file.getFullPath().toString()));
+			}
 			return CharOperation.NO_CHAR;
 		}
 	}
 	char[] contents = buffer.getCharacters();
-	if (contents == null) // see https://bugs.eclipse.org/bugs/show_bug.cgi?id=129814
+	if (contents == null) { // see https://bugs.eclipse.org/bugs/show_bug.cgi?id=129814
+		if (JavaModelManager.getJavaModelManager().abortOnMissingSource.get() == Boolean.TRUE) {
+			IOException ioException = new IOException(Messages.buffer_closed);
+			IFile file = (IFile) getResource();
+			// Get encoding from file
+			String encoding;
+			try {
+				encoding = file.getCharset();
+			} catch(CoreException ce) {
+				// do not use any encoding
+				encoding = null;
+			}
+			throw new AbortCompilationUnit(null, ioException, encoding);
+		}
 		return CharOperation.NO_CHAR;
+	}
 	return contents;
 }
 
