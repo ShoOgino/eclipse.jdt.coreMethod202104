@@ -1,0 +1,78 @@
+	/**
+	 * Compare an actual annotation mirror to the expected reference. It is assumed that the
+	 * annotation's sname has already been compared. Attributes that exist on the actual annotation
+	 * but not on the expected annotation are not considered to be a mismatch. Note that the
+	 * language model representation in XML does not include default values, since these are
+	 * attributes of the annotation type rather than the annotation instance.
+	 * 
+	 * @param actualAnnot
+	 *            must be non-null
+	 * @param expectedAnnot
+	 *            must be non-null
+	 * @return true if the elements match
+	 */
+	private boolean compareAnnotationNodes(Element actualAnnot, Element expectedAnnot) {
+		// Compare attributes of the annotation instances
+		// Intentionally ignore the presence of additional actual attributes not present in the
+		// expected model
+		NamedNodeMap expectedAttrs = expectedAnnot.getAttributes();
+		NamedNodeMap actualAttrs = actualAnnot.getAttributes();
+		int numAttrs = expectedAttrs.getLength();
+		String sname = null;
+		for (int i = 0; i < numAttrs; ++i) {
+			Node expectedAttr = expectedAttrs.item(i);
+			String attrName = expectedAttr.getNodeName();
+			Node actualAttr = actualAttrs.getNamedItem(attrName);
+			if (actualAttr == null) {
+				printProblem("Actual annotation mirror was missing expected attribute: " + attrName);
+				printDifferences();
+				return false;
+			}
+			String expectedValue = expectedAttr.getNodeValue();
+			String actualValue = actualAttr.getNodeValue();
+			if (!expectedValue.equals(actualValue)) {
+				printProblem("Actual attribute value was different than expected: attribute "
+						+ attrName + ", expected " + expectedValue + ", actual " + actualValue);
+				printDifferences();
+				return false;
+			}
+			if (SNAME.equals(attrName)) {
+				sname = actualValue;
+			}
+		}
+
+		// Examine member-value pairs
+		Element actualValues = null;
+		for (Node n = actualAnnot.getFirstChild(); n != null; n = n.getNextSibling()) {
+			if (n.getNodeType() == Node.ELEMENT_NODE && ANNOTATION_VALUES.equals(n.getNodeName())) {
+				actualValues = (Element)n;
+			}
+		}
+		Element expectedValues = null;
+		for (Node n = expectedAnnot.getFirstChild(); n != null; n = n.getNextSibling()) {
+			if (n.getNodeType() == Node.ELEMENT_NODE && ANNOTATION_VALUES.equals(n.getNodeName())) {
+				expectedValues = (Element)n;
+			}
+		}
+		if (actualValues != null && expectedValues != null) {
+			if (!compareAnnotationValuesNodes(actualValues, expectedValues)) {
+				return false;
+			}
+		}
+		else if (actualValues != null) {
+			// expectedValues == null
+			printProblem("Found unexpected <annotation-values> in annotation: " + sname);
+			printDifferences();
+			return false;
+		} 
+		else if (expectedValues != null) {
+			// actualValues == null
+			printProblem("Missing expected <annotation-values> in annotation: " + sname);
+			printDifferences();
+			return false;
+		} 
+		// both null is okay
+
+		return true;
+	}
+
