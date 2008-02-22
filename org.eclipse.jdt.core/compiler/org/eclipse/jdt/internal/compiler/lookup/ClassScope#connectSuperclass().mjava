@@ -10,33 +10,38 @@
 		Answer false if an error was reported against the sourceType.
 	*/
 	private boolean connectSuperclass() {
-		SourceTypeBinding sourceType = referenceContext.binding;
-		if (sourceType.id == T_JavaLangObject) { // handle the case of redefining java.lang.Object up front
+		SourceTypeBinding sourceType = this.referenceContext.binding;
+		if (sourceType.id == TypeIds.T_JavaLangObject) { // handle the case of redefining java.lang.Object up front
 			sourceType.superclass = null;
 			sourceType.superInterfaces = Binding.NO_SUPERINTERFACES;
 			if (!sourceType.isClass())
 				problemReporter().objectMustBeClass(sourceType);
-			if (referenceContext.superclass != null || (referenceContext.superInterfaces != null && referenceContext.superInterfaces.length > 0))
+			if (this.referenceContext.superclass != null || (this.referenceContext.superInterfaces != null && this.referenceContext.superInterfaces.length > 0))
 				problemReporter().objectCannotHaveSuperTypes(sourceType);
 			return true; // do not propagate Object's hierarchy problems down to every subtype
 		}
-		if (referenceContext.superclass == null) {
+		if (this.referenceContext.superclass == null) {
 			if (sourceType.isEnum() && compilerOptions().sourceLevel >= ClassFileConstants.JDK1_5) // do not connect if source < 1.5 as enum already got flagged as syntax error
 				return connectEnumSuperclass();
 			sourceType.superclass = getJavaLangObject();
 			return !detectHierarchyCycle(sourceType, sourceType.superclass, null);
 		}
-		TypeReference superclassRef = referenceContext.superclass;
+		TypeReference superclassRef = this.referenceContext.superclass;
 		ReferenceBinding superclass = findSupertype(superclassRef);
 		if (superclass != null) { // is null if a cycle was detected cycle or a problem
-			if (!superclass.isClass()) {
+			if (!superclass.isClass() && (superclass.tagBits & TagBits.HasMissingType) == 0) {
 				problemReporter().superclassMustBeAClass(sourceType, superclassRef, superclass);
 			} else if (superclass.isFinal()) {
 				problemReporter().classExtendFinalClass(sourceType, superclassRef, superclass);
 			} else if ((superclass.tagBits & TagBits.HasDirectWildcard) != 0) {
 				problemReporter().superTypeCannotUseWildcard(sourceType, superclassRef, superclass);
-			} else if (superclass.erasure().id == T_JavaLangEnum) {
+			} else if (superclass.erasure().id == TypeIds.T_JavaLangEnum) {
 				problemReporter().cannotExtendEnum(sourceType, superclassRef, superclass);
+			} else if ((superclass.tagBits & TagBits.HierarchyHasProblems) != 0
+					|| !superclassRef.resolvedType.isValidBinding()) {
+				sourceType.superclass = superclass;
+				sourceType.tagBits |= TagBits.HierarchyHasProblems; // propagate if missing supertype
+				return superclassRef.resolvedType.isValidBinding(); // reported some error against the source type ?
 			} else {
 				// only want to reach here when no errors are reported
 				sourceType.superclass = superclass;

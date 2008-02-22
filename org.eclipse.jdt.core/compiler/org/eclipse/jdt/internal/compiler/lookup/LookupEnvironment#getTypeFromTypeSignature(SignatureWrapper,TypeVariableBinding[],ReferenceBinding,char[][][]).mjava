@@ -1,0 +1,66 @@
+TypeBinding getTypeFromTypeSignature(SignatureWrapper wrapper, TypeVariableBinding[] staticVariables, ReferenceBinding enclosingType, char[][][] missingTypeNames) {
+	// TypeVariableSignature = 'T' Identifier ';'
+	// ArrayTypeSignature = '[' TypeSignature
+	// ClassTypeSignature = 'L' Identifier TypeArgs(optional) ';'
+	//   or ClassTypeSignature '.' 'L' Identifier TypeArgs(optional) ';'
+	// TypeArgs = '<' VariantTypeSignature VariantTypeSignatures '>'
+	int dimension = 0;
+	while (wrapper.signature[wrapper.start] == '[') {
+		wrapper.start++;
+		dimension++;
+	}
+	if (wrapper.signature[wrapper.start] == 'T') {
+	    int varStart = wrapper.start + 1;
+	    int varEnd = wrapper.computeEnd();
+		for (int i = staticVariables.length; --i >= 0;)
+			if (CharOperation.equals(staticVariables[i].sourceName, wrapper.signature, varStart, varEnd))
+				return dimension == 0 ? (TypeBinding) staticVariables[i] : createArrayType(staticVariables[i], dimension);
+	    ReferenceBinding initialType = enclosingType;
+		do {
+		    if (enclosingType instanceof BinaryTypeBinding) { // per construction can only be binary type binding
+				TypeVariableBinding[] enclosingVariables = ((BinaryTypeBinding)enclosingType).typeVariables; // do not trigger resolution of variables
+				for (int i = enclosingVariables.length; --i >= 0;)
+					if (CharOperation.equals(enclosingVariables[i].sourceName, wrapper.signature, varStart, varEnd))
+						return dimension == 0 ? (TypeBinding) enclosingVariables[i] : createArrayType(enclosingVariables[i], dimension);
+		    }
+		} while ((enclosingType = enclosingType.enclosingType()) != null);
+		problemReporter.undefinedTypeVariableSignature(CharOperation.subarray(wrapper.signature, varStart, varEnd), initialType);
+		return null; // cannot reach this, since previous problem will abort compilation
+	}
+	boolean isParameterized;
+	TypeBinding type = getTypeFromSignature(wrapper.signature, wrapper.start, wrapper.computeEnd(), isParameterized = (wrapper.end == wrapper.bracket), enclosingType, missingTypeNames);
+	if (!isParameterized)
+		return dimension == 0 ? type : createArrayType(type, dimension);
+
+	// type must be a ReferenceBinding at this point, cannot be a BaseTypeBinding or ArrayTypeBinding
+	ReferenceBinding actualType = (ReferenceBinding) type;
+	if (actualType instanceof UnresolvedReferenceBinding)
+		if (CharOperation.indexOf('$', actualType.compoundName[actualType.compoundName.length - 1]) > 0)
+			actualType = BinaryTypeBinding.resolveType(actualType, this, false); // must resolve member types before asking for enclosingType
+	ReferenceBinding genericType = actualType;
+	ReferenceBinding actualEnclosing = actualType.enclosingType();
+	if (actualEnclosing != null) { // convert needed if read some static member type
+		actualEnclosing = (ReferenceBinding) convertToRawType(actualEnclosing, false /*do not force conversion of enclosing types*/);
+		// The actualType needs to be a ParameterizedTypeBinding when its a member type, whose enclosing type is a generic
+		genericType = createParameterizedType(actualType, null, actualEnclosing);
+	}
+	TypeBinding[] typeArguments = getTypeArgumentsFromSignature(wrapper, staticVariables, enclosingType, genericType, missingTypeNames);
+	ParameterizedTypeBinding parameterizedType = createParameterizedType(actualType, typeArguments, actualEnclosing);
+
+	while (wrapper.signature[wrapper.start] == '.') {
+		wrapper.start++; // skip '.'
+		char[] memberName = wrapper.nextWord();
+		BinaryTypeBinding.resolveType(parameterizedType, this, false);
+		ReferenceBinding memberType = parameterizedType.genericType().getMemberType(memberName);
+		if (wrapper.signature[wrapper.start] == '<') {
+			wrapper.start++; // skip '<'
+			typeArguments = getTypeArgumentsFromSignature(wrapper, staticVariables, enclosingType, memberType, missingTypeNames);
+		} else {
+			typeArguments = null;
+		}
+		parameterizedType = createParameterizedType(memberType, typeArguments, parameterizedType);
+	}
+	wrapper.start++; // skip ';'
+	return dimension == 0 ? (TypeBinding) parameterizedType : createArrayType(parameterizedType, dimension);
+}
+

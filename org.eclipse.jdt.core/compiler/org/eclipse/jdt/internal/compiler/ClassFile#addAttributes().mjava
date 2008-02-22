@@ -11,7 +11,7 @@
 		contents[methodCountOffset++] = (byte) (methodCount >> 8);
 		contents[methodCountOffset] = (byte) methodCount;
 
-		int attributeNumber = 0;
+		int attributesNumber = 0;
 		// leave two bytes for the number of attributes and store the current offset
 		int attributeOffset = contentsOffset;
 		contentsOffset += 2;
@@ -44,7 +44,7 @@
 			int fileNameIndex = constantPool.literalIndex(fullFileName.toCharArray());
 			contents[contentsOffset++] = (byte) (fileNameIndex >> 8);
 			contents[contentsOffset++] = (byte) fileNameIndex;
-			attributeNumber++;
+			attributesNumber++;
 		}
 		// Deprecated attribute
 		if (referenceBinding.isDeprecated()) {
@@ -62,7 +62,7 @@
 			contents[contentsOffset++] = 0;
 			contents[contentsOffset++] = 0;
 			contents[contentsOffset++] = 0;
-			attributeNumber++;
+			attributesNumber++;
 		}
 		// add signature attribute
 		char[] genericSignature = referenceBinding.genericSignature();
@@ -85,7 +85,7 @@
 				constantPool.literalIndex(genericSignature);
 			contents[contentsOffset++] = (byte) (signatureIndex >> 8);
 			contents[contentsOffset++] = (byte) signatureIndex;
-			attributeNumber++;
+			attributesNumber++;
 		}
 		if (targetJDK >= ClassFileConstants.JDK1_5
 				&& this.referenceBinding.isNestedType()
@@ -119,19 +119,27 @@
 			}
 			contents[contentsOffset++] = methodIndexByte1;
 			contents[contentsOffset++] = methodIndexByte2;
-			attributeNumber++;
+			attributesNumber++;
 		}
 		if (this.targetJDK >= ClassFileConstants.JDK1_5) {
 			TypeDeclaration typeDeclaration = referenceBinding.scope.referenceContext;
 			if (typeDeclaration != null) {
 				final Annotation[] annotations = typeDeclaration.annotations;
 				if (annotations != null) {
-					attributeNumber += generateRuntimeAnnotations(annotations);
+					attributesNumber += generateRuntimeAnnotations(annotations);
 				}
 			}
 		}
 
 		if (this.referenceBinding.isHierarchyInconsistent()) {
+			ReferenceBinding superclass = this.referenceBinding.superclass;
+			if (superclass != null) {
+				this.missingTypes = superclass.collectMissingTypes(this.missingTypes);
+			}
+			ReferenceBinding[] superInterfaces = this.referenceBinding.superInterfaces();
+			for (int i = 0, max = superInterfaces.length; i < max; i++) {
+				this.missingTypes = superInterfaces[i].collectMissingTypes(this.missingTypes);
+			}
 			// add an attribute for inconsistent hierarchy
 			if (contentsOffset + 6 >= contents.length) {
 				resizeContents(6);
@@ -145,7 +153,7 @@
 			contents[contentsOffset++] = 0;
 			contents[contentsOffset++] = 0;
 			contents[contentsOffset++] = 0;
-			attributeNumber++;
+			attributesNumber++;
 		}
 		// Inner class attribute
 		int numberOfInnerClasses = this.innerClassesBindings == null ? 0 : this.innerClassesBindings.size();
@@ -214,14 +222,18 @@
 				contents[contentsOffset++] = (byte) (accessFlags >> 8);
 				contents[contentsOffset++] = (byte) accessFlags;
 			}
-			attributeNumber++;
+			attributesNumber++;
+		}
+		if (this.missingTypes != null) {
+			generateMissingTypesAttribute();
+			attributesNumber++;
 		}
 		// update the number of attributes
 		if (attributeOffset + 2 >= this.contents.length) {
 			resizeContents(2);
 		}
-		contents[attributeOffset++] = (byte) (attributeNumber >> 8);
-		contents[attributeOffset] = (byte) attributeNumber;
+		contents[attributeOffset++] = (byte) (attributesNumber >> 8);
+		contents[attributeOffset] = (byte) attributesNumber;
 
 		// resynchronize all offsets of the classfile
 		header = constantPool.poolContent;

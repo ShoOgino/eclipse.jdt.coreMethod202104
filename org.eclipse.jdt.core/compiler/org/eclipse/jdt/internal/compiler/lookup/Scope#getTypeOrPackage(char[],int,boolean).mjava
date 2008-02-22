@@ -1,0 +1,252 @@
+	/* Internal use only 
+	*/
+	final Binding getTypeOrPackage(char[] name, int mask, boolean needResolve) {
+		Scope scope = this;
+		ReferenceBinding foundType = null;
+		boolean insideStaticContext = false;
+		boolean insideTypeAnnotation = false;
+		if ((mask & Binding.TYPE) == 0) {
+			Scope next = scope;
+			while ((next = scope.parent) != null)
+				scope = next;
+		} else {
+			boolean inheritedHasPrecedence = compilerOptions().complianceLevel >= ClassFileConstants.JDK1_4;
+			done : while (true) { // done when a COMPILATION_UNIT_SCOPE is found
+				switch (scope.kind) {
+					case METHOD_SCOPE :
+						MethodScope methodScope = (MethodScope) scope;
+						AbstractMethodDeclaration methodDecl = methodScope.referenceMethod();
+						if (methodDecl != null) {
+							if (methodDecl.binding != null) {
+								TypeVariableBinding typeVariable = methodDecl.binding.getTypeVariable(name);
+								if (typeVariable != null)
+									return typeVariable;
+							} else {
+								// use the methodDecl's typeParameters to handle problem cases when the method binding doesn't exist
+								TypeParameter[] params = methodDecl.typeParameters();
+								for (int i = params == null ? 0 : params.length; --i >= 0;)
+									if (CharOperation.equals(params[i].name, name))
+										if (params[i].binding != null && params[i].binding.isValidBinding())
+											return params[i].binding;
+							}
+						}
+						insideStaticContext |= methodScope.isStatic;
+						insideTypeAnnotation = methodScope.insideTypeAnnotation;
+					case BLOCK_SCOPE :
+						ReferenceBinding localType = ((BlockScope) scope).findLocalType(name); // looks in this scope only
+						if (localType != null) {
+							if (foundType != null && foundType != localType)
+								return new ProblemReferenceBinding(new char[][]{name}, foundType, ProblemReasons.InheritedNameHidesEnclosingName);
+							return localType;
+						}
+						break;
+					case CLASS_SCOPE :
+						SourceTypeBinding sourceType = ((ClassScope) scope).referenceContext.binding;
+						if (scope == this && (sourceType.tagBits & TagBits.TypeVariablesAreConnected) == 0) {
+							// type variables take precedence over the source type, ex. class X <X> extends X == class X <Y> extends Y
+							// but not when we step out to the enclosing type
+							TypeVariableBinding typeVariable = sourceType.getTypeVariable(name);
+							if (typeVariable != null)
+								return typeVariable;
+							if (CharOperation.equals(name, sourceType.sourceName))
+								return sourceType;
+							insideStaticContext |= sourceType.isStatic();
+							break;
+						}						
+						// member types take precedence over type variables
+						if (!insideTypeAnnotation) {
+							// 6.5.5.1 - member types have precedence over top-level type in same unit
+							ReferenceBinding memberType = findMemberType(name, sourceType);
+							if (memberType != null) { // skip it if we did not find anything
+								if (memberType.problemId() == ProblemReasons.Ambiguous) {
+									if (foundType == null || foundType.problemId() == ProblemReasons.NotVisible)
+										// supercedes any potential InheritedNameHidesEnclosingName problem
+										return memberType;
+									// make the user qualify the type, likely wants the first inherited type
+									return new ProblemReferenceBinding(new char[][]{name}, foundType, ProblemReasons.InheritedNameHidesEnclosingName);
+								}
+								if (memberType.isValidBinding()) {
+									if (sourceType == memberType.enclosingType() || inheritedHasPrecedence) {
+										if (insideStaticContext && !memberType.isStatic() && sourceType.isGenericType())
+											return new ProblemReferenceBinding(new char[][]{name}, memberType, ProblemReasons.NonStaticReferenceInStaticContext);
+										// found a valid type in the 'immediate' scope (ie. not inherited)
+										// OR in 1.4 mode (inherited visible shadows enclosing)
+										if (foundType == null || (inheritedHasPrecedence && foundType.problemId() == ProblemReasons.NotVisible))
+											return memberType; 
+										// if a valid type was found, complain when another is found in an 'immediate' enclosing type (ie. not inherited)
+										if (foundType.isValidBinding() && foundType != memberType)
+											return new ProblemReferenceBinding(new char[][]{name}, foundType, ProblemReasons.InheritedNameHidesEnclosingName);
+									}
+								}
+								if (foundType == null || (foundType.problemId() == ProblemReasons.NotVisible && memberType.problemId() != ProblemReasons.NotVisible))
+									// only remember the memberType if its the first one found or the previous one was not visible & memberType is...
+									foundType = memberType;
+							}
+						}
+						TypeVariableBinding typeVariable = sourceType.getTypeVariable(name);
+						if (typeVariable != null) {
+							if (insideStaticContext) // do not consider this type modifiers: access is legite within same type
+								return new ProblemReferenceBinding(new char[][]{name}, typeVariable, ProblemReasons.NonStaticReferenceInStaticContext);
+							return typeVariable;
+						}						
+						insideStaticContext |= sourceType.isStatic();
+						insideTypeAnnotation = false;
+						if (CharOperation.equals(sourceType.sourceName, name)) {
+							if (foundType != null && foundType != sourceType && foundType.problemId() != ProblemReasons.NotVisible)
+								return new ProblemReferenceBinding(new char[][]{name}, foundType, ProblemReasons.InheritedNameHidesEnclosingName);
+							return sourceType;
+						}
+						break;
+					case COMPILATION_UNIT_SCOPE :
+						break done;
+				}
+				scope = scope.parent;
+			}
+			if (foundType != null && foundType.problemId() != ProblemReasons.NotVisible)
+				return foundType;
+		}
+
+		// at this point the scope is a compilation unit scope
+		CompilationUnitScope unitScope = (CompilationUnitScope) scope;
+		HashtableOfObject typeOrPackageCache = unitScope.typeOrPackageCache;
+		if (typeOrPackageCache != null) {
+			Binding cachedBinding = (Binding) typeOrPackageCache.get(name);
+			if (cachedBinding != null) { // can also include NotFound ProblemReferenceBindings if we already know this name is not found
+				if (cachedBinding instanceof ImportBinding) { // single type import cached in faultInImports(), replace it in the cache with the type
+					ImportReference importReference = ((ImportBinding) cachedBinding).reference;
+					if (importReference != null) {
+						importReference.bits |= ASTNode.Used;
+					}
+					if (cachedBinding instanceof ImportConflictBinding)
+						typeOrPackageCache.put(name, cachedBinding = ((ImportConflictBinding) cachedBinding).conflictingTypeBinding); // already know its visible
+					else
+						typeOrPackageCache.put(name, cachedBinding = ((ImportBinding) cachedBinding).resolvedImport); // already know its visible
+				}
+				if ((mask & Binding.TYPE) != 0) {
+					if (foundType != null && foundType.problemId() != ProblemReasons.NotVisible && cachedBinding.problemId() != ProblemReasons.Ambiguous)
+						return foundType; // problem type from above supercedes NotFound type but not Ambiguous import case
+					if (cachedBinding instanceof ReferenceBinding)
+						return cachedBinding; // cached type found in previous walk below
+				}
+				if ((mask & Binding.PACKAGE) != 0 && cachedBinding instanceof PackageBinding)
+					return cachedBinding; // cached package found in previous walk below
+			}
+		}
+
+		// ask for the imports + name
+		if ((mask & Binding.TYPE) != 0) {
+			ImportBinding[] imports = unitScope.imports;
+			if (imports != null && typeOrPackageCache == null) { // walk single type imports since faultInImports() has not run yet
+				nextImport : for (int i = 0, length = imports.length; i < length; i++) {
+					ImportBinding importBinding = imports[i];
+					if (!importBinding.onDemand) {
+						if (CharOperation.equals(importBinding.compoundName[importBinding.compoundName.length - 1], name)) {
+							Binding resolvedImport = unitScope.resolveSingleImport(importBinding);
+							if (resolvedImport == null) continue nextImport;
+							if (resolvedImport instanceof MethodBinding) {
+								resolvedImport = getType(importBinding.compoundName, importBinding.compoundName.length);
+								if (!resolvedImport.isValidBinding()) continue nextImport;
+							}
+							if (resolvedImport instanceof TypeBinding) {
+								ImportReference importReference = importBinding.reference;
+								if (importReference != null)
+									importReference.bits |= ASTNode.Used;
+								return resolvedImport; // already know its visible
+							}
+						}
+					}
+				}
+			}
+
+			// check if the name is in the current package, skip it if its a sub-package
+			PackageBinding currentPackage = unitScope.fPackage; 
+			unitScope.recordReference(currentPackage.compoundName, name);
+			Binding binding = currentPackage.getTypeOrPackage(name);
+			if (binding instanceof ReferenceBinding) {
+				ReferenceBinding referenceType = (ReferenceBinding) binding;
+				if ((referenceType.tagBits & TagBits.HasMissingType) == 0) {
+					if (typeOrPackageCache != null)
+						typeOrPackageCache.put(name, referenceType);
+					return referenceType; // type is always visible to its own package
+				}
+			}
+
+			// check on demand imports
+			if (imports != null) {
+				boolean foundInImport = false;
+				ReferenceBinding type = null;
+				for (int i = 0, length = imports.length; i < length; i++) {
+					ImportBinding someImport = imports[i];
+					if (someImport.onDemand) {
+						Binding resolvedImport = someImport.resolvedImport;
+						ReferenceBinding temp = null;
+						if (resolvedImport instanceof PackageBinding) {
+							temp = findType(name, (PackageBinding) resolvedImport, currentPackage);
+						} else if (someImport.isStatic()) {
+							temp = findMemberType(name, (ReferenceBinding) resolvedImport); // static imports are allowed to see inherited member types
+							if (temp != null && !temp.isStatic())
+								temp = null;
+						} else {
+							temp = findDirectMemberType(name, (ReferenceBinding) resolvedImport);
+						}
+						if (temp != type && temp != null) {
+							if (temp.isValidBinding()) {
+								ImportReference importReference = someImport.reference;
+								if (importReference != null) {
+									importReference.bits |= ASTNode.Used;
+								}
+								if (foundInImport) {
+									// Answer error binding -- import on demand conflict; name found in two import on demand packages.
+									temp = new ProblemReferenceBinding(new char[][]{name}, type, ProblemReasons.Ambiguous);
+									if (typeOrPackageCache != null)
+										typeOrPackageCache.put(name, temp);
+									return temp;
+								}
+								type = temp;
+								foundInImport = true;
+							} else if (foundType == null) {
+								foundType = temp;
+							}
+						}
+					}
+				}
+				if (type != null) {
+					if (typeOrPackageCache != null)
+						typeOrPackageCache.put(name, type);
+					return type;
+				}
+			}
+		}
+
+		unitScope.recordSimpleReference(name);
+		if ((mask & Binding.PACKAGE) != 0) {
+			PackageBinding packageBinding = unitScope.environment.getTopLevelPackage(name);
+			if (packageBinding != null) {
+				if (typeOrPackageCache != null)
+					typeOrPackageCache.put(name, packageBinding);
+				return packageBinding;
+			}
+		}
+
+		// Answer error binding -- could not find name
+		if (foundType == null) {
+			char[][] qName = new char[][] { name };
+			ReferenceBinding closestMatch = null;
+			if ((mask & Binding.PACKAGE) != 0 || unitScope.environment.getTopLevelPackage(name) == null) {
+				if (needResolve) {
+					closestMatch = environment().createMissingType(unitScope.fPackage, qName);
+				}
+			}
+			foundType = new ProblemReferenceBinding(qName, closestMatch, ProblemReasons.NotFound);
+			if (typeOrPackageCache != null && (mask & Binding.PACKAGE) != 0) { // only put NotFound type in cache if you know its not a package
+				typeOrPackageCache.put(name, foundType);
+			}
+		} else if ((foundType.tagBits & TagBits.HasMissingType) != 0) {
+			char[][] qName = new char[][] { name };
+			foundType = new ProblemReferenceBinding(qName, foundType, ProblemReasons.NotFound);
+			if (typeOrPackageCache != null && (mask & Binding.PACKAGE) != 0) // only put NotFound type in cache if you know its not a package
+				typeOrPackageCache.put(name, foundType);
+		}
+		return foundType;
+	}
+

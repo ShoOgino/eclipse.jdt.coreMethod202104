@@ -1,12 +1,24 @@
 	/*
 	 * We need to modify resolving behavior to handle package references
 	 */
-	TypeBinding internalResolveType(Scope scope) {
+	protected TypeBinding internalResolveType(Scope scope) {
 		// handle the error here
 		this.constant = Constant.NotAConstant;
-		if (this.resolvedType != null)// is a shared type reference which was already resolved
-			return this.resolvedType.isValidBinding() ? this.resolvedType : null; // already reported error
-
+		if (this.resolvedType != null) { // is a shared type reference which was already resolved
+			if (this.resolvedType.isValidBinding()) {
+				return this.resolvedType;
+			} else {
+				switch (this.resolvedType.problemId()) {
+					case ProblemReasons.NotFound :
+					case ProblemReasons.NotVisible :
+					case ProblemReasons.InheritedNameHidesEnclosingName :						
+						TypeBinding type = this.resolvedType.closestMatch();
+						return type;			
+					default :
+						return null;
+				}			
+			}
+		}
 		this.resolvedType = getTypeBinding(scope);
 		// End resolution when getTypeBinding(scope) returns null. This may happen in
 		// certain circumstances, typically when an illegal access is done on a type 
@@ -20,7 +32,7 @@
 				this.packageBinding = (PackageBinding) binding;
 			} else {
 				if (this.resolvedType.problemId() == ProblemReasons.NonStaticReferenceInStaticContext) {
-					ReferenceBinding closestMatch = ((ProblemReferenceBinding)this.resolvedType).closestMatch();
+					TypeBinding closestMatch = this.resolvedType.closestMatch();
 					if (closestMatch != null && closestMatch.isTypeVariable()) {
 						this.resolvedType = closestMatch; // ignore problem as we want report specific javadoc one instead
 						return this.resolvedType;
@@ -32,11 +44,10 @@
 		}
 		if (isTypeUseDeprecated(this.resolvedType, scope))
 			reportDeprecatedType(this.resolvedType, scope);
-		
 		// https://bugs.eclipse.org/bugs/show_bug.cgi?id=209936
 		// raw convert all enclosing types when dealing with Javadoc references
 		if (this.resolvedType.isGenericType() || this.resolvedType.isParameterizedType()) {
-			return this.resolvedType = scope.environment().convertToRawType(this.resolvedType, true /*force the conversion of enclosing types*/);
+			this.resolvedType = scope.environment().convertToRawType(this.resolvedType, true /*force the conversion of enclosing types*/);
 		}
 		return this.resolvedType;
 	}

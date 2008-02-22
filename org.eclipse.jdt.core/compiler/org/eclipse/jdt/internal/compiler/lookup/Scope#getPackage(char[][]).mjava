@@ -5,33 +5,37 @@
 	* from the binding & not assume the problem applies to the entire compoundName.
 	*/
 	public final Binding getPackage(char[][] compoundName) {
-		compilationUnitScope().recordQualifiedReference(compoundName);
-		Binding binding = getTypeOrPackage(compoundName[0], Binding.TYPE | Binding.PACKAGE);
-		if (binding == null)
-			return new ProblemReferenceBinding(compoundName[0], null, ProblemReasons.NotFound);
-		if (!binding.isValidBinding())
+ 		compilationUnitScope().recordQualifiedReference(compoundName);
+		Binding binding = getTypeOrPackage(compoundName[0], Binding.TYPE | Binding.PACKAGE, true);
+		if (binding == null) {
+			char[][] qName = new char[][] { compoundName[0] };
+			return new ProblemReferenceBinding(qName, environment().createMissingType(null, compoundName), ProblemReasons.NotFound);
+		}
+		if (!binding.isValidBinding()) {
+			if (binding instanceof PackageBinding) { /* missing package */
+				char[][] qName = new char[][] { compoundName[0] };
+				return new ProblemReferenceBinding(qName, null /* no closest match since search for pkg*/, ProblemReasons.NotFound);
+			}
 			return binding;
-
+		}
 		if (!(binding instanceof PackageBinding)) return null; // compoundName does not start with a package
 
-		int currentIndex = 1;
+		int currentIndex = 1, length = compoundName.length;
 		PackageBinding packageBinding = (PackageBinding) binding;
-		while (currentIndex < compoundName.length) {
+		while (currentIndex < length) {
 			binding = packageBinding.getTypeOrPackage(compoundName[currentIndex++]);
-			if (binding == null)
-				return new ProblemReferenceBinding(
-					CharOperation.subarray(compoundName, 0, currentIndex),
-					null, 
-					ProblemReasons.NotFound);
+			if (binding == null) {
+				return new ProblemReferenceBinding(CharOperation.subarray(compoundName, 0, currentIndex), null /* no closest match since search for pkg*/, ProblemReasons.NotFound);
+			}
 			if (!binding.isValidBinding())
 				return new ProblemReferenceBinding(
 					CharOperation.subarray(compoundName, 0, currentIndex),
-					binding instanceof ReferenceBinding ? ((ReferenceBinding)binding).closestMatch() : null,
+					binding instanceof ReferenceBinding ? (ReferenceBinding)((ReferenceBinding)binding).closestMatch() : null,
 					binding.problemId());
 			if (!(binding instanceof PackageBinding))
 				return packageBinding;
 			packageBinding = (PackageBinding) binding;
 		}
-		return new ProblemReferenceBinding(compoundName, null, ProblemReasons.NotFound);
+		return new ProblemReferenceBinding(compoundName, null /* no closest match since search for pkg*/, ProblemReasons.NotFound);
 	}
 

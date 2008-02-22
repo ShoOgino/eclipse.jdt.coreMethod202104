@@ -1,45 +1,44 @@
-	public FlowInfo analyseCode(BlockScope currentScope, FlowContext flowContext, FlowInfo flowInfo, boolean valueRequired) {
-	
-		switch (bits & RestrictiveFlagMASK) {
-			case Binding.FIELD : // reading a field
-				if (valueRequired || currentScope.compilerOptions().complianceLevel >= ClassFileConstants.JDK1_4) {
-					manageSyntheticAccessIfNecessary(currentScope, flowInfo, true /*read-access*/);
+public FlowInfo analyseCode(BlockScope currentScope, FlowContext flowContext, FlowInfo flowInfo, boolean valueRequired) {
+	switch (this.bits & ASTNode.RestrictiveFlagMASK) {
+		case Binding.FIELD : // reading a field
+			if (valueRequired || currentScope.compilerOptions().complianceLevel >= ClassFileConstants.JDK1_4) {
+				manageSyntheticAccessIfNecessary(currentScope, flowInfo, true /*read-access*/);
+			}
+			FieldBinding fieldBinding = (FieldBinding) this.binding;
+			ReferenceBinding declaringClass = fieldBinding.declaringClass;
+			// check if accessing enum static field in initializer
+			if (declaringClass.isEnum()) {
+				MethodScope methodScope = currentScope.methodScope();
+				SourceTypeBinding sourceType = currentScope.enclosingSourceType();
+				if (fieldBinding.isStatic()
+						&& this.constant == Constant.NotAConstant
+						&& !methodScope.isStatic
+						&& (sourceType == declaringClass || sourceType.superclass == declaringClass) // enum constant body
+						&& methodScope.isInsideInitializerOrConstructor()) {
+					currentScope.problemReporter().enumStaticFieldUsedDuringInitialization(fieldBinding, this);
 				}
-				FieldBinding fieldBinding = (FieldBinding) binding;
-				ReferenceBinding declaringClass = fieldBinding.declaringClass;
-				// check if accessing enum static field in initializer
-				if (declaringClass.isEnum()) {
-					MethodScope methodScope = currentScope.methodScope();
-					SourceTypeBinding sourceType = currentScope.enclosingSourceType();
-					if (fieldBinding.isStatic()
-							&& this.constant == Constant.NotAConstant
-							&& !methodScope.isStatic
-							&& (sourceType == declaringClass || sourceType.superclass == declaringClass) // enum constant body
-							&& methodScope.isInsideInitializerOrConstructor()) {
-						currentScope.problemReporter().enumStaticFieldUsedDuringInitialization(fieldBinding, this);
-					}
-				}				
-				// check if reading a final blank field
-				if (fieldBinding.isBlankFinal() && currentScope.needBlankFinalFieldInitializationCheck(fieldBinding)) {
-					if (!flowInfo.isDefinitelyAssigned(fieldBinding)) {
-						currentScope.problemReporter().uninitializedBlankFinalField(fieldBinding, this);
-					}
+			}				
+			// check if reading a final blank field
+			if (fieldBinding.isBlankFinal() && currentScope.needBlankFinalFieldInitializationCheck(fieldBinding)) {
+				if (!flowInfo.isDefinitelyAssigned(fieldBinding)) {
+					currentScope.problemReporter().uninitializedBlankFinalField(fieldBinding, this);
 				}
-				break;
-			case Binding.LOCAL : // reading a local variable
-				LocalVariableBinding localBinding;
-				if (!flowInfo.isDefinitelyAssigned(localBinding = (LocalVariableBinding) binding)) {
-					currentScope.problemReporter().uninitializedLocalVariable(localBinding, this);
-				}
-				if ((flowInfo.tagBits & FlowInfo.UNREACHABLE) == 0)	{
-					localBinding.useFlag = LocalVariableBinding.USED;
-				} else if (localBinding.useFlag == LocalVariableBinding.UNUSED) {
-					localBinding.useFlag = LocalVariableBinding.FAKE_USED;
-				}
-		}
-		if (valueRequired) {
-			manageEnclosingInstanceAccessIfNecessary(currentScope, flowInfo);
-		}
-		return flowInfo;
+			}
+			break;
+		case Binding.LOCAL : // reading a local variable
+			LocalVariableBinding localBinding;
+			if (!flowInfo.isDefinitelyAssigned(localBinding = (LocalVariableBinding) this.binding)) {
+				currentScope.problemReporter().uninitializedLocalVariable(localBinding, this);
+			}
+			if ((flowInfo.tagBits & FlowInfo.UNREACHABLE) == 0)	{
+				localBinding.useFlag = LocalVariableBinding.USED;
+			} else if (localBinding.useFlag == LocalVariableBinding.UNUSED) {
+				localBinding.useFlag = LocalVariableBinding.FAKE_USED;
+			}
 	}
+	if (valueRequired) {
+		manageEnclosingInstanceAccessIfNecessary(currentScope, flowInfo);
+	}
+	return flowInfo;
+}
 

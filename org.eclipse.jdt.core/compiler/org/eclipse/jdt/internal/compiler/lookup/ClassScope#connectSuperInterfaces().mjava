@@ -9,9 +9,9 @@
 		Answer false if an error was reported against the sourceType.
 	*/
 	private boolean connectSuperInterfaces() {
-		SourceTypeBinding sourceType = referenceContext.binding;
+		SourceTypeBinding sourceType = this.referenceContext.binding;
 		sourceType.superInterfaces = Binding.NO_SUPERINTERFACES;
-		if (referenceContext.superInterfaces == null) {
+		if (this.referenceContext.superInterfaces == null) {
 			if (sourceType.isAnnotationType() && compilerOptions().sourceLevel >= ClassFileConstants.JDK1_5) { // do not connect if source < 1.5 as annotation already got flagged as syntax error) {
 				ReferenceBinding annotationType = getJavaLangAnnotationAnnotation();
 				boolean foundCycle = detectHierarchyCycle(sourceType, annotationType, null);
@@ -20,31 +20,33 @@
 			}
 			return true;
 		}
-		if (sourceType.id == T_JavaLangObject) // already handled the case of redefining java.lang.Object
+		if (sourceType.id == TypeIds.T_JavaLangObject) // already handled the case of redefining java.lang.Object
 			return true;
 
 		boolean noProblems = true;
-		int length = referenceContext.superInterfaces.length;
+		int length = this.referenceContext.superInterfaces.length;
 		ReferenceBinding[] interfaceBindings = new ReferenceBinding[length];
 		int count = 0;
 		nextInterface : for (int i = 0; i < length; i++) {
-		    TypeReference superInterfaceRef = referenceContext.superInterfaces[i];
+		    TypeReference superInterfaceRef = this.referenceContext.superInterfaces[i];
 			ReferenceBinding superInterface = findSupertype(superInterfaceRef);
 			if (superInterface == null) { // detected cycle
 				sourceType.tagBits |= TagBits.HierarchyHasProblems;
 				noProblems = false;
 				continue nextInterface;
 			}
-			superInterfaceRef.resolvedType = superInterface; // hold onto the problem type
+
 			// check for simple interface collisions 
 			// Check for a duplicate interface once the name is resolved, otherwise we may be confused (ie : a.b.I and c.d.I)
 			for (int j = 0; j < i; j++) {
 				if (interfaceBindings[j] == superInterface) {
 					problemReporter().duplicateSuperinterface(sourceType, superInterfaceRef, superInterface);
+					sourceType.tagBits |= TagBits.HierarchyHasProblems;
+					noProblems = false;
 					continue nextInterface;
 				}
 			}
-			if (!superInterface.isInterface()) {
+			if (!superInterface.isInterface() && (superInterface.tagBits & TagBits.HasMissingType) == 0) {
 				problemReporter().superinterfaceMustBeAnInterface(sourceType, superInterfaceRef, superInterface);
 				sourceType.tagBits |= TagBits.HierarchyHasProblems;
 				noProblems = false;
@@ -58,6 +60,11 @@
 				noProblems = false;
 				continue nextInterface;
 			}
+			if ((superInterface.tagBits & TagBits.HierarchyHasProblems) != 0
+					|| !superInterfaceRef.resolvedType.isValidBinding()) {
+				sourceType.tagBits |= TagBits.HierarchyHasProblems; // propagate if missing supertype
+				noProblems &= superInterfaceRef.resolvedType.isValidBinding();
+			} 			
 			// only want to reach here when no errors are reported
 			interfaceBindings[count++] = superInterface;
 		}
