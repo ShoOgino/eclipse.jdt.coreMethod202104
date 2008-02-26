@@ -51,6 +51,9 @@
 									if ((result & ClasspathChange.HAS_PROJECT_CHANGE) != 0) {
 										this.state.addProjectReferenceChange(change.project, change.oldResolvedClasspath);
 									}
+									if ((result & ClasspathChange.HAS_LIBRARY_CHANGE) != 0) {
+										state.addExternalFolderChange(change.project, change.oldResolvedClasspath);
+									}
 								}
 								this.classpathChanges.clear();
 								if (!hasDelta)
@@ -61,10 +64,9 @@
 							if (elementsToRefresh == null) {
 								elementsToRefresh = this.state.removeExternalElementsToRefresh();
 							} else {
-								HashSet existingElements = this.state.removeExternalElementsToRefresh();
-								if (existingElements != null) {
-									elementsToRefresh.addAll(existingElements);
-								}
+								HashSet newElementsToRefresh = this.state.removeExternalElementsToRefresh();
+								if (newElementsToRefresh != null)
+									elementsToRefresh.addAll(newElementsToRefresh);
 							}
 							
 							// generate external archive change deltas
@@ -101,6 +103,19 @@
 				boolean isAffected = isAffectedBy(delta);
 				boolean needCycleValidation = isAffected && validateClasspaths(delta);
 
+				// update external folders if necessary
+			    ExternalFolderChange[] folderChanges = this.state.removeExternalFolderChanges();
+				if (folderChanges != null) {
+				    for (int i = 0, length = folderChanges.length; i < length; i++) {
+				        try {
+					        folderChanges[i].updateExternalFoldersIfNecessary(null);
+				        } catch (JavaModelException e) {
+				        	if (!e.isDoesNotExist())
+				        		Util.log(e, "Exception while updating external folders"); //$NON-NLS-1$
+				        }
+				    }
+				}
+				
 				// create classpath markers if necessary
 				ClasspathValidation[] validations = this.state.removeClasspathValidations();
 				if (validations != null) {
@@ -118,6 +133,8 @@
 					        projectRefChanges[i].updateProjectReferencesIfNecessary();
 				        } catch(JavaModelException e) {
 				            // project doesn't exist any longer, continue with next one
+				        	if (!e.isDoesNotExist())
+				        		Util.log(e, "Exception while updating project references"); //$NON-NLS-1$
 				        }
 				    }
 				}

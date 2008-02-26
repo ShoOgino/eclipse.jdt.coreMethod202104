@@ -1,0 +1,43 @@
+	/**
+	 * Compute the package fragment children of this package fragment root.
+	 * These are all of the directory zip entries, and any directories implied
+	 * by the path of class files contained in the jar of this package fragment root.
+	 */
+	protected boolean computeChildren(OpenableElementInfo info, IResource underlyingResource) throws JavaModelException {
+		HashtableOfArrayToObject rawPackageInfo = new HashtableOfArrayToObject();
+		IJavaElement[] children;
+		ZipFile jar = null;
+		try {
+			// always create the default package
+			rawPackageInfo.put(CharOperation.NO_STRINGS, new ArrayList[] { EMPTY_LIST, EMPTY_LIST });
+	
+			IJavaProject project = getJavaProject();
+			String sourceLevel = project.getOption(JavaCore.COMPILER_SOURCE, true);
+			String compliance = project.getOption(JavaCore.COMPILER_COMPLIANCE, true);
+			jar = getJar();
+			for (Enumeration e= jar.entries(); e.hasMoreElements();) {
+				ZipEntry member= (ZipEntry) e.nextElement();
+				initRawPackageInfo(rawPackageInfo, member.getName(), member.isDirectory(), sourceLevel, compliance);
+			}
+			
+			//l oop through all of referenced packages, creating package fragments if necessary
+			// and cache the entry names in the rawPackageInfo table
+			children = new IJavaElement[rawPackageInfo.size()];
+			int index = 0;
+			for (int i = 0, length = rawPackageInfo.keyTable.length; i < length; i++) {
+				String[] pkgName = (String[]) rawPackageInfo.keyTable[i];
+				if (pkgName == null) continue;
+				children[index++] = getPackageFragment(pkgName);
+			}
+		} catch (CoreException e) {
+			if (e instanceof JavaModelException) throw (JavaModelException)e;
+			throw new JavaModelException(e);
+		} finally {
+			JavaModelManager.getJavaModelManager().closeZipFile(jar);
+		}
+		
+		info.setChildren(children);
+		((JarPackageFragmentRootInfo) info).rawPackageInfo = rawPackageInfo;
+		return true;
+	}
+
