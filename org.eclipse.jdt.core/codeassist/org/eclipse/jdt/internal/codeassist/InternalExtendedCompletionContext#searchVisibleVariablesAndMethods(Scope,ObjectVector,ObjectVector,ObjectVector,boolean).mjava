@@ -1,0 +1,152 @@
+	private void searchVisibleVariablesAndMethods(
+			Scope scope,
+			ObjectVector localsFound,
+			ObjectVector fieldsFound,
+			ObjectVector methodsFound,
+			boolean notInJavadoc) {
+		
+		InvocationSite invocationSite = CompletionEngine.FakeInvocationSite;
+		
+		boolean staticsOnly = false;
+		// need to know if we're in a static context (or inside a constructor)
+
+		Scope currentScope = scope;
+		
+		done1 : while (true) { // done when a COMPILATION_UNIT_SCOPE is found
+
+			switch (currentScope.kind) {
+
+				case Scope.METHOD_SCOPE :
+					// handle the error case inside an explicit constructor call (see MethodScope>>findField)
+					MethodScope methodScope = (MethodScope) currentScope;
+					staticsOnly |= methodScope.isStatic | methodScope.isConstructorCall;
+
+				case Scope.BLOCK_SCOPE :
+					BlockScope blockScope = (BlockScope) currentScope;
+
+					next : for (int i = 0, length = blockScope.locals.length; i < length; i++) {
+						LocalVariableBinding local = blockScope.locals[i];
+
+						if (local == null)
+							break next;
+
+						if (local.isSecret())
+							continue next;
+
+						for (int f = 0; f < localsFound.size; f++) {
+							LocalVariableBinding otherLocal =
+								(LocalVariableBinding) localsFound.elementAt(f);
+							if (CharOperation.equals(otherLocal.name, local.name, true))
+								continue next;
+						}
+						
+						localsFound.add(local);
+					}
+					break;
+
+				case Scope.COMPILATION_UNIT_SCOPE :
+					break done1;
+			}
+			currentScope = currentScope.parent;
+		}
+		
+		staticsOnly = false;
+		currentScope = scope;
+		
+		done2 : while (true) { // done when a COMPILATION_UNIT_SCOPE is found
+
+			switch (currentScope.kind) {
+				case Scope.METHOD_SCOPE :
+					// handle the error case inside an explicit constructor call (see MethodScope>>findField)
+					MethodScope methodScope = (MethodScope) currentScope;
+					staticsOnly |= methodScope.isStatic | methodScope.isConstructorCall;
+					break;
+				case Scope.CLASS_SCOPE :
+					ClassScope classScope = (ClassScope) currentScope;
+					SourceTypeBinding enclosingType = classScope.referenceContext.binding;
+					
+					searchVisibleFields(
+							enclosingType,
+							classScope,
+							invocationSite,
+							scope,
+							staticsOnly,
+							notInJavadoc,
+							localsFound,
+							fieldsFound);
+					
+					searchVisibleMethods(
+							enclosingType,
+							classScope,
+							invocationSite,
+							scope,
+							staticsOnly,
+							notInJavadoc,
+							methodsFound);
+					
+					staticsOnly |= enclosingType.isStatic();
+					break;
+
+				case Scope.COMPILATION_UNIT_SCOPE :
+					break done2;
+			}
+			currentScope = currentScope.parent;
+		}
+		
+		// search in static import
+		ImportBinding[] importBindings = scope.compilationUnitScope().imports;
+		for (int i = 0; i < importBindings.length; i++) {
+			ImportBinding importBinding = importBindings[i];
+			if(importBinding.isValidBinding() && importBinding.isStatic()) {
+				Binding binding = importBinding.resolvedImport;
+				if(binding != null && binding.isValidBinding()) {
+					if(importBinding.onDemand) {
+						if((binding.kind() & Binding.TYPE) != 0) {
+							searchVisibleFields(
+									(ReferenceBinding)binding,
+									scope,
+									invocationSite,
+									scope,
+									staticsOnly,
+									notInJavadoc,
+									localsFound,
+									fieldsFound);
+							
+							searchVisibleMethods(
+									(ReferenceBinding)binding,
+									scope,
+									invocationSite,
+									scope,
+									staticsOnly,
+									notInJavadoc,
+									methodsFound);
+						}
+					} else {
+						if ((binding.kind() & Binding.FIELD) != 0) {
+							searchVisibleFields(
+									new FieldBinding[]{(FieldBinding)binding},
+									((FieldBinding)binding).declaringClass,
+									scope,
+									invocationSite,
+									scope,
+									staticsOnly,
+									localsFound,
+									fieldsFound);
+						} else if ((binding.kind() & Binding.METHOD) != 0) {
+							MethodBinding methodBinding = (MethodBinding)binding;
+							
+							searchVisibleLocalMethods(
+									methodBinding.declaringClass.getMethods(methodBinding.selector),
+									methodBinding.declaringClass,
+									scope,
+									invocationSite,
+									scope,
+									true,
+									methodsFound);
+						}
+					}
+				}
+			}
+		}
+	}
+

@@ -1,0 +1,229 @@
+	/**
+	 * Ask the engine to compute a completion at the specified position
+	 * of the given compilation unit.
+	 *
+	 *  No return
+	 *      completion results are answered through a requestor.
+	 *
+	 *  @param sourceUnit org.eclipse.jdt.internal.compiler.env.ICompilationUnit
+	 *      the source of the current compilation unit.
+	 *
+	 *  @param completionPosition int
+	 *      a position in the source where the completion is taking place. 
+	 *      This position is relative to the source provided.
+	 */
+	public void complete(ICompilationUnit sourceUnit, int completionPosition, int pos, ITypeRoot root) {
+
+		if(DEBUG) {
+			System.out.print("COMPLETION IN "); //$NON-NLS-1$
+			System.out.print(sourceUnit.getFileName());
+			System.out.print(" AT POSITION "); //$NON-NLS-1$
+			System.out.println(completionPosition);
+			System.out.println("COMPLETION - Source :"); //$NON-NLS-1$
+			System.out.println(sourceUnit.getContents());
+		}
+		this.requestor.beginReporting();
+		boolean contextAccepted = false;
+		try {
+			this.fileName = sourceUnit.getFileName();
+			this.actualCompletionPosition = completionPosition - 1;
+			this.offset = pos;
+			this.typeRoot = root;
+			// for now until we can change the UI.
+			CompilationResult result = new CompilationResult(sourceUnit, 1, 1, this.compilerOptions.maxProblemsPerUnit);
+			CompilationUnitDeclaration parsedUnit = this.parser.dietParse(sourceUnit, result, this.actualCompletionPosition);
+
+			//		boolean completionNodeFound = false;
+			if (parsedUnit != null) {
+				if(DEBUG) {
+					System.out.println("COMPLETION - Diet AST :"); //$NON-NLS-1$
+					System.out.println(parsedUnit.toString());
+				}
+
+				// scan the package & import statements first
+				if (parsedUnit.currentPackage instanceof CompletionOnPackageReference) {
+					contextAccepted = true;
+					this.buildContext(parsedUnit.currentPackage, null, parsedUnit, null, null);
+					if(!this.requestor.isIgnored(CompletionProposal.PACKAGE_REF)) {
+						findPackages((CompletionOnPackageReference) parsedUnit.currentPackage);
+					}
+					if(this.noProposal && this.problem != null) {
+						this.requestor.completionFailure(this.problem);
+						if(DEBUG) {
+							this.printDebug(this.problem);
+						}
+					}
+					return;
+				}
+
+				ImportReference[] imports = parsedUnit.imports;
+				if (imports != null) {
+					for (int i = 0, length = imports.length; i < length; i++) {
+						ImportReference importReference = imports[i];
+						if (importReference instanceof CompletionOnImportReference) {
+							this.lookupEnvironment.buildTypeBindings(parsedUnit, null /*no access restriction*/);
+							if ((this.unitScope = parsedUnit.scope) != null) {
+								contextAccepted = true;
+								this.buildContext(importReference, null, parsedUnit, null, null);
+								
+								long positions = importReference.sourcePositions[importReference.sourcePositions.length - 1];
+								setSourceAndTokenRange((int) (positions >>> 32), (int) positions);
+								
+								char[][] oldTokens = importReference.tokens;
+								int tokenCount = oldTokens.length;
+								if (tokenCount == 1) {
+									findImports((CompletionOnImportReference)importReference, true);
+								} else if(tokenCount > 1){
+									this.insideQualifiedReference = true;
+									
+									char[] lastToken = oldTokens[tokenCount - 1];
+									char[][] qualifierTokens = CharOperation.subarray(oldTokens, 0, tokenCount - 1);
+									
+									Binding binding = this.unitScope.getTypeOrPackage(qualifierTokens);
+									if(binding != null) {
+										if(binding instanceof PackageBinding) {
+											findImports((CompletionOnImportReference)importReference, false);
+										} else {
+											ReferenceBinding ref = (ReferenceBinding) binding;
+											
+											if(!this.requestor.isIgnored(CompletionProposal.TYPE_REF)) {
+												this.findImportsOfMemberTypes(lastToken, ref, importReference.isStatic());
+											}
+											if(importReference.isStatic()) {
+												
+												if(!this.requestor.isIgnored(CompletionProposal.FIELD_REF)) {
+													this.findImportsOfStaticFields(lastToken, ref);
+												}
+												if(!this.requestor.isIgnored(CompletionProposal.METHOD_NAME_REFERENCE)) {
+													this.findImportsOfStaticMethods(lastToken, ref);
+												}
+											}
+										}
+									}
+								}
+								
+								if(this.noProposal && this.problem != null) {
+									this.requestor.completionFailure(this.problem);
+									if(DEBUG) {
+										this.printDebug(this.problem);
+									}
+								}
+							}
+							return;
+						} else if(importReference instanceof CompletionOnKeyword) {
+							contextAccepted = true;
+							this.buildContext(importReference, null, parsedUnit, null, null);
+							if(!this.requestor.isIgnored(CompletionProposal.KEYWORD)) {
+								setSourceAndTokenRange(importReference.sourceStart, importReference.sourceEnd);
+								CompletionOnKeyword keyword = (CompletionOnKeyword)importReference;
+								findKeywords(keyword.getToken(), keyword.getPossibleKeywords(), false, false);
+							}
+							if(this.noProposal && this.problem != null) {
+								this.requestor.completionFailure(this.problem);
+								if(DEBUG) {
+									this.printDebug(this.problem);
+								}
+							}
+							return;
+						}
+					}
+				}
+
+				if (parsedUnit.types != null) {
+					try {
+						this.lookupEnvironment.buildTypeBindings(parsedUnit, null /*no access restriction*/);
+
+						if ((this.unitScope = parsedUnit.scope) != null) {
+							this.source = sourceUnit.getContents();
+							this.lookupEnvironment.completeTypeBindings(parsedUnit, true);
+							parsedUnit.scope.faultInTypes();
+							parseBlockStatements(parsedUnit, this.actualCompletionPosition);
+							if(DEBUG) {
+								System.out.println("COMPLETION - AST :"); //$NON-NLS-1$
+								System.out.println(parsedUnit.toString());
+							}
+							parsedUnit.resolve();
+						}
+					} catch (CompletionNodeFound e) {
+						//					completionNodeFound = true;
+						if (e.astNode != null) {
+							if(DEBUG) {
+								System.out.print("COMPLETION - Completion node : "); //$NON-NLS-1$
+								System.out.println(e.astNode.toString());
+								if(this.parser.assistNodeParent != null) {
+									System.out.print("COMPLETION - Parent Node : ");  //$NON-NLS-1$
+									System.out.println(this.parser.assistNodeParent);
+								}
+							}
+							// if null then we found a problem in the completion node
+							contextAccepted =
+								complete(
+									e.astNode,
+									this.parser.assistNodeParent,
+									this.parser.enclosingNode,
+									parsedUnit,
+									e.qualifiedBinding,
+									e.scope,
+									e.insideTypeAnnotation);
+						}
+					}
+				}
+			}
+			
+			if(this.noProposal && this.problem != null) {
+				if(!contextAccepted) {
+					contextAccepted = true;
+					CompletionContext context = new CompletionContext();
+					context.setOffset(completionPosition - this.offset);
+					context.setTokenKind(CompletionContext.TOKEN_KIND_UNKNOWN);
+					this.requestor.acceptContext(context);
+				}
+				this.requestor.completionFailure(this.problem);
+				if(DEBUG) {
+					this.printDebug(this.problem);
+				}
+			}
+			/* Ignore package, import, class & interface keywords for now...
+					if (!completionNodeFound) {
+						if (parsedUnit == null || parsedUnit.types == null) {
+							// this is not good enough... can still be trying to define a second type
+							CompletionScanner scanner = (CompletionScanner) this.parser.scanner;
+							setSourceRange(scanner.completedIdentifierStart, scanner.completedIdentifierEnd);
+							findKeywords(scanner.completionIdentifier, mainDeclarations, null);
+						}
+						// currently have no way to know if extends/implements are possible keywords
+					}
+			*/
+		} catch (IndexOutOfBoundsException e) { // work-around internal failure - 1GEMF6D
+			if(DEBUG) {
+				System.out.println("Exception caught by CompletionEngine:"); //$NON-NLS-1$
+				e.printStackTrace(System.out);
+			}
+		} catch (InvalidCursorLocation e) { // may eventually report a usefull error
+			if(DEBUG) {
+				System.out.println("Exception caught by CompletionEngine:"); //$NON-NLS-1$
+				e.printStackTrace(System.out);
+			}
+		} catch (AbortCompilation e) { // ignore this exception for now since it typically means we cannot find java.lang.Object
+			if(DEBUG) {
+				System.out.println("Exception caught by CompletionEngine:"); //$NON-NLS-1$
+				e.printStackTrace(System.out);
+			}
+		} catch (CompletionNodeFound e){ // internal failure - bugs 5618
+			if(DEBUG) {
+				System.out.println("Exception caught by CompletionEngine:"); //$NON-NLS-1$
+				e.printStackTrace(System.out);
+			}
+		} finally {
+			reset();
+			if(!contextAccepted) {
+				contextAccepted = true;
+				CompletionContext context = new CompletionContext();
+				context.setTokenKind(CompletionContext.TOKEN_KIND_UNKNOWN);
+				context.setOffset(completionPosition - this.offset);
+				this.requestor.acceptContext(context);
+			}
+			this.requestor.endReporting();
+		}
+	}
+

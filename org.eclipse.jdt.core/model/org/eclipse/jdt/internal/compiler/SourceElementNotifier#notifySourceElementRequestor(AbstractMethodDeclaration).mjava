@@ -1,0 +1,151 @@
+/*
+ * Update the bodyStart of the corresponding parse node
+ */
+protected void notifySourceElementRequestor(AbstractMethodDeclaration methodDeclaration) {
+
+	// range check
+	boolean isInRange = 
+				initialPosition <= methodDeclaration.declarationSourceStart
+				&& eofPosition >= methodDeclaration.declarationSourceEnd;
+
+	if (methodDeclaration.isClinit()) {
+		this.visitIfNeeded(methodDeclaration);
+		return;
+	}
+
+	if (methodDeclaration.isDefaultConstructor()) {
+		if (reportReferenceInfo) {
+			ConstructorDeclaration constructorDeclaration = (ConstructorDeclaration) methodDeclaration;
+			ExplicitConstructorCall constructorCall = constructorDeclaration.constructorCall;
+			if (constructorCall != null) {
+				switch(constructorCall.accessMode) {
+					case ExplicitConstructorCall.This :
+						requestor.acceptConstructorReference(
+							typeNames[nestedTypeIndex-1],
+							constructorCall.arguments == null ? 0 : constructorCall.arguments.length, 
+							constructorCall.sourceStart);
+						break;
+					case ExplicitConstructorCall.Super :
+					case ExplicitConstructorCall.ImplicitSuper :					
+						requestor.acceptConstructorReference(
+							superTypeNames[nestedTypeIndex-1],
+							constructorCall.arguments == null ? 0 : constructorCall.arguments.length, 
+							constructorCall.sourceStart);
+						break;
+				}
+			}
+		}	
+		return;	
+	}	
+	char[][] argumentTypes = null;
+	char[][] argumentNames = null;
+	boolean isVarArgs = false;
+	Argument[] arguments = methodDeclaration.arguments;
+	if (arguments != null) {
+		char[][][] argumentTypesAndNames = this.getArguments(arguments);
+		argumentTypes = argumentTypesAndNames[0];
+		argumentNames = argumentTypesAndNames[1];
+		
+		isVarArgs = arguments[arguments.length-1].isVarArgs();
+	}
+	char[][] thrownExceptionTypes = getThrownExceptions(methodDeclaration);
+	// by default no selector end position
+	int selectorSourceEnd = -1;
+	if (methodDeclaration.isConstructor()) {
+		selectorSourceEnd = this.sourceEnds.get(methodDeclaration);
+		if (isInRange){
+			int currentModifiers = methodDeclaration.modifiers;
+			if (isVarArgs)
+				currentModifiers |= ClassFileConstants.AccVarargs;
+			
+			// remember deprecation so as to not lose it below
+			boolean deprecated = (currentModifiers & ClassFileConstants.AccDeprecated) != 0 || hasDeprecatedAnnotation(methodDeclaration.annotations);
+			
+			ISourceElementRequestor.MethodInfo methodInfo = new ISourceElementRequestor.MethodInfo();
+			methodInfo.isConstructor = true;
+			methodInfo.declarationStart = methodDeclaration.declarationSourceStart;
+			methodInfo.modifiers = deprecated ? (currentModifiers & ExtraCompilerModifiers.AccJustFlag) | ClassFileConstants.AccDeprecated : currentModifiers & ExtraCompilerModifiers.AccJustFlag;
+			methodInfo.name = methodDeclaration.selector;
+			methodInfo.nameSourceStart = methodDeclaration.sourceStart;
+			methodInfo.nameSourceEnd = selectorSourceEnd;
+			methodInfo.parameterTypes = argumentTypes;
+			methodInfo.parameterNames = argumentNames;
+			methodInfo.exceptionTypes = thrownExceptionTypes;
+			methodInfo.typeParameters = getTypeParameterInfos(methodDeclaration.typeParameters());
+			methodInfo.categories = (char[][]) this.nodesToCategories.get(methodDeclaration);
+			methodInfo.annotations = methodDeclaration.annotations;
+			methodInfo.node = methodDeclaration;
+			requestor.enterConstructor(methodInfo);
+		}
+		if (reportReferenceInfo) {
+			ConstructorDeclaration constructorDeclaration = (ConstructorDeclaration) methodDeclaration;
+			ExplicitConstructorCall constructorCall = constructorDeclaration.constructorCall;
+			if (constructorCall != null) {
+				switch(constructorCall.accessMode) {
+					case ExplicitConstructorCall.This :
+						requestor.acceptConstructorReference(
+							typeNames[nestedTypeIndex-1],
+							constructorCall.arguments == null ? 0 : constructorCall.arguments.length, 
+							constructorCall.sourceStart);
+						break;
+					case ExplicitConstructorCall.Super :
+					case ExplicitConstructorCall.ImplicitSuper :
+						requestor.acceptConstructorReference(
+							superTypeNames[nestedTypeIndex-1],
+							constructorCall.arguments == null ? 0 : constructorCall.arguments.length, 
+							constructorCall.sourceStart);
+						break;
+				}
+			}
+		}
+		this.visitIfNeeded(methodDeclaration);
+		if (isInRange){
+			requestor.exitConstructor(methodDeclaration.declarationSourceEnd);
+		}
+		return;
+	}
+	selectorSourceEnd = this.sourceEnds.get(methodDeclaration);
+	if (isInRange) {
+		int currentModifiers = methodDeclaration.modifiers;
+		if (isVarArgs)
+			currentModifiers |= ClassFileConstants.AccVarargs;
+		
+		// remember deprecation so as to not lose it below
+		boolean deprecated = (currentModifiers & ClassFileConstants.AccDeprecated) != 0 || hasDeprecatedAnnotation(methodDeclaration.annotations);	
+			
+		TypeReference returnType = methodDeclaration instanceof MethodDeclaration
+			? ((MethodDeclaration) methodDeclaration).returnType
+			: null;
+		ISourceElementRequestor.MethodInfo methodInfo = new ISourceElementRequestor.MethodInfo();
+		methodInfo.isAnnotation = methodDeclaration instanceof AnnotationMethodDeclaration;
+		methodInfo.declarationStart = methodDeclaration.declarationSourceStart;
+		methodInfo.modifiers = deprecated ? (currentModifiers & ExtraCompilerModifiers.AccJustFlag) | ClassFileConstants.AccDeprecated : currentModifiers & ExtraCompilerModifiers.AccJustFlag;
+		methodInfo.returnType = returnType == null ? null : CharOperation.concatWith(returnType.getParameterizedTypeName(), '.');
+		methodInfo.name = methodDeclaration.selector;
+		methodInfo.nameSourceStart = methodDeclaration.sourceStart;
+		methodInfo.nameSourceEnd = selectorSourceEnd;
+		methodInfo.parameterTypes = argumentTypes;
+		methodInfo.parameterNames = argumentNames;
+		methodInfo.exceptionTypes = thrownExceptionTypes;
+		methodInfo.typeParameters = getTypeParameterInfos(methodDeclaration.typeParameters());
+		methodInfo.categories = (char[][]) this.nodesToCategories.get(methodDeclaration);
+		methodInfo.annotations = methodDeclaration.annotations;
+		methodInfo.node = methodDeclaration;
+		requestor.enterMethod(methodInfo);
+	}		
+		
+	this.visitIfNeeded(methodDeclaration);
+
+	if (isInRange) {
+		if (methodDeclaration instanceof AnnotationMethodDeclaration) {
+			AnnotationMethodDeclaration annotationMethodDeclaration = (AnnotationMethodDeclaration) methodDeclaration;
+			Expression expression = annotationMethodDeclaration.defaultValue;
+			if (expression != null) {
+				requestor.exitMethod(methodDeclaration.declarationSourceEnd, expression);
+				return;
+			}
+		} 
+		requestor.exitMethod(methodDeclaration.declarationSourceEnd, null);
+	}
+}
+

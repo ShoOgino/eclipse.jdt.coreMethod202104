@@ -1,0 +1,89 @@
+/*
+* Update the bodyStart of the corresponding parse node
+*/
+protected void notifySourceElementRequestor(FieldDeclaration fieldDeclaration, TypeDeclaration declaringType) {
+	
+	// range check
+	boolean isInRange = 
+				initialPosition <= fieldDeclaration.declarationSourceStart
+				&& eofPosition >= fieldDeclaration.declarationSourceEnd;
+
+	switch(fieldDeclaration.getKind()) {
+		case AbstractVariableDeclaration.ENUM_CONSTANT:
+			if (this.reportReferenceInfo) {
+				// accept constructor reference for enum constant
+				if (fieldDeclaration.initialization instanceof AllocationExpression) {
+					AllocationExpression alloc = (AllocationExpression) fieldDeclaration.initialization;
+					requestor.acceptConstructorReference(
+						declaringType.name,
+						alloc.arguments == null ? 0 : alloc.arguments.length, 
+						alloc.sourceStart);
+				}
+			}
+			// fall through next case
+		case AbstractVariableDeclaration.FIELD:
+			int fieldEndPosition = this.sourceEnds.get(fieldDeclaration);
+			if (fieldEndPosition == -1) {
+				// use the declaration source end by default
+				fieldEndPosition = fieldDeclaration.declarationSourceEnd;
+			}
+			if (isInRange) {
+				int currentModifiers = fieldDeclaration.modifiers;
+				
+				// remember deprecation so as to not lose it below
+				boolean deprecated = (currentModifiers & ClassFileConstants.AccDeprecated) != 0 || hasDeprecatedAnnotation(fieldDeclaration.annotations);	
+			
+				char[] typeName = null;
+				if (fieldDeclaration.type == null) {
+					// enum constant
+					typeName = declaringType.name;
+					currentModifiers |= ClassFileConstants.AccEnum;
+				} else {
+					// regular field
+					typeName = CharOperation.concatWith(fieldDeclaration.type.getParameterizedTypeName(), '.');
+				}
+				ISourceElementRequestor.FieldInfo fieldInfo = new ISourceElementRequestor.FieldInfo();
+				fieldInfo.declarationStart = fieldDeclaration.declarationSourceStart;
+				fieldInfo.name = fieldDeclaration.name;
+				fieldInfo.modifiers = deprecated ? (currentModifiers & ExtraCompilerModifiers.AccJustFlag) | ClassFileConstants.AccDeprecated : currentModifiers & ExtraCompilerModifiers.AccJustFlag;
+				fieldInfo.type = typeName;
+				fieldInfo.nameSourceStart = fieldDeclaration.sourceStart;
+				fieldInfo.nameSourceEnd = fieldDeclaration.sourceEnd;
+				fieldInfo.categories = (char[][]) this.nodesToCategories.get(fieldDeclaration);
+				fieldInfo.annotations = fieldDeclaration.annotations;
+				fieldInfo.node = fieldDeclaration;
+				requestor.enterField(fieldInfo);
+			}
+			this.visitIfNeeded(fieldDeclaration, declaringType);
+			if (isInRange){
+				requestor.exitField(
+					// filter out initializations that are not a constant (simple check)
+					(fieldDeclaration.initialization == null 
+							|| fieldDeclaration.initialization instanceof ArrayInitializer
+							|| fieldDeclaration.initialization instanceof AllocationExpression
+							|| fieldDeclaration.initialization instanceof ArrayAllocationExpression
+							|| fieldDeclaration.initialization instanceof Assignment
+							|| fieldDeclaration.initialization instanceof ClassLiteralAccess
+							|| fieldDeclaration.initialization instanceof MessageSend
+							|| fieldDeclaration.initialization instanceof ArrayReference
+							|| fieldDeclaration.initialization instanceof ThisReference) ? 
+						-1 :  
+						fieldDeclaration.initialization.sourceStart, 
+					fieldEndPosition,
+					fieldDeclaration.declarationSourceEnd);
+			}
+			break;
+		case AbstractVariableDeclaration.INITIALIZER:
+			if (isInRange){
+				requestor.enterInitializer(
+					fieldDeclaration.declarationSourceStart,
+					fieldDeclaration.modifiers); 
+			}
+			this.visitIfNeeded((Initializer)fieldDeclaration);
+			if (isInRange){
+				requestor.exitInitializer(fieldDeclaration.declarationSourceEnd);
+			}
+			break;
+	}
+}
+

@@ -1,0 +1,75 @@
+	/**
+	 * Return the java element corresponding to the given compiler binding.
+	 */
+	public static JavaElement getUnresolvedJavaElement(MethodBinding methodBinding, WorkingCopyOwner workingCopyOwner, BindingsToNodesMap bindingsToNodes) {
+		IType declaringType = (IType) getUnresolvedJavaElement(methodBinding.declaringClass, workingCopyOwner, bindingsToNodes);
+		
+		if (declaringType == null) return null;
+		
+		org.eclipse.jdt.internal.compiler.ast.ASTNode node = bindingsToNodes == null ? null : bindingsToNodes.get(methodBinding);
+		if (node != null && !declaringType.isBinary()) {
+			if (node instanceof AnnotationMethodDeclaration) {
+				// node is an AnnotationMethodDeclaration
+				AnnotationMethodDeclaration typeMemberDeclaration = (AnnotationMethodDeclaration) node;
+				return (JavaElement) declaringType.getMethod(String.valueOf(typeMemberDeclaration.selector), CharOperation.NO_STRINGS); // annotation type members don't have parameters
+			} else {
+				// node is an MethodDeclaration
+				MethodDeclaration methodDeclaration = (MethodDeclaration) node;
+				
+				Argument[] arguments = methodDeclaration.arguments;
+				String[] parameterSignatures;
+				if (arguments != null) {
+					parameterSignatures = new String[arguments.length];
+					for (int i = 0; i < arguments.length; i++) {
+						Argument argument = arguments[i];
+						TypeReference typeReference = argument.type;
+						int arrayDim = typeReference.dimensions();
+						
+						String typeSig = 
+							Signature.createTypeSignature(
+									CharOperation.concatWith(
+											typeReference.getTypeName(), '.'), false);
+						if (arrayDim > 0) {
+							typeSig = Signature.createArraySignature(typeSig, arrayDim);
+						}
+						parameterSignatures[i] = typeSig;
+						
+					}
+				} else {
+					parameterSignatures = new String[0];
+				}
+				return (JavaElement) declaringType.getMethod(String.valueOf(methodDeclaration.selector), parameterSignatures);
+			}
+		} else {
+			// case of method not in the created AST, or a binary method
+			org.eclipse.jdt.internal.compiler.lookup.MethodBinding original = methodBinding.original();
+			String selector = original.isConstructor() ? declaringType.getElementName() : new String(original.selector);
+			boolean isBinary = declaringType.isBinary();
+			ReferenceBinding enclosingType = original.declaringClass.enclosingType();
+			boolean isInnerBinaryTypeConstructor = isBinary && original.isConstructor() && enclosingType != null;
+			TypeBinding[] parameters = original.parameters;
+			int length = parameters == null ? 0 : parameters.length;
+			int declaringIndex = isInnerBinaryTypeConstructor ? 1 : 0;
+			String[] parameterSignatures = new String[declaringIndex + length];
+			if (isInnerBinaryTypeConstructor)
+				parameterSignatures[0] = new String(enclosingType.genericTypeSignature()).replace('/', '.');
+			for (int i = 0;  i < length; i++) {
+				parameterSignatures[declaringIndex + i] = new String(parameters[i].genericTypeSignature()).replace('/', '.');
+			}
+			IMethod result = declaringType.getMethod(selector, parameterSignatures);
+			if (isBinary)
+				return (JavaElement) result;
+			IMethod[] methods = null;
+			try {
+				methods = declaringType.getMethods();
+			} catch (JavaModelException e) {
+				// declaring type doesn't exist
+				return null;
+			}
+			IMethod[] candidates = Member.findMethods(result, methods);
+			if (candidates == null || candidates.length == 0)
+				return null;
+			return (JavaElement) candidates[0];
+		}
+	}
+
