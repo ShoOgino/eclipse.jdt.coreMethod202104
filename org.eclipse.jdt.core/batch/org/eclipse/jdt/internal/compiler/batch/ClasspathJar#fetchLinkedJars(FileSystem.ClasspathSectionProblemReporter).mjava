@@ -1,0 +1,44 @@
+public List fetchLinkedJars(FileSystem.ClasspathSectionProblemReporter problemReporter) {
+	// expected to be called once only - if multiple calls desired, consider
+	// using a cache
+	BufferedReader reader = null;
+	try {
+		initialize();
+		ArrayList result = new ArrayList();
+		ZipEntry manifest =	this.zipFile.getEntry("META-INF/MANIFEST.MF"); //$NON-NLS-1$
+		if (manifest != null) { // non-null implies regular file
+			reader = new BufferedReader(new InputStreamReader(this.zipFile.getInputStream(manifest)));
+			boolean success = MANIFEST_ANALYZER.analyzeManifestContents(reader);
+			List calledFileNames = MANIFEST_ANALYZER.getCalledFileNames();
+			if (problemReporter != null) {
+				if (!success || 
+						MANIFEST_ANALYZER.getClasspathSectionsCount() == 1 &&  calledFileNames == null) {
+					problemReporter.invalidClasspathSection(this.getPath());
+				} else if (MANIFEST_ANALYZER.getClasspathSectionsCount() > 1) {
+					problemReporter.multipleClasspathSections(this.getPath());				
+				}
+			}
+			if (calledFileNames != null) {
+				Iterator calledFilesIterator = calledFileNames.iterator();
+				String directoryPath = this.getPath();
+				int lastSeparator = directoryPath.lastIndexOf(File.separatorChar);
+				directoryPath = directoryPath.substring(0, lastSeparator + 1); // potentially empty (see bug 214731)
+				while (calledFilesIterator.hasNext()) {
+					result.add(new ClasspathJar(new File(directoryPath + (String) calledFilesIterator.next()), this.closeZipFileAtEnd, this.accessRuleSet, this.destinationPath));
+				}
+			}
+		}
+		return result;
+	} catch (IOException e) {
+		return null;
+	} finally {
+		if (reader != null) {
+			try {
+				reader.close();
+			} catch (IOException e) {
+				// best effort
+			}
+		}
+	}
+}
+
