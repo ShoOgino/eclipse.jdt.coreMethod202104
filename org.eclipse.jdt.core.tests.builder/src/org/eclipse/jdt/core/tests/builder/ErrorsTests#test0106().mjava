@@ -1,0 +1,75 @@
+//https://bugs.eclipse.org/bugs/show_bug.cgi?id=224715
+public void test0106() throws JavaModelException {
+	IPath projectPath = env.addProject("Project"); //$NON-NLS-1$
+	env.addExternalJars(projectPath, Util.getJavaClassLibs());
+	fullBuild(projectPath);
+
+	// remove old package fragment root so that names don't collide
+	env.removePackageFragmentRoot(projectPath, ""); //$NON-NLS-1$
+
+	IPath root = env.addPackageFragmentRoot(projectPath, "src", null, null); //$NON-NLS-1$
+	env.setOutputFolder(projectPath, "bin"); //$NON-NLS-1$
+
+	IPath classTest1 = env.addClass(root, "p1", "X", //$NON-NLS-1$ //$NON-NLS-2$
+		"package p1;\n"+ //$NON-NLS-1$
+		"public class X implements I {\n" +
+		"}\n" //$NON-NLS-1$
+	);
+
+	env.addClass(root, "p1", "I", //$NON-NLS-1$ //$NON-NLS-2$
+			"package p1;\n"+ //$NON-NLS-1$
+			"public interface I {\n" +
+			"   public void foo() {\n"+ //$NON-NLS-1$
+			"   }\n"+ //$NON-NLS-1$
+			"}\n" //$NON-NLS-1$
+		);
+
+	incrementalBuild(projectPath);
+
+	expectingSpecificProblemFor(classTest1, new Problem("p1", "The type X must implement the inherited abstract method I.foo()", classTest1, 25, 26, CategorizedProblem.CAT_MEMBER, IMarker.SEVERITY_ERROR));
+
+	IJavaProject project = env.getJavaProject(projectPath);
+	IRegion region = JavaCore.newRegion();
+	region.add(project);
+	IResource[] resources = JavaCore.getGeneratedResources(region, false);
+	assertEquals("Wrong size", 2, resources.length);//$NON-NLS-1$
+	Arrays.sort(resources, COMPARATOR);
+	String actualOutput = getResourceOuput(resources);
+	String expectedOutput =
+		"/Project/bin/p1/I.class\n" +
+		"/Project/bin/p1/X.class\n";
+	assertEquals("Wrong names", Util.convertToIndependantLineDelimiter(expectedOutput), actualOutput);
+	
+	assertEquals("Wrong type", IResource.FILE, resources[1].getType());
+	IFile classFile = (IFile) resources[1];
+	IClassFileReader classFileReader = null; 
+	InputStream stream = null;
+	try {
+		stream = classFile.getContents();
+		classFileReader = ToolFactory.createDefaultClassFileReader(stream, IClassFileReader.ALL);
+	} catch (CoreException e) {
+		e.printStackTrace();
+	} finally {
+		if (stream != null) {
+			try {
+				stream.close();
+			} catch(IOException e) {
+				// ignore
+			}
+		}
+	}
+	assertNotNull("No class file reader", classFileReader);
+	IMethodInfo[] methodInfos = classFileReader.getMethodInfos();
+	IMethodInfo found = null;
+	loop: for (int i = 0, max = methodInfos.length; i < max; i++) {
+		IMethodInfo methodInfo = methodInfos[i];
+		if (CharOperation.equals(methodInfo.getName(), "foo".toCharArray())) {
+			found = methodInfo;
+			break loop;
+		}
+	}
+	assertNotNull("No method found", found);
+	assertTrue("Not a synthetic method", found.isSynthetic());
+	env.removeProject(projectPath);
+}
+
