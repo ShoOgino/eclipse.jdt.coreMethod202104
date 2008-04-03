@@ -1,4 +1,4 @@
-	private static TypeDeclaration convert(IType type, IType alreadyComputedMember,TypeDeclaration alreadyComputedMemberDeclaration, CompilationResult compilationResult, HashSetOfCharArrayArray typeNames) throws JavaModelException {
+	private TypeDeclaration convert(IType type, IType alreadyComputedMember,TypeDeclaration alreadyComputedMemberDeclaration) throws JavaModelException {
 		/* create type declaration - can be member type */
 		TypeDeclaration typeDeclaration = new TypeDeclaration(compilationResult);
 
@@ -11,19 +11,19 @@
 
 		/* set superclass and superinterfaces */
 		if (type.getSuperclassName() != null) {
-			TypeReference typeReference = createTypeReference(type.getSuperclassName().toCharArray(), typeNames);
+			TypeReference typeReference = createTypeReference(type.getSuperclassTypeSignature());
 			if (typeReference != null) {
 				typeDeclaration.superclass = typeReference;
 				typeDeclaration.superclass.bits |= ASTNode.IsSuperType;
 			}
 		}
 		
-		String[] interfaceNames = type.getSuperInterfaceNames();
-		int interfaceCount = interfaceNames == null ? 0 : interfaceNames.length;
+		String[] interfaceTypes = type.getSuperInterfaceTypeSignatures();
+		int interfaceCount = interfaceTypes == null ? 0 : interfaceTypes.length;
 		typeDeclaration.superInterfaces = new TypeReference[interfaceCount];
 		int count = 0;
 		for (int i = 0; i < interfaceCount; i++) {
-			TypeReference typeReference = createTypeReference(interfaceNames[i].toCharArray(), typeNames);
+			TypeReference typeReference = createTypeReference(interfaceTypes[i]);
 			if (typeReference != null) {
 				typeDeclaration.superInterfaces[count] = typeReference;
 				typeDeclaration.superInterfaces[count++].bits |= ASTNode.IsSuperType;
@@ -31,6 +31,28 @@
 		}
 		if (count != interfaceCount) {
 			System.arraycopy(typeDeclaration.fields, 0, typeDeclaration.superInterfaces = new TypeReference[interfaceCount], 0, interfaceCount);
+		}
+		
+		// convert 1.5 specific constructs only if compliance is 1.5 or above
+		if (this.has1_5Compliance) {
+			
+			/* convert type parameters */
+			ITypeParameter[] typeParameters = type.getTypeParameters();
+			if (typeParameters != null && typeParameters.length > 0) {
+				int parameterCount = typeParameters.length;
+				org.eclipse.jdt.internal.compiler.ast.TypeParameter[] typeParams = new org.eclipse.jdt.internal.compiler.ast.TypeParameter[parameterCount];
+				for (int i = 0; i < parameterCount; i++) {
+					ITypeParameter typeParameter = typeParameters[i];
+					typeParams[i] = 
+						createTypeParameter(
+								typeParameter.getElementName().toCharArray(), 
+								stringArrayToCharArray(typeParameter.getBounds()),
+								0,
+								0);
+				}
+				
+				typeDeclaration.typeParameters = typeParams;
+			}
 		}
 		
 		/* convert member types */
@@ -41,7 +63,7 @@
 			if(alreadyComputedMember != null && alreadyComputedMember.getFullyQualifiedName().equals(memberTypes[i].getFullyQualifiedName())) {
 				typeDeclaration.memberTypes[i] = alreadyComputedMemberDeclaration;
 			} else {
-				typeDeclaration.memberTypes[i] = convert(memberTypes[i], null, null, compilationResult, typeNames);
+				typeDeclaration.memberTypes[i] = convert(memberTypes[i], null, null);
 			}
 		}
 
@@ -51,7 +73,7 @@
 		typeDeclaration.fields = new FieldDeclaration[fieldCount];
 		count = 0;
 		for (int i = 0; i < fieldCount; i++) {
-			FieldDeclaration fieldDeclaration = convert(fields[i], type, typeNames);
+			FieldDeclaration fieldDeclaration = convert(fields[i], type);
 			if (fieldDeclaration != null) {
 				typeDeclaration.fields[count++] = fieldDeclaration;
 			}
@@ -83,7 +105,7 @@
 		boolean hasAbstractMethods = false;
 		count = 0;
 		for (int i = 0; i < methodCount; i++) {
-			AbstractMethodDeclaration method = convert(methods[i], type, compilationResult, typeNames);
+			AbstractMethodDeclaration method = convert(methods[i], type);
 			if (method != null) {
 				boolean isAbstract;
 				if ((isAbstract = method.isAbstract()) || isInterface) { // fix-up flag 
