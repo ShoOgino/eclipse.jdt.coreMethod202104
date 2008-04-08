@@ -1,0 +1,51 @@
+// https://bugs.eclipse.org/bugs/show_bug.cgi?id=216684
+// ecj different from javac: repeated -sourcepath yields an error, while javac 
+// only keeps the last one (and swallows the others silently)
+public void test233_repeated_sourcepath() throws IOException, InterruptedException {
+	String commonOptions = " -d \"" + OUTPUT_DIR + "\"" 
+		+ " -sourcepath \"" + OUTPUT_DIR + File.separator + "src1\""
+		+ " -sourcepath \"" + OUTPUT_DIR + File.separator + "src2\"";
+	String sourceFilePathZ = "\"" + OUTPUT_DIR + File.separator + "src3" + File.separator + "Z.java\"";
+	String sourceFilePathW = "\"" + OUTPUT_DIR + File.separator + "src3" + File.separator + "W.java\"";
+	runTest(
+		false /* shouldCompileOK */,
+		new String[] { /* testFiles */
+			"src1/X.java",
+			"public class X {\n" +
+			"}\n",
+			"src2/Y.java",
+			"public class Y {\n" +
+			"}\n",
+			"src3/Z.java",
+			"public class Z {\n" +
+			"  Y y;\n" +
+			"}\n",
+			"src3/W.java",
+			"public class W {\n" +
+			"  X x;\n" +
+			"  Y y;\n" +
+			"}\n",
+		},
+		sourceFilePathZ + " -proc:none " + commonOptions /* commandLine */,
+		"" /* expectedOutOutputString */,
+		"duplicate sourcepath specification: -sourcepath ---OUTPUT_DIR_PLACEHOLDER---/src2\n" /* expectedErrOutputString */,
+		true /* shouldFlushOutputDirectory */,
+		null /* progress */);
+	if (RUN_JAVAC) {
+		Iterator javacCompilersIterator = javacCompilers.iterator();
+		String sourceFileNamesZ[] = new String[] {sourceFilePathZ}; 
+		String sourceFileNamesW[] = new String[] {sourceFilePathW}; 
+		while (javacCompilersIterator.hasNext()) {
+			JavacCompiler javacCompiler = (JavacCompiler) javacCompilersIterator.next();
+			// succeeds because it picks src2 up
+			assertTrue(javacCompiler.compile(
+					commonOptions /* options */, 
+					sourceFileNamesZ /* source file names */));
+			// fails because it misses src1
+			assertFalse(javacCompiler.compile(
+					commonOptions /* options */, 
+					sourceFileNamesW /* source file names */));
+		}
+	}
+}
+

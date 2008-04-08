@@ -1,0 +1,72 @@
+// https://bugs.eclipse.org/bugs/show_bug.cgi?id=216684
+// when class files are ready in all classpath entries, ecj and javac pick
+// the first available class file up, regardless of which is newer  (no sourcepath here)
+public void test236_classpath() throws IOException, InterruptedException {
+	runTest(
+		true /* shouldCompileOK*/,
+		new String[] { /* testFiles */
+			"src1/X.java",
+			"public class X {\n" +
+			"  public static final int CONST = 1;\n" + 
+			"}\n",
+		},
+		"\"" + OUTPUT_DIR + File.separator + "src1" + File.separator + "X.java\"" /* commandLine */
+		+ " -proc:none -d \"" + OUTPUT_DIR + File.separator + "bin1" + "\"",
+		"" /* expectedOutOutputString */,
+		"" /* expectedErrOutputString */,
+		true /* shouldFlushOutputDirectory */,
+		null /* progress */);
+	File bin1File = new File(OUTPUT_DIR + File.separator + "bin1" + File.separator + "X.class"),
+	  bin2File = new File(OUTPUT_DIR + File.separator + "bin2" + File.separator + "X.class");
+	do {
+		runTest(
+			true /* shouldCompileOK*/,
+			new String[] { /* testFiles */
+				"src2/X.java",
+				"public class X {\n" +
+				"  public static final int CONST = 2;\n" + 
+				"}\n",
+			},
+			"\"" + OUTPUT_DIR + File.separator + "src2" + File.separator + "X.java\"" /* commandLine */
+			+ " -proc:none -d \"" + OUTPUT_DIR + File.separator + "bin2" + "\"",
+			"" /* expectedOutOutputString */,
+			"" /* expectedErrOutputString */,
+			false /* shouldFlushOutputDirectory */,
+			null /* progress */);
+	} while (bin2File.lastModified() <= bin1File.lastModified());
+	String sourceFilePath = "\"" + OUTPUT_DIR +  File.separator + "Y.java\"";
+	String commonOptions = 
+		" -classpath \"" + OUTPUT_DIR + File.separator + "bin1" + File.pathSeparator
+		+ OUTPUT_DIR + File.separator + "bin2" + "\""
+		+ " -d \"" + OUTPUT_DIR + File.separator + "bin" + "\"";
+	runTest(
+		true /* shouldCompileOK*/,
+		new String[] { /* testFiles */
+			"Y.java",
+			"public class Y {\n" +
+			"  public static void main (String[] args) {\n" +
+			"    System.out.println(X.CONST);\n" +
+			"  }\n" + 
+			"}\n",
+		},
+		sourceFilePath + commonOptions	+ " -proc:none " /* commandLine */,
+		"" /* expectedOutOutputString */,
+		"" /* expectedErrOutputString */,
+		false /* shouldFlushOutputDirectory */,
+		null /* progress */);
+	this.verifier.execute("Y", new String[] {OUTPUT_DIR + File.separator + "bin"});
+	assertTrue(this.verifier.getExecutionOutput().startsWith("1")); // skip trailing newline
+	if (RUN_JAVAC) {
+		Iterator javacCompilersIterator = javacCompilers.iterator();
+		String sourceFileNames[] = new String[] {sourceFilePath}; 
+		while (javacCompilersIterator.hasNext()) {
+			JavacCompiler javacCompiler = (JavacCompiler) javacCompilersIterator.next();
+			assertTrue(javacCompiler.compile(
+					commonOptions /* options */, 
+					sourceFileNames /* source file names */));
+			this.verifier.execute("Y", new String[] {OUTPUT_DIR + File.separator + "bin"});
+			assertEquals('1', this.verifier.getExecutionOutput().charAt(0)); // skip trailing newline
+		}
+	}
+}
+

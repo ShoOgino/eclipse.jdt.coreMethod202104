@@ -1,34 +1,43 @@
 // https://bugs.eclipse.org/bugs/show_bug.cgi?id=216684
-// .java/.class files precedence depending on sourcepath
-// different from javac: we select sourcepath over classpath, while javac
-// does the opposite
-public void test230_sourcepath_vs_classpath() {
-	runConformTest(
-		new String[] {
-			"X.java",
-			"public class X {\n" + 
+// .java/.class files precedence depending on sourcepath and other conditions
+// ecj always selects source files from the sourcepath over class files
+// javac selects the class file over the source file when the class file is
+// newer than the source file, unless option -Xprefer:source is used (available
+// since 1.6)
+public void test230_sourcepath_vs_classpath() throws IOException, InterruptedException {
+	runTest(
+		true /* shouldCompileOK*/,
+		new String[] { /* testFiles */
+			"src1/X.java",
+			"public class X {\n" +
+			"  public static final int CONST = 1;\n" + 
+			"}\n",
+			"src2/X.java",
+			"public class X {\n" +
+			"  public static final int CONST = 2;\n" + 
 			"}\n",
 		},
-		"\"" + OUTPUT_DIR +  File.separator + "X.java\""
-		+ " -verbose -proc:none -d \"" + OUTPUT_DIR + "\"",
-		"[parsing    ---OUTPUT_DIR_PLACEHOLDER---/X.java - #1/1]\n" + 
+		"\"" + OUTPUT_DIR + File.separator + "src1" + File.separator + "X.java\"" /* commandLine */
+		+ " -verbose -proc:none -d \"" + OUTPUT_DIR + File.separator + "bin1" + "\"",
+		"[parsing    ---OUTPUT_DIR_PLACEHOLDER---/src1/X.java - #1/1]\n" + /* expectedOutOutputString */
 		"[reading    java/lang/Object.class]\n" + 
-		"[analyzing  ---OUTPUT_DIR_PLACEHOLDER---/X.java - #1/1]\n" + 
+		"[analyzing  ---OUTPUT_DIR_PLACEHOLDER---/src1/X.java - #1/1]\n" + 
 		"[writing    X.class - #1]\n" + 
-		"[completed  ---OUTPUT_DIR_PLACEHOLDER---/X.java - #1/1]\n" + 
+		"[completed  ---OUTPUT_DIR_PLACEHOLDER---/src1/X.java - #1/1]\n" + 
 		"[1 unit compiled]\n" + 
 		"[1 .class file generated]\n",
-		"",
-		true);
+		"" /* expectedErrOutputString */,
+		true /* shouldFlushOutputDirectory */,
+		null /* progress */);
 	// ensure that class file is newer than source file (some file systems
 	// store the modification time at a second precision)
-	File sourceFile = new File(OUTPUT_DIR + File.separator + "X.java"),
-	  classFile = new File(OUTPUT_DIR + File.separator + "X.class");
+	File sourceFile = new File(OUTPUT_DIR + File.separator + "src1" + File.separator + "X.java"),
+	  classFile = new File(OUTPUT_DIR + File.separator + "bin1" + File.separator + "X.class");
 	while (classFile.lastModified() <= sourceFile.lastModified()) {
 		runConformTest(
 			null,
-			"\"" + OUTPUT_DIR +  File.separator + "X.java\""
-			+ " -proc:none -d \"" + OUTPUT_DIR + "\"",
+			"\"" + OUTPUT_DIR +  File.separator + "src1" + File.separator + "X.java\""
+			+ " -proc:none -d \"" + OUTPUT_DIR + File.separator + "bin1" + "\"",
 			"",
 			"",
 			false);
@@ -38,15 +47,20 @@ public void test230_sourcepath_vs_classpath() {
 		new String[] {
 			"Y.java",
 			"public class Y {\n" +
-			"  X x;\n" + 
+			"  public static void main (String[] args) {\n" +
+			"    System.out.println(X.CONST);\n" +
+			"  }\n" + 
 			"}\n",
 		},
 		"\"" + OUTPUT_DIR +  File.separator + "Y.java\""
-		+ " -classpath \"" + OUTPUT_DIR + "\""
+		+ " -classpath \"" + OUTPUT_DIR + File.separator + "bin1" + "\""
 		+ " -verbose -proc:none -d \"" + OUTPUT_DIR + "\"",
 		"[parsing    ---OUTPUT_DIR_PLACEHOLDER---/Y.java - #1/1]\n" + 
 		"[reading    java/lang/Object.class]\n" + 
 		"[analyzing  ---OUTPUT_DIR_PLACEHOLDER---/Y.java - #1/1]\n" + 
+		"[reading    java/lang/String.class]\n" + 
+		"[reading    java/lang/System.class]\n" + 
+		"[reading    java/io/PrintStream.class]\n" + 
 		"[reading    X.class]\n" + 
 		"[writing    Y.class - #1]\n" + 
 		"[completed  ---OUTPUT_DIR_PLACEHOLDER---/Y.java - #1/1]\n" + 
@@ -54,28 +68,60 @@ public void test230_sourcepath_vs_classpath() {
 		"[1 .class file generated]\n",
 		"",
 		false);
-	// compile with sourcepath and classpath: X.java is preferred
+	// compile with sourcepath and classpath: src2/X.java is preferred
 	// this matches -Xprefer:source option of javac - except that
 	// javac then does it for classpath too; by default, javac would select
-	// X.class
+	// bin1/X.class (as shown below)
+	String sourceFilePath = "\"" + OUTPUT_DIR +  File.separator + "Y.java\"";
+	String commonOptions = 
+		" -classpath \"" + OUTPUT_DIR + File.separator + "bin1" + "\""
+		+ " -sourcepath \"" + OUTPUT_DIR + File.separator + "src2" + "\""
+		+ " -d \"" + OUTPUT_DIR + File.separator + "bin2" + "\"";
 	runConformTest(
 		null,
-		"\"" + OUTPUT_DIR +  File.separator + "Y.java\""
-		+ " -classpath \"" + OUTPUT_DIR + "\""
-		+ " -sourcepath \"" + OUTPUT_DIR + "\""
-		+ " -verbose -proc:none -d \"" + OUTPUT_DIR + "\"",
+		sourceFilePath + commonOptions + " -verbose -proc:none",
 		"[parsing    ---OUTPUT_DIR_PLACEHOLDER---/Y.java - #1/1]\n" + 
 		"[reading    java/lang/Object.class]\n" + 
 		"[analyzing  ---OUTPUT_DIR_PLACEHOLDER---/Y.java - #1/1]\n" + 
-		"[parsing    ---OUTPUT_DIR_PLACEHOLDER---/X.java - #2/2]\n" + 
+		"[reading    java/lang/String.class]\n" + 
+		"[reading    java/lang/System.class]\n" + 
+		"[reading    java/io/PrintStream.class]\n" + 
+		"[parsing    ---OUTPUT_DIR_PLACEHOLDER---/src2/X.java - #2/2]\n" + 
 		"[writing    Y.class - #1]\n" + 
 		"[completed  ---OUTPUT_DIR_PLACEHOLDER---/Y.java - #1/2]\n" + 
-		"[analyzing  ---OUTPUT_DIR_PLACEHOLDER---/X.java - #2/2]\n" + 
+		"[analyzing  ---OUTPUT_DIR_PLACEHOLDER---/src2/X.java - #2/2]\n" + 
 		"[writing    X.class - #2]\n" + 
-		"[completed  ---OUTPUT_DIR_PLACEHOLDER---/X.java - #2/2]\n" + 
+		"[completed  ---OUTPUT_DIR_PLACEHOLDER---/src2/X.java - #2/2]\n" + 
 		"[2 units compiled]\n" + 
 		"[2 .class files generated]\n",
 		"",
 		false);
+	if (RUN_JAVAC) {
+		// run ecj result
+		this.verifier.execute("Y", new String[] {OUTPUT_DIR + File.separator + "bin2"});
+		assertTrue(this.verifier.getExecutionOutput().startsWith("2")); // skip trailing newline
+		// 2 means we selected src2
+		// recompile and run result using various levels of javac
+		Iterator javacCompilersIterator = javacCompilers.iterator();
+		String specialOptions = commonOptions + " -Xprefer:source ";
+		String sourceFileNames[] = new String[] {sourceFilePath}; 
+		while (javacCompilersIterator.hasNext()) {
+			JavacCompiler javacCompiler = (JavacCompiler) javacCompilersIterator.next();
+			assertTrue(javacCompiler.compile(
+					commonOptions /* options */, 
+					sourceFileNames /* source file names */));
+			this.verifier.execute("Y", new String[] {OUTPUT_DIR + File.separator + "bin2"});
+			assertEquals('1', this.verifier.getExecutionOutput().charAt(0)); // skip trailing newline
+			// 1 means javac selected bin1 by default
+			if (javacCompiler.version.compareTo(JavaCore.VERSION_1_6) >= 0) {
+				assertTrue(javacCompiler.compile(
+						specialOptions /* options */, 
+						sourceFileNames /* source file names */));
+				this.verifier.execute("Y", new String[] {OUTPUT_DIR + File.separator + "bin2"});
+				assertEquals('2', this.verifier.getExecutionOutput().charAt(0)); // skip trailing newline
+				// 2 means javac selected src2
+			}
+		}
+	}
 }
 

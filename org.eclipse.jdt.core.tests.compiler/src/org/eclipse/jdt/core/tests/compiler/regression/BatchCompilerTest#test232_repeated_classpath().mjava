@@ -1,0 +1,58 @@
+// https://bugs.eclipse.org/bugs/show_bug.cgi?id=216684
+// ecj different from javac: repeated -classpath concatenates entries, while javac 
+// only keeps the last one (and swallows the others silently)
+public void test232_repeated_classpath() throws IOException, InterruptedException {
+	String commonOptions = " -d \"" + OUTPUT_DIR + File.separator + "bin" 
+		+ "\" -classpath \"" + OUTPUT_DIR + File.separator + "src1";
+	String combinedClasspathOptions = commonOptions + File.pathSeparator
+		+ OUTPUT_DIR + File.separator + "src2\" ";
+	String splitClasspathOptions = commonOptions
+		+ "\" -classpath \"" + OUTPUT_DIR + File.separator + "src2\" ";
+	String sourceFilePath = "\"" + OUTPUT_DIR + File.separator + "src3" + File.separator + "Z.java\"";
+	// ecj considers repeated classpath entries as if they were concatenated
+	// into one
+	runTest(
+		true /* shouldCompileOK*/,
+		new String[] { /* testFiles */
+			"src1/X.java",
+			"public class X {\n" +
+			"}\n",
+			"src2/Y.java",
+			"public class Y {\n" +
+			"}\n",
+			"src3/Z.java",
+			"public class Z {\n" +
+			"  X x;\n" +
+			"  Y y;\n" +
+			"}\n",
+		},
+		sourceFilePath + " -proc:none " + combinedClasspathOptions /* commandLine */,
+		"" /* expectedOutOutputString */,
+		"" /* expectedErrOutputString */,
+		true /* shouldFlushOutputDirectory */,
+		null /* progress */);
+	runTest(
+		true /* shouldCompileOK*/,
+		null /* testFiles */,
+		sourceFilePath + " -proc:none " + splitClasspathOptions /* commandLine */,
+		"" /* expectedOutOutputString */,
+		"" /* expectedErrOutputString */,
+		false /* shouldFlushOutputDirectory */,
+		null /* progress */);
+	if (RUN_JAVAC) {
+		// javac skips all but the last classpath entry (which results into an
+		// error in the split case here)
+		Iterator javacCompilersIterator = javacCompilers.iterator();
+		String sourceFileNames[] = new String[] {sourceFilePath}; 
+		while (javacCompilersIterator.hasNext()) {
+			JavacCompiler javacCompiler = (JavacCompiler) javacCompilersIterator.next();
+			assertTrue(javacCompiler.compile(
+					combinedClasspathOptions /* options */, 
+					sourceFileNames /* source file names */));
+			assertFalse(javacCompiler.compile(
+					splitClasspathOptions /* options */, 
+					sourceFileNames /* source file names */));
+		}
+	}
+}
+
