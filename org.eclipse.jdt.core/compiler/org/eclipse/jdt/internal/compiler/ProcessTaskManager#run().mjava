@@ -1,0 +1,45 @@
+public void run() {
+	while (this.processingThread != null) {
+		CompilationUnitDeclaration unitToProcess = null;
+		int index = -1;
+		synchronized (this) {
+			if (this.processingThread == null) return;
+
+			unitToProcess = this.compiler.getUnitToProcess(this.unitIndex);
+			if (unitToProcess == null) {
+				shutdown();
+				return;
+			}
+			index = this.unitIndex++;
+		}
+
+		try {
+			this.compiler.reportProgress(Messages.bind(Messages.compilation_processing, new String(unitToProcess.getFileName())));
+			if (this.compiler.options.verbose)
+				this.compiler.out.println(
+					Messages.bind(Messages.compilation_process,
+					new String[] {
+						String.valueOf(index + 1),
+						String.valueOf(this.compiler.totalUnits),
+						new String(unitToProcess.getFileName())
+					}));
+			this.compiler.process(unitToProcess, index);
+		} catch (AbortCompilation e) {
+			shutdown();
+			this.compiler.handleInternalException(e, unitToProcess);
+		} catch (Error e) {
+			shutdown();
+			this.compiler.handleInternalException(e, unitToProcess, null);
+			throw e; // rethrow
+		} catch (RuntimeException e) {
+			shutdown();
+			this.compiler.handleInternalException(e, unitToProcess, null);
+			throw e; // rethrow
+		} finally {
+			unitToProcess.cleanUp();
+		}
+
+		addNextUnit(unitToProcess);
+	}
+}
+

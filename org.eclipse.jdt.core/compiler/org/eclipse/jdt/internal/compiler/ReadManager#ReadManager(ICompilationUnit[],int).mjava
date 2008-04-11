@@ -1,0 +1,37 @@
+public ReadManager(ICompilationUnit[] files, int length) {
+	// start the background threads to read the file's contents
+	int threadCount = 0;
+	try {
+		Class runtime = Class.forName("java.lang.Runtime"); //$NON-NLS-1$
+		java.lang.reflect.Method m = runtime.getDeclaredMethod("availableProcessors", new Class[0]); //$NON-NLS-1$
+		if (m != null) {
+			Integer result = (Integer) m.invoke(Runtime.getRuntime(), null);
+			threadCount = result.intValue() + 1;
+			if (threadCount < 2)
+				threadCount = 0;
+			else if (threadCount > CACHE_SIZE)
+				threadCount = CACHE_SIZE;
+		}
+	} catch (Exception ignored) { // ignored		
+	}
+
+	if (threadCount > 0) {
+		synchronized (this) {
+			this.units = new ICompilationUnit[length];
+			System.arraycopy(files, 0, this.units, 0, length);
+			this.nextFileToRead = START_CUSHION; // skip some files to reduce the number of times we have to wait
+			this.filesRead = new ICompilationUnit[CACHE_SIZE];
+			this.contentsRead = new char[CACHE_SIZE][];
+			this.readyToReadPosition = 0;
+			this.nextAvailablePosition = 0;
+			this.sleepingThreadCount = 0;
+			this.readingThreads = new Thread[threadCount];
+			for (int i = threadCount; --i >= 0;) {
+				this.readingThreads[i] = new Thread(this, "Compiler Source File Reader"); //$NON-NLS-1$
+				this.readingThreads[i].setDaemon(true);
+				this.readingThreads[i].start();
+			}
+		}
+	}
+}
+
