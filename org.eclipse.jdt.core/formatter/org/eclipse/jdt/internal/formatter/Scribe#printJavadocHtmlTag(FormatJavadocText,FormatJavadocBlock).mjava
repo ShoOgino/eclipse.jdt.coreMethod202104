@@ -1,0 +1,129 @@
+	private int printJavadocHtmlTag(FormatJavadocText text, FormatJavadocBlock block) {
+		
+		// Local variables init
+		boolean clearBlankLines = this.formatter.preferences.comment_clear_blank_lines_in_javadoc_comment;
+		int textStart = text.sourceStart;
+		int nextStart = textStart;
+		int startLine = Util.getLineNumber(textStart, this.lineEnds, 0, this.maxLines);
+		boolean textOnNewLine = (block.isParamTag() && this.formatter.preferences.comment_insert_new_line_for_parameter) || !block.hasTextOnTagLine();
+	    int tagCategory =  text.getHtmlTagID();
+	    StringBuffer buffer = new StringBuffer();
+
+	    // New line will be added before next node
+	    int max = text.separatorsPtr;
+		int linesAfter = 0;
+		int previousEnd = -1;
+	    if (tagCategory != JAVADOC_SINGLE_BREAK_TAG_ID) {
+
+			// Iterate on text line separators
+			boolean isCode = tagCategory == JAVADOC_CODE_TAGS_ID;
+			for (int i=0, ptr=0; i<=max ; i++) {
+	
+				// append text to buffer realigning with the line length
+				int end = (int) (text.separators[i] >>> 32);
+				boolean wasHtmlTag = false;
+				if (text.htmlNodesPtr >= 0 && ptr <= text.htmlNodesPtr && end > text.htmlNodes[ptr].sourceStart) {
+					FormatJavadocNode node = text.htmlNodes[ptr];
+					FormatJavadocText htmlTag = node.isText() ? (FormatJavadocText) node : null;
+					int newLines = htmlTag == null ? 0 : htmlTag.linesBefore;
+					if (linesAfter > newLines) {
+						newLines = linesAfter;
+						if (newLines > 1 && clearBlankLines) newLines = 1;
+					}
+					if (textStart < previousEnd) addReplaceEdit(textStart, previousEnd, buffer.toString());
+					printJavadocGapLines(previousEnd+1, node.sourceStart-1, newLines, clearBlankLines, false, null);
+					if (newLines > 0) textOnNewLine = true;
+					if (node.isText()) {
+						linesAfter = printJavadocHtmlTag(htmlTag, block);
+					} else {
+						printJavadocBlock((FormatJavadocBlock)node);
+						linesAfter = 0;
+					}
+					buffer = new StringBuffer();
+					textStart = node.sourceEnd + 1;
+					ptr++;
+					wasHtmlTag = true;
+				} else {
+					if (i > 0 && linesAfter > 0) {
+						printJavadocGapLines(previousEnd+1, nextStart, linesAfter, clearBlankLines, false, buffer);
+						textOnNewLine = true;
+					}
+					boolean needIndentation = buffer.length() == 0 && textOnNewLine;
+					printJavadocTextLine(buffer, nextStart, end, block, i==1/*first text?*/, needIndentation, i==0/* opening html tag?*/);
+				    if (i==0 && tagCategory == JAVADOC_SEPARATOR_TAGS_ID) {
+				    	linesAfter = 1;
+					} else {
+						linesAfter = 0;
+					}
+				}
+
+				// Replace with current buffer if there are several empty lines between text lines
+				nextStart = (int) text.separators[i];
+				if (!clearBlankLines && (wasHtmlTag || i==0 || i==max)) {
+					int endLine = Util.getLineNumber(end, this.lineEnds, startLine-1, this.maxLines);
+					startLine = Util.getLineNumber(nextStart, this.lineEnds, endLine-1, this.maxLines);
+					if (linesAfter < (startLine - endLine)) {
+						linesAfter = startLine - endLine;
+					}
+				}
+
+				// print <pre> tag
+				if (isCode) {
+	    			int codeEnd = (int) (text.separators[max] >>> 32);
+	    			if (codeEnd > end) {
+	    				if (this.formatter.preferences.comment_format_source) {
+							if (textStart < end) addReplaceEdit(textStart, end, buffer.toString());
+			    			printJavadocGapLines(end+1, nextStart-1, 1, false/* never clear blank lines inside <pre> tag*/, false, null);
+							printCodeSnippet(nextStart, codeEnd);
+							nextStart = (int) text.separators[max];
+		    				printJavadocGapLines(codeEnd+1, nextStart-1, 1, false/* never clear blank lines inside <pre> tag*/, false, null);
+		    				return 2;
+	    				}
+	    			} else {
+						nextStart = (int) text.separators[max];
+						if ((nextStart-1) > (end+1)) {
+							int line1 = Util.getLineNumber(end+1, this.lineEnds, startLine-1, this.maxLines);
+							int line2 = Util.getLineNumber(nextStart-1, this.lineEnds, line1-1, this.maxLines);
+		    				int gapLines = line2-line1-1;
+							printJavadocGapLines(end+1, nextStart-1, gapLines, false/* never clear blank lines inside <pre> tag*/, false, null);
+							if (gapLines > 0) textOnNewLine = true;
+						}
+	    			}
+    				return 1;
+				}
+				
+				// store previous end
+				previousEnd = end;
+			}
+	    }
+		
+		// Insert last gap
+		if (previousEnd != -1) {
+		    if (max > 0 && tagCategory == JAVADOC_SEPARATOR_TAGS_ID) {
+				if (linesAfter == 0) linesAfter = 1;
+			}
+			if (linesAfter > 0) {
+				int newLines = linesAfter;
+//				if (newLines > 1 && clearBlankLines) newLines = 1;
+				printJavadocGapLines(previousEnd+1, nextStart-1, newLines, clearBlankLines, false, buffer);
+			}
+		}
+	    
+	    // Print closing tag
+		boolean needIndentation = buffer.length() == 0 && textOnNewLine;
+		printJavadocTextLine(buffer, nextStart, text.sourceEnd, block, false /*not the first text*/, needIndentation, true/* closing html tag*/);
+		if (textStart < text.sourceEnd) {
+			addReplaceEdit(textStart, text.sourceEnd, buffer.toString());
+		}
+
+		// Reset
+		needSpace = false;
+		this.scanner.resetTo(text.sourceEnd+1, this.scannerEndPosition - 1);
+		
+		// Return the new lines to insert after
+	    if (max > 0 && tagCategory == JAVADOC_SEPARATOR_TAGS_ID) {
+			return 1;
+		}
+	    return 0;
+	}
+

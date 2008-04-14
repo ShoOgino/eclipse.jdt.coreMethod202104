@@ -1,27 +1,13 @@
 	/* (non-Javadoc)
 	 * Returns true if tag @deprecated is present in javadoc comment.
 	 * 
-	 * If javadoc checking is enabled, will also construct an Javadoc node, which will be stored into Parser.javadoc
-	 * slot for being consumed later on.
+	 * If javadoc checking is enabled, will also construct an Javadoc node,
+	 * which will be stored into Parser.javadoc slot for being consumed later on.
 	 */
 	protected boolean commentParse() {
 		
 		boolean validComment = true;
 		try {
-			// Init scanner position
-			this.linePtr = getLineNumber(this.firstTagPosition);
-			int realStart = this.linePtr==1 ? javadocStart : this.scanner.getLineEnd(this.linePtr-1)+1;
-			if (realStart < javadocStart) realStart = javadocStart;
-			this.scanner.resetTo(realStart, javadocEnd);
-			this.index = realStart;
-			if (realStart == javadocStart) {
-				readChar(); // starting '/'
-				readChar(); // first '*'
-			}
-			int previousPosition = this.index;
-			char nextCharacter = 0;
-			if (realStart == javadocStart) nextCharacter = readChar(); // second '*'
-
 			// Init local variables
 			this.astLengthPtr = -1;
 			this.astPtr = -1;
@@ -34,14 +20,33 @@
 			this.inheritedPositions = -1;
 			this.deprecated = false;
 			this.lastLinePtr = getLineNumber(javadocEnd);
-			this.lineEnd = (this.linePtr == this.lastLinePtr) ? this.javadocEnd: this.scanner.getLineEnd(this.linePtr) - 1;
 			this.textStart = -1;
+			this.spacePosition = -1;
 			char previousChar = 0;
 			int invalidTagLineEnd = -1;
 			int invalidInlineTagLineEnd = -1;
 			boolean pushText = (this.kind & TEXT_PARSE) != 0;
 			boolean verifText = (this.kind & TEXT_VERIF) != 0;
 			boolean isDomParser = (this.kind & DOM_PARSER) != 0;
+			boolean isFormatterParser = (this.kind & FORMATTER_COMMENT_PARSER) != 0;
+
+			// Init scanner position
+			this.linePtr = getLineNumber(this.firstTagPosition);
+			int realStart = this.linePtr==1 ? javadocStart : this.scanner.getLineEnd(this.linePtr-1)+1;
+			if (realStart < javadocStart) realStart = javadocStart;
+			this.scanner.resetTo(realStart, javadocEnd);
+			this.index = realStart;
+			if (realStart == javadocStart) {
+				readChar(); // starting '/'
+				readChar(); // first '*'
+			}
+			int previousPosition = this.index;
+			char nextCharacter = 0;
+			if (realStart == javadocStart) {
+				nextCharacter = readChar(); // second '*'
+				this.javadocTextStart = this.index;
+			}
+			this.lineEnd = (this.linePtr == this.lastLinePtr) ? this.javadocEnd: this.scanner.getLineEnd(this.linePtr) - 1;
 			
 			// Loop on each comment character
 			while (!abort && this.index < this.javadocEnd) {
@@ -70,11 +75,8 @@
 					}
 					consumeToken();
 				}
-			
-				if (this.index >= this.javadocEnd) {
-					break;
-				}
-				
+
+				// Consume rules depending on the read character
 				switch (nextCharacter) {
 					case '@' :
 						// Start tag parsing only if we are on line beginning or at inline tag beginning
@@ -88,19 +90,35 @@
 									this.sourceParser.problemReporter().javadocUnterminatedInlineTag(this.inlineTagStart, end);
 								}
 								validComment = false;
-								if (this.textStart != -1 && this.textStart < previousPosition) {
-									if (pushText) pushText(this.textStart, previousPosition);
+								int textEndPosition = previousPosition;
+								if (isFormatterParser && ScannerHelper.isWhitespace(previousChar)) {
+									textEndPosition = this.spacePosition;
 								}
-								if (isDomParser) refreshInlineTagPosition(previousPosition);
+								if (this.textStart != -1 && this.textStart < textEndPosition) {
+									if (pushText) pushText(this.textStart, textEndPosition);
+								}
+								if (isDomParser || isFormatterParser) {
+									refreshInlineTagPosition(textEndPosition);
+								}
 							}
 							if (previousChar == '{') {
-								if (this.textStart != -1 && this.textStart < this.inlineTagStart) {
-									if (pushText) pushText(this.textStart, this.inlineTagStart);
+								if (this.textStart != -1) {
+									int textEndPosition = this.inlineTagStart;
+									if (isFormatterParser && ScannerHelper.isWhitespace(previousChar)) {
+										textEndPosition = this.spacePosition;
+									}
+									if (this.textStart < textEndPosition) {
+										if (pushText) pushText(this.textStart, textEndPosition);
+									}
 								}
 								this.inlineTagStarted = true;
 								invalidInlineTagLineEnd = this.lineEnd;
 							} else if (this.textStart != -1 && this.textStart < invalidTagLineEnd) {
-								if (pushText) pushText(this.textStart, invalidTagLineEnd);
+								int textEndPosition = invalidTagLineEnd;
+								if (isFormatterParser && ScannerHelper.isWhitespace(previousChar)) {
+									textEndPosition = this.spacePosition;
+								}
+								if (pushText) pushText(this.textStart, textEndPosition);
 							}
 							this.scanner.resetTo(this.index, this.javadocEnd);
 							this.currentTokenType = -1; // flush token cache at line begin
@@ -127,8 +145,18 @@
 						break;
 					case '\r':
 					case '\n':
-						if (this.lineStarted && this.textStart < previousPosition) {
-							if (pushText) pushText(this.textStart, previousPosition);
+						if (this.lineStarted) {
+							int textEndPosition = previousPosition;
+							if (isFormatterParser) {
+								if (ScannerHelper.isWhitespace(previousChar)) {
+									textEndPosition = this.spacePosition;
+								} else {
+									this.spacePosition = previousPosition;
+								}
+							}
+							if (this.textStart != -1 && this.textStart < textEndPosition) {
+								if (pushText) pushText(this.textStart, textEndPosition);
+							}
 						}
 						this.lineStarted = false;
 						// Fix bug 51650
@@ -140,10 +168,14 @@
 						}
 						if (this.inlineTagStarted) {
 							if (pushText) {
-								if (this.lineStarted && this.textStart != -1 && this.textStart < previousPosition) {
-								pushText(this.textStart, previousPosition);
+								int textEndPosition = previousPosition;
+								if (isFormatterParser && ScannerHelper.isWhitespace(previousChar)) {
+									textEndPosition = this.spacePosition;
 								}
-								refreshInlineTagPosition(previousPosition);
+								if (this.lineStarted && this.textStart != -1 && this.textStart < textEndPosition) {
+									pushText(this.textStart, textEndPosition);
+								}
+								refreshInlineTagPosition(textEndPosition);
 							}
 							this.textStart = this.index;
 							this.inlineTagStarted = false;
@@ -167,10 +199,14 @@
 								this.sourceParser.problemReporter().javadocUnterminatedInlineTag(this.inlineTagStart, end);
 							}
 							if (pushText) {
-								if (this.lineStarted && this.textStart != -1 && this.textStart < previousPosition) {
-									pushText(this.textStart, previousPosition);
+								int textEndPosition = previousPosition;
+								if (isFormatterParser && ScannerHelper.isWhitespace(previousChar)) {
+									textEndPosition = this.spacePosition;
 								}
-								refreshInlineTagPosition(previousPosition);
+								if (this.lineStarted && this.textStart != -1 && this.textStart < textEndPosition) {
+									pushText(this.textStart, textEndPosition);
+								}
+								refreshInlineTagPosition(textEndPosition);
 							}
 						}
 						if (!this.lineStarted) {
@@ -180,39 +216,70 @@
 						this.inlineTagStart = previousPosition;
 						break;
 					case '*' :
+						// Store the star position as text start while formatting
+						this.starPosition = previousPosition;
+						break;
 					case '\u000c' :	/* FORM FEED               */
 					case ' ' :			/* SPACE                   */
 					case '\t' :			/* HORIZONTAL TABULATION   */
-						// do nothing for space or '*' characters
+						// Store first space position while formatting
+						if (isFormatterParser && !ScannerHelper.isWhitespace(previousChar)) {
+							this.spacePosition = previousPosition;
+						}
 						break;
+					case '/':
+						if (previousChar == '*') {
+							// End of javadoc
+							break;
+						}
+						// fall through default case
 					default :
+						if (isFormatterParser && nextCharacter == '<') {
+							// html tags are meaningful for formatter parser
+							int initialIndex = this.index;
+							this.scanner.resetTo(this.index, this.javadocEnd);
+							int endTextPosition = ScannerHelper.isWhitespace(previousChar) ? this.spacePosition : previousPosition;
+							if (parseHtmlTag(previousPosition, endTextPosition)) {
+								break;
+							}
+							if (this.abort) return false;
+							// Wrong html syntax continue to process character normally
+							this.scanner.currentPosition = initialIndex;
+							this.index = initialIndex;
+						}
 						if (verifText && this.tagValue == TAG_RETURN_VALUE && this.returnStatement != null) {
 							refreshReturnStatement();
 						}
-						if (!this.lineStarted) {
+						if (!this.lineStarted || this.textStart == -1) {
 							this.textStart = previousPosition;
 						}
 						this.lineStarted = true;
 						break;
 				}
 			}
+			this.javadocTextEnd = this.starPosition-1;
+
 			// bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=53279
 			// Cannot leave comment inside inline comment
 			if (this.inlineTagStarted) {
-				this.inlineTagStarted = false;
 				if (this.reportProblems) {
-					int end = previousPosition<invalidInlineTagLineEnd ? previousPosition : invalidInlineTagLineEnd;
+					int end = this.javadocTextEnd<invalidInlineTagLineEnd ? this.javadocTextEnd : invalidInlineTagLineEnd;
 					if (this.index >= this.javadocEnd) end = invalidInlineTagLineEnd;
 					this.sourceParser.problemReporter().javadocUnterminatedInlineTag(this.inlineTagStart, end);
 				}
 				if (pushText) {
-					if (this.lineStarted && this.textStart != -1 && this.textStart < previousPosition) {
-						pushText(this.textStart, previousPosition);
+					int textEndPosition = this.javadocTextEnd;
+					if (isFormatterParser && ScannerHelper.isWhitespace(previousChar)) {
+						textEndPosition = this.spacePosition;
 					}
-					refreshInlineTagPosition(previousPosition);
+					if (this.lineStarted && this.textStart != -1 && this.textStart < textEndPosition) {
+						pushText(this.textStart, textEndPosition);
+					}
+					refreshInlineTagPosition(textEndPosition);
 				}
-			} else if (pushText && this.lineStarted && this.textStart < previousPosition) {
-				pushText(this.textStart, previousPosition);
+				this.inlineTagStarted = false;
+			} else if (pushText && this.lineStarted && this.textStart != -1 && this.textStart <= this.javadocTextEnd) {
+				pushText(this.textStart, this.starPosition);
 			}
 			updateDocComment();
 		} catch (Exception ex) {

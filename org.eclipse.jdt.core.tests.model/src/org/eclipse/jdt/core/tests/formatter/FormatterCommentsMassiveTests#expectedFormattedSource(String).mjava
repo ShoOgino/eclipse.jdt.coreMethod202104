@@ -1,0 +1,43 @@
+private String expectedFormattedSource(String source) {
+	DefaultCodeFormatter codeFormatter = codeFormatter();
+	Scanner scanner = new Scanner(true, true, false/*nls*/, ClassFileConstants.JDK1_4/*sourceLevel*/, null/*taskTags*/, null/*taskPriorities*/, true/*taskCaseSensitive*/);
+	CodeSnippetParsingUtil codeSnippetParsingUtil = new CodeSnippetParsingUtil();
+	CompilationUnitDeclaration compilationUnitDeclaration = codeSnippetParsingUtil.parseCompilationUnit(source.toCharArray(), getDefaultCompilerOptions(), true);
+	scanner.setSource(source.toCharArray());
+	scanner.lineEnds = codeSnippetParsingUtil.recordedParsingInformation.lineEnds;
+	int[][] commentsPositions = compilationUnitDeclaration.comments;
+	int length = commentsPositions == null ? 0 : commentsPositions.length;
+	String[] formattedComments = new String[length];
+	for (int i=0; i<length; i++) {
+		int[] positions = commentsPositions[i];
+		int commentKind = CodeFormatter.K_JAVA_DOC;
+		int commentStart = positions [0];
+		int commentEnd = positions [1];
+		if (commentEnd < 0) { // line or block comments have negative end position
+			commentEnd = -commentEnd;
+			if (commentStart > 0) { // block comments have positive start position
+				commentKind = CodeFormatter.K_MULTI_LINE_COMMENT;
+			} else {
+				commentStart = -commentStart;
+				commentKind = CodeFormatter.K_SINGLE_LINE_COMMENT;
+			}
+		}
+		int indentationLevel = getIndentationLevel(scanner, commentStart);
+		if (commentKind == CodeFormatter.K_JAVA_DOC) { // Only process javadoc for now
+			formattedComments[i] = runFormatter(codeFormatter, source.substring(commentStart, commentEnd), commentKind, indentationLevel, 0, commentEnd - commentStart, Util.LINE_SEPARATOR);
+		}
+	}
+	SimpleDocument document = new SimpleDocument(source);
+	for (int i=length-1; i>=0; i--) {
+		if (formattedComments[i] != null) {
+			int[] positions = commentsPositions[i];
+			int commentStart = positions[0] > 0 ? positions [0] : -positions[0];
+			int commentEnd = positions[1] > 0 ? positions [1] : -positions[1];
+			document.replace(commentStart, commentEnd - commentStart, formattedComments[i]);
+		}
+	}
+	String newSource = document.get();
+	String oldResult = runFormatter(codeFormatter, newSource, CodeFormatter.K_COMPILATION_UNIT, 0, 0, newSource.length(), null);
+	return oldResult;
+}
+

@@ -1,14 +1,15 @@
 	/*
 	 * Verify that end of the line only contains space characters or end of comment.
-	 * Note that end of comment may be preceeding by several contiguous '*' chars.
+	 * Note that end of comment may be preceding by several contiguous '*' chars.
 	 */
 	protected boolean verifyEndLine(int textPosition) {
-		boolean domParser = (this.kind & DOM_PARSER) != 0;
+		boolean isDomParser = (this.kind & DOM_PARSER) != 0;
+		boolean isFormatterParser = (this.kind & FORMATTER_COMMENT_PARSER) != 0;
 		// Special case for inline tag
 		if (this.inlineTagStarted) {
 			// expecting closing brace
 			if (peekChar() == '}') {
-				if (domParser) {
+				if (isDomParser || isFormatterParser) {
 					createTag();
 					pushText(textPosition, this.starPosition);
 				}
@@ -19,21 +20,30 @@
 		
 		int startPosition = this.index;
 		int previousPosition = this.index;
+		int spacePos = this.index;
 		this.starPosition = -1;
 		char ch = readChar();
+		char previousChar = ch;
 		nextChar: while (true) {
 			switch (ch) {
 				case '\r':
 				case '\n':
-					if (domParser) {
+					if (isDomParser || isFormatterParser) {
 						createTag();
-						pushText(textPosition, previousPosition);
+						int textEndPosition = previousPosition;
+						if (isFormatterParser && ScannerHelper.isWhitespace(previousChar)) {
+							textEndPosition = spacePos;
+						}
+						pushText(textPosition, textEndPosition);
 					}
 					this.index = previousPosition;
 					return true;
 				case '\u000c' :	/* FORM FEED               */
 				case ' ' :			/* SPACE                   */
 				case '\t' :			/* HORIZONTAL TABULATION   */
+					if (isFormatterParser && previousChar != ch && !ScannerHelper.isWhitespace(previousChar)) {
+						this.spacePosition = previousPosition;
+					}
 					if (this.starPosition >= 0) break nextChar;
 					break;
 				case '*':
@@ -41,9 +51,13 @@
 					break;
 				case '/':
 					if (this.starPosition >= textPosition) {
-						if (domParser) {
+						if (isDomParser || isFormatterParser) {
 							createTag();
-							pushText(textPosition, this.starPosition);
+							int textEndPosition = this.starPosition;
+							if (isFormatterParser && ScannerHelper.isWhitespace(previousChar)) {
+								textEndPosition = this.spacePosition;
+							}
+							pushText(textPosition, textEndPosition);
 						}
 						return true;
 					}
@@ -53,6 +67,7 @@
 				
 			}
 			previousPosition = this.index;
+			previousChar = ch;
 			ch = readChar();
 		}
 		this.index = startPosition;

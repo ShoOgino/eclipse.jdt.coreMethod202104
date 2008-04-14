@@ -1,0 +1,54 @@
+private void pushText(int start, int end, int htmlIndex, int htmlDepth) {
+	
+	// Search previous tag on which to add the text element
+	FormatJavadocBlock previousBlock = null;
+	int previousStart = start;
+	if (this.astPtr == -1) {
+		previousBlock = new FormatJavadocBlock(start, start, NO_TAG_VALUE);
+		pushOnAstStack(previousBlock, true);
+	} else {
+		previousBlock = (FormatJavadocBlock) this.astStack[this.astPtr];
+		previousStart = previousBlock.sourceStart;
+	}
+	
+	// If we're in a inline tag, then retrieve previous tag in its fragments
+	if (this.inlineTagStarted) {
+		if (previousBlock.nodes == null) {
+			// no existing fragment => just add the element
+		} else {
+			// If last fragment is a tag, then use it as previous tag
+			FormatJavadocNode lastNode = previousBlock.nodes[previousBlock.nodesPtr];
+			if (!lastNode.isText()) {
+				previousBlock = (FormatJavadocBlock) lastNode;
+				previousStart = previousBlock.sourceStart;
+			}
+		}
+	}
+
+	// Add the text
+	int textEnd = end;
+	if (this.javadocTextEnd > 0 && end >= this.javadocTextEnd) {
+		// Special case on javadoc text end, need to retrieve the space
+		// position by rescanning the text
+		int restart = this.spacePosition == -1 ? start : this.spacePosition;
+		this.scanner.resetTo(restart, end-1/* before last star*/);
+		try {
+			if (this.scanner.getNextToken() == TerminalTokens.TokenNameEOF) {
+				textEnd = this.spacePosition;
+			}
+		}
+		catch (InvalidInputException iie) {
+			// do nothing
+		}
+	}
+	FormatJavadocText text = new FormatJavadocText(start, textEnd-1, htmlIndex, htmlDepth);
+	previousBlock.addText(text);
+	previousBlock.sourceStart = previousStart;
+	int lineStart = this.scanner.getLineNumber(start);
+	int blockLine = this.scanner.getLineNumber(previousBlock.sourceStart);
+	if (lineStart == blockLine) {
+		previousBlock.flags |= FormatJavadocBlock.TEXT_ON_TAG_LINE;
+	}
+	this.textStart = -1;
+}
+

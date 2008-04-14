@@ -1,0 +1,45 @@
+	private void printJavadocText( FormatJavadocText text, FormatJavadocBlock block) {
+
+		boolean clearBlankLines = this.formatter.preferences.comment_clear_blank_lines_in_javadoc_comment;
+		StringBuffer buffer = new StringBuffer();
+		int textStart = text.sourceStart;
+		int nextStart = textStart;
+		int startLine = Util.getLineNumber(textStart, this.lineEnds, 0, this.maxLines);
+		boolean textOnNewLine = (block.isParamTag() && this.formatter.preferences.comment_insert_new_line_for_parameter) || !block.hasTextOnTagLine();
+
+		// Iterate on text line separators
+		for (int i=0, max=text.separatorsPtr; i<=max ; i++) {
+
+			// append text to buffer realigning with the line length
+			int end = (int) (text.separators[i] >>> 32);
+			boolean needIndentation = buffer.length() == 0 && textOnNewLine;
+			printJavadocTextLine(buffer, nextStart, end, block, i==0 /*first text?*/, needIndentation, false /*not an html tag*/);
+
+			// Replace with current buffer if there are several empty lines between text lines
+			nextStart = (int) text.separators[i];
+			if (!clearBlankLines) {
+				int endLine = Util.getLineNumber(end, this.lineEnds, startLine-1, this.maxLines);
+				startLine = Util.getLineNumber(nextStart, this.lineEnds, endLine-1, this.maxLines);
+				if (startLine > (endLine+1)) {
+					addReplaceEdit(textStart, end, buffer.toString());
+					textStart = nextStart;
+					buffer = new StringBuffer();
+					printJavadocGapLines(end+1, nextStart-1, startLine - endLine, this.formatter.preferences.comment_clear_blank_lines_in_javadoc_comment, false, null);
+					textOnNewLine = true;
+				}
+			}
+		}
+		
+		// Replace remaining line
+		boolean needIndentation = buffer.length() == 0 && textOnNewLine;
+		printJavadocTextLine(buffer, nextStart, text.sourceEnd, block, text.separatorsPtr==-1 /* first text?*/, needIndentation, false /*not an html tag*/);
+		// TODO (eric) Bring back following optimization
+		// if (lastNewLines != this.lastNumberOfNewLines || (this.column - currentColumn) != (text.sourceEnd - text.sourceStart + 1)) {
+			addReplaceEdit(textStart, text.sourceEnd, buffer.toString());
+		// }
+
+		// Reset
+		needSpace = false;
+		this.scanner.resetTo(text.sourceEnd+1, this.scannerEndPosition - 1);
+	}
+

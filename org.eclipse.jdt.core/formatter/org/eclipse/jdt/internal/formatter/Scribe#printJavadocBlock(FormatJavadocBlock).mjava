@@ -1,0 +1,125 @@
+	private void printJavadocBlock(FormatJavadocBlock block) {
+		if( block == null) return;
+
+		// Init positions
+		int previousEnd = block.tagEnd;
+		int maxNodes = block.nodesPtr;
+
+		// format tag section if necessary
+		if (!block.isDescription()) {
+			this.column += previousEnd - block.sourceStart + 1;
+			if (block.isInlined()) 	{
+				this.column++; // Add extra character for inline tag
+			}
+			FormatJavadocNode reference= block.reference;
+			if (reference != null) {
+				// format between tag name and reference
+				addReplaceEdit(previousEnd+1, reference.sourceStart - 1, " "); //$NON-NLS-1$
+				this.column++;
+				previousEnd = reference.sourceEnd;
+				this.column += previousEnd - reference.sourceStart + 1;
+			}
+
+			// Nothing else to do if the tag has no node
+			if (maxNodes < 0)  return;
+		}
+		
+		// tag section: iterate through the blocks composing this tag but the last one
+		FormatJavadocNode previousNode = null;
+		for (int i=0; i<=maxNodes; i++) {
+			FormatJavadocNode node = block.nodes[i];
+			int nodeStart = node.sourceStart;
+			
+			// Print empty lines before the node
+			int textLength = -1;
+			if (i == 0) {
+				int newLines = this.formatter.preferences.comment_insert_new_line_for_parameter && block.isParamTag() ? 1 : 0;
+				if (nodeStart > (previousEnd+1)) {
+			   		printJavadocGapLines(previousEnd+1, nodeStart-1, newLines, this.formatter.preferences.comment_clear_blank_lines_in_javadoc_comment, false, null);
+				} else {
+					StringBuffer buffer = new StringBuffer();
+					if (newLines > 0) {
+						for (int j=0; j<newLines; j++) {
+							printJavadocNewLine(buffer);
+						}
+						addInsertEdit(nodeStart, buffer.toString());
+					}
+				}
+			} else {
+				int newLines = this.column > this.formatter.preferences.comment_line_length ? 1 : 0;
+				if (node.isText()) {
+					// Need to verify if new line is necessary for immutable tag
+					FormatJavadocText text = (FormatJavadocText) node;
+					if (newLines < text.linesBefore) newLines = text.linesBefore;
+					if (newLines == 0 && text.isImmutableHtmlTag()) {
+						textLength = getTextLength(block, text);
+						if ((this.column + textLength) > this.formatter.preferences.comment_line_length) {
+							newLines = 1;
+						}
+					}
+				}
+				if (!node.isText() || newLines > 0 || nodeStart > (previousEnd+1)) {
+					if (newLines == 0 && previousNode.isText() && node.isText()) {
+						// Special case when two texts are consecutive (html tag->text or text->html tag)
+						// If no line is to be inserted, then no space should not be inserted either
+						// and column reset if the next token is over the max line length
+						try {
+							this.scanner.resetTo(nodeStart, block.sourceEnd);
+							this.scanner.getNextToken();
+				    		int tokenLength = (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - this.scanner.startPosition;
+				    		if (((FormatJavadocText)node).isHtmlTag()) {
+								// read the html tag
+								if (this.scanner.getNextToken() == TerminalTokens.TokenNameDIVIDE) {
+									tokenLength++;
+									this.scanner.getNextToken();
+								}
+								tokenLength += (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - this.scanner.startPosition;
+								this.scanner.getNextToken(); // '>'
+								tokenLength++;
+							}
+							if ((this.column + tokenLength + 1) > this.formatter.preferences.comment_line_length) {
+								// finally a new line will be inserted while printing next text, just reset the column
+								this.column = 1;
+							} else {
+								// print one
+					   			printJavadocGapLines(previousEnd+1, nodeStart-1, newLines, this.formatter.preferences.comment_clear_blank_lines_in_javadoc_comment, false, null);
+							}
+						} catch (InvalidInputException iie) {
+							// skip
+						}
+					} else {
+			   			printJavadocGapLines(previousEnd+1, nodeStart-1, newLines, this.formatter.preferences.comment_clear_blank_lines_in_javadoc_comment, false, null);
+					}
+				}
+			}
+
+			// Print node
+			if (node.isText()) {
+				FormatJavadocText text = (FormatJavadocText) node;
+				if (text.isHtmlTag()) {
+					if (text.isImmutableHtmlTag()) {
+						if (textLength == -1) {
+							textLength = getTextLength(block, text);
+						}
+						this.column += textLength;
+					} else {
+						// Immutable tags are not formatted
+//						StringBuffer buffer = new StringBuffer();
+						printJavadocHtmlTag(text, block);
+//						if ((text.htmlTagIndex & JAVADOC_TAGS_ID_MASK) != JAVADOC_CODE_TAGS_ID) {
+//							addReplaceEdit(text.sourceStart, text.sourceEnd, buffer.toString());
+//						}
+					}
+				} else {
+					printJavadocText(text, block);
+				}
+			} else {
+				printJavadocBlock((FormatJavadocBlock)node);
+			}
+
+			// Print empty lines before the node
+			previousEnd = node.sourceEnd;
+			previousNode = node;
+		}
+	}
+

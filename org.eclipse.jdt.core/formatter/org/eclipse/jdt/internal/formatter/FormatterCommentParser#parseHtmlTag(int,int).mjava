@@ -1,0 +1,74 @@
+/*
+ * Parse an HTML tag expected to be either opening (e.g. <tag_name> ) or
+ * closing (e.g. </tag_name>).
+ */
+protected boolean parseHtmlTag(int previousPosition, int endTextPosition) throws InvalidInputException {
+    boolean closing = false;
+    boolean valid = false;
+    boolean incremented = false;
+    int start = this.scanner.currentPosition;
+	try {
+	    int token = readTokenAndConsume();
+	    char[] htmlTag;
+	    int htmlIndex;
+	    switch (token) {
+	    	case TerminalTokens.TokenNameIdentifier:
+	    		// HTML tag opening
+				htmlTag = this.scanner.getCurrentIdentifierSource();
+				htmlIndex = htmlTagIndex(htmlTag);
+				if ((htmlIndex & JAVADOC_TAGS_ID_MASK) > JAVADOC_SINGLE_TAGS_ID) {
+		    		if (this.htmlTagsPtr == -1 || !CharOperation.equals(this.htmlTags[this.htmlTagsPtr], htmlTag, false)) {
+						if (++this.htmlTagsPtr == 0) { // lazy initialization
+							this.htmlTags = new char[AST_STACK_INCREMENT][];
+						} else { // resize if needed
+							if (this.htmlTagsPtr == this.htmlTags.length) {
+								System.arraycopy(this.htmlTags, 0, (this.htmlTags = new char[this.htmlTags.length + AST_STACK_INCREMENT][]), 0, this.htmlTagsPtr);
+							}
+						}
+						this.htmlTags[this.htmlTagsPtr] = htmlTag;
+						incremented = true;
+		    		}
+				}
+		    	break;
+	    	case TerminalTokens.TokenNameDIVIDE:
+	    		// HTML tag closing
+	    		if (this.htmlTagsPtr == -1) return false;
+	    		htmlTag = this.htmlTags[this.htmlTagsPtr];
+				htmlIndex = htmlTagIndex(htmlTag);
+	    		if ((token = readTokenAndConsume()) != TerminalTokens.TokenNameIdentifier || !CharOperation.equals(htmlTag, this.scanner.getCurrentIdentifierSource(), false)) {
+	    			this.abort = true;
+	    			return valid;
+	    		}
+				// set closing flag
+				htmlIndex |= JAVADOC_CLOSED_TAG;
+				closing = true;
+	    		break;
+	    	default:
+    			return valid;
+	    }
+	    if ((token = readTokenAndConsume()) != TerminalTokens.TokenNameGREATER) {
+	    	// invalid syntax
+			return valid;
+	    }
+		if (this.lineStarted && this.textStart != -1 && this.textStart < endTextPosition) {
+			pushText(this.textStart, endTextPosition, -1, closing ? this.htmlTagsPtr : (this.htmlTagsPtr < 1 ? 0 : this.htmlTagsPtr-1));
+		}
+		pushText(previousPosition, this.index, htmlIndex, this.htmlTagsPtr);
+		this.textStart = -1;
+		valid = true;
+	}
+	finally {
+		if (valid) {
+			if (closing) this.htmlTagsPtr--;
+		} else if (!this.abort) {
+	    	if (incremented) {
+	    		this.htmlTagsPtr--;
+	    		if (this.htmlTagsPtr == -1) this.htmlTags = null;
+	    	}
+	    	this.scanner.resetTo(start, this.scanner.eofPosition-1);
+	    	this.index = start;
+		}
+	}
+    return valid;
+}
+

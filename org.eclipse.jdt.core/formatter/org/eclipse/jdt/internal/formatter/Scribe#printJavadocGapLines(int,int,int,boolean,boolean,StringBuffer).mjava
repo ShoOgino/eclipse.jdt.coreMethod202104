@@ -1,0 +1,175 @@
+	/*
+	 * prints the empty javadoc line between the 2 given positions.
+	 * May insert new '*' before each new line
+	 */
+	private void printJavadocGapLines(int textStartPosition, int textEndPosition, int newLines, boolean clearBlankLines, boolean footer, StringBuffer output) {
+		try {
+			// If no lines to set in the gap then just insert a space if there's enough room to
+			if (newLines == 0) {
+				if (output == null) {
+					addReplaceEdit(textStartPosition, textEndPosition,  " "); //$NON-NLS-1$
+				} else {
+					output.append(' ');
+				}
+				this.column++;
+				return;
+			}
+
+			// if there's no enough room to replace text, then insert the gap
+			if ( textStartPosition > textEndPosition) {
+				if (newLines > 0) {
+					StringBuffer buffer = new StringBuffer();
+					for (int i=0; i<newLines; i++) {
+						buffer.append(this.lineSeparator);
+						this.column = 1;
+						printIndentationIfNecessary(buffer);
+						if (footer) {
+							buffer.append(' ');
+							this.column++;
+						} else {
+							buffer.append(JAVADOC_LINE_PREFIX);
+							this.column += JAVADOC_LINE_PREFIX_LENGTH;
+						}
+					}
+					if (output == null) {
+						addInsertEdit(textStartPosition, buffer.toString());
+					} else {
+						output.append(buffer);
+					}
+				}
+				return;
+			}
+
+			// There's enough room and some lines to set...
+			// Skip the text token per token to keep existing stars when possible
+			this.scanner.resetTo(textStartPosition, textEndPosition);
+			this.scanner.recordLineSeparator = true;
+			this.scanner.linePtr = Util.getLineNumber(textStartPosition, this.lineEnds, 0, this.maxLines) - 2;
+			int linePtr = this.scanner.linePtr;
+			int lineCount = 0;
+			int start = textStartPosition;
+			while (!this.scanner.atEnd()) {
+				switch (this.scanner.getNextToken()) {
+					case TerminalTokens.TokenNameMULTIPLY:
+						// we just need to replace each lines between '*' with the javadoc formatted ones
+						int linesGap = this.scanner.linePtr - linePtr;
+						if (linesGap > 0) {
+							StringBuffer buffer = new StringBuffer();
+							if (lineCount > 0) {
+								// TODO (eric) https://bugs.eclipse.org/bugs/show_bug.cgi?id=49619
+								buffer.append( ' ');
+							}
+							for (int i = 0; i < linesGap ; i++) {
+								if (clearBlankLines && lineCount >= newLines) {
+									// leave as the required new lines have been inserted
+									// so remove any remaining blanks and leave
+									if (textEndPosition >= start) {
+										if (output == null) {
+											addReplaceEdit(start, textEndPosition, buffer.toString());
+										} else {
+											output.append(buffer);
+										}
+									}
+									return;
+								}
+								buffer.append(this.lineSeparator);
+								this.column = 1;
+								printIndentationIfNecessary(buffer);
+								if (i == (linesGap-1)) {
+									buffer.append(' ');
+									this.column++;
+								} else {
+									buffer.append(JAVADOC_LINE_PREFIX);
+									this.column += JAVADOC_LINE_PREFIX_LENGTH;
+								}
+								lineCount++;
+							}
+							int currentTokenStartPosition = this.scanner.getCurrentTokenStartPosition();
+							int tokenLength = this.scanner.currentPosition - currentTokenStartPosition;
+							if (output == null) {
+								addReplaceEdit(start, currentTokenStartPosition-1, buffer.toString());
+							} else {
+								output.append(buffer);
+								output.append(this.scanner.source, currentTokenStartPosition, tokenLength);
+							}
+							this.column += tokenLength;
+							if (footer && clearBlankLines && lineCount == newLines) {
+								if (textEndPosition >= currentTokenStartPosition) {
+									if (output == null) {
+										addDeleteEdit(currentTokenStartPosition, textEndPosition);
+									}
+								}
+								return;
+							}
+						}
+						// next start is just after the current token
+						start = this.scanner.currentPosition;
+						linePtr = this.scanner.linePtr;
+						break;
+				}
+			}
+
+			// Format the last whitespaces
+			if (lineCount < newLines) {
+				// Insert new lines as not enough was encountered while scanning the whitespaces
+				StringBuffer buffer = new StringBuffer();
+				if (lineCount > 0) {
+					// TODO (eric) https://bugs.eclipse.org/bugs/show_bug.cgi?id=49619
+					buffer.append( ' ');
+				}
+				for (int i = lineCount; i < newLines-1; i++) {
+					printJavadocNewLine(buffer);
+				}
+				buffer.append(this.lineSeparator);
+				this.column = 1;
+				printIndentationIfNecessary(buffer);
+				if (footer) {
+					buffer.append(' ');
+					this.column++;
+				} else {
+					buffer.append(JAVADOC_LINE_PREFIX);
+					this.column += JAVADOC_LINE_PREFIX_LENGTH;
+				}
+				if (output == null) {
+					if (textEndPosition >= start) {
+						addReplaceEdit(start, textEndPosition, buffer.toString());
+					} else {
+						addInsertEdit(textEndPosition+1, buffer.toString());
+					}
+				} else {
+					output.append(buffer);
+				}
+			} else {
+				// Replace all remaining whitespaces by a single space
+				if (textEndPosition >= start) {
+					StringBuffer buffer = new StringBuffer();
+					if (this.scanner.linePtr > linePtr) {
+						if (lineCount > 0) {
+							// TODO (eric) https://bugs.eclipse.org/bugs/show_bug.cgi?id=49619
+							buffer.append( ' ');
+						}
+						buffer.append(this.lineSeparator);
+						this.column = 1;
+						printIndentationIfNecessary(buffer);
+					}
+					buffer.append(' ');
+					if (output == null) {
+						addReplaceEdit(start, textEndPosition, buffer.toString());
+					} else {
+						output.append(buffer);
+					}
+				}
+				this.column++;
+			}
+		}		
+		catch (InvalidInputException iie) {
+			// there's nothing to do if this exception happens
+		}
+		finally {
+			this.scanner.recordLineSeparator = false;
+			needSpace = false;
+			this.scanner.resetTo(textEndPosition+1, this.scannerEndPosition - 1);
+			this.lastNumberOfNewLines += newLines;
+		}
+	}
+
