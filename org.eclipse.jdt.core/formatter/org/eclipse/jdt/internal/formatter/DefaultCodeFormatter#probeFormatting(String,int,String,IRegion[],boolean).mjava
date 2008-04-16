@@ -1,4 +1,4 @@
-	private TextEdit probeFormatting(String source, int indentationLevel, String lineSeparator, IRegion[] regions, boolean formatJavadoc) {
+	private TextEdit probeFormatting(String source, int indentationLevel, String lineSeparator, IRegion[] regions, boolean includeComments) {
 		if (PROBING_SCANNER == null) {
 			// scanner use to check if the kind could be K_JAVA_DOC, K_MULTI_LINE_COMMENT or K_SINGLE_LINE_COMMENT 
 			PROBING_SCANNER = new Scanner(true, true, false/*nls*/, ClassFileConstants.JDK1_3, ClassFileConstants.JDK1_3, null/*taskTags*/, null/*taskPriorities*/, true/*taskCaseSensitive*/);
@@ -14,18 +14,28 @@
 			switch(PROBING_SCANNER.getNextToken()) {
 				case ITerminalSymbols.TokenNameCOMMENT_BLOCK :
 					if (PROBING_SCANNER.getCurrentTokenEndPosition() == offset + length - 1) {
-						return formatComment(K_MULTI_LINE_COMMENT, source, indentationLevel, lineSeparator, regions);
+						return formatComment(K_MULTI_LINE_COMMENT, source, indentationLevel, lineSeparator, regions, includeComments);
 					}
 					break;
 				case ITerminalSymbols.TokenNameCOMMENT_LINE :
 					if (PROBING_SCANNER.getCurrentTokenEndPosition() == offset + length - 1) {
-						return formatComment(K_SINGLE_LINE_COMMENT, source, indentationLevel, lineSeparator, regions);
+						return formatComment(K_SINGLE_LINE_COMMENT, source, indentationLevel, lineSeparator, regions, includeComments);
 					}
 					break;
 				case ITerminalSymbols.TokenNameCOMMENT_JAVADOC :
 					if (PROBING_SCANNER.getCurrentTokenEndPosition() == offset + length - 1) {
-						// bug 102780 - javadoc is formatted in a different manner
-						return formatJavadoc(source, indentationLevel, lineSeparator, regions);
+						// https://bugs.eclipse.org/bugs/show_bug.cgi?id=102780
+						// use the integrated comment formatter to format comment
+						if (ENABLE_NEW_JAVADOC_FORMAT || FORCE_NEW_COMMENT_FORMAT) {
+							return formatJavadoc(source, indentationLevel, lineSeparator, regions);
+						}
+						// In all other cases, use the old way to format javadoc comments
+						if (!PRINTED_OLD_JAVA_DOC_WARNING) {
+							org.eclipse.jdt.internal.core.util.Util.log(IStatus.WARNING, WARNING_JAVADOC_COMMENTS);
+							System.out.println(WARNING_JAVADOC_COMMENTS);
+							PRINTED_OLD_JAVA_DOC_WARNING = true;
+						}
+						return formatComment(K_JAVA_DOC, source, indentationLevel, lineSeparator, regions, includeComments);
 					}
 			}
 		} catch (InvalidInputException e) {
@@ -52,6 +62,6 @@
 		}
 
 		// this has to be a compilation unit
-		return formatCompilationUnit(source, indentationLevel, lineSeparator, regions, formatJavadoc);
+		return formatCompilationUnit(source, indentationLevel, lineSeparator, regions, includeComments);
 	}
 
