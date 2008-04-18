@@ -11,30 +11,35 @@
 			path = getPath().append(path);
 		}
 		int segmentCount = path.segmentCount();
-		switch (segmentCount) {
-			case 0:
-				return null;
-			case 1:
-				if (path.equals(getPath())) { // see https://bugs.eclipse.org/bugs/show_bug.cgi?id=75814
-					// default root
-					return getPackageFragmentRoot(this.project);
-				}
-			default:
-				// a path ending with .jar/.zip is still ambiguous and could still resolve to a source/lib folder 
-				// thus will try to guess based on existing resource
-				if (org.eclipse.jdt.internal.compiler.util.Util.isArchiveFileName(path.lastSegment())) {
-					IResource resource = this.project.getWorkspace().getRoot().findMember(path); 
-					if (resource != null && resource.getType() == IResource.FOLDER){
-						return getPackageFragmentRoot(resource);
-					}
-					return getPackageFragmentRoot0(path);
-				} else if (segmentCount == 1) {
-					// lib being another project
-					return getPackageFragmentRoot(this.project.getWorkspace().getRoot().getProject(path.lastSegment()));
-				} else {
-					// lib being a folder
-					return getPackageFragmentRoot(this.project.getWorkspace().getRoot().getFolder(path));
-				}
+		if (segmentCount == 0) {
+			return null;
 		}
+		if (path.getDevice() != null || JavaModel.getExternalTarget(path, true/*check existence*/) != null) {
+			// external path
+			return getPackageFragmentRoot0(path);
+		}
+		IWorkspaceRoot workspaceRoot = this.project.getWorkspace().getRoot();
+		if (segmentCount == 1) {
+			String projectName = path.segment(0);
+			if (getElementName().equals(projectName)) { // see https://bugs.eclipse.org/bugs/show_bug.cgi?id=75814
+				// default root
+				return getPackageFragmentRoot(this.project);
+			} else {
+				// lib being another project
+				return getPackageFragmentRoot(workspaceRoot.getProject(projectName));
+			}
+		}
+		IResource resource = workspaceRoot.findMember(path); 
+		if (resource == null) {
+			// resource doesn't exist in workspace
+			if (path.getFileExtension() != null) {
+				// assume it is a file
+				resource = workspaceRoot.getFile(path);
+			} else {
+				// assume it is a folder
+				resource = workspaceRoot.getFolder(path);
+			}
+		}
+		return getPackageFragmentRoot(resource);
 	}
 

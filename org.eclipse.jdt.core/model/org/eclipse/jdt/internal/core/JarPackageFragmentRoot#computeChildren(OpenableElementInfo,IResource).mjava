@@ -8,19 +8,20 @@
 		IJavaElement[] children;
 		ZipFile jar = null;
 		try {
-			// always create the default package
-			rawPackageInfo.put(CharOperation.NO_STRINGS, new ArrayList[] { EMPTY_LIST, EMPTY_LIST });
-	
 			IJavaProject project = getJavaProject();
 			String sourceLevel = project.getOption(JavaCore.COMPILER_SOURCE, true);
 			String compliance = project.getOption(JavaCore.COMPILER_COMPLIANCE, true);
 			jar = getJar();
+
+			// always create the default package
+			rawPackageInfo.put(CharOperation.NO_STRINGS, new ArrayList[] { EMPTY_LIST, EMPTY_LIST });
+			
 			for (Enumeration e= jar.entries(); e.hasMoreElements();) {
 				ZipEntry member= (ZipEntry) e.nextElement();
 				initRawPackageInfo(rawPackageInfo, member.getName(), member.isDirectory(), sourceLevel, compliance);
 			}
 			
-			//l oop through all of referenced packages, creating package fragments if necessary
+			// loop through all of referenced packages, creating package fragments if necessary
 			// and cache the entry names in the rawPackageInfo table
 			children = new IJavaElement[rawPackageInfo.size()];
 			int index = 0;
@@ -30,8 +31,15 @@
 				children[index++] = getPackageFragment(pkgName);
 			}
 		} catch (CoreException e) {
-			if (e instanceof JavaModelException) throw (JavaModelException)e;
-			throw new JavaModelException(e);
+			if (e.getCause() instanceof ZipException) {
+				// not a ZIP archive, leave the children empty
+				Util.log(e, "Invalid ZIP archive: " + toStringWithAncestors()); //$NON-NLS-1$
+				children = NO_ELEMENTS;
+			} else if (e instanceof JavaModelException) {
+				throw (JavaModelException)e;
+			} else {
+				throw new JavaModelException(e);
+			}
 		} finally {
 			JavaModelManager.getJavaModelManager().closeZipFile(jar);
 		}
