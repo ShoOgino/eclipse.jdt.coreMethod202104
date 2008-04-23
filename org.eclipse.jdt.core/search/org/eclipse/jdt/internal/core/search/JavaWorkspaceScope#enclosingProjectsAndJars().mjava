@@ -1,7 +1,46 @@
+/* (non-Javadoc)
+ * @see org.eclipse.jdt.core.search.IJavaSearchScope#enclosingProjectsAndJars()
+ */
 public IPath[] enclosingProjectsAndJars() {
-	if (this.needsInitialize) {
-		this.initialize(5);
+	if (this.enclosingPaths != null) {
+		return this.enclosingPaths;
 	}
-	return super.enclosingProjectsAndJars();
+	long start = BasicSearchEngine.VERBOSE ? System.currentTimeMillis() : -1;
+	try {
+		IJavaProject[] projects = JavaModelManager.getJavaModelManager().getJavaModel().getJavaProjects();
+		Set paths = new HashSet(projects.length * 2);
+		for (int i = 0, length = projects.length; i < length; i++) {
+			JavaProject javaProject = (JavaProject) projects[i];
+			
+			// Add project full path
+			IPath projectPath = javaProject.getProject().getFullPath();
+			paths.add(projectPath);
+
+			// Add project libraries paths
+			IClasspathEntry[] entries = javaProject.getResolvedClasspath();
+			for (int j = 0, eLength = entries.length; j < eLength; j++) {
+				IClasspathEntry entry = entries[j];
+				if (entry.getEntryKind() == IClasspathEntry.CPE_LIBRARY) {
+					IPath path = entry.getPath();
+					Object target = JavaModel.getTarget(path, false/*don't check existence*/);
+					if (target instanceof IFolder) // case of an external folder
+						path = ((IFolder) target).getFullPath();
+					paths.add(entry.getPath());
+				}
+			}
+		}
+		IPath[] result = new IPath[paths.size()];
+		paths.toArray(result);
+		return this.enclosingPaths = result;
+	} catch (JavaModelException e) {
+		Util.log(e, "Exception while computing workspace scope's enclosing projects and jars"); //$NON-NLS-1$
+		return new IPath[0];
+	} finally {
+		if (BasicSearchEngine.VERBOSE) {
+			long time = System.currentTimeMillis() - start;
+			int length = this.enclosingPaths == null ? 0 : this.enclosingPaths.length;
+			Util.verbose("JavaWorkspaceScope.enclosingProjectsAndJars: "+length+" paths computed in "+time+"ms."); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+		}
+	}
 }
 
