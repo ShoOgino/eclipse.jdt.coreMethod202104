@@ -5,7 +5,7 @@
 
 		boolean indentRootTags = this.formatter.preferences.comment_indent_root_tags && !block.isDescription();
 		boolean indentParamTag = this.formatter.preferences.comment_indent_parameter_description && block.isParamTag();
-		boolean headerLine = block.isHeaderLine() && this.lastNumberOfNewLines == 0;
+		boolean headerLine = (buffer.indexOf(Util.LINE_SEPARATOR) < 0) && block.isHeaderLine() && this.lastNumberOfNewLines == 0;
 		StringBuffer textBuffer = isHtmlTag ? new StringBuffer() : buffer;
 		
 		// First we need to know what is the indentation
@@ -42,6 +42,7 @@
 			this.scanner.resetTo(textStart, textEnd);
 			this.scanner.skipComments = true;
 			int previousToken = -1;
+			boolean openedString  =false;
 
 			// Consume text token per token
     		while (!this.scanner.atEnd()) {
@@ -49,18 +50,34 @@
 				try {
 					token = this.scanner.getNextToken();
 				} catch (InvalidInputException iie) {
+					boolean insertSpace = previousToken == TerminalTokens.TokenNameWHITESPACE;
 					String msg = iie.getMessage();
 					if (msg == Scanner.INVALID_CHARACTER_CONSTANT) {
+						if (insertSpace) {
+							buffer.append(' ');
+							this.column++;
+						}
 						buffer.append('\'');
+						this.column++;
 					} else if (msg == Scanner.INVALID_CHAR_IN_STRING) {
+						if (openedString) {
+							openedString = false;
+						} else {
+							if (insertSpace) {
+								buffer.append(' ');
+								this.column++;
+							}
+							openedString = true;
+						}
 						buffer.append('"');
+						this.column++;
 					} else {
 						// skip failure
 					}
-					this.column++;
 					// Need to retrieve correct position
 					this.scanner.resetTo(this.scanner.startPosition, textEnd);
 					this.scanner.getNextChar();
+					previousToken = 1;
 					continue;
 				}
 				if (token == TerminalTokens.TokenNameWHITESPACE) {
@@ -87,7 +104,7 @@
 			    	this.column = 1;
 			    	printIndentationIfNecessary(buffer);
 		    		buffer.append(BLOCK_LINE_PREFIX);
-			    	this.column = firstColumn;
+			    	this.column = headerLine ? firstColumn-1 : firstColumn;
 			    	if (indentationBuffer != null) {
 			    		buffer.append(indentationBuffer);
 			    	}

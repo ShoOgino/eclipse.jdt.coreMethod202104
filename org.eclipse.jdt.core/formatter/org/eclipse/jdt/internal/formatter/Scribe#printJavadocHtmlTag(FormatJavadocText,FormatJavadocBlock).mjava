@@ -1,7 +1,31 @@
 	private int printJavadocHtmlTag(FormatJavadocText text, FormatJavadocBlock block) {
-		
-		// Local variables init
+
+		// Compute indentation if necessary
 		boolean clearBlankLines = this.formatter.preferences.comment_clear_blank_lines_in_javadoc_comment;
+		boolean indentRootTags = this.formatter.preferences.comment_indent_root_tags && !block.isDescription();
+		boolean indentParamTag = this.formatter.preferences.comment_indent_parameter_description && block.isParamTag();
+		boolean headerLine = block.isHeaderLine() && this.lastNumberOfNewLines == 0;
+		int firstColumn = 1 + this.indentationLevel + BLOCK_LINE_PREFIX_LENGTH;
+		if (headerLine) firstColumn++;
+		StringBuffer indentationBuffer = null;
+		if (indentRootTags) {
+			int indentLevel = this.indentationLevel;
+			int indentations = this.numberOfIndentations;
+			this.numberOfIndentations += (BLOCK_LINE_PREFIX_LENGTH / this.indentationSize) + 1;
+			this.indentationLevel = this.numberOfIndentations * this.indentationSize;
+			int currentColumn = this.column;
+			this.column = firstColumn;
+			if (indentParamTag) {
+				this.indentationLevel += this.indentationSize;
+				this.numberOfIndentations++;
+			}
+			printIndentationIfNecessary(indentationBuffer = new StringBuffer());
+			this.column = currentColumn;
+			this.indentationLevel = indentLevel;
+			this.numberOfIndentations = indentations;
+		}
+
+		// Local variables init
 		int textStart = text.sourceStart;
 		int nextStart = textStart;
 		int startLine = Util.getLineNumber(textStart, this.lineEnds, 0, this.maxLines);
@@ -31,17 +55,42 @@
 						newLines = linesAfter;
 						if (newLines > 1 && clearBlankLines) newLines = 1;
 					}
-					if (textStart < previousEnd) addReplaceEdit(textStart, previousEnd, buffer.toString());
+					if (textStart < previousEnd) {
+						addReplaceEdit(textStart, previousEnd, buffer.toString());
+//						this.column += buffer.length();
+					}
+					boolean immutable = htmlTag == null ? false : htmlTag.isImmutableHtmlTag();
+					boolean overEndLine = false;
+					if (immutable) {
+						overEndLine = (this.column + htmlTag.getLength()) > this.formatter.preferences.comment_line_length;
+						if (overEndLine) {
+							if (newLines < 1) newLines = 1;
+						}
+					}
 					printJavadocGapLines(previousEnd+1, node.sourceStart-1, newLines, clearBlankLines, false, null);
 					if (newLines > 0) textOnNewLine = true;
+					buffer = new StringBuffer();
 					if (node.isText()) {
-						linesAfter = printJavadocHtmlTag(htmlTag, block);
+						if (immutable) {
+							// do not change immutable tags, just increment column
+							this.column += getTextLength(block, htmlTag);
+							linesAfter = 0;
+							if (overEndLine) {
+								// need to indent
+								if (indentationBuffer != null) {
+									addInsertEdit(node.sourceStart, indentationBuffer.toString());
+								}
+//								buffer.append(' ');
+//								this.column++;
+							}
+						} else {
+							linesAfter = printJavadocHtmlTag(htmlTag, block);
+						}
 					} else {
 						printJavadocBlock((FormatJavadocBlock)node);
 						linesAfter = 0;
 					}
-					buffer = new StringBuffer();
-					textStart = node.sourceEnd + 1;
+					textStart = node.sourceEnd+1;
 					ptr++;
 					if (idx > max)  {
 						return linesAfter;
@@ -78,7 +127,8 @@
 					if (clearBlankLines) {
 						// keep previously computed lines after
 					} else {
-						if (wasHtmlTag || idx==0 || (idx==max && ((text.htmlIndexes[max] & JAVADOC_TAGS_ID_MASK) == htmlTagID))) {
+//						if (wasHtmlTag || idx==0 || (idx==max && ((text.htmlIndexes[max] & JAVADOC_TAGS_ID_MASK) == htmlTagID))) {
+						if (idx==0 || (idx==max && ((text.htmlIndexes[max] & JAVADOC_TAGS_ID_MASK) == htmlTagID)) || (idx < max && wasHtmlTag && (text.htmlIndexes[idx-1] & JAVADOC_TAGS_ID_MASK) != JAVADOC_IMMUTABLE_TAGS_ID)) {
 							if (linesAfter < linesGap) {
 								linesAfter = linesGap;
 							}
