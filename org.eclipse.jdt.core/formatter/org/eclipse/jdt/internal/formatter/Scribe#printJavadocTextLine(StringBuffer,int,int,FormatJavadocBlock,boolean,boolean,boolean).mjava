@@ -6,7 +6,7 @@
 		boolean indentRootTags = this.formatter.preferences.comment_indent_root_tags && !block.isDescription();
 		boolean indentParamTag = this.formatter.preferences.comment_indent_parameter_description && block.isParamTag();
 		boolean headerLine = (buffer.indexOf(Util.LINE_SEPARATOR) < 0) && block.isHeaderLine() && this.lastNumberOfNewLines == 0;
-		StringBuffer textBuffer = isHtmlTag ? new StringBuffer() : buffer;
+		StringBuffer tokensBuffer = new StringBuffer();
 		
 		// First we need to know what is the indentation
 		int firstColumn = 1 + this.indentationLevel + BLOCK_LINE_PREFIX_LENGTH;
@@ -26,7 +26,7 @@
 			printIndentationIfNecessary(indentationBuffer = new StringBuffer());
 			if (needIndentation) {
 				this.column = firstColumn;
-				printIndentationIfNecessary(textBuffer);
+				printIndentationIfNecessary(buffer);
 			}
 			firstColumn = this.indentationLevel + 1;
 			this.column = currentColumn < firstColumn ? firstColumn : currentColumn;
@@ -54,23 +54,19 @@
 					String msg = iie.getMessage();
 					if (msg == Scanner.INVALID_CHARACTER_CONSTANT) {
 						if (insertSpace) {
-							buffer.append(' ');
-							this.column++;
+							tokensBuffer.append(' ');
 						}
-						buffer.append('\'');
-						this.column++;
+						tokensBuffer.append('\'');
 					} else if (msg == Scanner.INVALID_CHAR_IN_STRING) {
 						if (openedString) {
 							openedString = false;
 						} else {
 							if (insertSpace) {
-								buffer.append(' ');
-								this.column++;
+								tokensBuffer.append(' ');
 							}
 							openedString = true;
 						}
-						buffer.append('"');
-						this.column++;
+						tokensBuffer.append('"');
 					} else {
 						// skip failure
 					}
@@ -82,24 +78,26 @@
 				}
 				if (token == TerminalTokens.TokenNameWHITESPACE) {
 					previousToken = token;
+					buffer.append(tokensBuffer);
+					this.column += tokensBuffer.length();
+					tokensBuffer.setLength(0);
 					continue;
 				}
     			int tokenStart = this.scanner.getCurrentTokenStartPosition();
 	    		int tokenLength = (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - tokenStart;
 	    		boolean insertSpace = previousToken == TerminalTokens.TokenNameWHITESPACE || (tokenStart == textStart && this.column > firstColumn && !(firstText || isHtmlTag));
-				this.column += tokenLength;
-	    		if (insertSpace) this.column++;
-	    		int col = column; 
+	    		int lastColumn = this.column + tokensBuffer.length() + tokenLength;
+	    		if (insertSpace) lastColumn++;
 	    		if (headerLine) {
 	    			// special case when text is on the same line of the javadoc's header
-	    			if (col > maxColumn)  {
-	    				col--; // new line gives an extra character
+	    			if (lastColumn > maxColumn)  {
+	    				lastColumn--; // new line gives an extra character
 	    				this.lastNumberOfNewLines++; // in case we leave just after
 	    			}
 	    		}
-				if (col > maxColumn) {
+				if (lastColumn > maxColumn) {
 					// not enough space on the line
-					if (col == this.column) this.lastNumberOfNewLines++;
+					if (lastColumn == this.column) this.lastNumberOfNewLines++;
 			    	buffer.append(this.lineSeparator);
 			    	this.column = 1;
 			    	printIndentationIfNecessary(buffer);
@@ -108,11 +106,13 @@
 			    	if (indentationBuffer != null) {
 			    		buffer.append(indentationBuffer);
 			    	}
-					if (isHtmlTag && buffer != textBuffer) {
-						buffer.append(textBuffer);
-						textBuffer = buffer;
-					}
-					textBuffer.append(this.scanner.source, tokenStart, tokenLength);
+			    	if (tokensBuffer.length() > 0) {
+			    		String tokensString = tokensBuffer.toString().trim();
+						buffer.append(tokensString);
+						this.column += tokensString.length();
+						tokensBuffer.setLength(0);
+			    	}
+					buffer.append(this.scanner.source, tokenStart, tokenLength);
 					this.column += tokenLength;
 					if (headerLine) {
 						firstColumn--;
@@ -120,18 +120,20 @@
 					}
     			} else {
 					// append token to the line
-					if (insertSpace)  {
-		    			textBuffer.append(' ');
-					}
-					textBuffer.append(this.scanner.source, tokenStart, tokenLength);
+		    		if (insertSpace) {
+		    			tokensBuffer.append(' ');
+		    		}
+					tokensBuffer.append(this.scanner.source, tokenStart, tokenLength);
     			}
 				previousToken = token;
     		}
 		}
 		finally {
 			this.scanner.skipComments = false;
-			if (isHtmlTag && buffer != textBuffer) {
-				buffer.append(textBuffer);
+			// Add remaining buffered tokens
+			if (tokensBuffer.length() > 0) {
+				buffer.append(tokensBuffer);
+				this.column += tokensBuffer.length();
 			}
 		}
     }

@@ -14,7 +14,8 @@
 		this.scanner.getNextChar();
 		this.column += 2;
 		this.scanner.skipComments = true;
-		
+		StringBuffer tokensBuffer = new StringBuffer();
+
 		// Consume text token per token
 		int maxColumn = this.formatter.preferences.comment_line_length + 1;
 		int previousToken = -1;
@@ -29,7 +30,6 @@
 		int lineNumber = scannerLine;
 		int lastTextLine = -1;
 		boolean openedString = false;
-		boolean openedChar = false;
 		while (!this.scanner.atEnd()) {
 			
 			// Consume token
@@ -40,29 +40,20 @@
 				String msg = iie.getMessage();
 				boolean insertSpace = (previousToken == TerminalTokens.TokenNameWHITESPACE || newLine) && !firstWord;
 				if (msg == Scanner.INVALID_CHARACTER_CONSTANT) {
-					if (openedChar) {
-						openedChar = false;
-					} else {
-						if (insertSpace) {
-							buffer.append(' ');
-							this.column++;
-						}
-						openedChar = true;
+					if (insertSpace) {
+						tokensBuffer.append(' ');
 					}
-					buffer.append('\'');
-					this.column++;
+					tokensBuffer.append('\'');
 				} else if (msg == Scanner.INVALID_CHAR_IN_STRING) {
 					if (openedString) {
 						openedString = false;
 					} else {
 						if (insertSpace) {
-							buffer.append(' ');
-							this.column++;
+							tokensBuffer.append(' ');
 						}
 						openedString = true;
 					}
-					buffer.append('"');
-					this.column++;
+					tokensBuffer.append('"');
 				} else {
 					// skip failure
 				}
@@ -75,9 +66,12 @@
 			}
 			
 			// Look at specific tokens
-    		boolean insertSpace = (previousToken == TerminalTokens.TokenNameWHITESPACE || newLine) && !firstWord;
+    		boolean insertSpace = (previousToken == TerminalTokens.TokenNameWHITESPACE || newLine) && (!firstWord || !hasTokens);
 			switch (token) {
 				case TerminalTokens.TokenNameWHITESPACE:
+					buffer.append(tokensBuffer);
+					this.column += tokensBuffer.length();
+					tokensBuffer.setLength(0);
 					previousToken = token;
 					lineNumber = Util.getLineNumber(this.scanner.getCurrentTokenEndPosition(), this.lineEnds, scannerLine>1 ? scannerLine-2 : 0, this.maxLines);
 					if (lineNumber > scannerLine) {
@@ -87,8 +81,14 @@
 					scannerLine = lineNumber;
 					continue;
 				case TerminalTokens.TokenNameMULTIPLY:
+					previousToken = token;
 					lineNumber = Util.getLineNumber(this.scanner.getCurrentTokenEndPosition(), this.lineEnds, scannerLine>1 ? scannerLine-2 : 0, this.maxLines);
 					if (this.scanner.currentCharacter == '/') {
+						// Add remaining buffered tokens
+						if (tokensBuffer.length() > 0) {
+							buffer.append(tokensBuffer);
+							this.column += tokensBuffer.length();
+						}
 						// end of comment
 						if (multiLines) {
 					    	buffer.append(this.lineSeparator);
@@ -97,64 +97,12 @@
 						}
 						buffer.append(' ');
 			    		buffer.append(BLOCK_FOOTER);
-				    	this.column += BLOCK_LINE_PREFIX_LENGTH + 1;
+				    	this.column += BLOCK_FOOTER_LENGTH + 1;
 				    	this.scanner.getNextChar(); // reach the end of scanner
 				    	continue;
 					}
 					scannerLine = lineNumber;
 					continue;
-				case TerminalTokens.TokenNameLESS:
-					// We cannot break tags
-					StringBuffer breakBuffer = new StringBuffer();
-					int start = this.scanner.startPosition;
-		    		int tokenLength = (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - this.scanner.startPosition;
-					breakBuffer.append(this.scanner.source, this.scanner.startPosition, tokenLength);
-					try {
-						boolean closing = false;
-						if ((token = this.scanner.getNextToken()) == TerminalTokens.TokenNameDIVIDE) {
-			    			tokenLength = (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - this.scanner.startPosition;
-							breakBuffer.append(this.scanner.source, this.scanner.startPosition, tokenLength);
-							token = this.scanner.getNextToken();
-							closing = true;
-						}
-						if (token == TerminalTokens.TokenNameIdentifier) {
-			    			tokenLength = (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - this.scanner.startPosition;
-							breakBuffer.append(this.scanner.source, this.scanner.startPosition, tokenLength);
-							token = this.scanner.getNextToken();
-							if (token == TerminalTokens.TokenNameGREATER) {
-				    			tokenLength = (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - this.scanner.startPosition;
-								breakBuffer.append(this.scanner.source, this.scanner.startPosition, tokenLength);
-								if ((this.column + breakBuffer.length()) > maxColumn) {
-							    	buffer.append(this.lineSeparator);
-							    	this.column = 1;
-							    	printIndentationIfNecessary(buffer);
-						    		buffer.append(BLOCK_LINE_PREFIX);
-							    	this.column += BLOCK_LINE_PREFIX_LENGTH;
-									multiLines = true;
-								} else if (!closing) {
-									buffer.append(' ');
-									this.column++;
-								}
-								buffer.append(breakBuffer);
-								this.column += breakBuffer.length();
-								previousToken = token;
-								scannerLine = lineNumber;
-								newLine = false;
-								continue;
-							}
-						}
-					}
-					catch (InvalidInputException iie) {
-						// forget as we're started after next token
-					}
-					// Need to retrieve correct position
-					this.scanner.resetTo(start, currentTokenEndPosition-1);
-					try {
-	                    token = this.scanner.getNextToken();
-                    } catch (InvalidInputException e) {
-	                    // will not happen
-                    }
-					break;
 			}
 
 			// Look at gap and insert corresponding lines if necessary
@@ -181,6 +129,11 @@
 					 }
 				}
 				for (int i=0; i<linesGap; i++) {
+					// Add remaining buffered tokens
+					if (tokensBuffer.length() > 0) {
+						buffer.append(tokensBuffer);
+						tokensBuffer.setLength(0);
+					}
 			    	buffer.append(this.lineSeparator);
 			    	this.column = 1;
 			    	printIndentationIfNecessary(buffer);
@@ -200,28 +153,44 @@
     		hasTokens = true;
     		if (!hastTextOnFirstLine && scannerLine == firstLine) {
     			hastTextOnFirstLine = true;
-    			this.column++;
     		}
-			this.column += tokenLength;
-    		if (previousToken == -1 || insertSpace) this.column++;
+    		int lastColumn = this.column + tokensBuffer.length() + tokenLength;
+    		if (previousToken == -1 || insertSpace) lastColumn++;
     		
     		// Append next token inserting a new line if max line is reached
-			if (!firstWord && this.column > maxColumn) {
+			if (!firstWord && lastColumn > maxColumn) {
+		    	String tokensString = tokensBuffer.toString().trim();
+				if ((firstColumn+tokensString.length()+tokenLength) > maxColumn) {
+					// there won't be enough room even if we break the line before the buffered tokens
+					// So add the buffered tokens now
+					if (buffer.length() == 0) {
+						buffer.append(' ');
+						this.column++;
+					}
+					buffer.append(tokensString);
+					this.column += tokensString.length();
+					tokensBuffer.setLength(0);
+				}
 				// not enough space on the line
 		    	buffer.append(this.lineSeparator);
 		    	this.column = 1;
 		    	printIndentationIfNecessary(buffer);
 	    		buffer.append(BLOCK_LINE_PREFIX);
 		    	this.column += BLOCK_LINE_PREFIX_LENGTH;
+		    	if (tokensBuffer.length() > 0) {
+					buffer.append(tokensString);
+					this.column += tokensString.length();
+					tokensBuffer.setLength(0);
+		    	}
 				buffer.append(this.scanner.source, tokenStart, tokenLength);
 				this.column += tokenLength;
 				multiLines = true;
 			} else {
 				// append token to the line
 				if (insertSpace)  {
-					if (buffer.length() > 0) buffer.append(' ');
+					tokensBuffer.append(' ');
 				}
-				buffer.append(this.scanner.source, tokenStart, tokenLength);
+				tokensBuffer.append(this.scanner.source, tokenStart, tokenLength);
 			}
 			previousToken = token;
 			newLine = false;
@@ -237,11 +206,20 @@
 					replacement.append(this.lineSeparator);
 					this.column = 1;
 					printIndentationIfNecessary(replacement);
-					replacement.append(BLOCK_LINE_PREFIX);
+					if (buffer.charAt(0) == ' ') {
+						replacement.append(' ');
+						replacement.append('*');
+					} else {
+						replacement.append(BLOCK_LINE_PREFIX);
+						this.column++;
+					}
 			    	this.column = col;
 				}
 			} else {
-				if (hasTokens) replacement.append(' ');
+				if (buffer.charAt(0) != ' ') {
+					replacement.append(' ');
+					this.column++;
+				}
 			}
 			replacement.append(buffer);
 			addReplaceEdit(currentTokenStartPosition, currentTokenEndPosition-1, replacement.toString());
