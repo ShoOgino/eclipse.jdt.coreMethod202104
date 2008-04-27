@@ -21,8 +21,11 @@
 		int previousToken = -1;
 		boolean newLine = false;
 		boolean multiLines = false;
+		boolean hasMultiLines = false;
 		boolean hasTokens = false;
-		boolean hastTextOnFirstLine = false;
+		boolean bufferHasTokens = false;
+		int hasTextOnFirstLine = 0;
+		boolean textOnFirstLine = false;
 		boolean firstWord = true;
 		boolean clearBlankLines = this.formatter.preferences.comment_clear_blank_lines_in_block_comment;
 		int scannerLine = Util.getLineNumber(this.scanner.currentPosition, this.lineEnds, 0, this.maxLines);
@@ -69,13 +72,19 @@
     		boolean insertSpace = (previousToken == TerminalTokens.TokenNameWHITESPACE || newLine || previousToken == -1) && (!firstWord || !hasTokens);
 			switch (token) {
 				case TerminalTokens.TokenNameWHITESPACE:
-					buffer.append(tokensBuffer);
-					this.column += tokensBuffer.length();
-					tokensBuffer.setLength(0);
+					if (tokensBuffer.length() > 0) {
+						buffer.append(tokensBuffer);
+						this.column += tokensBuffer.length();
+						tokensBuffer.setLength(0);
+						bufferHasTokens = true;
+						if (!textOnFirstLine && multiLines) {
+							textOnFirstLine = true;
+						}
+					}
 					previousToken = token;
 					lineNumber = Util.getLineNumber(this.scanner.getCurrentTokenEndPosition(), this.lineEnds, scannerLine>1 ? scannerLine-2 : 0, this.maxLines);
 					if (lineNumber > scannerLine) {
-						multiLines = true;
+						hasMultiLines = true;
 						newLine = true;
 					}
 					scannerLine = lineNumber;
@@ -90,7 +99,7 @@
 							this.column += tokensBuffer.length();
 						}
 						// end of comment
-						if (multiLines) {
+						if (multiLines || hasMultiLines) {
 					    	buffer.append(this.lineSeparator);
 					    	this.column = 1;
 					    	printIndentationIfNecessary(buffer);
@@ -141,6 +150,7 @@
 					if (tokensBuffer.length() > 0) {
 						buffer.append(tokensBuffer);
 						tokensBuffer.setLength(0);
+						bufferHasTokens = true;
 					}
 			    	buffer.append(this.lineSeparator);
 			    	this.column = 1;
@@ -159,14 +169,16 @@
 			int tokenStart = this.scanner.getCurrentTokenStartPosition();
     		int tokenLength = (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - tokenStart;
     		hasTokens = true;
-    		if (!hastTextOnFirstLine && scannerLine == firstLine) {
-    			hastTextOnFirstLine = true;
+    		if (hasTextOnFirstLine == 0 && scannerLine == firstLine) {
+    			hasTextOnFirstLine = 1;
+    			textOnFirstLine = true;
     		}
     		int lastColumn = this.column + tokensBuffer.length() + tokenLength;
     		if (previousToken == -1 || insertSpace) lastColumn++;
-    		
+
     		// Append next token inserting a new line if max line is reached
 			if (!firstWord && lastColumn > maxColumn) {
+				boolean alreadyHasNewLine = !bufferHasTokens && tokensBuffer.length() > 0 && multiLines;
 		    	String tokensString = tokensBuffer.toString().trim();
 				if ((this.indentationLevel+tokensString.length()+tokenLength) > maxColumn) {
 					// there won't be enough room even if we break the line before the buffered tokens
@@ -178,19 +190,26 @@
 					buffer.append(tokensString);
 					this.column += tokensString.length();
 					tokensBuffer.setLength(0);
+					alreadyHasNewLine = false;
 				}
 				// not enough space on the line
-		    	buffer.append(this.lineSeparator);
-		    	this.column = 1;
-		    	printIndentationIfNecessary(buffer);
-	    		buffer.append(BLOCK_LINE_PREFIX);
-		    	this.column += BLOCK_LINE_PREFIX_LENGTH;
+				if (!alreadyHasNewLine) {
+			    	buffer.append(this.lineSeparator);
+			    	this.column = 1;
+			    	printIndentationIfNecessary(buffer);
+		    		buffer.append(BLOCK_LINE_PREFIX);
+			    	this.column += BLOCK_LINE_PREFIX_LENGTH;
+					if (!bufferHasTokens) {
+						textOnFirstLine = false;
+					}
+				}
 		    	if (tokensBuffer.length() > 0) {
 					buffer.append(tokensString);
 					this.column += tokensString.length();
 					tokensBuffer.setLength(0);
 		    	}
 				buffer.append(this.scanner.source, tokenStart, tokenLength);
+				bufferHasTokens = true;
 				this.column += tokenLength;
 				multiLines = true;
 			} else {
@@ -208,21 +227,19 @@
 		// Replace block comment text
 		if (hasTokens || multiLines) {
 			StringBuffer replacement = new StringBuffer(BLOCK_HEADER);
-			if (multiLines) {
-				if (/*clearBlankLines || */(hasTokens && hastTextOnFirstLine)) {
-					int col = this.column;
-					replacement.append(this.lineSeparator);
-					this.column = 1;
-					printIndentationIfNecessary(replacement);
-					if (buffer.charAt(0) == ' ') {
-						replacement.append(' ');
-						replacement.append('*');
-					} else {
-						replacement.append(BLOCK_LINE_PREFIX);
-						this.column++;
-					}
-			    	this.column = col;
+			if ((hasMultiLines || multiLines) && hasTextOnFirstLine == 1 && textOnFirstLine) {
+				int col = this.column;
+				replacement.append(this.lineSeparator);
+				this.column = 1;
+				printIndentationIfNecessary(replacement);
+				if (buffer.charAt(0) == ' ') {
+					replacement.append(' ');
+					replacement.append('*');
+				} else {
+					replacement.append(BLOCK_LINE_PREFIX);
+					this.column++;
 				}
+		    	this.column = col;
 			}
 			replacement.append(buffer);
 			addReplaceEdit(currentTokenStartPosition, currentTokenEndPosition-1, replacement.toString());

@@ -1,0 +1,93 @@
+	private int printJavadocBlockNodesNewLines(FormatJavadocBlock block, FormatJavadocNode node, int previousEnd) {
+	   	int maxColumn = this.formatter.preferences.comment_line_length+1;
+    	int nodeStart = node.sourceStart;
+ 	    try {
+			this.scanner.resetTo(nodeStart , node.sourceEnd);
+	    	int token = this.scanner.getNextToken();
+	    	int tokenLength = (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - this.scanner.startPosition;
+	    	int newLines = 0;
+	    	boolean newLine = false;
+			boolean headerLine = block.isHeaderLine() && this.lastNumberOfNewLines == 0;
+	    	if (node.isText()) {
+	    		FormatJavadocText text = (FormatJavadocText)node;
+    			if (text.isImmutableHtmlTag()) {
+					int firstColumn = 1 + this.indentationLevel + BLOCK_LINE_PREFIX_LENGTH;
+					if (headerLine) firstColumn++;
+			    	if (nodeStart > (previousEnd+1)) {
+			    		tokenLength++; // include space between nodes
+			    	}
+    				int col = this.column + tokenLength;
+	    			while (!this.scanner.atEnd()) {
+	    				token = this.scanner.getNextToken();
+	    				switch (token) {
+	    					case TerminalTokens.TokenNameWHITESPACE:
+	    						if (CharOperation.indexOf('\n', this.scanner.source, this.scanner.startPosition, this.scanner.getCurrentTokenEndPosition()) >= 0) {
+	    							return newLines;
+	    						}
+	    						tokenLength = 1;
+	    						break;
+	    					case TerminalTokens.TokenNameMULTIPLY:
+	    						if (newLine) {
+	    							newLine = false;
+	    							continue;
+	    						}
+	    						tokenLength = 1;
+	    						break;
+	    					default:
+				    			tokenLength = (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - this.scanner.startPosition;
+	    						break;
+	    				}
+	    				col += tokenLength;
+			    		if (headerLine) { // special case when text is on the same line of the javadoc's header
+			    			if ((col-1) > maxColumn)  {
+								newLines++;
+								col = firstColumn;
+								firstColumn--;
+								headerLine = false;
+			    			}
+			    		} else if (col > maxColumn) {
+							newLines++;
+							col = firstColumn;
+						}
+	    			}
+	    			return newLines;
+    			}
+    			if (text.isHtmlTag()) {
+	    			// read the html tag
+	    			if (this.scanner.getNextToken() == TerminalTokens.TokenNameDIVIDE) {
+	    				tokenLength++;
+	    				this.scanner.getNextToken();
+	    			}
+	    			tokenLength += (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - this.scanner.startPosition;
+	    			this.scanner.getNextToken(); // '>'
+	    			tokenLength++;
+	    		} else {
+	    			while (true) {
+	    				token = this.scanner.getNextToken();
+	    				if (token == TerminalTokens.TokenNameWHITESPACE || token == TerminalTokens.TokenNameEOF) break;
+		    			tokenLength += (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - this.scanner.startPosition;
+	    			}
+	    		}
+	    	} else {
+	    		FormatJavadocBlock inlinedBlock = (FormatJavadocBlock) node;
+	    		tokenLength += inlinedBlock.tagEnd - inlinedBlock.sourceStart + 1;
+	    	}
+	    	if (nodeStart > (previousEnd+1)) {
+	    		tokenLength++; // include space between nodes
+	    	}
+			if ((this.column + tokenLength) > maxColumn) {
+	    		return 1;
+	    	}
+	    } catch (InvalidInputException iie) {
+	    	// Assume length is one
+	    	int tokenLength = 1;
+	    	if (nodeStart > (previousEnd+1)) {
+	    		tokenLength++; // include space between nodes
+	    	}
+			if ((this.column + tokenLength) > maxColumn) {
+	    		return 1;
+	    	}
+	    }
+	    return 0;
+    }
+

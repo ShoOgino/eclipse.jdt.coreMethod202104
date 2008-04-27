@@ -1,35 +1,16 @@
-	private int printJavadocHtmlTag(FormatJavadocText text, FormatJavadocBlock block) {
+	private int printJavadocHtmlTag(FormatJavadocText text, FormatJavadocBlock block, boolean textOnNewLine) {
 
 		// Compute indentation if necessary
 		boolean clearBlankLines = this.formatter.preferences.comment_clear_blank_lines_in_javadoc_comment;
-		boolean indentRootTags = this.formatter.preferences.comment_indent_root_tags && !block.isDescription();
-		boolean indentParamTag = this.formatter.preferences.comment_indent_parameter_description && block.isParamTag();
 		boolean headerLine = block.isHeaderLine() && this.lastNumberOfNewLines == 0;
 		int firstColumn = 1 + this.indentationLevel + BLOCK_LINE_PREFIX_LENGTH;
 		if (headerLine) firstColumn++;
-		StringBuffer indentationBuffer = null;
-		if (indentRootTags) {
-			int indentLevel = this.indentationLevel;
-			int indentations = this.numberOfIndentations;
-			this.numberOfIndentations += (BLOCK_LINE_PREFIX_LENGTH / this.indentationSize) + 1;
-			this.indentationLevel = this.numberOfIndentations * this.indentationSize;
-			int currentColumn = this.column;
-			this.column = firstColumn;
-			if (indentParamTag) {
-				this.indentationLevel += this.indentationSize;
-				this.numberOfIndentations++;
-			}
-			printIndentationIfNecessary(indentationBuffer = new StringBuffer());
-			this.column = currentColumn;
-			this.indentationLevel = indentLevel;
-			this.numberOfIndentations = indentations;
-		}
+		StringBuffer indentationBuffer = printJavadocIndentationBuffer(block, firstColumn);
 
 		// Local variables init
 		int textStart = text.sourceStart;
 		int nextStart = textStart;
 		int startLine = Util.getLineNumber(textStart, this.lineEnds, 0, this.maxLines);
-		boolean textOnNewLine = (text == block.nodes[0] && ((!block.isInlined() && block.isParamTag() && this.formatter.preferences.comment_insert_new_line_for_parameter) || !block.hasTextOnTagLine())) || text.linesBefore > 0;
 	    int htmlTagID = text.getHtmlTagID();
 	    StringBuffer buffer = new StringBuffer();
 
@@ -46,7 +27,7 @@
 	
 				// append text to buffer realigning with the line length
 				int end = (idx > max) ? text.sourceEnd : (int) (text.separators[idx] >>> 32);
-				boolean wasHtmlTag = false;
+				int nodeKind = 0; // text break
 				if (text.htmlNodesPtr >= 0 && ptr <= text.htmlNodesPtr && end > text.htmlNodes[ptr].sourceStart) {
 					FormatJavadocNode node = text.htmlNodes[ptr];
 					FormatJavadocText htmlTag = node.isText() ? (FormatJavadocText) node : null;
@@ -66,6 +47,9 @@
 							if (newLines < 1) newLines = 1;
 						}
 					}
+					if (newLines == 0) {
+						newLines = printJavadocBlockNodesNewLines(block, node, previousEnd);
+					}
 					printJavadocGapLines(previousEnd+1, node.sourceStart-1, newLines, clearBlankLines, false, null);
 					if (newLines > 0) textOnNewLine = true;
 					buffer = new StringBuffer();
@@ -81,18 +65,19 @@
 								}
 							}
 						} else {
-							linesAfter = printJavadocHtmlTag(htmlTag, block);
+							linesAfter = printJavadocHtmlTag(htmlTag, block, textOnNewLine);
 						}
+						nodeKind = 1; // text
 					} else {
 						printJavadocBlock((FormatJavadocBlock)node);
 						linesAfter = 0;
+						nodeKind = 2; // block
 					}
 					textStart = node.sourceEnd+1;
 					ptr++;
 					if (idx > max)  {
 						return linesAfter;
 					}
-					wasHtmlTag = true;
 				} else {
 					if (idx > 0 && linesAfter > 0) {
 						printJavadocGapLines(previousEnd+1, nextStart, linesAfter, clearBlankLines, false, buffer);
@@ -121,10 +106,10 @@
 				startLine = Util.getLineNumber(nextStart, this.lineEnds, endLine-1, this.maxLines);
 				int linesGap = startLine - endLine;
 				if (linesGap > 0) {
-					if (clearBlankLines) {
+					if (clearBlankLines && linesGap > 1) {
 						// keep previously computed lines after
 					} else {
-						if (idx==0 || (idx==max && ((text.htmlIndexes[max] & JAVADOC_TAGS_ID_MASK) == htmlTagID)) || (idx < max && wasHtmlTag && (text.htmlIndexes[idx-1] & JAVADOC_TAGS_ID_MASK) != JAVADOC_IMMUTABLE_TAGS_ID)) {
+						if (idx==0 || (idx==max && ((text.htmlIndexes[max] & JAVADOC_TAGS_ID_MASK) == htmlTagID)) || (idx < max && nodeKind==1 && (text.htmlIndexes[idx-1] & JAVADOC_TAGS_ID_MASK) != JAVADOC_IMMUTABLE_TAGS_ID)) {
 							if (linesAfter < linesGap) {
 								linesAfter = linesGap;
 							}

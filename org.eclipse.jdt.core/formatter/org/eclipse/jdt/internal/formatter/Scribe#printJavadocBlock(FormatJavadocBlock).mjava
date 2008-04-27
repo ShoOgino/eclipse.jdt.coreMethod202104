@@ -5,9 +5,18 @@
 		int previousEnd = block.tagEnd;
 		int maxNodes = block.nodesPtr;
 
+		// Compute indentation
+		boolean headerLine = block.isHeaderLine() && this.lastNumberOfNewLines == 0;
+		int firstColumn = 1 + this.indentationLevel + BLOCK_LINE_PREFIX_LENGTH;
+		if (headerLine) firstColumn++;
+		StringBuffer indentationBuffer = printJavadocIndentationBuffer(block, firstColumn);
+
 		// format tag section if necessary
-		int maxColumn = this.formatter.preferences.comment_line_length;
+		int maxColumn = this.formatter.preferences.comment_line_length + 1;
 		boolean clearBlankLines = this.formatter.preferences.comment_clear_blank_lines_in_javadoc_comment;
+		if (!block.isInlined()) {
+			this.lastNumberOfNewLines = 0;
+		}
 		if (!block.isDescription()) {
 			this.column += previousEnd - block.sourceStart + 1;
 			if (block.isInlined()) 	{
@@ -23,11 +32,41 @@
 			}
 
 			// Nothing else to do if the tag has no node
-			if (maxNodes < 0)  return;
+			if (maxNodes < 0)  {
+				if (block.isInlined()) {
+					// Need to print the closing brace
+					StringBuffer buffer = new StringBuffer();
+					if ((this.column+2) > (maxColumn+1)) {
+						this.lastNumberOfNewLines++;
+						this.line++;
+				    	buffer.append(this.lineSeparator);
+				    	this.column = 1;
+				    	printIndentationIfNecessary(buffer);
+			    		buffer.append(BLOCK_LINE_PREFIX);
+				    	this.column = headerLine ? firstColumn-1 : firstColumn;
+				    	if (indentationBuffer != null) {
+							buffer.append(indentationBuffer);
+							this.column += indentationBuffer.length();
+				    	}
+					}
+					this.scanner.resetTo(previousEnd+1, block.sourceEnd+1);
+					try {
+	                    int token = this.scanner.getNextToken();
+	                    while (token == TerminalTokens.TokenNameWHITESPACE || token == TerminalTokens.TokenNameMULTIPLY) {
+	                    	token = this.scanner.getNextToken();
+	                    }
+	                    buffer.append(this.scanner.source, this.scanner.startPosition, this.scanner.currentPosition-this.scanner.startPosition);
+                    } catch (InvalidInputException e) {
+						buffer.append('}');
+                    }
+                    addReplaceEdit(previousEnd+1, block.sourceEnd, buffer.toString());
+				}
+				return;
+			}
 		}
 		
 		// tag section: iterate through the blocks composing this tag but the last one
-		if (block.isHeaderLine()) maxColumn++;
+//		if (block.isHeaderLine()) maxColumn++;
 		for (int i=0; i<=maxNodes; i++) {
 			FormatJavadocNode node = block.nodes[i];
 			int nodeStart = node.sourceStart;
@@ -36,8 +75,11 @@
 			int textLength = -1;
 			int newLines;
 			if (i == 0) {
-				newLines = this.formatter.preferences.comment_insert_new_line_for_parameter && !block.isInlined() && block.isParamTag() ? 1 : 0;
+				newLines = this.formatter.preferences.comment_insert_new_line_for_parameter && block.isParamTag() ? 1 : 0;
 				if (nodeStart > (previousEnd+1)) {
+					if (newLines == 0) {
+						newLines = printJavadocBlockNodesNewLines(block, node, previousEnd);
+					}
 			   		printJavadocGapLines(previousEnd+1, nodeStart-1, newLines, clearBlankLines, false, null);
 				} else {
 					StringBuffer buffer = new StringBuffer();
@@ -49,52 +91,13 @@
 					}
 				}
 			} else {
-				newLines = this.column > this.formatter.preferences.comment_line_length ? 1 : 0;
-				if (node.isText()) {
-					// Need to verify if new line is necessary for immutable tag
-					FormatJavadocText text = (FormatJavadocText) node;
-					if (newLines < text.linesBefore) newLines = text.linesBefore;
-					if (newLines == 0 && text.isImmutableHtmlTag()) {
-						textLength = getTextLength(block, text);
-						if ((this.column + textLength) > maxColumn) {
-							newLines = 1;
-						}
-					}
+				newLines = this.column > maxColumn ? 1 : 0;
+				if (newLines < node.linesBefore) newLines = node.linesBefore;
+				if (newLines == 0) {
+					newLines = printJavadocBlockNodesNewLines(block, node, previousEnd);
 				}
-				if (!node.isText() || newLines > 0 || nodeStart > (previousEnd+1)) {
-					if (newLines == 0 && node.isText()) {
-						// Special case when two texts are consecutive (html tag->text or text->html tag)
-						// If no line is to be inserted, then no space should not be inserted either
-						// and column reset if the next token is over the max line length
-						try {
-							this.scanner.resetTo(nodeStart, block.sourceEnd);
-							this.scanner.getNextToken();
-				    		int tokenLength = (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - this.scanner.startPosition;
-				    		if (((FormatJavadocText)node).isHtmlTag()) {
-								// read the html tag
-								if (this.scanner.getNextToken() == TerminalTokens.TokenNameDIVIDE) {
-									tokenLength++;
-									this.scanner.getNextToken();
-								}
-								tokenLength += (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - this.scanner.startPosition;
-								this.scanner.getNextToken(); // '>'
-								tokenLength++;
-							}
-							if (nodeStart > (previousEnd+1)) {
-								tokenLength++; // include space between nodes
-							}
-							if ((this.column + tokenLength) > maxColumn) {
-								// finally a new line will be inserted while printing next text
-								newLines = 1;
-								((FormatJavadocText)node).linesBefore = 1;
-							}
-				   			printJavadocGapLines(previousEnd+1, nodeStart-1, newLines, clearBlankLines, false, null);
-						} catch (InvalidInputException iie) {
-							// skip
-						}
-					} else {
-			   			printJavadocGapLines(previousEnd+1, nodeStart-1, newLines, clearBlankLines, false, null);
-					}
+				if (newLines > 0 || nodeStart > (previousEnd+1)) {
+		   			printJavadocGapLines(previousEnd+1, nodeStart-1, newLines, clearBlankLines, false, null);
 				}
 			}
 
@@ -118,17 +121,22 @@
 						}
 						this.column += textLength;
 					} else {
-						printJavadocHtmlTag(text, block);
+						printJavadocHtmlTag(text, block, newLines>0);
 					}
 				} else {
-					printJavadocText(text, block);
+					printJavadocText(text, block, newLines>0);
 				}
 			} else {
+				if (newLines > 0 && indentationBuffer != null) {
+					addInsertEdit(node.sourceStart, indentationBuffer.toString());
+					this.column += indentationBuffer.length();
+				}
 				printJavadocBlock((FormatJavadocBlock)node);
 			}
 
 			// Print empty lines before the node
 			previousEnd = node.sourceEnd;
 		}
+		this.lastNumberOfNewLines = 0;
 	}
 
