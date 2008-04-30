@@ -1,0 +1,59 @@
+	private int printJavadocHtmlImmutableTag(FormatJavadocText text, FormatJavadocBlock block, boolean textOnNewLine) {
+
+		int additionalLength = 0;
+		try {
+			// Indent if necessary
+			if (textOnNewLine) {
+				int col = this.column;
+				StringBuffer buffer = new StringBuffer();
+				int textEnd = text.separatorsPtr == -1 ? text.sourceEnd : (int) (text.separators[0] >>> 32);
+				printJavadocTextLine(buffer, text.sourceStart, textEnd, block, true, true, true);
+				addReplaceEdit(text.sourceStart, textEnd, buffer.toString());
+				additionalLength = this.column - col;
+			}
+	
+			// Iterate on text line separators
+			int lineNumber = text.lineStart;
+			this.scanner.tokenizeWhiteSpace = false;
+			StringBuffer buffer = null;
+			for (int idx=1, max=text.separatorsPtr; idx<max ; idx++) {
+				int start = (int) text.separators[idx];
+				int lineStart = Util.getLineNumber(start, lineEnds, lineNumber, this.maxLines);
+				if (buffer == null) {
+					buffer = new StringBuffer();
+					this.column = 1;
+					printIndentationIfNecessary(buffer);
+					buffer.append(BLOCK_LINE_PREFIX);
+					this.column += BLOCK_LINE_PREFIX_LENGTH;
+				}
+				while (lineNumber < lineStart) {
+					int end = this.lineEnds[lineNumber-1];
+					this.scanner.resetTo(end, start);
+					int token = this.scanner.getNextToken();
+					switch (token) {
+						case TerminalTokens.TokenNameMULTIPLY:
+						case TerminalTokens.TokenNameMULTIPLY_EQUAL:
+							break;
+						default:
+							return 0;
+					}
+					if (this.scanner.currentCharacter == ' ') {
+						this.scanner.getNextChar();
+					}
+					addReplaceEdit(end+1, this.scanner.getCurrentTokenEndPosition(), buffer.toString());
+					lineNumber++;
+				}
+			}
+		}
+		catch (InvalidInputException iie) {
+			// leave
+		}
+		finally {
+			// Reset
+			needSpace = false;
+			this.scanner.tokenizeWhiteSpace = true;
+			this.scanner.resetTo(text.sourceEnd+1, this.scannerEndPosition - 1);
+		}
+		return text.separatorsPtr<2 ? additionalLength : 0;
+	}
+
