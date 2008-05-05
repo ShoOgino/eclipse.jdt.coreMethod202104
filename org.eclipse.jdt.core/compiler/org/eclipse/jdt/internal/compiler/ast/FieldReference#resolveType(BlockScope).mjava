@@ -6,12 +6,12 @@ public TypeBinding resolveType(BlockScope scope) {
 	//always ignore receiver cast, since may affect constant pool reference
 	boolean receiverCast = false;
 	if (this.receiver instanceof CastExpression) {
-		this.receiver.bits |= DisableUnnecessaryCastCheck; // will check later on
+		this.receiver.bits |= ASTNode.DisableUnnecessaryCastCheck; // will check later on
 		receiverCast = true;
 	}
 	this.receiverType = this.receiver.resolveType(scope);
 	if (this.receiverType == null) {
-		constant = Constant.NotAConstant;
+		this.constant = Constant.NotAConstant;
 		return null;
 	}
 	if (receiverCast) {
@@ -21,9 +21,9 @@ public TypeBinding resolveType(BlockScope scope) {
 		}
 	}		
 	// the case receiverType.isArrayType and token = 'length' is handled by the scope API
-	FieldBinding fieldBinding = this.codegenBinding = this.binding = scope.getField(this.receiverType, token, this);
+	FieldBinding fieldBinding = this.codegenBinding = this.binding = scope.getField(this.receiverType, this.token, this);
 	if (!fieldBinding.isValidBinding()) {
-		constant = Constant.NotAConstant;
+		this.constant = Constant.NotAConstant;
 		if (this.receiver.resolvedType instanceof ProblemReferenceBinding) {
 			// problem already got signaled on receiver, do not report secondary problem
 			return null;
@@ -38,27 +38,39 @@ public TypeBinding resolveType(BlockScope scope) {
 		}
 	}
 	this.receiver.computeConversion(scope, this.receiverType, this.receiverType);
-	if (isFieldUseDeprecated(fieldBinding, scope, (this.bits & IsStrictlyAssigned) !=0)) {
+	if (isFieldUseDeprecated(fieldBinding, scope, (this.bits & ASTNode.IsStrictlyAssigned) !=0)) {
 		scope.problemReporter().deprecatedField(fieldBinding, this);
 	}
-	boolean isImplicitThisRcv = receiver.isImplicitThis();
-	constant = isImplicitThisRcv ? fieldBinding.constant() : Constant.NotAConstant;
+	boolean isImplicitThisRcv = this.receiver.isImplicitThis();
+	this.constant = isImplicitThisRcv ? fieldBinding.constant() : Constant.NotAConstant;
 	if (fieldBinding.isStatic()) {
 		// static field accessed through receiver? legal but unoptimal (optional warning)
 		if (!(isImplicitThisRcv
-				|| (receiver instanceof NameReference 
-					&& (((NameReference) receiver).bits & Binding.TYPE) != 0))) {
+				|| (this.receiver instanceof NameReference 
+					&& (((NameReference) this.receiver).bits & Binding.TYPE) != 0))) {
 			scope.problemReporter().nonStaticAccessToStaticField(this, fieldBinding);
 		}
+		ReferenceBinding declaringClass = this.binding.declaringClass;
 		if (!isImplicitThisRcv
-				&& fieldBinding.declaringClass != receiverType
-				&& fieldBinding.declaringClass.canBeSeenBy(scope)) {
+				&& declaringClass != this.receiverType
+				&& declaringClass.canBeSeenBy(scope)) {
 			scope.problemReporter().indirectAccessToStaticField(this, fieldBinding);
 		}
+		// check if accessing enum static field in initializer
+		if (declaringClass.isEnum()) {
+			MethodScope methodScope = scope.methodScope();
+			SourceTypeBinding sourceType = scope.enclosingSourceType();
+			if (this.constant == Constant.NotAConstant
+					&& !methodScope.isStatic
+					&& (sourceType == declaringClass || sourceType.superclass == declaringClass) // enum constant body
+					&& methodScope.isInsideInitializerOrConstructor()) {
+				scope.problemReporter().enumStaticFieldUsedDuringInitialization(this.binding, this);
+			}
+		}		
 	}
 	TypeBinding fieldType = fieldBinding.type;
 	if (fieldType != null) {
-		if ((this.bits & IsStrictlyAssigned) == 0) {
+		if ((this.bits & ASTNode.IsStrictlyAssigned) == 0) {
 			fieldType = fieldType.capture(scope, this.sourceEnd);	// perform capture conversion if read access
 		}
 		this.resolvedType = fieldType;
