@@ -43,7 +43,7 @@
 			this.scanner.skipComments = true;
 			int previousToken = -1;
 			boolean openedString  =false;
-			boolean hasTokens = false;
+			boolean textOnNewLine = needIndentation;
 
 			// Consume text token per token
     		while (!this.scanner.atEnd()) {
@@ -77,13 +77,16 @@
 					previousToken = 1;
 					continue;
 				}
+	    		int tokensBufferLength = tokensBuffer.length();
 				switch (token) {
 					case TerminalTokens.TokenNameWHITESPACE:
 						previousToken = token;
-						buffer.append(tokensBuffer);
-						this.column += tokensBuffer.length();
-						tokensBuffer.setLength(0);
-						hasTokens = true;
+						if (tokensBufferLength > 0) {
+							buffer.append(tokensBuffer);
+							this.column += tokensBufferLength;
+							tokensBuffer.setLength(0);
+						}
+						textOnNewLine = false;
 						continue;
 					case TerminalTokens.TokenNameStringLiteral:
 						if (this.scanner.currentPosition > this.scanner.eofPosition) {
@@ -103,21 +106,29 @@
     			int tokenStart = this.scanner.getCurrentTokenStartPosition();
 	    		int tokenLength = (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - tokenStart;
 	    		boolean insertSpace = previousToken == TerminalTokens.TokenNameWHITESPACE || (tokenStart == textStart && this.column > firstColumn && !(firstText || isHtmlTag));
-	    		int lastColumn = this.column + tokensBuffer.length() + tokenLength;
+	    		int lastColumn = this.column + tokensBufferLength + tokenLength;
 	    		if (insertSpace) lastColumn++;
 	    		if (headerLine) {
 	    			// special case when text is on the same line of the javadoc's header
 	    			if (lastColumn > maxColumn)  {
 	    				lastColumn--; // new line gives an extra character
-	    				this.lastNumberOfNewLines++; // in case we leave just after
+	    				this.lastNumberOfNewLines++; // the javadoc will become multi lines
 	    				this.line++;
 	    			}
 	    		}
-				if (lastColumn > maxColumn) {
+				if (lastColumn > maxColumn && token != TerminalTokens.TokenNameAT && (tokensBufferLength == 0 || tokensBuffer.charAt(tokensBufferLength-1) != '@')) {
 					// not enough space on the line
-					boolean alreadyHasNewLine = !hasTokens && tokensBuffer.length() > 0 && firstText && !isHtmlTag && this.lastNumberOfNewLines > 0;
-					if (!alreadyHasNewLine) {
-						if (lastColumn == this.column) {
+					if (!isHtmlTag && (firstColumn+tokensBufferLength+tokenLength) >= maxColumn) {
+						// there won't be enough room even if we break the line before the buffered tokens
+						// So add the buffered tokens now
+						buffer.append(tokensBuffer);
+						this.column += tokensBufferLength;
+						tokensBuffer.setLength(0);
+						tokensBufferLength = 0;
+						textOnNewLine = false;
+					}
+					if (!textOnNewLine) {
+						if (headerLine && lastColumn == this.column) {
 							this.lastNumberOfNewLines++;
 							this.line++;
 						}
@@ -130,15 +141,16 @@
 				    		buffer.append(indentationBuffer);
 				    	}
 					}
-			    	if (tokensBuffer.length() > 0) {
+			    	if (tokensBufferLength > 0) {
 			    		String tokensString = tokensBuffer.toString().trim();
 						buffer.append(tokensString);
 						this.column += tokensString.length();
 						tokensBuffer.setLength(0);
+						tokensBufferLength = 0;
 			    	}
 					buffer.append(this.scanner.source, tokenStart, tokenLength);
-					hasTokens = true;
 					this.column += tokenLength;
+					textOnNewLine = false;
 					if (headerLine) {
 						firstColumn--;
 						headerLine = false;

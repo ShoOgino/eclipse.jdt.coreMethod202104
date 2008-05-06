@@ -1,0 +1,165 @@
+private String filterFormattingInComments(String input) {
+	StringTokenizer tokenizer = new StringTokenizer(input, "\r\n\f");
+	StringBuffer buffer = new StringBuffer();
+	boolean skipToken = false;
+	String line =  null;
+	lineLoop: while (tokenizer.hasMoreTokens()) {
+		if (!skipToken) {
+			line = tokenizer.nextToken();
+		}
+		skipToken = false;
+		int length = line.length();
+		int lineStart = 0;
+		if (length > 0) {
+			// Trim leading whitespaces
+			if (IGNORE_SPACES > 0) {
+				while (lineStart < length && ScannerHelper.isWhitespace(line.charAt(lineStart))) {
+					lineStart++;
+				}
+			}
+			// Search if a comment starts
+			int commentKind = 0;
+			int idx = line.indexOf('/', lineStart);
+			if (idx >= 0 && (idx+1) < length) {
+				idx++;
+				char ch = line.charAt(idx++);
+				switch (ch) {
+					case '/':
+						commentKind = 1; // line comment
+						break;
+					case '*':
+						commentKind = 2; // block comment
+						if (idx < length && line.charAt(idx) == '*') {
+							commentKind = 3; // javadoc comment
+							idx++;
+						}
+						break;
+				}
+				if (commentKind != 0) {
+					// Enter a comment
+					switch (IGNORE_SPACES) {
+						case ALL_COMMENTS_SPACES:
+							switch (commentKind) {
+								case 1:
+									int start = idx;
+									buffer.append(line.substring(0, start).trim());
+									while (true) {
+										if (start < length) {
+											while (start < length && ScannerHelper.isWhitespace(line.charAt(start))) {
+												start++;
+											}
+											buffer.append(ModelTestsUtil.removeWhiteSpace(line.substring(start)));
+										}
+										line = tokenizer.nextToken();
+										length = line.length();
+										start = 0;
+										while (start < length && ScannerHelper.isWhitespace(line.charAt(start))) {
+											start++;
+										}
+										if (start > length+1 || line.charAt(start) != '/' || line.charAt(start+1) != '/') {
+											buffer.append('\n');
+											skipToken = true;
+											// only gate to break the loop
+											continue lineLoop;
+										}
+										start += 2;
+									}
+								case 2:
+								case 3:
+									buffer.append(line.substring(0, idx).trim());
+									int endComment = line.indexOf("*/");
+									if (endComment > 0) {
+										buffer.append(ModelTestsUtil.removeWhiteSpace(line.substring(0, endComment + 2)));
+										line = line.substring(endComment+2);
+										skipToken = true;
+										continue lineLoop;
+									}
+									while (endComment < 0) {
+										buffer.append(ModelTestsUtil.removeWhiteSpace(line));
+										line = tokenizer.nextToken();
+										endComment = line.indexOf("*/");
+									}
+									buffer.append(ModelTestsUtil.removeWhiteSpace(line.substring(0, endComment + 2)));
+									buffer.append('\n');
+									continue;
+							}
+							break;
+						case ALL_COMMENTS_LINES_LEADING_SPACES:
+							switch (commentKind) {
+								case 1:
+									int start = idx;
+									buffer.append(line.substring(0, start).trim());
+									while (true) {
+										if (start < length) {
+											while (start < length && ScannerHelper.isWhitespace(line.charAt(start))) {
+												start++;
+											}
+											if (start < length) {
+												buffer.append(line.substring(start));
+											}
+										}
+										line = tokenizer.nextToken();
+										length = line.length();
+										start = 0;
+										while (start < length && ScannerHelper.isWhitespace(line.charAt(start))) {
+											start++;
+										}
+										if (start < length && (line.charAt(start) != '/' || line.charAt(start+1) != '/')) {
+											buffer.append('\n');
+											skipToken = true;
+											// only gate to break the loop
+											continue lineLoop;
+										}
+										buffer.append(' ');
+										start += 2; // skip next line starting comment
+									}
+								case 3:
+								case 2:
+									start = idx;
+									int endComment = line.indexOf("*/");
+									if (endComment > 0) {
+										buffer.append(line.substring(0, endComment + 2));
+										line = line.substring(endComment+2);
+										skipToken = true;
+										continue lineLoop;
+									}
+									buffer.append(line.substring(0, start).trim());
+									while (endComment < 0) {
+										if (start < length) {
+											while (start < length && ScannerHelper.isWhitespace(line.charAt(start))) {
+												start++;
+											}
+											if (start < length && ch == '*') {
+												start++;
+												while (start < length && ScannerHelper.isWhitespace(line.charAt(start))) {
+													start++;
+												}
+											}
+											if (start < length) {
+												buffer.append(line.substring(start));
+											}
+										}
+										line = tokenizer.nextToken();
+										length = line.length();
+										endComment = line.indexOf("*/");
+										start = 0;
+										buffer.append(' ');
+									}
+									buffer.append(line.substring(0, endComment + 2));
+									buffer.append('\n');
+									continue;
+							}
+					}
+				}
+			}
+		}
+		if (length > 0 && lineStart > 0 && lineStart < length) {
+			buffer.append(line.substring(lineStart).trim());
+		} else {
+			buffer.append(line);
+		}
+		buffer.append('\n');
+	}
+    return buffer.toString();
+}
+

@@ -4,7 +4,7 @@
 		int firstColumn = this.column;
 		int indentLevel = this.indentationLevel;
 		int indentations = this.numberOfIndentations;
-		this.indentationLevel = getNextIndentationLevel(firstColumn);
+		this.indentationLevel = (this.column / this.tabLength) * this.tabLength;
 		this.numberOfIndentations = this.indentationLevel / this.indentationSize;
 
 		// Consume the comment prefix
@@ -15,6 +15,8 @@
 		this.scanner.getNextChar();
 		buffer.append(this.scanner.currentCharacter);
 		this.column += 2;
+		StringBuffer tokensBuffer = new StringBuffer();
+		boolean bufferHasTokens = false;
 
 		// Scan the text token per token to compact it and size it the max line length
 		int maxColumn = this.formatter.preferences.comment_line_length + 1;
@@ -30,23 +32,31 @@
 			try {
 				token = this.scanner.getNextToken();
 			} catch (InvalidInputException iie) {
-				String msg = iie.getMessage();
-				if (msg == Scanner.INVALID_CHARACTER_CONSTANT) {
-					buffer.append('\'');
-				} else if (msg == Scanner.INVALID_CHAR_IN_STRING) {
-					buffer.append('"');
-				} else {
-					// skip failure
-				}
-				// Need to retrieve correct position
+	    		if (previousToken == -1 || previousToken == TerminalTokens.TokenNameWHITESPACE) {
+	    			tokensBuffer.append(' ');
+	    		}
 				this.scanner.resetTo(this.scanner.startPosition, commentEnd);
-				this.scanner.getNextChar();
-				this.column++;
+	    		char ch = (char) this.scanner.getNextChar();
+				previousToken = TerminalTokens.TokenNameWHITESPACE;
+				while (!ScannerHelper.isWhitespace(ch)) {
+					tokensBuffer.append(ch);
+					if (this.scanner.atEnd()) {
+						previousToken = TerminalTokens.TokenNameEOF;
+						break;
+					}
+					ch = (char) this.scanner.getNextChar();
+				}
 				continue;
 			}
 			switch (token) {
 				case TerminalTokens.TokenNameWHITESPACE:
 					previousToken = token;
+					if (tokensBuffer.length() > 0) {
+						buffer.append(tokensBuffer);
+						this.column += tokensBuffer.length();
+						tokensBuffer.setLength(0);
+						bufferHasTokens = true;
+					}
 					previousPosition = this.scanner.currentPosition;
 					previousChar = this.scanner.currentCharacter;
 					continue;
@@ -55,31 +65,62 @@
 			}
 			int tokenStart = this.scanner.getCurrentTokenStartPosition();
     		int tokenLength = (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - tokenStart;
-    		boolean insertSpace = previousToken == TerminalTokens.TokenNameWHITESPACE;
-			this.column += tokenLength;
-    		if (previousToken == -1 || insertSpace) this.column++;
-    		int col = column; 
-			if (!firstWord && col > maxColumn) {
+    		boolean insertSpace = previousToken == -1 || previousToken == TerminalTokens.TokenNameWHITESPACE;
+    		int lastColumn = this.column + tokensBuffer.length() + tokenLength;
+    		if (insertSpace) lastColumn++;
+			if (!firstWord && lastColumn > maxColumn) {
 				// not enough space on the line
 				this.line++;
-		    	buffer.append(this.lineSeparator);
-		    	this.column = 1;
-		    	printIndentationIfNecessary(buffer);
-	    		buffer.append(LINE_COMMENT_PREFIX);
-		    	this.column = firstColumn + LINE_COMMENT_PREFIX_LENGTH;
+				if ((firstColumn+tokensBuffer.length()+tokenLength) > maxColumn) {
+					// there won't be enough room even if we break the line before the buffered tokens
+					// So add the buffered tokens now
+					buffer.append(tokensBuffer);
+					this.column += tokensBuffer.length();
+					tokensBuffer.setLength(0);
+					bufferHasTokens = true;
+				}
+				if (bufferHasTokens) {
+			    	buffer.append(this.lineSeparator);
+			    	this.column = 1;
+			    	printIndentationIfNecessary(buffer);
+	    			buffer.append(LINE_COMMENT_PREFIX);
+		    		this.column += LINE_COMMENT_PREFIX_LENGTH;
+				}
+		    	if (tokensBuffer.length() > 0) {
+		    		if (ScannerHelper.isWhitespace(tokensBuffer.charAt(0))) {
+						buffer.append(tokensBuffer.substring(1));
+						this.column += tokensBuffer.length() - 1;
+		    		} else {
+						buffer.append(tokensBuffer);
+						this.column += tokensBuffer.length();
+		    		}
+					tokensBuffer.setLength(0);
+					if (insertSpace)  {
+		    			buffer.append(' ');
+		    			this.column++;
+					}
+		    	}
 				buffer.append(this.scanner.source, tokenStart, tokenLength);
+				bufferHasTokens = true;
 				this.column += tokenLength;
+				firstColumn = this.indentationLevel + LINE_COMMENT_PREFIX_LENGTH;
 			} else {
 				// append token to the line
-				if (previousToken == -1 || insertSpace)  {
-	    			buffer.append(' ');
+				if (insertSpace)  {
+	    			tokensBuffer.append(' ');
 				}
-				buffer.append(this.scanner.source, tokenStart, tokenLength);
+				tokensBuffer.append(this.scanner.source, tokenStart, tokenLength);
 			}
 			previousToken = token;
 			previousPosition = this.scanner.currentPosition;
 			previousChar = this.scanner.currentCharacter;
 			firstWord = false;
+		}
+
+		// Add remaining buffered tokens
+		if (tokensBuffer.length() > 0) {
+			buffer.append(tokensBuffer);
+			this.column += tokensBuffer.length();
 		}
 
 		// Append separator if the comment is not at the end of file
