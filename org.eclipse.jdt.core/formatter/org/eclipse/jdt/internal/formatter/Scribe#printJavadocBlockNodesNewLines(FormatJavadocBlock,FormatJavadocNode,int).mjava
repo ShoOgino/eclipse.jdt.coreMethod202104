@@ -3,22 +3,22 @@
     	int nodeStart = node.sourceStart;
  	    try {
 			this.scanner.resetTo(nodeStart , node.sourceEnd);
-	    	int token = this.scanner.getNextToken();
-	    	int length = (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - this.scanner.startPosition;
+	    	int length = 0;
 	    	int newLines = 0;
 	    	boolean newLine = false;
 			boolean headerLine = block.isHeaderLine() && this.lastNumberOfNewLines == 0;
+			int firstColumn = 1 + this.indentationLevel + BLOCK_LINE_PREFIX_LENGTH;
+			if (this.commentIndentation != null) firstColumn += this.commentIndentation.length();
+			if (headerLine) maxColumn++;
 	    	if (node.isText()) {
 	    		FormatJavadocText text = (FormatJavadocText)node;
-				int firstColumn = 1 + this.indentationLevel + BLOCK_LINE_PREFIX_LENGTH;
-				if (headerLine) firstColumn++;
     			if (text.isImmutableHtmlTag()) {
 			    	if (nodeStart > (previousEnd+1)) {
 			    		length++; // include space between nodes
 			    	}
-    				int col = this.column + length;
+    				int lastColumn = this.column + length;
 	    			while (!this.scanner.atEnd()) {
-	    				token = this.scanner.getNextToken();
+	    				int token = this.scanner.getNextToken();
 	    				switch (token) {
 	    					case TerminalTokens.TokenNameWHITESPACE:
 	    						if (CharOperation.indexOf('\n', this.scanner.source, this.scanner.startPosition, this.scanner.currentPosition) >= 0) {
@@ -37,23 +37,25 @@
 				    			length = (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - this.scanner.startPosition;
 	    						break;
 	    				}
-	    				col += length;
-			    		if (headerLine) { // special case when text is on the same line of the javadoc's header
-			    			if ((col-1) > maxColumn)  {
-								newLines++;
-								col = firstColumn;
-								firstColumn--;
+	    				lastColumn += length;
+	    				if (lastColumn > maxColumn) {
+							newLines++;
+				    		if (headerLine) {
+								maxColumn--;
 								headerLine = false;
 			    			}
-			    		} else if (col > maxColumn) {
-							newLines++;
-							col = firstColumn;
+							lastColumn = firstColumn;
 						}
 	    			}
 	    			return newLines;
     			}
     			if (text.isHtmlTag()) {
+    				if (text.getHtmlTagID() == JAVADOC_SINGLE_BREAK_TAG_ID) {
+    					// never break before single break tag
+    					return 0;
+    				}
 	    			// read the html tag
+    				this.scanner.getNextToken();
 	    			if (this.scanner.getNextToken() == TerminalTokens.TokenNameDIVIDE) {
 	    				length++;
 	    				this.scanner.getNextToken();
@@ -63,22 +65,53 @@
 	    			length++;
 	    		} else {
 	    			while (true) {
-	    				token = this.scanner.getNextToken();
+	    				int token = this.scanner.getNextToken();
 	    				if (token == TerminalTokens.TokenNameWHITESPACE || token == TerminalTokens.TokenNameEOF) break;
 		    			int tokenLength = (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - this.scanner.startPosition;
-		    			if ((firstColumn + length + tokenLength) >= maxColumn) {
+		    			length += tokenLength;
+		    			if ((this.column + length) >= maxColumn) {
 		    				break;
 		    			}
-		    			length += tokenLength;
 	    			}
 	    		}
 	    	} else {
 	    		FormatJavadocBlock inlinedBlock = (FormatJavadocBlock) node;
-	    		length += inlinedBlock.tagEnd - inlinedBlock.sourceStart + 1;
+	    		length += inlinedBlock.tagEnd - inlinedBlock.sourceStart + 1;  // tag length
+	    		if (inlinedBlock.reference != null) {
+		    		length++; // space between tag and reference
+					this.scanner.resetTo(inlinedBlock.reference.sourceStart, inlinedBlock.reference.sourceEnd);
+					int previousToken = -1;
+					loop: while (!this.scanner.atEnd()) {
+						int token = this.scanner.getNextToken();
+			    		int tokenLength = (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - this.scanner.startPosition;
+						switch (token) {
+							case TerminalTokens.TokenNameWHITESPACE:
+								if (previousToken == TerminalTokens.TokenNameCOMMA) { // space between method arguments
+									length++;
+								}
+								break;
+							case TerminalTokens.TokenNameMULTIPLY:
+								break;
+							default:
+								length += tokenLength;
+								if ((this.column+length) > maxColumn) {
+									break loop;
+								}
+					    		break;
+						}
+						previousToken = token;
+		    		}
+	    		}
+	    		length++; // one more for closing brace
 	    	}
 	    	if (nodeStart > (previousEnd+1)) {
 	    		length++; // include space between nodes
 	    	}
+    		if ((firstColumn + length) >= maxColumn && node == block.nodes[0]) {
+    			// Do not split in this peculiar case as length would be also over the max
+    			// length on next line
+    			return 0;
+    		}
 			if ((this.column + length) > maxColumn) {
 	    		return 1;
 	    	}

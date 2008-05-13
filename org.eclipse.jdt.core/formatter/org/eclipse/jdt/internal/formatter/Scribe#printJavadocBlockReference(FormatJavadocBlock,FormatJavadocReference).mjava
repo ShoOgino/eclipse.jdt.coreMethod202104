@@ -1,0 +1,76 @@
+	private void printJavadocBlockReference(FormatJavadocBlock block, FormatJavadocReference reference) {
+		int maxColumn = this.formatter.preferences.comment_line_length + 1;
+		boolean headerLine = block.isHeaderLine();
+		boolean inlined = block.isInlined();
+		if (headerLine) maxColumn++;
+		
+		// First we need to know what is the indentation
+		this.scanner.resetTo(block.tagEnd+1, reference.sourceEnd);
+		StringBuffer buffer = new StringBuffer();
+		boolean needFormat = false;
+		int previousToken = -1;
+		int spacePosition = -1;
+		String newLineString = null;
+		StringBuffer newLineBuffer = null;
+		int firstColumn = -1;
+		while (!this.scanner.atEnd()) {
+			int token;
+			try {
+				token = this.scanner.getNextToken();
+	    		int tokenLength = (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - this.scanner.startPosition;
+				switch (token) {
+					case TerminalTokens.TokenNameWHITESPACE:
+						if (previousToken != -1 || tokenLength > 1 || this.scanner.currentCharacter != ' ') needFormat = true;
+						if (previousToken == -1) { // space before reference
+							buffer.append(' ');
+							this.column++;
+						}
+						if (previousToken == TerminalTokens.TokenNameCOMMA) { // space between method arguments
+							spacePosition = buffer.length();
+							buffer.append(' ');
+							this.column++; // space before reference
+						}
+						break;
+					case TerminalTokens.TokenNameMULTIPLY:
+						break;
+					default:
+						if (!inlined && spacePosition > 0 && (this.column+tokenLength) > maxColumn) {
+							// not enough space on the line
+							this.lastNumberOfNewLines++;
+							this.line++;
+							if (newLineString == null) {
+								newLineBuffer = new StringBuffer(this.lineSeparator);
+						    	this.column = 1;
+						    	printIndentationIfNecessary(newLineBuffer);
+					    		newLineBuffer.append(BLOCK_LINE_PREFIX);
+					    		this.column += BLOCK_LINE_PREFIX_LENGTH;
+								if (this.commentIndentation != null) {
+							    	newLineBuffer.append(this.commentIndentation);
+							    	this.column += this.commentIndentation.length();
+						    	}
+						    	newLineString = newLineBuffer.substring(0, newLineBuffer.length()-1); // remove last space as buffer will be inserted before a space
+						    	firstColumn = this.column;
+							} else {
+								this.column = firstColumn;
+							}
+							this.column = firstColumn + buffer.length() - spacePosition - 1;
+							buffer.insert(spacePosition, newLineString);
+							if (headerLine) {
+								headerLine = false;
+								maxColumn--;
+							}
+						}
+						buffer.append(this.scanner.source, this.scanner.startPosition, tokenLength);
+			    		this.column += tokenLength;
+			    		break;
+				}
+				previousToken = token;
+			} catch (InvalidInputException iie) {
+				// does not happen as syntax is correct
+			}
+		}
+		if (needFormat) {
+		    addReplaceEdit(block.tagEnd+1, reference.sourceEnd, buffer.toString());
+		}
+    }
+

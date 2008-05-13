@@ -7,76 +7,66 @@
 
 		// Compute indentation
 		boolean headerLine = block.isHeaderLine() && this.lastNumberOfNewLines == 0;
-		int firstColumn = 1 + this.indentationLevel + BLOCK_LINE_PREFIX_LENGTH;
 		int maxColumn = this.formatter.preferences.comment_line_length + 1;
 		if (headerLine) {
-			firstColumn++;
 			maxColumn++;
 		}
-		StringBuffer indentationBuffer = printJavadocIndentationBuffer(block, firstColumn);
 
 		// format tag section if necessary
 		boolean clearBlankLines = this.formatter.preferences.comment_clear_blank_lines_in_javadoc_comment;
 		if (!block.isInlined()) {
 			this.lastNumberOfNewLines = 0;
 		}
-		if (!block.isDescription()) {
-			this.column += previousEnd - block.sourceStart + 1;
+		if (block.isDescription()) {
+			if (!block.isInlined()) {
+			    this.commentIndentation = null;
+			}
+		} else {
+			int tagLength = previousEnd - block.sourceStart + 1;
+			this.column += tagLength;
+			if (!block.isInlined()) {
+			    boolean indentRootTags = this.formatter.preferences.comment_indent_root_tags && !block.isInDescription();
+			    int commentIndentationLevel = 0;
+				if (indentRootTags) {
+				    commentIndentationLevel = tagLength + 1;
+					boolean indentParamTag = this.formatter.preferences.comment_indent_parameter_description && block.isInParamTag();
+					if (indentParamTag) {
+						commentIndentationLevel += this.indentationSize;
+					}
+				}
+				if (commentIndentationLevel == 0) {
+				    this.commentIndentation = null;
+				} else {
+		    		StringBuffer indentationBuffer = new StringBuffer();
+		        	for (int i=0; i<commentIndentationLevel; i++) {
+		    			indentationBuffer.append(' ');
+		        	}
+	        		this.commentIndentation = indentationBuffer.toString();
+		    	}
+			}
 			FormatJavadocReference reference= block.reference;
 			if (reference != null) {
 				// format reference
-				StringBuffer buffer = new StringBuffer();
-				printJavadocBlockReference(buffer, reference, block);
-			    addReplaceEdit(previousEnd+1, reference.sourceEnd, buffer.toString());
+				printJavadocBlockReference(block, reference);
 				previousEnd = reference.sourceEnd;
 			}
 
 			// Nothing else to do if the tag has no node
 			if (maxNodes < 0)  {
 				if (block.isInlined()) {
-					// Need to print the closing brace
-					StringBuffer buffer = new StringBuffer();
-					if ((this.column+1) > maxColumn) {
-						this.lastNumberOfNewLines++;
-						this.line++;
-				    	buffer.append(this.lineSeparator);
-				    	this.column = 1;
-				    	printIndentationIfNecessary(buffer);
-			    		buffer.append(BLOCK_LINE_PREFIX);
-				    	this.column = headerLine ? firstColumn-1 : firstColumn;
-				    	if (indentationBuffer != null) {
-							buffer.append(indentationBuffer);
-							this.column += indentationBuffer.length();
-				    	}
-				    	headerLine = false;
-				    	maxColumn--;
-					}
-					this.scanner.resetTo(previousEnd+1, block.sourceEnd+1);
-					try {
-	                    int token = this.scanner.getNextToken();
-	                    while (token == TerminalTokens.TokenNameWHITESPACE || token == TerminalTokens.TokenNameMULTIPLY) {
-	                    	token = this.scanner.getNextToken();
-	                    }
-	                    if (token == TerminalTokens.TokenNameRBRACE) {
-		                    buffer.append(this.scanner.source, this.scanner.startPosition, this.scanner.currentPosition-this.scanner.startPosition);
-					    	this.column += (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - this.scanner.startPosition;
-	                    }
-                    } catch (InvalidInputException e) {
-						buffer.append('}');
-                    }
-                    addReplaceEdit(previousEnd+1, block.sourceEnd, buffer.toString());
+					this.column++;
 				}
 				return;
 			}
 		}
 		
 		// tag section: iterate through the blocks composing this tag but the last one
+		int previousLine = 0;
 		for (int i=0; i<=maxNodes; i++) {
 			FormatJavadocNode node = block.nodes[i];
 			int nodeStart = node.sourceStart;
 			
 			// Print empty lines before the node
-			int textLength = -1;
 			int newLines;
 			if (i == 0) {
 				newLines = this.formatter.preferences.comment_insert_new_line_for_parameter && block.isParamTag() ? 1 : 0;
@@ -84,7 +74,7 @@
 					if (newLines == 0) {
 						newLines = printJavadocBlockNodesNewLines(block, node, previousEnd);
 					}
-			   		printJavadocGapLines(previousEnd+1, nodeStart-1, newLines, clearBlankLines, false, null);
+					printJavadocGapLines(previousEnd+1, nodeStart-1, newLines, clearBlankLines, false, null);
 				} else {
 					StringBuffer buffer = new StringBuffer();
 					if (newLines > 0) {
@@ -96,6 +86,7 @@
 				}
 			} else {
 				newLines = this.column > maxColumn ? 1 : 0;
+				if (!clearBlankLines && node.lineStart > (previousLine+1)) newLines = node.lineStart - previousLine;
 				if (newLines < node.linesBefore) newLines = node.linesBefore;
 				if (newLines == 0) {
 					newLines = printJavadocBlockNodesNewLines(block, node, previousEnd);
@@ -114,13 +105,13 @@
 				FormatJavadocText text = (FormatJavadocText) node;
 				if (text.isHtmlTag()) {
 					if (text.isImmutableHtmlTag()) {
-						// Immutable tags are not formatted
-						if (textLength == -1) {
-							textLength = getTextLength(block, text, false);
-						}
 						// Indent if new line was added
-						int additionalLength = printJavadocHtmlImmutableTag(text, block, newLines > 0);
-						this.column += textLength - additionalLength;
+						if (newLines > 0 && this.commentIndentation != null) {
+					    	addInsertEdit(node.sourceStart, this.commentIndentation);
+					    	this.column += this.commentIndentation.length();
+						}
+						printJavadocHtmlImmutableTag(text, block, newLines > 0);
+						this.column += getTextLength(block, text);
 					} else {
 						printJavadocHtmlTag(text, block, newLines>0);
 					}
@@ -128,15 +119,16 @@
 					printJavadocText(text, block, newLines>0);
 				}
 			} else {
-				if (newLines > 0 && indentationBuffer != null) {
-					addInsertEdit(node.sourceStart, indentationBuffer.toString());
-					this.column += indentationBuffer.length();
+				if (newLines > 0 && this.commentIndentation != null) {
+			    	addInsertEdit(node.sourceStart, this.commentIndentation);
+			    	this.column += this.commentIndentation.length();
 				}
 				printJavadocBlock((FormatJavadocBlock)node);
 			}
 
 			// Print empty lines before the node
 			previousEnd = node.sourceEnd;
+			previousLine = Util.getLineNumber(previousEnd, this.lineEnds, node.lineStart > 1 ? node.lineStart-2 : 0, this.maxLines);
 		}
 		this.lastNumberOfNewLines = 0;
 	}
