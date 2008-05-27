@@ -1,0 +1,200 @@
+/*
+ * Run Sun compilation using one or more versions of javac. Compare the 
+ * results to expected ones, raising mismatches as needed.
+ * To enable such tests, specify the following VM properies in the launch
+ * configuration:
+ * -Drun.javac=enabled
+ *     mandatory - tells the test suite to run javac tests
+ * -Djdk.roots=<the root directories of the tested javac(s)>
+ *     optional - enables to find the versions of javac that will be run by 
+ *     the tests suite; the root directories must be specified as a 
+ *     File.pathSeparator separated list of absolute paths which should
+ *     point each to a JDK root, aka /opt/jdk1.5.0_05 for Linux or
+ *     c:/JDK_50 for Windows; in case this property is not specified, the
+ *     tests suite will use the runtime JRE of the launching configuration.
+ * Note that enabling javac tests implies running into 1.5 compliance level
+ * (or higher).
+ */
+// WORK unify use of output, error, log, etc...
+protected void runJavac(
+		String[] testFiles,
+		boolean expectingCompilerErrors,
+		String expectedCompilerLog,
+		String expectedOutputString,
+		String expectedErrorString,
+		boolean shouldFlushOutputDirectory, 
+		JavacTestOptions options) {
+	// WORK we're probably doing too much around class libraries in general - java should be able to fetch its own runtime libs
+	if (options == JavacTestOptions.SKIP) {
+		return;
+	}
+	String testName = testName();
+	Iterator compilers = javacCompilers.iterator();
+	while (compilers.hasNext()) {
+		JavacCompiler compiler = (JavacCompiler) compilers.next();
+		if (!options.skip(compiler) && compiler.compliance == complianceLevel) {
+			JavacTestOptions.Excuse excuse = options.excuseFor(compiler);
+			StringBuffer compilerLog = new StringBuffer();
+			File javacOutputDirectory = null;
+			int mismatch = 0;
+			String sourceFileNames[] = null;
+			try {
+				// cleanup javac output dir if needed
+ 				javacOutputDirectory = new File(JAVAC_OUTPUT_DIR_NAME +  
+						File.separator + compiler.rawVersion); // need to change output directory per javac version
+				if (shouldFlushOutputDirectory) {
+					Util.delete(javacOutputDirectory);
+				}
+				javacOutputDirectory.mkdirs();
+				// write test files
+				for (int i = 0, length = testFiles.length; i < length; ) {
+					String fileName = testFiles[i++];
+					String contents = testFiles[i++];
+					File file = new File(javacOutputDirectory, fileName);
+					if (fileName.lastIndexOf('/') >= 0) {
+						File dir = file.getParentFile();
+						if (!dir.exists()) {
+							dir.mkdirs();
+						}
+					}
+					Util.writeToFile(contents, file.getPath());
+				}
+				// compute source file names
+				int testFilesLength = testFiles.length;
+				sourceFileNames = new String[testFilesLength / 2];
+				for (int i = 0, j = 0; i < testFilesLength; i += 2, j++) {
+					sourceFileNames[j] = testFiles[i];
+				}
+				// compile
+				long compilerResult = compiler.compile(javacOutputDirectory, "" /* options */, sourceFileNames, compilerLog);
+				// check cumulative javac results
+				// WORK need to use a per compiler approach
+				if (! testName.equals(javacTestName)) {
+					javacTestName = testName;
+					javacTestErrorFlag = false;
+				}
+				if ((compilerResult & JavacCompiler.EXIT_VALUE_MASK) != 0) {
+					javacTestErrorFlag = true;
+				}
+				// compare compilation results
+				if (expectingCompilerErrors) {
+					if ((compilerResult & JavacCompiler.EXIT_VALUE_MASK) == 0) {
+						if ((compilerResult & JavacCompiler.ERROR_LOG_MASK) == 0) {
+							mismatch = JavacTestOptions.MismatchType.EclipseErrorsJavacNone;
+						} else {
+							mismatch = JavacTestOptions.MismatchType.EclipseErrorsJavacWarnings;
+						}
+					}
+				} else {
+					if ((compilerResult & JavacCompiler.EXIT_VALUE_MASK) != 0) {
+						if (expectedCompilerLog != null /* null skips warnings test */ && expectedCompilerLog.length() > 0) {
+							mismatch = JavacTestOptions.MismatchType.JavacErrorsEclipseWarnings;
+						} else {
+							mismatch = JavacTestOptions.MismatchType.JavacErrorsEclipseNone;
+						}
+					} else if (expectedCompilerLog != null /* null skips warnings test */) {
+						if (expectedCompilerLog.length() > 0 && (compilerResult & JavacCompiler.ERROR_LOG_MASK) == 0) {
+							mismatch = JavacTestOptions.MismatchType.EclipseWarningsJavacNone;
+						} else if (expectedCompilerLog.length() == 0 && (compilerResult & JavacCompiler.ERROR_LOG_MASK) != 0) {
+							mismatch = JavacTestOptions.MismatchType.JavacWarningsEclipseNone;
+						}
+					}
+				}
+			} 
+			catch (InterruptedException e1) {
+				e1.printStackTrace();
+				mismatch = JavacTestOptions.MismatchType.JavacAborted;
+			}
+			catch (Throwable e) {
+				e.printStackTrace();
+				mismatch = JavacTestOptions.MismatchType.JavacNotLaunched;
+			}
+			String output = null;
+			String err = null;
+			try {
+				if ((expectedOutputString != null || expectedErrorString != null) && 
+						!javacTestErrorFlag && mismatch == 0 && sourceFileNames != null) {
+					JavaRuntime runtime = JavaRuntime.runtimeFor(compiler);
+					StringBuffer stderr = new StringBuffer();
+					StringBuffer stdout = new StringBuffer();
+					runtime.execute(javacOutputDirectory, "", "\"" + testFiles[0].substring(0, testFiles[0].length() - 5) + "\"", stdout, stderr);
+					if (expectedOutputString != null /* null skips output test */) {
+						output = stdout.toString().trim();
+						if (!expectedOutputString.equals(output)) {
+							mismatch = JavacTestOptions.MismatchType.StandardOutputMismatch;
+						}
+					}
+					if (expectedErrorString != null /* null skips error test */ && mismatch == 0) {
+						err = stderr.toString().trim();
+						if (!expectedErrorString.equals(err)) {
+							mismatch = JavacTestOptions.MismatchType.ErrorOutputMismatch;
+						}
+					}
+				}
+			} 
+			catch (InterruptedException e1) {
+				e1.printStackTrace();
+				mismatch = JavacTestOptions.MismatchType.JavaAborted;
+			}
+			catch (Throwable e) {
+				e.printStackTrace();
+				mismatch = JavacTestOptions.MismatchType.JavaNotLaunched;
+			} 
+			if (mismatch != 0) {
+				if (excuse != null && excuse.clears(mismatch)) {
+					excuse = null;
+				} else {
+					System.out.println("----------------------------------------");
+					switch (mismatch) {
+						case JavacTestOptions.MismatchType.EclipseErrorsJavacNone:
+							assertEquals(testName + " - Eclipse found error(s) but Javac did not find any", 
+									"", expectedCompilerLog.toString());
+							break;
+						case JavacTestOptions.MismatchType.EclipseErrorsJavacWarnings:
+							assertEquals(testName + " - Eclipse found error(s) but Javac only found warning(s)", 
+									expectedCompilerLog.toString(),	compilerLog.toString());
+							break;
+						case JavacTestOptions.MismatchType.JavacErrorsEclipseNone:
+							assertEquals(testName + " - Javac found error(s) but Eclipse did not find any", 
+									"", compilerLog.toString());
+							break;
+						case JavacTestOptions.MismatchType.JavacErrorsEclipseWarnings:
+							assertEquals(testName + " - Javac found error(s) but Eclipse only found warning(s)", 
+									expectedCompilerLog.toString(),	compilerLog.toString());
+							break;
+						case JavacTestOptions.MismatchType.EclipseWarningsJavacNone:
+							assertEquals(testName + " - Eclipse found warning(s) but Javac did not find any", 
+									"", expectedCompilerLog.toString());
+							break;
+						case JavacTestOptions.MismatchType.JavacWarningsEclipseNone:
+							assertEquals(testName + " - Javac found warning(s) but Eclipse did not find any", 
+									"", compilerLog.toString());
+							break;
+						case JavacTestOptions.MismatchType.StandardOutputMismatch:
+							assertEquals(testName + " - Eclipse/Javac standard output mismatch", 
+									expectedOutputString, output);
+							break;
+						case JavacTestOptions.MismatchType.ErrorOutputMismatch:
+							assertEquals(testName + " - Eclipse/Javac standard error mismatch", 
+									expectedErrorString, err);
+							break;
+						case JavacTestOptions.MismatchType.JavacAborted:
+						case JavacTestOptions.MismatchType.JavacNotLaunched:
+							fail(testName + " - Javac failure");
+							break;
+						case JavacTestOptions.MismatchType.JavaAborted:
+						case JavacTestOptions.MismatchType.JavaNotLaunched:
+							fail(testName + " - Java failure");
+							break;
+						default:
+							throw new RuntimeException("unexpected mismatch value: " + mismatch);
+					}
+				}
+			}
+			if (excuse != null) {
+				fail(testName + ": unused excuse " + excuse + " for compiler " + compiler);
+			}
+		}
+	}
+}
+
