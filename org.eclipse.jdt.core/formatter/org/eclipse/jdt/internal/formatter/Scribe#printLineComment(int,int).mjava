@@ -11,10 +11,9 @@
 		this.scanner.resetTo(commentStart, commentEnd);
 		StringBuffer buffer = new StringBuffer();
 		this.scanner.getNextChar();
-		buffer.append(this.scanner.currentCharacter);
 		this.scanner.getNextChar();
-		buffer.append(this.scanner.currentCharacter);
 		this.column += 2;
+		int editStart = this.scanner.currentPosition;
 		StringBuffer tokensBuffer = new StringBuffer();
 		boolean bufferHasTokens = false;
 
@@ -22,7 +21,6 @@
 		int maxColumn = this.formatter.preferences.comment_line_length + 1;
 		int previousToken = -1;
 		int previousPosition = commentStart;
-		char previousChar = 0;
 		boolean firstWord = true;
 		this.scanner.skipComments = true;
 
@@ -43,8 +41,6 @@
 						tokensBuffer.setLength(0);
 						bufferHasTokens = true;
 					}
-					previousPosition = this.scanner.currentPosition;
-					previousChar = this.scanner.currentCharacter;
 					continue;
 				case TerminalTokens.TokenNameEOF:
 					continue;
@@ -99,9 +95,9 @@
 			}
 			previousToken = token;
 			previousPosition = this.scanner.currentPosition;
-			previousChar = this.scanner.currentCharacter;
 			firstWord = false;
 		}
+		this.scanner.skipComments = false;
 
 		// Add remaining buffered tokens
 		if (tokensBuffer.length() > 0) {
@@ -113,29 +109,22 @@
 		this.indentationLevel = indentLevel;
 		this.numberOfIndentations = indentations;
 		this.lastNumberOfNewLines = 0;
-		if (previousChar == '\n' || previousChar == '\r') {
-			// line comment is normally ended with new line
-			this.column = 1;
-			buffer.append(this.lineSeparator);
-			this.line++;
-			this.lastNumberOfNewLines++;
-		} else {
-			this.scanner.resetTo(previousPosition, commentEnd);
-			while (!this.scanner.atEnd()) {
-				this.scanner.getNextChar();
-				if (this.scanner.currentCharacter == '\n' || this.scanner.currentCharacter == '\r') {
-					// line comment is normally ended with new line
-					buffer.append(this.lineSeparator);
-					this.column = 1;
-					this.line++;
-					this.lastNumberOfNewLines++;
-					break;
-				}
+		this.scanner.resetTo(previousPosition, commentEnd);
+		while (!this.scanner.atEnd()) {
+			previousPosition = this.scanner.currentPosition;
+			this.scanner.getNextChar();
+			if (this.scanner.currentCharacter == '\n' || this.scanner.currentCharacter == '\r') {
+				// line comment is normally ended with new line
+				this.column = 1;
+				this.line++;
+				this.lastNumberOfNewLines++;
+				break;
 			}
 		}
 
 		// Replace the existing comment with new one
-		addReplaceEdit(commentStart, commentEnd, buffer.toString());
-		this.scanner.skipComments = false;
+		if (buffer.length() > 0) {
+			addReplaceEdit(editStart, previousPosition - 1, buffer.toString());
+		}
 	}
 
