@@ -21,7 +21,6 @@
 			this.deprecated = false;
 			this.lastLinePtr = getLineNumber(javadocEnd);
 			this.textStart = -1;
-			this.spacePosition = -1;
 			char previousChar = 0;
 			int invalidTagLineEnd = -1;
 			int invalidInlineTagLineEnd = -1;
@@ -51,9 +50,13 @@
 				this.javadocTextStart = this.index;
 			}
 			this.lineEnd = (this.linePtr == this.lastLinePtr) ? this.javadocEnd: this.scanner.getLineEnd(this.linePtr) - 1;
+			this.javadocTextEnd = this.javadocEnd - 2; // supposed text end, it will be refined later...
 			
 			// Loop on each comment character
+			int textEndPosition = -1;
 			while (!abort && this.index < this.javadocEnd) {
+
+				// Store previous position and char
 				previousPosition = this.index;
 				previousChar = nextCharacter;
 				
@@ -94,10 +97,6 @@
 									this.sourceParser.problemReporter().javadocUnterminatedInlineTag(this.inlineTagStart, end);
 								}
 								validComment = false;
-								int textEndPosition = previousPosition;
-								if (isFormatterParser && ScannerHelper.isWhitespace(previousChar)) {
-									textEndPosition = this.spacePosition;
-								}
 								if (this.textStart != -1 && this.textStart < textEndPosition) {
 									if (pushText) pushText(this.textStart, textEndPosition);
 								}
@@ -107,10 +106,6 @@
 							}
 							if (previousChar == '{') {
 								if (this.textStart != -1) {
-									int textEndPosition = this.inlineTagStart;
-									if (isFormatterParser && this.spacePosition == (this.inlineTagStart-1)) {
-										textEndPosition = this.spacePosition;
-									}
 									if (this.textStart < textEndPosition) {
 										if (pushText) pushText(this.textStart, textEndPosition);
 									}
@@ -118,11 +113,7 @@
 								this.inlineTagStarted = true;
 								invalidInlineTagLineEnd = this.lineEnd;
 							} else if (this.textStart != -1 && this.textStart < invalidTagLineEnd) {
-								int textEndPosition = invalidTagLineEnd;
-								if (isFormatterParser && ScannerHelper.isWhitespace(previousChar)) {
-									textEndPosition = this.spacePosition;
-								}
-								if (pushText) pushText(this.textStart, textEndPosition);
+								if (pushText) pushText(this.textStart, invalidTagLineEnd);
 							}
 							this.scanner.resetTo(this.index, this.javadocEnd);
 							this.currentTokenType = -1; // flush token cache at line begin
@@ -138,27 +129,26 @@
 									}
 									this.textStart = this.tagSourceEnd+1;
 									invalidTagLineEnd  = this.lineEnd;
+									textEndPosition = this.index;
 								}
 							} catch (InvalidInputException e) {
 								consumeToken();
 							}
-						} else if (verifText && this.tagValue == TAG_RETURN_VALUE && this.returnStatement != null) {
-							refreshReturnStatement();
-						} else if (isFormatterParser) {
-							if (this.textStart == -1) this.textStart = previousPosition;
+						} else {
+							textEndPosition = this.index;
+							if (verifText && this.tagValue == TAG_RETURN_VALUE && this.returnStatement != null) {
+								refreshReturnStatement();
+							} else if (isFormatterParser) {
+								if (this.textStart == -1) this.textStart = previousPosition;
+							}
 						}
 						this.lineStarted = true;
 						break;
 					case '\r':
 					case '\n':
 						if (this.lineStarted) {
-							int textEndPosition = previousPosition;
-							if (isFormatterParser) {
-								if (ScannerHelper.isWhitespace(previousChar)) {
-									textEndPosition = this.spacePosition;
-								} else {
-									this.spacePosition = previousPosition;
-								}
+							if (isFormatterParser && !ScannerHelper.isWhitespace(previousChar)) {
+								textEndPosition = previousPosition;
 							}
 							if (this.textStart != -1 && this.textStart < textEndPosition) {
 								if (pushText) pushText(this.textStart, textEndPosition);
@@ -175,10 +165,6 @@
 						}
 						if (this.inlineTagStarted) {
 							if (pushText) {
-								int textEndPosition = previousPosition;
-								if (isFormatterParser && ScannerHelper.isWhitespace(previousChar)) {
-									textEndPosition = this.spacePosition;
-								}
 								if (this.lineStarted && this.textStart != -1 && this.textStart < textEndPosition) {
 									pushText(this.textStart, textEndPosition);
 								}
@@ -192,6 +178,7 @@
 							}
 						}
 						this.lineStarted = true;
+						textEndPosition = this.index;
 						break;
 					case '{' :
 						if (verifText && this.tagValue == TAG_RETURN_VALUE && this.returnStatement != null) {
@@ -206,15 +193,14 @@
 								this.sourceParser.problemReporter().javadocUnterminatedInlineTag(this.inlineTagStart, end);
 							}
 							if (pushText) {
-								int textEndPosition = previousPosition;
-								if (isFormatterParser && ScannerHelper.isWhitespace(previousChar)) {
-									textEndPosition = this.spacePosition;
-								}
 								if (this.lineStarted && this.textStart != -1 && this.textStart < textEndPosition) {
 									pushText(this.textStart, textEndPosition);
 								}
 								refreshInlineTagPosition(textEndPosition);
 							}
+							textEndPosition = this.index;
+						} else if (peekChar() != '@') {
+							textEndPosition = this.index;
 						}
 						if (!this.lineStarted) {
 							this.textStart = previousPosition;
@@ -240,9 +226,13 @@
 					case '\u000c' :	/* FORM FEED               */
 					case ' ' :			/* SPACE                   */
 					case '\t' :			/* HORIZONTAL TABULATION   */
-						// Store first space position while formatting
-						if (isFormatterParser && !ScannerHelper.isWhitespace(previousChar)) {
-							this.spacePosition = previousPosition;
+						// Do not include trailing spaces in text while formatting
+						if (isFormatterParser) {
+							if (!ScannerHelper.isWhitespace(previousChar)) {
+								textEndPosition = previousPosition;
+							}
+						} else if (this.lineStarted) {
+							textEndPosition = this.index;
 						}
 						break;
 					case '/':
@@ -256,8 +246,10 @@
 							// html tags are meaningful for formatter parser
 							int initialIndex = this.index;
 							this.scanner.resetTo(this.index, this.javadocEnd);
-							int endTextPosition = ScannerHelper.isWhitespace(previousChar) ? this.spacePosition : previousPosition;
-							if (parseHtmlTag(previousPosition, endTextPosition)) {
+							if (!ScannerHelper.isWhitespace(previousChar)) {
+								textEndPosition = previousPosition;
+							}
+							if (parseHtmlTag(previousPosition, textEndPosition)) {
 								break;
 							}
 							if (this.abort) return false;
@@ -272,6 +264,7 @@
 							this.textStart = previousPosition;
 						}
 						this.lineStarted = true;
+						textEndPosition = this.index;
 						break;
 				}
 			}
@@ -286,18 +279,14 @@
 					this.sourceParser.problemReporter().javadocUnterminatedInlineTag(this.inlineTagStart, end);
 				}
 				if (pushText) {
-					int textEndPosition = this.javadocTextEnd;
-					if (isFormatterParser && ScannerHelper.isWhitespace(previousChar)) {
-						textEndPosition = this.spacePosition;
-					}
 					if (this.lineStarted && this.textStart != -1 && this.textStart < textEndPosition) {
 						pushText(this.textStart, textEndPosition);
 					}
 					refreshInlineTagPosition(textEndPosition);
 				}
 				this.inlineTagStarted = false;
-			} else if (pushText && this.lineStarted && this.textStart != -1 && this.textStart <= this.javadocTextEnd) {
-				pushText(this.textStart, this.starPosition);
+			} else if (pushText && this.lineStarted && this.textStart != -1 && this.textStart <= textEndPosition) {
+				pushText(this.textStart, textEndPosition);
 			}
 			updateDocComment();
 		} catch (Exception ex) {
