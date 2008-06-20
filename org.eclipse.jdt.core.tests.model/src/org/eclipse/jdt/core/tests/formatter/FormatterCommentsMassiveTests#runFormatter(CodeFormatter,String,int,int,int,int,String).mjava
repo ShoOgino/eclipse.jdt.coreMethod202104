@@ -1,50 +1,76 @@
 String runFormatter(CodeFormatter codeFormatter, String source, int kind, int indentationLevel, int offset, int length, String lineSeparator) {
 	TextEdit edit = codeFormatter.format(kind, source, offset, length, indentationLevel, lineSeparator);//$NON-NLS-1$
-	if (edit == null) return null;
-	String result = org.eclipse.jdt.internal.core.util.Util.editedString(source, edit);
+	try {
+		assertNotNull("Formatted source should not be null!", edit);
+	}
+	catch (ComparisonFailure cf) {
+		this.failureIndex = NO_OUTPUT_FAILURE;
+//		FAILURES[NO_OUTPUT_FAILURE].failures.add(this.path);
+		throw cf;
+	}
+	catch (AssertionFailedError afe) {
+		this.failureIndex = NO_OUTPUT_FAILURE;
+//		FAILURES[NO_OUTPUT_FAILURE].failures.add(this.path);
+		throw afe;
+	}
+	String initialResult = org.eclipse.jdt.internal.core.util.Util.editedString(source, edit);
 
 	int count = 1;
-	if (COMPARE == null && length == source.length()) {
-		String previousResult = result;
-		while (count++ < FORMAT_REPEAT) {
-			edit = codeFormatter.format(kind, result, 0, result.length(), indentationLevel, lineSeparator);//$NON-NLS-1$
-			if (edit == null) return null;
-			previousResult = result;
-			result = org.eclipse.jdt.internal.core.util.Util.editedString(result, edit);
+	String result = initialResult;
+	String previousResult = result;
+	while (count++ < FORMAT_REPEAT) {
+		edit = codeFormatter.format(kind, result, 0, result.length(), indentationLevel, lineSeparator);//$NON-NLS-1$
+		if (edit == null) return null;
+		previousResult = result;
+		result = org.eclipse.jdt.internal.core.util.Util.editedString(result, edit);
+	}
+	if (!previousResult.equals(result)) {
+
+		// Try to compare without leading spaces
+		String trimmedExpected = ModelTestsUtil.trimLinesLeadingWhitespaces(previousResult);
+		String trimmedActual= ModelTestsUtil.trimLinesLeadingWhitespaces(result);
+		if (trimmedExpected.equals(trimmedActual)) {
+			this.failureIndex = REFORMATTING_LEADING_FAILURE;
+			FAILURES[REFORMATTING_LEADING_FAILURE].failures.add(this.path);
+			this.hasSpaceFailure = true;
+			return initialResult;
 		}
-		if (!previousResult.equals(result)) {
-			switch (IGNORE_SPACES) {
-				case ALL_SPACES:
-					String trimmedExpected = ModelTestsUtil.removeWhiteSpace(previousResult);
-					String trimmedActual= ModelTestsUtil.removeWhiteSpace(result);
-					if (trimmedExpected.equals(trimmedActual)) {
-						this.whitespacesFailures.add(this.path);
-						this.hasSpaceFailure = true;
-						return previousResult;
-					}
-					break;
-				case LINES_LEADING_SPACES:
-					trimmedExpected = ModelTestsUtil.trimLinesLeadingWhitespaces(previousResult);
-					trimmedActual= ModelTestsUtil.trimLinesLeadingWhitespaces(result);
-					if (trimmedExpected.equals(trimmedActual)) {
-						this.leadingWhitespacesFailures.add(this.path);
-						this.hasSpaceFailure = true;
-						return previousResult;
-					}
-					if (ModelTestsUtil.removeWhiteSpace(previousResult).equals(ModelTestsUtil.removeWhiteSpace(result))) {
-						this.whitespacesFailures.add(this.path);
-						this.hasSpaceFailure = true;
-						return previousResult;
-					}
-					break;
+		
+		// Try to compare without spaces at all
+		if (ModelTestsUtil.removeWhiteSpace(previousResult).equals(ModelTestsUtil.removeWhiteSpace(result))) {
+			this.failureIndex = REFORMATTING_WHITESPACES_FAILURE;
+			FAILURES[REFORMATTING_WHITESPACES_FAILURE].failures.add(this.path);
+			this.hasSpaceFailure = true;
+			return initialResult;
+		}
+
+		/*
+		// Try to see if the formatting also fails without comments
+		if (!runFormatterWithoutComments(null, source, kind, indentationLevel, offset, length, lineSeparator)) {
+			return initialResult;
+		}
+
+		// format without comments is OK => there's a problem with comment formatting
+		String counterString = counterToString(count-1);
+		assertSourceEquals(counterString+" formatting is different from first one!", previousResult, result);
+		*/
+		if (!isExpectedFailure()) {
+			String counterString = counterToString(count-1);
+			try {
+				assertSourceEquals(counterString+" formatting is different from first one!", previousResult, result);
 			}
-			if (!isExpectedFailure()) {
-				String counterString = counterToString(count-1);
-				assertSourceEquals(counterString+" formatting is different from first one!", Util.convertToIndependantLineDelimiter(previousResult), Util.convertToIndependantLineDelimiter(result));
+			catch (ComparisonFailure cf) {
+				this.failureIndex = REFORMATTING_FAILURE;
+//				FAILURES[REFORMATTING_FAILURE].failures.add(this.path);
+				throw cf;
 			}
-			result = previousResult;
+			catch (AssertionFailedError afe) {
+				this.failureIndex = REFORMATTING_FAILURE;
+//				FAILURES[REFORMATTING_FAILURE].failures.add(this.path);
+				throw afe;
+			}
 		}
 	}
-	return result;
+	return initialResult;
 }
 

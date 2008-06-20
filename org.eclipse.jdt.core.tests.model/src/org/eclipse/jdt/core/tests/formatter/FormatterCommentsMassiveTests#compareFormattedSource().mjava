@@ -1,34 +1,29 @@
 void compareFormattedSource() throws IOException, Exception {
-	DefaultCodeFormatter codeFormatter = codeFormatter();
 	String source = new String(org.eclipse.jdt.internal.compiler.util.Util.getFileCharContent(this.file, null));
 	try {
-		if ("comments".equals(COMPARE)) {
-			String[] oldFormattedComments = formattedComments(source, true);
-			String[] newFormattedComments = formattedComments(source, false);
-			int length = oldFormattedComments == null ? 0 : oldFormattedComments.length;
-			this.abortOnFailure = false;
-			assertEquals("Unexpected number of comments!", length, newFormattedComments == null ? 0 : newFormattedComments.length);
-			for (int i=0; i<length; i++) {
-				String oldComment = oldFormattedComments[i];
-				String newComment = newFormattedComments[i];
-				if (oldComment == null) {
-					assertNull("Unexpected non-null new comment", newComment);
-				} else {
-					String expected = cleanAllKnownDifferences(oldComment);
-					String actual = cleanAllKnownDifferences(newComment);
-					if (!expected.equals(actual)) {
-						String actualResult = runFormatter(codeFormatter, source, CodeFormatter.K_COMPILATION_UNIT | CodeFormatter.F_INCLUDE_COMMENTS, 0, 0, source.length(), null);
-						String expectedResult = expectedFormattedSource(source);
-						assertEquals("Unexpected difference with formatted comment "+(i+1), Util.convertToIndependantLineDelimiter(expectedResult), Util.convertToIndependantLineDelimiter(actualResult));
-					}
-				}
+		// Format the source
+		String actualResult = runFormatter(codeFormatter(), source, CodeFormatter.K_COMPILATION_UNIT | CodeFormatter.F_INCLUDE_COMMENTS, 0, 0, source.length(), null);
+
+		// Look for output to compare with
+		File outputFile = new Path(OUTPUT_DIR.getPath()).append(this.path).toFile();
+		if (COMPARE) {
+			String expectedResult = new String(org.eclipse.jdt.internal.compiler.util.Util.getFileCharContent(outputFile, null));
+			try {
+				assertSourceEquals("Unexpected format output!", expectedResult, actualResult);
+			}
+			catch (ComparisonFailure cf) {
+				this.failureIndex = COMPARISON_FAILURE;
+//				FAILURES[COMPARISON_FAILURE].failures.add(this.path);
+				throw cf;
+			}
+			catch (AssertionFailedError afe) {
+				this.failureIndex = COMPARISON_FAILURE;
+//				FAILURES[COMPARISON_FAILURE].failures.add(this.path);
+				throw afe;
 			}
 		} else {
-			String actualResult = runFormatter(codeFormatter, source, CodeFormatter.K_COMPILATION_UNIT | CodeFormatter.F_INCLUDE_COMMENTS, 0, 0, source.length(), null);
-			if (!this.hasSpaceFailure && "true".equals(COMPARE)) {
-				String expectedResult = expectedFormattedSource(source);
-				assertLineEquals(actualResult, source, expectedResult, false);
-			}
+			outputFile.getParentFile().mkdirs();
+			Util.writeToFile(actualResult, outputFile.getAbsolutePath());
 		}
 	}
 	catch (Exception e) {
