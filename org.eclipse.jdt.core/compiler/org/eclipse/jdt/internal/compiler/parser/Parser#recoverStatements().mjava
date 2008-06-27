@@ -1,22 +1,22 @@
 protected void recoverStatements() {
 	class MethodVisitor extends ASTVisitor {
 		public ASTVisitor typeVisitor;
-		
+
 		TypeDeclaration enclosingType; // used only for initializer
-		
+
 		TypeDeclaration[] types = new TypeDeclaration[0];
 		int typePtr = -1;
 		public boolean visit(ConstructorDeclaration constructorDeclaration, ClassScope scope) {
-			typePtr = -1;
+			this.typePtr = -1;
 			return true;
 		}
 		public boolean visit(Initializer initializer, MethodScope scope) {
-			typePtr = -1;
+			this.typePtr = -1;
 			if (initializer.block == null) return false;
 			return true;
 		}
 		public boolean visit(MethodDeclaration methodDeclaration,ClassScope scope) {
-			typePtr = -1;
+			this.typePtr = -1;
 			return true;
 		}
 		public boolean visit(TypeDeclaration typeDeclaration, BlockScope scope) {
@@ -34,10 +34,10 @@ protected void recoverStatements() {
 			return false;
 		}
 		public void endVisit(ConstructorDeclaration constructorDeclaration, ClassScope scope) {
-			this.endVisitMethod(constructorDeclaration, scope);
+			endVisitMethod(constructorDeclaration, scope);
 		}
 		public void endVisit(MethodDeclaration methodDeclaration, ClassScope scope) {
-			this.endVisitMethod(methodDeclaration, scope);
+			endVisitMethod(methodDeclaration, scope);
 		}
 		private void endVisitMethod(AbstractMethodDeclaration methodDeclaration, ClassScope scope) {
 			TypeDeclaration[] foundTypes = null;
@@ -51,17 +51,17 @@ protected void recoverStatements() {
 			Parser.this.recoveryScanner.resetTo(methodDeclaration.bodyStart, methodDeclaration.bodyEnd);
 			Scanner oldScanner = Parser.this.scanner;
 			Parser.this.scanner = Parser.this.recoveryScanner;
-			Parser.this.parseStatements(
+			parseStatements(
 					methodDeclaration,
 					methodDeclaration.bodyStart,
 					methodDeclaration.bodyEnd,
 					foundTypes,
-					compilationUnit);
+					Parser.this.compilationUnit);
 			Parser.this.scanner = oldScanner;
 			Parser.this.referenceContext = oldContext;
-			
+
 			for (int i = 0; i < length; i++) {
-				foundTypes[i].traverse(typeVisitor, scope);
+				foundTypes[i].traverse(this.typeVisitor, scope);
 			}
 		}
 		public void endVisit(Initializer initializer, MethodScope scope) {
@@ -77,26 +77,26 @@ protected void recoverStatements() {
 			Parser.this.recoveryScanner.resetTo(initializer.bodyStart, initializer.bodyEnd);
 			Scanner oldScanner = Parser.this.scanner;
 			Parser.this.scanner = Parser.this.recoveryScanner;
-			Parser.this.parseStatements(
+			parseStatements(
 					this.enclosingType,
 					initializer.bodyStart,
 					initializer.bodyEnd,
 					foundTypes,
-					compilationUnit);
+					Parser.this.compilationUnit);
 			Parser.this.scanner = oldScanner;
 			Parser.this.referenceContext = oldContext;
-			
+
 			for (int i = 0; i < length; i++) {
-				foundTypes[i].traverse(typeVisitor, scope);
+				foundTypes[i].traverse(this.typeVisitor, scope);
 			}
 		}
 	}
 	class TypeVisitor extends ASTVisitor {
 		public MethodVisitor methodVisitor;
-		
+
 		TypeDeclaration[] types = new TypeDeclaration[0];
 		int typePtr = -1;
-		
+
 		public void endVisit(TypeDeclaration typeDeclaration, BlockScope scope) {
 			endVisitType();
 		}
@@ -122,32 +122,32 @@ protected void recoverStatements() {
 		}
 		public boolean visit(ConstructorDeclaration constructorDeclaration, ClassScope scope) {
 			if(constructorDeclaration.isDefaultConstructor()) return false;
-			
-			constructorDeclaration.traverse(methodVisitor, scope);
+
+			constructorDeclaration.traverse(this.methodVisitor, scope);
 			return false;
 		}
 		public boolean visit(Initializer initializer, MethodScope scope) {
 			if (initializer.block == null) return false;
-			methodVisitor.enclosingType = this.types[typePtr];
-			initializer.traverse(methodVisitor, scope);
+			this.methodVisitor.enclosingType = this.types[this.typePtr];
+			initializer.traverse(this.methodVisitor, scope);
 			return false;
 		}
 		public boolean visit(MethodDeclaration methodDeclaration, ClassScope scope) {
-			methodDeclaration.traverse(methodVisitor, scope);
+			methodDeclaration.traverse(this.methodVisitor, scope);
 			return false;
 		}
 	}
-	
+
 	MethodVisitor methodVisitor = new MethodVisitor();
 	TypeVisitor typeVisitor = new TypeVisitor();
 	methodVisitor.typeVisitor = typeVisitor;
 	typeVisitor.methodVisitor = methodVisitor;
-	
+
 	if(this.referenceContext instanceof AbstractMethodDeclaration) {
 		((AbstractMethodDeclaration)this.referenceContext).traverse(methodVisitor, (ClassScope)null);
 	} else if(this.referenceContext instanceof TypeDeclaration) {
 		TypeDeclaration typeContext = (TypeDeclaration)this.referenceContext;
-		
+
 		int length = typeContext.fields.length;
 		for (int i = 0; i < length; i++) {
 			final FieldDeclaration fieldDeclaration = typeContext.fields[i];

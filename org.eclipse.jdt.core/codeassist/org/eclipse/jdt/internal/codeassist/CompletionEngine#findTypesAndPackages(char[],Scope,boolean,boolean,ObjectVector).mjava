@@ -1,34 +1,34 @@
 	private void findTypesAndPackages(char[] token, Scope scope, boolean proposeBaseTypes, boolean proposeVoidType, ObjectVector typesFound) {
-		
+
 		if (token == null)
 			return;
-		
+
 		// do not propose type if completion token is empty
 		boolean skip = false;
 		if (token.length == 0 && NO_TYPE_COMPLETION_ON_EMPTY_TOKEN) {
-			if(!assistNodeIsConstructor && (this.assistNodeInJavadoc & CompletionOnJavadoc.EXCEPTION) == 0) {
+			if(!this.assistNodeIsConstructor && (this.assistNodeInJavadoc & CompletionOnJavadoc.EXCEPTION) == 0) {
 				return;
 			}
 			skip = true;
 		}
-		
+
 		boolean proposeType =
 			!this.requestor.isIgnored(CompletionProposal.TYPE_REF) ||
 			((this.assistNodeInJavadoc & CompletionOnJavadoc.TEXT) != 0 && !this.requestor.isIgnored(CompletionProposal.JAVADOC_TYPE_REF));
-		
+
 		boolean proposeAllMemberTypes = !this.assistNodeIsConstructor;
-		
+
 		if (!skip && proposeType && scope.enclosingSourceType() != null) {
 			findNestedTypes(token, scope.enclosingSourceType(), scope, proposeAllMemberTypes, typesFound);
-			if(!assistNodeIsInterface &&
-					!assistNodeIsConstructor &&
-					!assistNodeIsAnnotation &&
+			if(!this.assistNodeIsInterface &&
+					!this.assistNodeIsConstructor &&
+					!this.assistNodeIsAnnotation &&
 					this.assistNodeInJavadoc == 0) {
 				// don't propose type parameters if the completion is a constructor ('new |')
 				findTypeParameters(token, scope);
 			}
 		}
-		
+
 		boolean isEmptyPrefix = token.length == 0;
 
 		if (!skip && proposeType && this.unitScope != null) {
@@ -40,15 +40,15 @@
 					temp = temp.enclosingType();
 				}
 			}
-			
+
 			int typeLength = token.length;
 			SourceTypeBinding[] types = this.unitScope.topLevelTypes;
 
 			next : for (int i = 0, length = types.length; i < length; i++) {
-				SourceTypeBinding sourceType = types[i]; 
-				
+				SourceTypeBinding sourceType = types[i];
+
 				if(isForbidden(sourceType)) continue next;
-				
+
 				if(proposeAllMemberTypes &&
 					sourceType != outerInvocationType) {
 					findSubMemberTypes(
@@ -61,27 +61,27 @@
 							false,
 							typesFound);
 				}
-				
+
 				if (sourceType.sourceName == CompletionParser.FAKE_TYPE_NAME) continue next;
 				if (sourceType.sourceName == TypeConstants.PACKAGE_INFO_NAME) continue next;
 
 				if (typeLength > sourceType.sourceName.length) continue next;
-				
+
 				if (!CharOperation.prefixEquals(token, sourceType.sourceName, false)
 						&& !(this.options.camelCaseMatch && CharOperation.camelCaseMatch(token, sourceType.sourceName))) continue;
-	
+
 				if (this.assistNodeIsAnnotation && !hasPossibleAnnotationTarget(sourceType, scope)) {
 					continue next;
 				}
 
 				for (int j = typesFound.size; --j >= 0;) {
 					ReferenceBinding otherType = (ReferenceBinding) typesFound.elementAt(j);
-	
+
 					if (sourceType == otherType) continue next;
 				}
-				
+
 				this.knownTypes.put(CharOperation.concat(sourceType.qualifiedPackageName(), sourceType.sourceName(), '.'), this);
-				
+
 				if(this.assistNodeIsClass) {
 					if(!sourceType.isClass()) continue next;
 				} else if(this.assistNodeIsInterface) {
@@ -93,7 +93,7 @@
 						continue next;
 					}
 				}
-				
+
 				int relevance = computeBaseRelevance();
 				relevance += computeRelevanceForResolution();
 				relevance += computeRelevanceForInterestingProposal();
@@ -127,18 +127,18 @@
 				}
 			}
 		}
-		
+
 		if(!skip && proposeType) {
-			this.findTypesFromStaticImports(token, scope, proposeAllMemberTypes, typesFound);
+			findTypesFromStaticImports(token, scope, proposeAllMemberTypes, typesFound);
 		}
-		
+
 		if (isEmptyPrefix && !this.assistNodeIsAnnotation) {
 			if(proposeType && this.expectedTypesPtr > -1) {
 				next : for (int i = 0; i <= this.expectedTypesPtr; i++) {
 					if(this.expectedTypes[i] instanceof ReferenceBinding) {
 						ReferenceBinding refBinding = (ReferenceBinding)this.expectedTypes[i];
-						
-						if(refBinding.isTypeVariable() && assistNodeIsConstructor) {
+
+						if(refBinding.isTypeVariable() && this.assistNodeIsConstructor) {
 							// don't propose type variable if the completion is a constructor ('new |')
 							continue next;
 						}
@@ -146,10 +146,10 @@
 								refBinding.isViewedAsDeprecated() &&
 								!scope.isDefinedInSameUnit(refBinding))
 							continue next;
-						
+
 						int accessibility = IAccessRule.K_ACCESSIBLE;
 						if(refBinding.hasRestrictedAccess()) {
-							AccessRestriction accessRestriction = lookupEnvironment.getAccessRestriction(refBinding);
+							AccessRestriction accessRestriction = this.lookupEnvironment.getAccessRestriction(refBinding);
 							if(accessRestriction != null) {
 								switch (accessRestriction.getProblemId()) {
 									case IProblem.ForbiddenReference:
@@ -167,22 +167,22 @@
 								}
 							}
 						}
-						
+
 						for (int j = 0; j < typesFound.size(); j++) {
 							ReferenceBinding typeFound = (ReferenceBinding)typesFound.elementAt(j);
 							if (typeFound == refBinding) {
 								continue next;
 							}
 						}
-						
+
 						boolean inSameUnit = this.unitScope.isDefinedInSameUnit(refBinding);
-						
+
 						// top level types of the current unit are already proposed.
 						if(skip || !inSameUnit || (inSameUnit && refBinding.isMemberType())) {
 							char[] packageName = refBinding.qualifiedPackageName();
 							char[] typeName = refBinding.sourceName();
 							char[] completionName = typeName;
-							
+
 							boolean isQualified = false;
 							if (!this.insideQualifiedReference && !refBinding.isMemberType()) {
 								if (mustQualifyType(packageName, typeName, null, refBinding.modifiers)) {
@@ -193,7 +193,7 @@
 									isQualified = true;
 								}
 							}
-							
+
 							if(this.assistNodeIsClass) {
 								if(!refBinding.isClass()) continue next;
 							} else if(this.assistNodeIsInterface) {
@@ -201,7 +201,7 @@
 							} else if (this.assistNodeIsAnnotation) {
 								if(!refBinding.isAnnotationType()) continue next;
 							}
-							
+
 							int relevance = computeBaseRelevance();
 							relevance += computeRelevanceForResolution();
 							relevance += computeRelevanceForInterestingProposal();
@@ -209,7 +209,7 @@
 							relevance += computeRelevanceForExpectingType(refBinding);
 							relevance += computeRelevanceForQualification(isQualified);
 							relevance += computeRelevanceForRestrictions(accessibility);
-							
+
 							if(refBinding.isClass()) {
 								relevance += computeRelevanceForClass();
 								relevance += computeRelevanceForException(typeName);
@@ -218,10 +218,10 @@
 							} else if(refBinding.isInterface()) {
 								relevance += computeRelevanceForInterface();
 							}
-								
+
 							this.noProposal = false;
 							if(!this.requestor.isIgnored(CompletionProposal.TYPE_REF)) {
-								CompletionProposal proposal = this.createProposal(CompletionProposal.TYPE_REF, this.actualCompletionPosition);
+								CompletionProposal proposal = createProposal(CompletionProposal.TYPE_REF, this.actualCompletionPosition);
 								proposal.setDeclarationSignature(packageName);
 								proposal.setSignature(getSignature(refBinding));
 								proposal.setPackageName(packageName);
@@ -240,7 +240,7 @@
 						}
 					}
 				}
-			} 
+			}
 		} else {
 			if(!isEmptyPrefix && !this.requestor.isIgnored(CompletionProposal.KEYWORD)) {
 				if (this.assistNodeInJavadoc == 0 || (this.assistNodeInJavadoc & CompletionOnJavadoc.BASE_TYPES) != 0) {
@@ -260,7 +260,7 @@
 					char[] fullyQualifiedTypeName =
 						CharOperation.concat(
 								typeFound.qualifiedPackageName(),
-								typeFound.qualifiedSourceName(), 
+								typeFound.qualifiedSourceName(),
 								'.');
 					this.knownTypes.put(fullyQualifiedTypeName, this);
 				}

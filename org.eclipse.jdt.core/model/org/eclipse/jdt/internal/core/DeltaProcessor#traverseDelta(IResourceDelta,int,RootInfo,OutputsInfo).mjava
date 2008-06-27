@@ -3,41 +3,41 @@
 	 * the corresponding <code>IJavaElementDelta</code>s.
 	 */
 	private void traverseDelta(
-		IResourceDelta delta, 
-		int elementType, 
+		IResourceDelta delta,
+		int elementType,
 		RootInfo rootInfo,
 		OutputsInfo outputsInfo) {
-			
+
 		IResource res = delta.getResource();
-	
+
 		// set stack of elements
 		if (this.currentElement == null && rootInfo != null) {
 			this.currentElement = rootInfo.project;
 		}
-		
+
 		// process current delta
 		boolean processChildren = true;
 		if (res instanceof IProject) {
 			// reset source element parser cache
 			this.sourceElementParserCache = null;
-			
-			processChildren = 
-				this.updateCurrentDeltaAndIndex(
-					delta, 
-					elementType == IJavaElement.PACKAGE_FRAGMENT_ROOT ? 
+
+			processChildren =
+				updateCurrentDeltaAndIndex(
+					delta,
+					elementType == IJavaElement.PACKAGE_FRAGMENT_ROOT ?
 						IJavaElement.JAVA_PROJECT : // case of prj=src
-						elementType, 
+						elementType,
 					rootInfo);
 		} else if (rootInfo != null) {
-			processChildren = this.updateCurrentDeltaAndIndex(delta, elementType, rootInfo);
+			processChildren = updateCurrentDeltaAndIndex(delta, elementType, rootInfo);
 		} else {
 			// not yet inside a package fragment root
 			processChildren = true;
 		}
-		
+
 		// get the project's output locations and traverse mode
-		if (outputsInfo == null) outputsInfo = this.outputsInfo(rootInfo, res);
-	
+		if (outputsInfo == null) outputsInfo = outputsInfo(rootInfo, res);
+
 		// process children if needed
 		if (processChildren) {
 			IResourceDelta[] children = delta.getAffectedChildren();
@@ -49,41 +49,41 @@
 			for (int i = 0; i < length; i++) {
 				IResourceDelta child = children[i];
 				IResource childRes = child.getResource();
-	
+
 				// check source attachment change
-				this.checkSourceAttachmentChange(child, childRes);
-				
+				checkSourceAttachmentChange(child, childRes);
+
 				// find out whether the child is a package fragment root of the current project
 				IPath childPath = externalPath(childRes);
 				int childKind = child.getKind();
-				RootInfo childRootInfo = this.rootInfo(childPath, childKind);
+				RootInfo childRootInfo = rootInfo(childPath, childKind);
 				RootInfo originalChildRootInfo = childRootInfo;
 				if (childRootInfo != null && !childRootInfo.isRootOfProject(childPath)) {
 					// package fragment root of another project (dealt with later)
 					childRootInfo = null;
 				}
-				
+
 				// compute child type
-				int childType = 
-					this.elementType(
-						childRes, 
+				int childType =
+					elementType(
+						childRes,
 						childKind,
-						elementType, 
+						elementType,
 						rootInfo == null ? childRootInfo : rootInfo
 					);
-						
+
 				// is childRes in the output folder and is it filtered out ?
-				boolean isResFilteredFromOutput = this.isResFilteredFromOutput(rootInfo, outputsInfo, childRes, childType);
+				boolean isResFilteredFromOutput = isResFilteredFromOutput(rootInfo, outputsInfo, childRes, childType);
 
 				boolean isNestedRoot = rootInfo != null && childRootInfo != null;
-				if (!isResFilteredFromOutput 
+				if (!isResFilteredFromOutput
 						&& !isNestedRoot) { // do not treat as non-java rsc if nested root
 
-					this.traverseDelta(child, childType, rootInfo == null ? childRootInfo : rootInfo, outputsInfo); // traverse delta for child in the same project
+					traverseDelta(child, childType, rootInfo == null ? childRootInfo : rootInfo, outputsInfo); // traverse delta for child in the same project
 
 					if (childType == NON_JAVA_RESOURCE) {
 						if (rootInfo != null) { // if inside a package fragment root
-							if (!isValidParent) continue; 
+							if (!isValidParent) continue;
 							if (parent == null) {
 								// find the parent of the non-java resource to attach to
 								if (this.currentElement == null
@@ -92,12 +92,12 @@
 									this.currentElement = rootInfo.project;
 								}
 								if (elementType == IJavaElement.JAVA_PROJECT
-									|| (elementType == IJavaElement.PACKAGE_FRAGMENT_ROOT 
-										&& res instanceof IProject)) { 
+									|| (elementType == IJavaElement.PACKAGE_FRAGMENT_ROOT
+										&& res instanceof IProject)) {
 									// NB: attach non-java resource to project (not to its package fragment root)
 									parent = rootInfo.project;
 								} else {
-									parent = this.createElement(res, elementType, rootInfo);
+									parent = createElement(res, elementType, rootInfo);
 								}
 								if (parent == null) {
 									isValidParent = false;
@@ -125,34 +125,34 @@
 				} else {
 					oneChildOnClasspath = true; // to avoid reporting child delta as non-java resource delta
 				}
-								
-				// if child is a nested root 
+
+				// if child is a nested root
 				// or if it is not a package fragment root of the current project
 				// but it is a package fragment root of another project, traverse delta too
-				if (isNestedRoot 
+				if (isNestedRoot
 						|| (childRootInfo == null && originalChildRootInfo != null)) {
-					this.traverseDelta(child, IJavaElement.PACKAGE_FRAGMENT_ROOT, originalChildRootInfo, null); // binary output of childRootInfo.project cannot be this root
+					traverseDelta(child, IJavaElement.PACKAGE_FRAGMENT_ROOT, originalChildRootInfo, null); // binary output of childRootInfo.project cannot be this root
 				}
-	
+
 				// if the child is a package fragment root of one or several other projects
 				ArrayList rootList;
-				if ((rootList = this.otherRootsInfo(childPath, childKind)) != null) {
+				if ((rootList = otherRootsInfo(childPath, childKind)) != null) {
 					Iterator iterator = rootList.iterator();
 					while (iterator.hasNext()) {
 						originalChildRootInfo = (RootInfo) iterator.next();
 						this.currentElement = null; // ensure that 2 roots refering to the same resource don't share the current element (see https://bugs.eclipse.org/bugs/show_bug.cgi?id=210746 )
-						this.traverseDelta(child, IJavaElement.PACKAGE_FRAGMENT_ROOT, originalChildRootInfo, null); // binary output of childRootInfo.project cannot be this root
+						traverseDelta(child, IJavaElement.PACKAGE_FRAGMENT_ROOT, originalChildRootInfo, null); // binary output of childRootInfo.project cannot be this root
 					}
 				}
 			}
 			if (orphanChildren != null
 					&& (oneChildOnClasspath // orphan children are siblings of a package fragment root
 						|| res instanceof IProject)) { // non-java resource directly under a project
-						
+
 				// attach orphan children
 				IProject rscProject = res.getProject();
 				JavaProject adoptiveProject = (JavaProject)JavaCore.create(rscProject);
-				if (adoptiveProject != null 
+				if (adoptiveProject != null
 						&& JavaProject.hasJavaNature(rscProject)) { // delta iff Java project (18698)
 					for (int i = 0; i < length; i++) {
 						if (orphanChildren[i] != null) {

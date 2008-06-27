@@ -5,40 +5,40 @@
 	 * Translates <code>IResourceDeltas</code> into <code>IJavaElementDeltas</code>.
 	 *
 	 * @see IResourceDelta
-	 * @see IResource 
+	 * @see IResource
 	 */
 	public void resourceChanged(IResourceChangeEvent event) {
-	
+
 		int eventType = this.overridenEventType == -1 ? event.getType() : this.overridenEventType;
 		IResource resource = event.getResource();
 		IResourceDelta delta = event.getDelta();
-		
+
 		switch(eventType){
 			case IResourceChangeEvent.PRE_DELETE :
 				try {
-					if(resource.getType() == IResource.PROJECT 
+					if(resource.getType() == IResource.PROJECT
 						&& ((IProject) resource).hasNature(JavaCore.NATURE_ID)) {
-							
+
 						deleting((IProject)resource);
 					}
 				} catch(CoreException e){
 					// project doesn't exist or is not open: ignore
 				}
 				return;
-				
+
 			case IResourceChangeEvent.PRE_REFRESH:
 				JavaModelManager.getExternalManager().refreshReferences((IProject) resource, null);
 				return;
-				
+
 			case IResourceChangeEvent.POST_CHANGE :
 				HashSet elementsToRefresh = this.state.removeExternalElementsToRefresh();
 				if (isAffectedBy(delta) // avoid populating for SYNC or MARKER deltas
-						|| elementsToRefresh != null) { 
+						|| elementsToRefresh != null) {
 					try {
 						try {
 							stopDeltas();
 							checkProjectsBeingAddedOrRemoved(delta);
-							
+
 							// generate classpath change deltas
 							if (this.classpathChanges.size() > 0) {
 								boolean hasDelta = this.currentDelta != null;
@@ -51,8 +51,8 @@
 										hasDelta = true;
 
 										// need to recompute root infos
-										state.rootsAreStale = true;
-				
+										this.state.rootsAreStale = true;
+
 										change.requestIndexing();
 										this.state.addClasspathValidation(change.project);
 									}
@@ -60,14 +60,14 @@
 										this.state.addProjectReferenceChange(change.project, change.oldResolvedClasspath);
 									}
 									if ((result & ClasspathChange.HAS_LIBRARY_CHANGE) != 0) {
-										state.addExternalFolderChange(change.project, change.oldResolvedClasspath);
+										this.state.addExternalFolderChange(change.project, change.oldResolvedClasspath);
 									}
 								}
 								this.classpathChanges.clear();
 								if (!hasDelta)
 									this.currentDelta = null;
 							}
-							
+
 							// add late coming elements to refresh (see https://bugs.eclipse.org/bugs/show_bug.cgi?id=212769 )
 							if (elementsToRefresh == null) {
 								elementsToRefresh = this.state.removeExternalElementsToRefresh();
@@ -76,15 +76,15 @@
 								if (newElementsToRefresh != null)
 									elementsToRefresh.addAll(newElementsToRefresh);
 							}
-							
+
 							// generate external archive change deltas
 							if (elementsToRefresh != null) {
 								createExternalArchiveDelta(elementsToRefresh, null);
 							}
-							
+
 							// generate Java deltas from resource changes
 							IJavaElementDelta translatedDelta = processResourceDelta(delta);
-							if (translatedDelta != null) { 
+							if (translatedDelta != null) {
 								registerJavaModelDelta(translatedDelta);
 							}
 						} finally {
@@ -100,17 +100,17 @@
 						notifyTypeHierarchies(listeners, listenerCount);
 						fire(null, ElementChangedEvent.POST_CHANGE);
 					} finally {
-						// workaround for bug 15168 circular errors not reported 
+						// workaround for bug 15168 circular errors not reported
 						this.state.resetOldJavaProjectNames();
 						this.oldRoots = null;
 					}
 				}
 				return;
-				
+
 			case IResourceChangeEvent.PRE_BUILD :
 				boolean isAffected = isAffectedBy(delta);
 				boolean needCycleValidation = isAffected && validateClasspaths(delta);
-	
+
 				// update external folders if necessary
 			    ExternalFolderChange[] folderChanges = this.state.removeExternalFolderChanges();
 				if (folderChanges != null) {
@@ -123,7 +123,7 @@
 				        }
 				    }
 				}
-				
+
 				// create classpath markers if necessary
 				ClasspathValidation[] validations = this.state.removeClasspathValidations();
 				if (validations != null) {
@@ -132,7 +132,7 @@
 						validation.validate();
 					}
 				}
-				
+
 				// update project references if necessary
 			    ProjectReferenceChange[] projectRefChanges = this.state.removeProjectReferenceChanges();
 				if (projectRefChanges != null) {
@@ -146,7 +146,7 @@
 				        }
 				    }
 				}
-				
+
 				if (needCycleValidation || projectRefChanges != null) {
 					// update all cycle markers since the project references changes may have affected cycles
 					try {
@@ -155,15 +155,15 @@
 						// a project no longer exists
 					}
 				}
-				
+
 				if (isAffected) {
 					JavaModel.flushExternalFileCache();
 					JavaBuilder.buildStarting();
 				}
-				
+
 				// does not fire any deltas
 				return;
-	
+
 			case IResourceChangeEvent.POST_BUILD :
 				JavaBuilder.buildFinished();
 				return;

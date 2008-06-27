@@ -1,5 +1,5 @@
 protected void attachOrphanCompletionNode(){
-	if(assistNode == null || this.isAlreadyAttached) return;
+	if(this.assistNode == null || this.isAlreadyAttached) return;
 
 	this.isAlreadyAttached = true;
 
@@ -7,15 +7,15 @@ protected void attachOrphanCompletionNode(){
 		ASTNode orphan = this.assistNode;
 		this.isOrphanCompletionNode = false;
 
-		if (currentElement instanceof RecoveredUnit){
+		if (this.currentElement instanceof RecoveredUnit){
 			if (orphan instanceof ImportReference){
-				currentElement.add((ImportReference)orphan, 0);
+				this.currentElement.add((ImportReference)orphan, 0);
 			}
 		}
 
 		/* if in context of a type, then persists the identifier into a fake field return type */
-		if (currentElement instanceof RecoveredType){
-			RecoveredType recoveredType = (RecoveredType)currentElement;
+		if (this.currentElement instanceof RecoveredType){
+			RecoveredType recoveredType = (RecoveredType)this.currentElement;
 			/* filter out cases where scanner is still inside type header */
 			if (recoveredType.foundOpeningBrace) {
 				/* generate a pseudo field with a completion on type reference */
@@ -26,10 +26,10 @@ protected void attachOrphanCompletionNode(){
 					int info = topKnownElementInfo(COMPLETION_OR_ASSIST_PARSER);
 					if(kind == K_BINARY_OPERATOR && info == LESS && this.identifierPtr > -1) {
 						if(this.genericsLengthStack[this.genericsLengthPtr] > 0) {
-							this.consumeTypeArguments();
+							consumeTypeArguments();
 						}
-						this.pushOnGenericsStack(orphan);
-						this.consumeTypeArguments();
+						pushOnGenericsStack(orphan);
+						consumeTypeArguments();
 						fieldType = getTypeReference(0);
 						this.assistNodeParent = fieldType;
 					} else {
@@ -37,7 +37,7 @@ protected void attachOrphanCompletionNode(){
 					}
 
 					CompletionOnFieldType fieldDeclaration = new CompletionOnFieldType(fieldType, false);
-					
+
 					// retrieve annotations if any
 					int length;
 					if ((length = this.expressionLengthStack[this.expressionLengthPtr]) != 0 &&
@@ -51,24 +51,24 @@ protected void attachOrphanCompletionNode(){
 					}
 
 					// retrieve available modifiers if any
-					if (intPtr >= 2 && intStack[intPtr-1] == this.lastModifiersStart && intStack[intPtr-2] == this.lastModifiers){
-						fieldDeclaration.modifiersSourceStart = intStack[intPtr-1];
-						fieldDeclaration.modifiers = intStack[intPtr-2];
+					if (this.intPtr >= 2 && this.intStack[this.intPtr-1] == this.lastModifiersStart && this.intStack[this.intPtr-2] == this.lastModifiers){
+						fieldDeclaration.modifiersSourceStart = this.intStack[this.intPtr-1];
+						fieldDeclaration.modifiers = this.intStack[this.intPtr-2];
 					}
 
-					currentElement = currentElement.add(fieldDeclaration, 0);
+					this.currentElement = this.currentElement.add(fieldDeclaration, 0);
 					return;
 				}
 			}
 		}
 		/* if in context of a method, persists if inside arguments as a type */
-		if (currentElement instanceof RecoveredMethod){
-			RecoveredMethod recoveredMethod = (RecoveredMethod)currentElement;
+		if (this.currentElement instanceof RecoveredMethod){
+			RecoveredMethod recoveredMethod = (RecoveredMethod)this.currentElement;
 			/* only consider if inside method header */
 			if (!recoveredMethod.foundOpeningBrace) {
 				//if (rParenPos < lParenPos){ // inside arguments
 				if (orphan instanceof TypeReference){
-					currentElement = currentElement.parent.add(
+					this.currentElement = this.currentElement.parent.add(
 						new CompletionOnFieldType((TypeReference)orphan, true), 0);
 					return;
 				}
@@ -80,7 +80,7 @@ protected void attachOrphanCompletionNode(){
 								this.compilationUnit.compilationResult(),
 								(Annotation)orphan);
 					fakeType.isParameter = true;
-					currentElement.parent.add(fakeType, 0);
+					this.currentElement.parent.add(fakeType, 0);
 					this.pendingAnnotation = fakeType;
 					return;
 				}
@@ -94,18 +94,18 @@ protected void attachOrphanCompletionNode(){
 
 		if(orphan instanceof Annotation) {
 			popUntilCompletedAnnotationIfNecessary();
-			
+
 			CompletionOnAnnotationOfType fakeType =
 				new CompletionOnAnnotationOfType(
 						FAKE_TYPE_NAME,
 						this.compilationUnit.compilationResult(),
 						(Annotation)orphan);
-			currentElement.add(fakeType, 0);
-			
+			this.currentElement.add(fakeType, 0);
+
 			if (!isInsideAnnotation()) {
 				this.pendingAnnotation = fakeType;
 			}
-			
+
 			return;
 		}
 
@@ -130,31 +130,31 @@ protected void attachOrphanCompletionNode(){
 			/* check for completion at the beginning of method body
 				behind an invalid signature
 			 */
-			RecoveredMethod method = currentElement.enclosingMethod();
+			RecoveredMethod method = this.currentElement.enclosingMethod();
 			if (method != null){
 				AbstractMethodDeclaration methodDecl = method.methodDeclaration;
 				if ((methodDecl.bodyStart == methodDecl.sourceEnd+1) // was missing opening brace
-					&& (Util.getLineNumber(orphan.sourceStart, scanner.lineEnds, 0, scanner.linePtr) 
-							== Util.getLineNumber(methodDecl.sourceEnd, scanner.lineEnds, 0, scanner.linePtr))){
+					&& (Util.getLineNumber(orphan.sourceStart, this.scanner.lineEnds, 0, this.scanner.linePtr)
+							== Util.getLineNumber(methodDecl.sourceEnd, this.scanner.lineEnds, 0, this.scanner.linePtr))){
 					return;
 				}
 			}
 			// add the completion node as a statement to the list of block statements
-			currentElement = currentElement.add((Statement)orphan, 0);
+			this.currentElement = this.currentElement.add((Statement)orphan, 0);
 			return;
 		}
 	}
 
-	if (this.isInsideAnnotation()) {
+	if (isInsideAnnotation()) {
 		// push top expression on ast stack if it contains the completion node
 		Expression expression;
 		if (this.expressionPtr > -1) {
 			expression = this.expressionStack[this.expressionPtr];
-			if(expression == assistNode) {
+			if(expression == this.assistNode) {
 				if (this.topKnownElementKind(COMPLETION_OR_ASSIST_PARSER) == K_MEMBER_VALUE_ARRAY_INITIALIZER ) {
 					ArrayInitializer arrayInitializer = new ArrayInitializer();
 					arrayInitializer.expressions = new Expression[]{expression};
-				
+
 					MemberValuePair valuePair =
 							new MemberValuePair(VALUE, expression.sourceStart, expression.sourceEnd, arrayInitializer);
 						buildMoreAnnotationCompletionContext(valuePair);
@@ -259,7 +259,7 @@ protected void attachOrphanCompletionNode(){
 				int kind = topKnownElementKind(COMPLETION_OR_ASSIST_PARSER);
 				int info = topKnownElementInfo(COMPLETION_OR_ASSIST_PARSER);
 				if(kind == K_BINARY_OPERATOR && info == LESS) {
-					this.consumeTypeArguments();
+					consumeTypeArguments();
 				}
 				int numberOfIdentifiers = this.genericsIdentifiersLengthStack[this.genericsIdentifiersLengthPtr];
 				int genPtr = this.genericsPtr;
@@ -311,7 +311,7 @@ protected void attachOrphanCompletionNode(){
 			if (method != null){
 				AbstractMethodDeclaration methodDecl = method.methodDeclaration;
 				if ((methodDecl.bodyStart == methodDecl.sourceEnd+1) // was missing opening brace
-					&& (Util.getLineNumber(node.sourceStart, this.scanner.lineEnds, 0, this.scanner.linePtr) 
+					&& (Util.getLineNumber(node.sourceStart, this.scanner.lineEnds, 0, this.scanner.linePtr)
 						== Util.getLineNumber(methodDecl.sourceEnd, this.scanner.lineEnds, 0, this.scanner.linePtr))){
 					return;
 				}
@@ -326,30 +326,30 @@ protected void attachOrphanCompletionNode(){
 	Expression expression;
 	if (this.expressionPtr > -1) {
 		expression = this.expressionStack[this.expressionPtr];
-		CompletionNodeDetector detector = new CompletionNodeDetector(assistNode, expression);
+		CompletionNodeDetector detector = new CompletionNodeDetector(this.assistNode, expression);
 		if(detector.containsCompletionNode()) {
 			/* check for completion at the beginning of method body
 				behind an invalid signature
 			 */
-			RecoveredMethod method = currentElement.enclosingMethod();
+			RecoveredMethod method = this.currentElement.enclosingMethod();
 			if (method != null){
 				AbstractMethodDeclaration methodDecl = method.methodDeclaration;
 				if ((methodDecl.bodyStart == methodDecl.sourceEnd+1) // was missing opening brace
-					&& (Util.getLineNumber(expression.sourceStart, scanner.lineEnds, 0, scanner.linePtr) 
-						== Util.getLineNumber(methodDecl.sourceEnd, scanner.lineEnds, 0, scanner.linePtr))){
+					&& (Util.getLineNumber(expression.sourceStart, this.scanner.lineEnds, 0, this.scanner.linePtr)
+						== Util.getLineNumber(methodDecl.sourceEnd, this.scanner.lineEnds, 0, this.scanner.linePtr))){
 					return;
 				}
 			}
-			if(expression == assistNode
+			if(expression == this.assistNode
 				|| (expression instanceof AllocationExpression
-					&& ((AllocationExpression)expression).type == assistNode)){
+					&& ((AllocationExpression)expression).type == this.assistNode)){
 				buildMoreCompletionContext(expression);
 			} else {
-				assistNodeParent = detector.getCompletionNodeParent();
-				if(assistNodeParent != null) {
-					currentElement = currentElement.add((Statement)assistNodeParent, 0);
+				this.assistNodeParent = detector.getCompletionNodeParent();
+				if(this.assistNodeParent != null) {
+					this.currentElement = this.currentElement.add((Statement)this.assistNodeParent, 0);
 				} else {
-					currentElement = currentElement.add(expression, 0);
+					this.currentElement = this.currentElement.add(expression, 0);
 				}
 			}
 		}
