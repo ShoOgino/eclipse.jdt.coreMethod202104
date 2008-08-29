@@ -26,26 +26,31 @@
 			if (index >= 0) {
 				// the offset of the region is inside a comment => restart the region from the comment start
 				adaptedOffset = this.commentPositions[index][0];
-				if (adaptedOffset < 0) adaptedOffset = -adaptedOffset;
-				adaptedLength = length + offset - adaptedOffset;
-				commentIndex = index;
-				// include also the indentation edit just before the comment if any
-				for (int j=0; j<this.editsIndex; j++) {
-					int editOffset = this.edits[j].offset;
-					int editEnd = editOffset + this.edits[j].length;
-					if (editEnd == adaptedOffset) {
-						if (j > 0 && this.edits[j].replacement.trim().length() == 0) {
-							adaptedLength += adaptedOffset - this.edits[j].offset;
-							adaptedOffset = editOffset;
+				if (adaptedOffset >= 0) {
+					// adapt only javadoc or block commments. Since fix for bug
+					// https://bugs.eclipse.org/bugs/show_bug.cgi?id=238210
+					// edits in line comments only concerns whitespaces hence can be
+					// treated as edits in code
+					adaptedLength = length + offset - adaptedOffset;
+					commentIndex = index;
+					// include also the indentation edit just before the comment if any
+					for (int j=0; j<this.editsIndex; j++) {
+						int editOffset = this.edits[j].offset;
+						int editEnd = editOffset + this.edits[j].length;
+						if (editEnd == adaptedOffset) {
+							if (j > 0 && this.edits[j].replacement.trim().length() == 0) {
+								adaptedLength += adaptedOffset - this.edits[j].offset;
+								adaptedOffset = editOffset;
+								break;
+							}
+						} else if (editEnd > adaptedOffset) {
 							break;
 						}
-					} else if (editEnd > adaptedOffset) {
-						break;
 					}
 				}
 			}
 			index = getCommentIndex(commentIndex, offset+length-1);
-			if (index >= 0) {
+			if (index >= 0 && this.commentPositions[index][0] >= 0) { // only javadoc or block comment
 				// the region end is inside a comment => set the region end at the comment end
 				int commentEnd = this.commentPositions[index][1];
 				if (commentEnd < 0) commentEnd = -commentEnd;
@@ -55,65 +60,8 @@
 			if (adaptedLength != length) {
 				// adapt the region and jump to next one
 				this.adaptedRegions[i] = new Region(adaptedOffset, adaptedLength);
-				continue;
-			}
-
-			if (offset > 0) {
-				if (isAdaptableRegion(offset, length)) {
-					// if we have a selection, search for overlapping edits
-					int upperBound = offset;
-					int lowerBound = 0;
-					boolean upperFound = false;
-					int regionEnd = offset + length;
-					for (int j = 0, max2 = this.editsIndex - 1; j <= max2; j++) {
-						// search for lower bound
-						int editOffset = this.edits[j].offset;
-						if (upperFound && lowerBound == 0) {
-							int editLength = this.edits[j].length;
-							if (editOffset == regionEnd) { // matching edit found
-								lowerBound = regionEnd;
-								break;
-							} else if (editOffset + editLength < regionEnd) {
-								continue;
-							} else {
-								lowerBound = editOffset + editLength; // upper and lower bounds found
-								break;
-							}
-							// search for upper bound
-						} else {
-							int next = j+1;
-							if (next == max2) {
-								// https://bugs.eclipse.org/bugs/show_bug.cgi?id=213284
-								// checked all edits, no upper bound found: leave the loop
-								break;
-							}
-							if (this.edits[next].offset < offset) {
-								continue;
-							} else {
-								upperBound = editOffset;
-								upperFound = true;
-								// verify if region end is at EOF
-								if (this.scannerEndPosition == regionEnd) {
-									lowerBound = this.scannerEndPosition - 1;
-									break;
-								}
-							}
-						}
-					}
-					if (lowerBound != 0) {
-						if (offset != upperBound || regionEnd != lowerBound) { // ensure we found a different region
-							this.adaptedRegions[i] = new Region(upperBound,
-									lowerBound - upperBound);
-						}
-						// keep other unadaptable region
-					} else {
-						this.adaptedRegions[i] = this.regions[i];
-					}
-				} else {
-					this.adaptedRegions[i] = this.regions[i];
-				}
 			} else {
-				this.adaptedRegions[i] = this.regions[i];
+				this.adaptedRegions[i] = aRegion;
 			}
 		}
 	}
