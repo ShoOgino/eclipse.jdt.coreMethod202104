@@ -1,0 +1,31 @@
+/*
+ * Ensures that a JavaModelException is thrown if attempting to set a raw classpath
+ * when .classpath file is read-only
+ * (regression test for https://bugs.eclipse.org/bugs/show_bug.cgi?id=245576 )
+ */
+public void testReadOnly() throws CoreException {
+	if (!org.eclipse.jdt.internal.core.util.Util.isReadOnlySupported())
+		return;
+	IJavaProject project = this.createJavaProject("P", new String[] {"src"}, "bin");
+	IClasspathEntry[] originalCP= project.getRawClasspath();
+
+	try {
+		IClasspathEntry newEntry= JavaCore.newSourceEntry(project.getProject().getFullPath().append("extra"));
+		IClasspathEntry[] newCP= new IClasspathEntry[originalCP.length + 1];
+		System.arraycopy(originalCP, 0 , newCP, 0, originalCP.length);
+		newCP[originalCP.length]= newEntry;
+		
+		org.eclipse.jdt.internal.core.util.Util.setReadOnly(getFile("/P/.classpath"), true);
+		JavaModelException expected = null;
+		try {
+			project.setRawClasspath(newCP, null);
+		} catch (JavaModelException e) {
+			expected = e;
+		}
+		assertExceptionEquals("Unexpected exception", "File /P/.classpath is read-only.", expected);
+	} finally {
+		// cleanup
+		this.deleteProject("P");
+	}
+}
+
