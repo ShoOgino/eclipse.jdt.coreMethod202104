@@ -1,0 +1,126 @@
+	private void findVariableName(
+			char[] token,
+			char[] qualifiedPackageName,
+			char[] qualifiedSourceName,
+			char[] sourceName,
+			final TypeBinding typeBinding,
+			char[][] discouragedNames,
+			final char[][] forbiddenNames,
+			boolean forCollection,
+			int dim,
+			int kind,
+			int modifiers){
+
+		if(sourceName == null || sourceName.length == 0)
+			return;
+
+		// compute variable name for non base type
+		final char[] displayName;
+		if (!forCollection) {
+			if (dim > 0){
+				int l = qualifiedSourceName.length;
+				displayName = new char[l+(2*dim)];
+				System.arraycopy(qualifiedSourceName, 0, displayName, 0, l);
+				for(int i = 0; i < dim; i++){
+					displayName[l+(i*2)] = '[';
+					displayName[l+(i*2)+1] = ']';
+				}
+			} else {
+				displayName = qualifiedSourceName;
+			}
+		} else {
+			displayName = typeBinding.qualifiedSourceName();
+		}
+
+		final char[] t = token;
+		final char[] q = qualifiedPackageName;
+		INamingRequestor namingRequestor = new INamingRequestor() {
+			public void acceptNameWithPrefixAndSuffix(char[] name, boolean isFirstPrefix, boolean isFirstSuffix, int reusedCharacters) {
+				accept(
+						name,
+						(isFirstPrefix ? R_NAME_FIRST_PREFIX : R_NAME_PREFIX) + (isFirstSuffix ? R_NAME_FIRST_SUFFIX : R_NAME_SUFFIX),
+						reusedCharacters);
+			}
+
+			public void acceptNameWithPrefix(char[] name, boolean isFirstPrefix, int reusedCharacters) {
+				accept(name, isFirstPrefix ? R_NAME_FIRST_PREFIX :  R_NAME_PREFIX, reusedCharacters);
+			}
+
+			public void acceptNameWithSuffix(char[] name, boolean isFirstSuffix, int reusedCharacters) {
+				accept(name, isFirstSuffix ? R_NAME_FIRST_SUFFIX : R_NAME_SUFFIX, reusedCharacters);
+			}
+
+			public void acceptNameWithoutPrefixAndSuffix(char[] name,int reusedCharacters) {
+				accept(name, 0, reusedCharacters);
+			}
+			void accept(char[] name, int prefixAndSuffixRelevance, int reusedCharacters){
+				int l = forbiddenNames == null ? 0 : forbiddenNames.length;
+				for (int i = 0; i < l; i++) {
+					if (CharOperation.equals(forbiddenNames[i], name, false)) return;
+				}
+
+				if (CharOperation.prefixEquals(t, name, false)) {
+					int relevance = computeBaseRelevance();
+					relevance += computeRelevanceForInterestingProposal();
+					relevance += computeRelevanceForCaseMatching(t, name);
+					relevance += prefixAndSuffixRelevance;
+					if(reusedCharacters > 0) relevance += R_NAME_LESS_NEW_CHARACTERS;
+					relevance += computeRelevanceForRestrictions(IAccessRule.K_ACCESSIBLE); // no access restriction for variable name
+
+					// accept result
+					CompletionEngine.this.noProposal = false;
+					if(!CompletionEngine.this.requestor.isIgnored(CompletionProposal.VARIABLE_DECLARATION)) {
+						CompletionProposal proposal = CompletionEngine.this.createProposal(CompletionProposal.VARIABLE_DECLARATION, CompletionEngine.this.actualCompletionPosition);
+						proposal.setSignature(getSignature(typeBinding));
+						proposal.setPackageName(q);
+						proposal.setTypeName(displayName);
+						proposal.setName(name);
+						proposal.setCompletion(name);
+						//proposal.setFlags(Flags.AccDefault);
+						proposal.setReplaceRange(CompletionEngine.this.startPosition - CompletionEngine.this.offset, CompletionEngine.this.endPosition - CompletionEngine.this.offset);
+						proposal.setTokenRange(CompletionEngine.this.tokenStart - CompletionEngine.this.offset, CompletionEngine.this.tokenEnd - CompletionEngine.this.offset);
+						proposal.setRelevance(relevance);
+						CompletionEngine.this.requestor.accept(proposal);
+						if(DEBUG) {
+							CompletionEngine.this.printDebug(proposal);
+						}
+					}
+				}
+			}
+		};
+
+		switch (kind) {
+			case FIELD :
+				InternalNamingConventions.suggestFieldNames(
+					this.javaProject,
+					qualifiedPackageName,
+					qualifiedSourceName,
+					dim,
+					modifiers,
+					token,
+					discouragedNames,
+					namingRequestor);
+				break;
+			case LOCAL :
+				InternalNamingConventions.suggestLocalVariableNames(
+					this.javaProject,
+					qualifiedPackageName,
+					qualifiedSourceName,
+					dim,
+					token,
+					discouragedNames,
+					namingRequestor);
+				break;
+			case ARGUMENT :
+				InternalNamingConventions.suggestArgumentNames(
+					this.javaProject,
+					qualifiedPackageName,
+					qualifiedSourceName,
+					dim,
+					token,
+					discouragedNames,
+					namingRequestor);
+				break;
+		}
+	}
+
