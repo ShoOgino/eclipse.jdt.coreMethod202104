@@ -5,17 +5,10 @@
 	 * Throws exceptions if the file cannot be accessed or is malformed.
 	 */
 	public IClasspathEntry[] readFileEntriesWithException(Map unknownElements) throws CoreException, IOException, ClasspathEntry.AssertionFailedException {
-		String xmlClasspath;
 		IFile rscFile = this.project.getFile(JavaProject.CLASSPATH_FILENAME);
+		byte[] bytes;
 		if (rscFile.exists()) {
-			byte[] bytes = Util.getResourceContentsAsByteArray(rscFile);
-			try {
-				xmlClasspath = new String(bytes, org.eclipse.jdt.internal.compiler.util.Util.UTF_8); // .classpath always encoded with UTF-8
-			} catch (UnsupportedEncodingException e) {
-				Util.log(e, "Could not read .classpath with UTF-8 encoding"); //$NON-NLS-1$
-				// fallback to default
-				xmlClasspath = new String(bytes);
-			}
+			bytes = Util.getResourceContentsAsByteArray(rscFile);
 		} else {
 			// when a project is imported, we get a first delta for the addition of the .project, but the .classpath is not accessible
 			// so default to using java.io.File
@@ -26,7 +19,6 @@
 			File file = Util.toLocalFile(location, null/*no progress monitor available*/);
 			if (file == null)
 				throw new IOException("Unable to fetch file from " + location); //$NON-NLS-1$
-			byte[] bytes;
 			try {
 				bytes = org.eclipse.jdt.internal.compiler.util.Util.getFileByteContent(file);
 			} catch (IOException e) {
@@ -34,13 +26,18 @@
 					return defaultClasspath();
 				throw e;
 			}
-			try {
-				xmlClasspath = new String(bytes, org.eclipse.jdt.internal.compiler.util.Util.UTF_8); // .classpath always encoded with UTF-8
-			} catch (UnsupportedEncodingException e) {
-				Util.log(e, "Could not read .classpath with UTF-8 encoding"); //$NON-NLS-1$
-				// fallback to default
-				xmlClasspath = new String(bytes);
-			}
+		}
+		if (hasUTF8BOM(bytes)) { // see https://bugs.eclipse.org/bugs/show_bug.cgi?id=240034
+			int length = bytes.length-IContentDescription.BOM_UTF_8.length;
+			System.arraycopy(bytes, IContentDescription.BOM_UTF_8.length, bytes = new byte[length], 0, length);
+		}
+		String xmlClasspath;
+		try {
+			xmlClasspath = new String(bytes, org.eclipse.jdt.internal.compiler.util.Util.UTF_8); // .classpath always encoded with UTF-8
+		} catch (UnsupportedEncodingException e) {
+			Util.log(e, "Could not read .classpath with UTF-8 encoding"); //$NON-NLS-1$
+			// fallback to default
+			xmlClasspath = new String(bytes);
 		}
 		return decodeClasspath(xmlClasspath, unknownElements);
 	}
