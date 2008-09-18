@@ -1,0 +1,34 @@
+/**
+ * Query a given index for matching entries. Assumes the sender has opened the index and will close when finished.
+ * 
+ * @noreference This method is not intended to be referenced by clients. 
+ * @nooverride This method is not intended to be re-implemented or extended by clients.
+ */
+public void findIndexMatches(Index index, IndexQueryRequestor requestor, SearchParticipant participant, IJavaSearchScope scope, IProgressMonitor monitor) throws IOException {
+	if (monitor != null && monitor.isCanceled()) throw new OperationCanceledException();
+	try {
+		index.startQuery();
+		SearchPattern pattern = currentPattern();
+		EntryResult[] entries = pattern.queryIn(index);
+		if (entries == null) return;
+
+		SearchPattern decodedResult = pattern.getBlankPattern();
+		String containerPath = index.containerPath;
+		char separator = index.separator;
+		for (int i = 0, l = entries.length; i < l; i++) {
+			if (monitor != null && monitor.isCanceled()) throw new OperationCanceledException();
+
+			EntryResult entry = entries[i];
+			decodedResult.decodeIndexKey(entry.getWord());
+			if (pattern.matchesDecodedKey(decodedResult)) {
+				// TODO (kent) some clients may not need the document names
+				String[] names = entry.getDocumentNames(index);
+				for (int j = 0, n = names.length; j < n; j++)
+					acceptMatch(names[j], containerPath, separator, decodedResult, requestor, participant, scope);
+			}
+		}
+	} finally {
+		index.stopQuery();
+	}
+}
+
