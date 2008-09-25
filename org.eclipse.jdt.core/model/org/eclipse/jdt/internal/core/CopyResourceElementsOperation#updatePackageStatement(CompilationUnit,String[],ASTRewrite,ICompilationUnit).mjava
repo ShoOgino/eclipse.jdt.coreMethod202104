@@ -1,0 +1,40 @@
+	private void updatePackageStatement(CompilationUnit astCU, String[] pkgName, ASTRewrite rewriter, ICompilationUnit cu) throws JavaModelException {
+		boolean defaultPackage = pkgName.length == 0;
+		AST ast = astCU.getAST();
+		if (defaultPackage) {
+			// remove existing package statement
+			PackageDeclaration pkg = astCU.getPackage();
+			if (pkg != null) {
+				int pkgStart;
+				Javadoc javadoc = pkg.getJavadoc();
+				if (javadoc != null) {
+					pkgStart = javadoc.getStartPosition() + javadoc.getLength() + 1;
+				} else {
+					pkgStart = pkg.getStartPosition();
+				}
+				int extendedStart = astCU.getExtendedStartPosition(pkg);
+				if (pkgStart != extendedStart) {
+					// keep the comments associated with package declaration
+					// see https://bugs.eclipse.org/bugs/show_bug.cgi?id=247757
+					String commentSource = cu.getSource().substring(extendedStart, pkgStart);
+					ASTNode comment = rewriter.createStringPlaceholder(commentSource, ASTNode.PACKAGE_DECLARATION);
+					rewriter.set(astCU, CompilationUnit.PACKAGE_PROPERTY, comment, null);
+				} else {
+					rewriter.set(astCU, CompilationUnit.PACKAGE_PROPERTY, null, null);
+				}
+			}
+		} else {
+			org.eclipse.jdt.core.dom.PackageDeclaration pkg = astCU.getPackage();
+			if (pkg != null) {
+				// rename package statement
+				Name name = ast.newName(pkgName);
+				rewriter.set(pkg, PackageDeclaration.NAME_PROPERTY, name, null);
+			} else {
+				// create new package statement
+				pkg = ast.newPackageDeclaration();
+				pkg.setName(ast.newName(pkgName));
+				rewriter.set(astCU, CompilationUnit.PACKAGE_PROPERTY, pkg, null);
+			}
+		}
+	}
+
