@@ -1,26 +1,20 @@
-public void generateCompoundAssignment(
-	BlockScope currentScope,
-	CodeStream codeStream,
-	Expression expression,
-	int operator,
-	int assignmentImplicitConversion,
-	boolean valueRequired) {
-
+public void generateCompoundAssignment(BlockScope currentScope, CodeStream codeStream, Expression expression, int operator, int assignmentImplicitConversion, boolean valueRequired) {
 	FieldBinding lastFieldBinding = generateReadSequence(currentScope, codeStream);
-	SyntheticMethodBinding accessor =
-		this.syntheticReadAccessors == null
-			? null
-			: this.syntheticReadAccessors[this.syntheticReadAccessors.length - 1];
+	boolean isFirst = lastFieldBinding == this.binding
+		&& (this.indexOfFirstFieldBinding == 1 || lastFieldBinding.declaringClass == currentScope.enclosingReceiverType())
+		&& this.otherBindings == null; // could be dup: next.next.next
+	TypeBinding constantPoolDeclaringClass = CodeStream.getConstantPoolDeclaringClass(currentScope, lastFieldBinding, getFinalReceiverType(), isFirst);			
+	SyntheticMethodBinding accessor = this.syntheticReadAccessors == null ? null : this.syntheticReadAccessors[this.syntheticReadAccessors.length - 1];
 	if (lastFieldBinding.isStatic()) {
 		if (accessor == null) {
-			codeStream.getstatic(lastFieldBinding);
+			codeStream.fieldAccess(Opcodes.OPC_getstatic, lastFieldBinding, constantPoolDeclaringClass);
 		} else {
 			codeStream.invoke(Opcodes.OPC_invokestatic, accessor, null /* default declaringClass */);
 		}
 	} else {
 		codeStream.dup();
 		if (accessor == null) {
-			codeStream.getfield(lastFieldBinding);
+			codeStream.fieldAccess(Opcodes.OPC_getfield, lastFieldBinding, constantPoolDeclaringClass);
 		} else {
 			codeStream.invoke(Opcodes.OPC_invokestatic, accessor, null /* default declaringClass */);
 		}
@@ -35,7 +29,7 @@ public void generateCompoundAssignment(
 			codeStream.generateStringConcatenationAppend(currentScope, null, expression);
 			break;
 		default :
-			TypeBinding requiredGenericCast = getGenericCast(this.otherCodegenBindings == null ? 0 : this.otherCodegenBindings.length);
+			TypeBinding requiredGenericCast = getGenericCast(this.otherBindings == null ? 0 : this.otherBindings.length);
 			if (requiredGenericCast != null) codeStream.checkcast(requiredGenericCast);
 			// promote the array reference to the suitable operation type
 			codeStream.generateImplicitConversion(this.implicitConversion);
@@ -51,7 +45,7 @@ public void generateCompoundAssignment(
 			codeStream.generateImplicitConversion(assignmentImplicitConversion);
 	}
 	// actual assignment
-	fieldStore(codeStream, lastFieldBinding, this.syntheticWriteAccessor, valueRequired);
+	fieldStore(currentScope, codeStream, lastFieldBinding, this.syntheticWriteAccessor, getFinalReceiverType(), false /*implicit this*/, valueRequired);
 	// equivalent to valuesRequired[maxOtherBindings]
 }
 

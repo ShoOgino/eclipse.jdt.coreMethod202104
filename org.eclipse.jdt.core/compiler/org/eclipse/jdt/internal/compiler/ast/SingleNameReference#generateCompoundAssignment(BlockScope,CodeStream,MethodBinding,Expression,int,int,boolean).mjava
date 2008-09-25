@@ -5,10 +5,11 @@
 public void generateCompoundAssignment(BlockScope currentScope, CodeStream codeStream, MethodBinding writeAccessor, Expression expression, int operator, int assignmentImplicitConversion, boolean valueRequired) {
 	switch (this.bits & ASTNode.RestrictiveFlagMASK) {
 		case Binding.FIELD : // assigning to a field
-			FieldBinding fieldBinding;
-			if ((fieldBinding = (FieldBinding) this.codegenBinding).isStatic()) {
+			FieldBinding codegenField = ((FieldBinding) this.binding).original();
+			if (codegenField.isStatic()) {
 				if ((this.syntheticAccessors == null) || (this.syntheticAccessors[SingleNameReference.READ] == null)) {
-					codeStream.getstatic(fieldBinding);
+					TypeBinding constantPoolDeclaringClass = CodeStream.getConstantPoolDeclaringClass(currentScope, codegenField, this.actualReceiverType, true /* implicit this */);					
+					codeStream.fieldAccess(Opcodes.OPC_getstatic, codegenField, constantPoolDeclaringClass);
 				} else {
 					codeStream.invoke(Opcodes.OPC_invokestatic, this.syntheticAccessors[SingleNameReference.READ], null /* default declaringClass */);
 				}
@@ -22,14 +23,15 @@ public void generateCompoundAssignment(BlockScope currentScope, CodeStream codeS
 				}
 				codeStream.dup();
 				if ((this.syntheticAccessors == null) || (this.syntheticAccessors[SingleNameReference.READ] == null)) {
-					codeStream.getfield(fieldBinding);
+					TypeBinding constantPoolDeclaringClass = CodeStream.getConstantPoolDeclaringClass(currentScope, codegenField, this.actualReceiverType, true /* implicit this */);
+					codeStream.fieldAccess(Opcodes.OPC_getfield, codegenField, constantPoolDeclaringClass);
 				} else {
 					codeStream.invoke(Opcodes.OPC_invokestatic, this.syntheticAccessors[SingleNameReference.READ], null /* default declaringClass */);
 				}
 			}
 			break;
 		case Binding.LOCAL : // assigning to a local variable (cannot assign to outer local)
-			LocalVariableBinding localBinding = (LocalVariableBinding) this.codegenBinding;
+			LocalVariableBinding localBinding = (LocalVariableBinding) this.binding;
 			// using incr bytecode if possible
 			switch (localBinding.type.id) {
 				case T_JavaLangString :
@@ -99,16 +101,21 @@ public void generateCompoundAssignment(BlockScope currentScope, CodeStream codeS
 	// store the result back into the variable
 	switch (this.bits & ASTNode.RestrictiveFlagMASK) {
 		case Binding.FIELD : // assigning to a field
-			fieldStore(codeStream, (FieldBinding) this.codegenBinding, writeAccessor, valueRequired);
+			FieldBinding codegenField = ((FieldBinding) this.binding).original();
+			fieldStore(currentScope, codeStream, codegenField, writeAccessor, this.actualReceiverType, true /* implicit this*/, valueRequired);
 			// no need for generic cast as value got dupped
 			return;
 		case Binding.LOCAL : // assigning to a local variable
-			LocalVariableBinding localBinding = (LocalVariableBinding) this.codegenBinding;
+			LocalVariableBinding localBinding = (LocalVariableBinding) this.binding;
 			if (valueRequired) {
-				if ((localBinding.type == TypeBinding.LONG) || (localBinding.type == TypeBinding.DOUBLE)) {
-					codeStream.dup2();
-				} else {
-					codeStream.dup();
+				switch (localBinding.type.id) {
+					case TypeIds.T_long :
+					case TypeIds.T_double :
+						codeStream.dup2();
+						break;
+					default:
+						codeStream.dup();
+						break;
 				}
 			}
 			codeStream.store(localBinding, false);

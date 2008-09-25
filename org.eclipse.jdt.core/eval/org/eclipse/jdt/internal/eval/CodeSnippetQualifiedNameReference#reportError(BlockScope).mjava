@@ -2,12 +2,12 @@
  * Normal field binding did not work, try to bind to a field of the delegate receiver.
  */
 public TypeBinding reportError(BlockScope scope) {
-
 	if (this.evaluationContext.declaringTypeName != null) {
 		this.delegateThis = scope.getField(scope.enclosingSourceType(), DELEGATE_THIS, this);
 		if (this.delegateThis == null){  // if not found then internal error, field should have been found
 			return super.reportError(scope);
 		}
+		this.actualReceiverType = this.delegateThis.type;
 	} else {
 		return super.reportError(scope);
 	}
@@ -20,7 +20,7 @@ public TypeBinding reportError(BlockScope scope) {
 			if (((ProblemFieldBinding) fieldBinding).problemId() == NotVisible) {
 				// manage the access to a private field of the enclosing type
 				CodeSnippetScope localScope = new CodeSnippetScope(scope);
-				this.codegenBinding = this.binding = localScope.getFieldForCodeSnippet(this.delegateThis.type, this.tokens[0], this);
+				this.binding = localScope.getFieldForCodeSnippet(this.delegateThis.type, this.tokens[0], this);
 				if (this.binding.isValidBinding()) {
 					return checkFieldAccess(scope);
 				} else {
@@ -30,22 +30,27 @@ public TypeBinding reportError(BlockScope scope) {
 				return super.reportError(scope);
 			}
 		}
-		this.codegenBinding = this.binding = fieldBinding;
+		this.binding = fieldBinding;
 		return checkFieldAccess(scope);
 	}
 
 	TypeBinding result;
-	if (this.binding instanceof ProblemFieldBinding
-		&& ((ProblemFieldBinding) this.binding).problemId() == NotVisible) {
-		result = resolveTypeVisibility(scope);
-		if (result == null) {
+	if (this.binding instanceof ProblemFieldBinding && ((ProblemFieldBinding) this.binding).problemId() == NotVisible) {
+		// field and/or local are done before type lookups
+		// the only available value for the restrictiveFlag BEFORE
+		// the TC is Flag_Type Flag_LocalField and Flag_TypeLocalField
+		CodeSnippetScope localScope = new CodeSnippetScope(scope);
+		if ((this.binding = localScope.getBinding(this.tokens, this.bits & RestrictiveFlagMASK, this, (ReferenceBinding) this.delegateThis.type)).isValidBinding()) {
+			this.bits &= ~RestrictiveFlagMASK; // clear bits
+			this.bits |= Binding.FIELD;
+			result = getOtherFieldBindings(scope);
+		} else {
 			return super.reportError(scope);
 		}
-		if (result.isValidBinding()) {
+		if (result != null && result.isValidBinding()) {
 			return result;
 		}
 	}
-
 	return super.reportError(scope);
 }
 

@@ -3,23 +3,25 @@
  * for a read or write access.
  */
 public FieldBinding generateReadSequence(BlockScope currentScope, CodeStream codeStream) {
-
 	// determine the rank until which we now we do not need any actual value for the field access
-	int otherBindingsCount = this.otherCodegenBindings == null ? 0 : this.otherCodegenBindings.length;
+	int otherBindingsCount = this.otherBindings == null ? 0 : this.otherBindings.length;
 	boolean needValue = otherBindingsCount == 0 || !this.otherBindings[0].isStatic();
-	FieldBinding lastFieldBinding = null;
-	TypeBinding lastGenericCast = null;
-
+	FieldBinding lastFieldBinding;
+	TypeBinding lastGenericCast;
+	TypeBinding lastReceiverType;
+	boolean complyTo14 = currentScope.compilerOptions().complianceLevel >= ClassFileConstants.JDK1_4;
+	
 	switch (this.bits & RestrictiveFlagMASK) {
 		case Binding.FIELD :
-			lastFieldBinding = (FieldBinding) this.codegenBinding;
+			lastFieldBinding = ((FieldBinding) this.binding).original();
 			lastGenericCast = this.genericCast;
+			lastReceiverType = this.actualReceiverType;
 			// if first field is actually constant, we can inline it
 			if (lastFieldBinding.constant() != Constant.NotAConstant) {
 				break;
 			}
 			if (needValue) {
-				if (lastFieldBinding.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
+				if (lastFieldBinding.canBeSeenBy(this.actualReceiverType, this, currentScope)) {
 					if (!lastFieldBinding.isStatic()) {
 						if ((this.bits & DepthMASK) != 0) {
 							ReferenceBinding targetType = currentScope.enclosingSourceType().enclosingTypeAt((this.bits & DepthMASK) >> DepthSHIFT);
@@ -45,8 +47,11 @@ public FieldBinding generateReadSequence(BlockScope currentScope, CodeStream cod
 			}
 			break;
 		case Binding.LOCAL : // reading the first local variable
+			lastFieldBinding = null;
+			lastGenericCast = null;
+			LocalVariableBinding localBinding = (LocalVariableBinding) this.binding;
+			lastReceiverType = localBinding.type;
 			if (!needValue) break; // no value needed
-			LocalVariableBinding localBinding = (LocalVariableBinding) this.codegenBinding;
 			// regular local variable read
 			Constant localConstant = localBinding.constant();
 			if (localConstant != Constant.NotAConstant) {
@@ -62,50 +67,94 @@ public FieldBinding generateReadSequence(BlockScope currentScope, CodeStream cod
 					codeStream.load(localBinding);
 				}
 			}
+			break;
+		default : // should not occur
+			return null;			
 	}
-
 	// all intermediate field accesses are read accesses
 	// only the last field binding is a write access
-	if (this.otherCodegenBindings != null) {
+	int positionsLength = this.sourcePositions.length;
+	FieldBinding initialFieldBinding = lastFieldBinding; // can be null if initial was a local binding
+	if (this.otherBindings != null) {
 		for (int i = 0; i < otherBindingsCount; i++) {
-			FieldBinding nextField = this.otherCodegenBindings[i];
+			int pc = codeStream.position;
+			FieldBinding nextField = this.otherBindings[i].original();
 			TypeBinding nextGenericCast = this.otherGenericCasts == null ? null : this.otherGenericCasts[i];
 			if (lastFieldBinding != null) {
 				needValue = !nextField.isStatic();
-				if (needValue) {
-					if (lastFieldBinding.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
-						Constant fieldConstant = lastFieldBinding.constant();
-						if (fieldConstant != Constant.NotAConstant) {
-							if (lastFieldBinding != this.codegenBinding && !lastFieldBinding.isStatic()) {
-								codeStream.invokeObjectGetClass(); // perform null check
-								codeStream.pop();
-							}
-							codeStream.generateConstant(fieldConstant, 0);
-						} else if (lastFieldBinding.isStatic()) {
-							codeStream.getstatic(lastFieldBinding);
-						} else {
-							codeStream.getfield(lastFieldBinding);
-						}
-					} else {
-						codeStream.generateEmulatedReadAccessForField(lastFieldBinding);
-					}
-					if (lastGenericCast != null) codeStream.checkcast(lastGenericCast);
-				} else {
-					if (this.codegenBinding != lastFieldBinding && !lastFieldBinding.isStatic()){
+				Constant fieldConstant = lastFieldBinding.constant();
+				if (fieldConstant != Constant.NotAConstant) {
+					if (i > 0 && !lastFieldBinding.isStatic()) {
 						codeStream.invokeObjectGetClass(); // perform null check
 						codeStream.pop();
+					}
+					if (needValue) {
+						codeStream.generateConstant(fieldConstant, 0);
+					}
+				} else {
+					if (needValue || (i > 0 && complyTo14) || lastGenericCast != null) {
+						if (lastFieldBinding.canBeSeenBy(lastReceiverType, this, currentScope)) {
+							MethodBinding accessor = this.syntheticReadAccessors == null ? null : this.syntheticReadAccessors[i];
+							if (accessor == null) {
+								TypeBinding constantPoolDeclaringClass = CodeStream.getConstantPoolDeclaringClass(currentScope, lastFieldBinding, lastReceiverType, i == 0 && this.indexOfFirstFieldBinding == 1);
+								if (lastFieldBinding.isStatic()) {
+									codeStream.fieldAccess(Opcodes.OPC_getstatic, lastFieldBinding, constantPoolDeclaringClass);
+								} else {
+									codeStream.fieldAccess(Opcodes.OPC_getfield, lastFieldBinding, constantPoolDeclaringClass);
+								}
+							} else {
+								codeStream.invoke(Opcodes.OPC_invokestatic, accessor, null /* default declaringClass */);
+							}
+						} else {
+							codeStream.generateEmulatedReadAccessForField(lastFieldBinding);
+						}
+						if (lastGenericCast != null) {
+							codeStream.checkcast(lastGenericCast);
+							lastReceiverType = lastGenericCast;
+						} else {
+							lastReceiverType = lastFieldBinding.type;
+						}
+						if (!needValue) codeStream.pop();
+					} else {
+						if (lastFieldBinding == initialFieldBinding) {
+							if (lastFieldBinding.isStatic()){
+								// if no valueRequired, still need possible side-effects of <clinit> invocation, if field belongs to different class
+								if (initialFieldBinding.declaringClass != this.actualReceiverType.erasure()) {
+									if (lastFieldBinding.canBeSeenBy(lastReceiverType, this, currentScope)) {
+										MethodBinding accessor = this.syntheticReadAccessors == null ? null : this.syntheticReadAccessors[i];
+										if (accessor == null) {
+											TypeBinding constantPoolDeclaringClass = CodeStream.getConstantPoolDeclaringClass(currentScope, lastFieldBinding, lastReceiverType, i == 0 && this.indexOfFirstFieldBinding == 1);
+											codeStream.fieldAccess(Opcodes.OPC_getstatic, lastFieldBinding, constantPoolDeclaringClass);
+										} else {
+											codeStream.invoke(Opcodes.OPC_invokestatic, accessor, null /* default declaringClass */);
+										}
+									} else {
+										codeStream.generateEmulatedReadAccessForField(lastFieldBinding);
+									}
+									codeStream.pop();
+								}
+							}
+						} else if (!lastFieldBinding.isStatic()){
+							codeStream.invokeObjectGetClass(); // perform null check
+							codeStream.pop();
+						}
+						lastReceiverType = lastFieldBinding.type;
+					}
+					if ((positionsLength - otherBindingsCount + i - 1) >= 0) {
+						int fieldPosition = (int) (this.sourcePositions[positionsLength - otherBindingsCount + i - 1] >>>32);
+						codeStream.recordPositionsFrom(pc, fieldPosition);
 					}
 				}
 			}
 			lastFieldBinding = nextField;
 			lastGenericCast = nextGenericCast;
-			if (lastFieldBinding != null && !lastFieldBinding.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
+			if (lastFieldBinding != null && !lastFieldBinding.canBeSeenBy(lastReceiverType, this, currentScope)) {
 				if (lastFieldBinding.isStatic()) {
 					codeStream.aconst_null();
 				}
-			}
+			}			
 		}
 	}
-	return lastFieldBinding;
+	return lastFieldBinding;	
 }
 

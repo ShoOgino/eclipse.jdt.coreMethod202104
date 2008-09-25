@@ -28,9 +28,9 @@ public void generateAssignment(BlockScope currentScope, CodeStream codeStream, A
 	}
 	switch (this.bits & ASTNode.RestrictiveFlagMASK) {
 		case Binding.FIELD : // assigning to a field
-			FieldBinding fieldBinding;
 			int pc = codeStream.position;
-			if (!(fieldBinding = (FieldBinding) this.codegenBinding).isStatic()) { // need a receiver?
+			FieldBinding codegenBinding = ((FieldBinding) this.binding).original();
+			if (!codegenBinding.isStatic()) { // need a receiver?
 				if ((this.bits & ASTNode.DepthMASK) != 0) {
 					ReferenceBinding targetType = currentScope.enclosingSourceType().enclosingTypeAt((this.bits & ASTNode.DepthMASK) >> ASTNode.DepthSHIFT);
 					Object[] emulationPath = currentScope.getEmulationPath(targetType, true /*only exact match*/, false/*consider enclosing arg*/);
@@ -41,14 +41,14 @@ public void generateAssignment(BlockScope currentScope, CodeStream codeStream, A
 			}
 			codeStream.recordPositionsFrom(pc, this.sourceStart);
 			assignment.expression.generateCode(currentScope, codeStream, true);
-			fieldStore(codeStream, fieldBinding, this.syntheticAccessors == null ? null : this.syntheticAccessors[SingleNameReference.WRITE], valueRequired);
+			fieldStore(currentScope, codeStream, codegenBinding, this.syntheticAccessors == null ? null : this.syntheticAccessors[SingleNameReference.WRITE], this.actualReceiverType, true /*implicit this*/, valueRequired);
 			if (valueRequired) {
 				codeStream.generateImplicitConversion(assignment.implicitConversion);
 			}
 			// no need for generic cast as value got dupped
 			return;
 		case Binding.LOCAL : // assigning to a local variable
-			LocalVariableBinding localBinding = (LocalVariableBinding) this.codegenBinding;
+			LocalVariableBinding localBinding = (LocalVariableBinding) this.binding;
 			if (localBinding.resolvedPosition != -1) {
 				assignment.expression.generateCode(currentScope, codeStream, true);
 			} else {
@@ -64,11 +64,15 @@ public void generateAssignment(BlockScope currentScope, CodeStream codeStream, A
 					if (valueRequired) {
 						codeStream.generateImplicitConversion(assignment.implicitConversion); // implicit conversion
 					} else {
-						if ((localBinding.type == TypeBinding.LONG) || (localBinding.type == TypeBinding.DOUBLE)) {
-							codeStream.pop2();
-						} else {
-							codeStream.pop();
-						}
+						switch(localBinding.type.id) {
+							case TypeIds.T_long :
+							case TypeIds.T_double :
+								codeStream.pop2();
+								break;
+							default :
+								codeStream.pop();
+								break;
+						}						
 					}
 				}
 				return;

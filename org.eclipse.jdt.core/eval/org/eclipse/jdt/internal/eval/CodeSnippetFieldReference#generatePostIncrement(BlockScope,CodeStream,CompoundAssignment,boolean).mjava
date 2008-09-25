@@ -1,55 +1,63 @@
 public void generatePostIncrement(BlockScope currentScope, CodeStream codeStream, CompoundAssignment postIncrement, boolean valueRequired) {
 	boolean isStatic;
-	if (this.codegenBinding.canBeSeenBy(this.receiverType, this, currentScope)) {
+	FieldBinding codegenBinding = this.binding.original();
+	if (codegenBinding.canBeSeenBy(this.actualReceiverType, this, currentScope)) {
 		super.generatePostIncrement(currentScope, codeStream, postIncrement, valueRequired);
 	} else {
-		this.receiver.generateCode(currentScope, codeStream, !(isStatic = this.codegenBinding.isStatic()));
+		this.receiver.generateCode(currentScope, codeStream, !(isStatic = codegenBinding.isStatic()));
 		if (isStatic) {
 			codeStream.aconst_null();
 		}
 		// the actual stack is: receiver
 		codeStream.dup();
 		// the actual stack is: receiver receiver
-		codeStream.generateEmulatedReadAccessForField(this.codegenBinding);
+		codeStream.generateEmulatedReadAccessForField(codegenBinding);
 		// the actual stack is: receiver value
 		// receiver value
 		// value receiver value 							dup_x1 or dup2_x1 if value required
-		// value value receiver value						dup_x1 or dup2_x1
-		// value value receiver								pop or pop2
+		// value value receiver value					dup_x1 or dup2_x1
+		// value value receiver							pop or pop2
 		// value value receiver field						generateEmulationForField
-		// value value field receiver 						swap
-		// value field receiver value field receiver 		dup2_x1 or dup2_x2
-		// value field receiver value 				 		pop2
-		// value field receiver newvalue 				 	generate constant + op
-		// value 											store
-		if (valueRequired) {
-			if ((this.codegenBinding.type == TypeBinding.LONG) || (this.codegenBinding.type == TypeBinding.DOUBLE)) {
+		// value value field receiver 					swap
+		// value field receiver value field receiver 	dup2_x1 or dup2_x2
+		// value field receiver value 				 	pop2
+		// value field receiver newvalue 				generate constant + op
+		// value 												store
+		int typeID;
+		switch (typeID = codegenBinding.type.id) {
+			case TypeIds.T_long :
+			case TypeIds.T_double :
+				if (valueRequired) {
+					codeStream.dup2_x1();
+				}
 				codeStream.dup2_x1();
-			} else {
+				codeStream.pop2();
+				break;
+			default :
+				if (valueRequired) {
+					codeStream.dup_x1();
+				}
 				codeStream.dup_x1();
-			}
+				codeStream.pop();
+				break;
 		}
-		if ((this.codegenBinding.type == TypeBinding.LONG) || (this.codegenBinding.type == TypeBinding.DOUBLE)) {
-			codeStream.dup2_x1();
-			codeStream.pop2();
-		} else {
-			codeStream.dup_x1();
-			codeStream.pop();
-		}
-		codeStream.generateEmulationForField(this.codegenBinding);
+		codeStream.generateEmulationForField(codegenBinding);
 		codeStream.swap();
-
-		if ((this.codegenBinding.type == TypeBinding.LONG) || (this.codegenBinding.type == TypeBinding.DOUBLE)) {
-			codeStream.dup2_x2();
-		} else {
-			codeStream.dup2_x1();
+		switch (typeID) {
+			case TypeIds.T_long :
+			case TypeIds.T_double :
+				codeStream.dup2_x2();
+				break;
+			default :
+				codeStream.dup2_x1();
+				break;
 		}
 		codeStream.pop2();
 
 		codeStream.generateConstant(postIncrement.expression.constant, this.implicitConversion);
-		codeStream.sendOperator(postIncrement.operator, this.codegenBinding.type.id);
+		codeStream.sendOperator(postIncrement.operator, codegenBinding.type.id);
 		codeStream.generateImplicitConversion(postIncrement.preAssignImplicitConversion);
-		codeStream.generateEmulatedWriteAccessForField(this.codegenBinding);
+		codeStream.generateEmulatedWriteAccessForField(codegenBinding);
 	}
 }
 

@@ -1,11 +1,11 @@
 public void generatePostIncrement(BlockScope currentScope, CodeStream codeStream, CompoundAssignment postIncrement, boolean valueRequired) {
 	switch (this.bits & RestrictiveFlagMASK) {
 		case Binding.FIELD : // assigning to a field
-			FieldBinding fieldBinding = (FieldBinding) this.codegenBinding;
-			if (fieldBinding.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
+			FieldBinding codegenField = ((FieldBinding) this.binding).original();
+			if (codegenField.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
 				super.generatePostIncrement(currentScope, codeStream, postIncrement, valueRequired);
 			} else {
-				if (fieldBinding.isStatic()) {
+				if (codegenField.isStatic()) {
 					codeStream.aconst_null();
 				} else {
 					if ((this.bits & DepthMASK) != 0) {
@@ -16,40 +16,48 @@ public void generatePostIncrement(BlockScope currentScope, CodeStream codeStream
 						generateReceiver(codeStream);
 					}
 				}
-				codeStream.generateEmulatedReadAccessForField(fieldBinding);
+				codeStream.generateEmulatedReadAccessForField(codegenField);
 				if (valueRequired) {
-					if ((fieldBinding.type == TypeBinding.LONG) || (fieldBinding.type == TypeBinding.DOUBLE)) {
-						codeStream.dup2();
-					} else {
-						codeStream.dup();
+					switch (codegenField.type.id) {
+						case TypeIds.T_long :
+						case TypeIds.T_double :
+							codeStream.dup2();
+							break;
+						default:
+							codeStream.dup();
+							break;
 					}
 				}
-				codeStream.generateEmulationForField(fieldBinding);
-				if ((fieldBinding.type == TypeBinding.LONG) || (fieldBinding.type == TypeBinding.DOUBLE)) {
-					codeStream.dup_x2();
+				codeStream.generateEmulationForField(codegenField);
+				switch (codegenField.type.id) {
+					case TypeIds.T_long :
+					case TypeIds.T_double :
+						codeStream.dup_x2();
+						codeStream.pop();
+						if (codegenField.isStatic()) {
+							codeStream.aconst_null();
+						} else {
+							generateReceiver(codeStream);
+						}
+						codeStream.dup_x2();
+						codeStream.pop();
+						break;
+					default:
+						codeStream.dup_x1();
 					codeStream.pop();
-					if (fieldBinding.isStatic()) {
+					if (codegenField.isStatic()) {
 						codeStream.aconst_null();
 					} else {
 						generateReceiver(codeStream);
 					}
-					codeStream.dup_x2();
-					codeStream.pop();
-				} else {
 					codeStream.dup_x1();
 					codeStream.pop();
-					if (fieldBinding.isStatic()) {
-						codeStream.aconst_null();
-					} else {
-						generateReceiver(codeStream);
-					}
-					codeStream.dup_x1();
-					codeStream.pop();
+						break;
 				}
 				codeStream.generateConstant(postIncrement.expression.constant, this.implicitConversion);
-				codeStream.sendOperator(postIncrement.operator, fieldBinding.type.id);
+				codeStream.sendOperator(postIncrement.operator, codegenField.type.id);
 				codeStream.generateImplicitConversion(postIncrement.preAssignImplicitConversion);
-				codeStream.generateEmulatedWriteAccessForField(fieldBinding);
+				codeStream.generateEmulatedWriteAccessForField(codegenField);
 			}
 			return;
 		case Binding.LOCAL : // assigning to a local variable

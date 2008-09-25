@@ -1,41 +1,71 @@
 public void generateCode(BlockScope currentScope, CodeStream codeStream, boolean valueRequired) {
 	int pc = codeStream.position;
-	if (this.constant != Constant.NotAConstant) {
-		if (valueRequired) {
-			codeStream.generateConstant(this.constant, this.implicitConversion);
-		}
-	} else {
-		FieldBinding lastFieldBinding = generateReadSequence(currentScope, codeStream);
-		if (valueRequired) {
-			if (lastFieldBinding.declaringClass == null) { // array length
-				codeStream.arraylength();
-				codeStream.generateImplicitConversion(this.implicitConversion);
-			} else {
-				Constant fieldConstant = lastFieldBinding.constant();
-				if (fieldConstant != Constant.NotAConstant) {
-					if (!lastFieldBinding.isStatic()){
-						codeStream.invokeObjectGetClass();
-						codeStream.pop();
-					}
-					// inline the last field constant
-					codeStream.generateConstant(fieldConstant, this.implicitConversion);
-				} else {
-					if (lastFieldBinding.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
-						if (lastFieldBinding.isStatic()) {
-							codeStream.getstatic(lastFieldBinding);
-						} else {
-							codeStream.getfield(lastFieldBinding);
-						}
-					} else {
-						codeStream.generateEmulatedReadAccessForField(lastFieldBinding);
-					}
-					codeStream.generateImplicitConversion(this.implicitConversion);
-				}
+	if ((this.bits & Binding.VARIABLE) == 0) { // nothing to do if type ref
+		codeStream.recordPositionsFrom(pc, this.sourceStart);
+		return;
+	}
+	FieldBinding lastFieldBinding = this.otherBindings == null ? (FieldBinding) this.binding : this.otherBindings[this.otherBindings.length-1];
+	if (lastFieldBinding.canBeSeenBy(getFinalReceiverType(), this, currentScope)) {
+		super.generateCode(currentScope, codeStream, valueRequired);
+		return;
+	}
+	lastFieldBinding = generateReadSequence(currentScope, codeStream);
+	if (lastFieldBinding != null) {
+		boolean isStatic = lastFieldBinding.isStatic();
+		Constant fieldConstant = lastFieldBinding.constant();
+		if (fieldConstant != Constant.NotAConstant) {
+			if (!isStatic){
+				codeStream.invokeObjectGetClass();
+				codeStream.pop();
+			}
+			if (valueRequired) { // inline the last field constant
+				codeStream.generateConstant(fieldConstant, this.implicitConversion);
 			}
 		} else {
-			if (lastFieldBinding != null && !lastFieldBinding.isStatic()){
-				codeStream.invokeObjectGetClass(); // perform null check
-				codeStream.pop();
+			boolean isFirst = lastFieldBinding == this.binding
+											&& (this.indexOfFirstFieldBinding == 1 || lastFieldBinding.declaringClass == currentScope.enclosingReceiverType())
+											&& this.otherBindings == null; // could be dup: next.next.next
+			TypeBinding requiredGenericCast = getGenericCast(this.otherBindings == null ? 0 : this.otherBindings.length);
+			if (valueRequired
+					|| (!isFirst && currentScope.compilerOptions().complianceLevel >= ClassFileConstants.JDK1_4)
+					|| ((this.implicitConversion & TypeIds.UNBOXING) != 0)
+					|| requiredGenericCast != null) {
+				int lastFieldPc = codeStream.position;
+				if (lastFieldBinding.declaringClass == null) { // array length
+					codeStream.arraylength();
+					if (valueRequired) {
+						codeStream.generateImplicitConversion(this.implicitConversion);
+					} else {
+						// could occur if !valueRequired but compliance >= 1.4
+						codeStream.pop();
+					}
+				} else {
+					codeStream.generateEmulatedReadAccessForField(lastFieldBinding);
+					if (requiredGenericCast != null) codeStream.checkcast(requiredGenericCast);
+					if (valueRequired) {
+						codeStream.generateImplicitConversion(this.implicitConversion);
+					} else {
+						boolean isUnboxing = (this.implicitConversion & TypeIds.UNBOXING) != 0;
+						// conversion only generated if unboxing
+						if (isUnboxing) codeStream.generateImplicitConversion(this.implicitConversion);
+						switch (isUnboxing ? postConversionType(currentScope).id : lastFieldBinding.type.id) {
+							case T_long :
+							case T_double :
+								codeStream.pop2();
+								break;
+							default :
+								codeStream.pop();
+						}
+					}
+				}
+
+				int fieldPosition = (int) (this.sourcePositions[this.sourcePositions.length - 1] >>> 32);
+				codeStream.recordPositionsFrom(lastFieldPc, fieldPosition);
+			} else {
+				if (!isStatic){
+					codeStream.invokeObjectGetClass(); // perform null check
+					codeStream.pop();
+				}
 			}
 		}
 	}

@@ -9,13 +9,15 @@ public void generateCode(BlockScope currentScope, CodeStream codeStream, boolean
 			case Binding.FIELD : // reading a field
 				if (!valueRequired)
 					break;
-				FieldBinding fieldBinding = (FieldBinding) this.codegenBinding;
-				Constant fieldConstant = fieldBinding.constant();
+				FieldBinding codegenField = ((FieldBinding) this.binding).original();
+				Constant fieldConstant = codegenField.constant();
 				if (fieldConstant == Constant.NotAConstant) { // directly use inlined value for constant fields
-					if (fieldBinding.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
-						 // directly use inlined value for constant fields
-						boolean isStatic;
-						if (!(isStatic = fieldBinding.isStatic())) {
+					if (codegenField.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
+						TypeBinding someReceiverType = this.delegateThis != null ? this.delegateThis.type : this.actualReceiverType;
+						TypeBinding constantPoolDeclaringClass = CodeStream.getConstantPoolDeclaringClass(currentScope, codegenField, someReceiverType, true /* implicit this */);
+						if (codegenField.isStatic()) {
+							codeStream.fieldAccess(Opcodes.OPC_getstatic, codegenField, constantPoolDeclaringClass);
+						} else {
 							if ((this.bits & DepthMASK) != 0) {
 								ReferenceBinding targetType = currentScope.enclosingSourceType().enclosingTypeAt((this.bits & DepthMASK) >> DepthSHIFT);
 								Object[] emulationPath = currentScope.getEmulationPath(targetType, true /*only exact match*/, false/*consider enclosing arg*/);
@@ -23,16 +25,11 @@ public void generateCode(BlockScope currentScope, CodeStream codeStream, boolean
 							} else {
 								generateReceiver(codeStream);
 							}
-						}
-						// managing private access
-						if (isStatic) {
-							codeStream.getstatic(fieldBinding);
-						} else {
-							codeStream.getfield(fieldBinding);
+							codeStream.fieldAccess(Opcodes.OPC_getfield, codegenField, constantPoolDeclaringClass);
 						}
 					} else {
 						// managing private access
-						if (!fieldBinding.isStatic()) {
+						if (!codegenField.isStatic()) {
 							if ((this.bits & DepthMASK) != 0) {
 								// internal error, per construction we should have found it
 								// not yet supported
@@ -43,7 +40,7 @@ public void generateCode(BlockScope currentScope, CodeStream codeStream, boolean
 						} else {
 							codeStream.aconst_null();
 						}
-						codeStream.generateEmulatedReadAccessForField(fieldBinding);
+						codeStream.generateEmulatedReadAccessForField(codegenField);
 					}
 					if (this.genericCast != null) codeStream.checkcast(this.genericCast);
 					codeStream.generateImplicitConversion(this.implicitConversion);
@@ -52,7 +49,7 @@ public void generateCode(BlockScope currentScope, CodeStream codeStream, boolean
 				}
 				break;
 			case Binding.LOCAL : // reading a local
-				LocalVariableBinding localBinding = (LocalVariableBinding) this.codegenBinding;
+				LocalVariableBinding localBinding = (LocalVariableBinding) this.binding;
 				if (!valueRequired)
 					break;
 				// outer local?

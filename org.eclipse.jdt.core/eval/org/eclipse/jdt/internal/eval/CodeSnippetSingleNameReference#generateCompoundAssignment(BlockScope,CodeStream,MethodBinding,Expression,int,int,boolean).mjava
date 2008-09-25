@@ -5,21 +5,23 @@
 public void generateCompoundAssignment(BlockScope currentScope, CodeStream codeStream, MethodBinding writeAccessor, Expression expression, int operator, int assignmentImplicitConversion, boolean valueRequired) {
 	switch (this.bits & RestrictiveFlagMASK) {
 		case Binding.FIELD : // assigning to a field
-			FieldBinding fieldBinding = (FieldBinding) this.codegenBinding;
-			if (fieldBinding.isStatic()) {
-				if (fieldBinding.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
-					codeStream.getstatic(fieldBinding);
+			FieldBinding codegenField = ((FieldBinding) this.binding).original();
+			if (codegenField.isStatic()) {
+				if (codegenField.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
+					TypeBinding someReceiverType = this.delegateThis != null ? this.delegateThis.type : this.actualReceiverType;
+					TypeBinding constantPoolDeclaringClass = CodeStream.getConstantPoolDeclaringClass(currentScope, codegenField, someReceiverType, true /* implicit this */);
+					codeStream.fieldAccess(Opcodes.OPC_getstatic, codegenField, constantPoolDeclaringClass);
 				} else {
 					// used to store the value
-					codeStream.generateEmulationForField(fieldBinding);
+					codeStream.generateEmulationForField(codegenField);
 					codeStream.aconst_null();
 
 					// used to retrieve the actual value
 					codeStream.aconst_null();
-					codeStream.generateEmulatedReadAccessForField(fieldBinding);
+					codeStream.generateEmulatedReadAccessForField(codegenField);
 				}
 			} else {
-				if (fieldBinding.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
+				if (codegenField.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
 					if ((this.bits & DepthMASK) != 0) {
 						ReferenceBinding targetType = currentScope.enclosingSourceType().enclosingTypeAt((this.bits & DepthMASK) >> DepthSHIFT);
 						Object[] emulationPath = currentScope.getEmulationPath(targetType, true /*only exact match*/, false/*consider enclosing arg*/);
@@ -28,7 +30,9 @@ public void generateCompoundAssignment(BlockScope currentScope, CodeStream codeS
 						generateReceiver(codeStream);
 					}
 					codeStream.dup();
-					codeStream.getfield(fieldBinding);
+					TypeBinding someReceiverType = this.delegateThis != null ? this.delegateThis.type : this.actualReceiverType;
+					TypeBinding constantPoolDeclaringClass = CodeStream.getConstantPoolDeclaringClass(currentScope, codegenField, someReceiverType, true /* implicit this */);
+					codeStream.fieldAccess(Opcodes.OPC_getfield, codegenField, constantPoolDeclaringClass);
 				} else {
 					if ((this.bits & DepthMASK) != 0) {
 						// internal error, per construction we should have found it
@@ -36,17 +40,17 @@ public void generateCompoundAssignment(BlockScope currentScope, CodeStream codeS
 						currentScope.problemReporter().needImplementation(this);
 					}
 					// used to store the value
-					codeStream.generateEmulationForField(fieldBinding);
+					codeStream.generateEmulationForField(codegenField);
 					generateReceiver(codeStream);
 
 					// used to retrieve the actual value
 					codeStream.dup();
-					codeStream.generateEmulatedReadAccessForField(fieldBinding);
+					codeStream.generateEmulatedReadAccessForField(codegenField);
 				}
 			}
 			break;
 		case Binding.LOCAL : // assigning to a local variable (cannot assign to outer local)
-			LocalVariableBinding localBinding = (LocalVariableBinding) this.codegenBinding;
+			LocalVariableBinding localBinding = (LocalVariableBinding) this.binding;
 			// using incr bytecode if possible
 			switch (localBinding.type.id) {
 				case T_JavaLangString :
@@ -110,32 +114,40 @@ public void generateCompoundAssignment(BlockScope currentScope, CodeStream codeS
 	// store the result back into the variable
 	switch (this.bits & RestrictiveFlagMASK) {
 		case Binding.FIELD : // assigning to a field
-			FieldBinding fieldBinding = (FieldBinding) this.codegenBinding;
-			if (fieldBinding.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
-				fieldStore(codeStream, fieldBinding, writeAccessor, valueRequired);
+			FieldBinding codegenField = ((FieldBinding) this.binding).original();
+			if (codegenField.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
+				fieldStore(currentScope, codeStream, codegenField, writeAccessor, this.actualReceiverType, this.delegateThis == null /* implicit this */, valueRequired);
 			} else {
 				// current stack is:
 				// field receiver value
 				if (valueRequired) {
-					if ((fieldBinding.type == TypeBinding.LONG) || (fieldBinding.type == TypeBinding.DOUBLE)) {
-						codeStream.dup2_x2();
-					} else {
-						codeStream.dup_x2();
-					}
+					switch (codegenField.type.id) {
+						case TypeIds.T_long :
+						case TypeIds.T_double :
+							codeStream.dup2_x2();
+							break;
+						default:
+							codeStream.dup_x2();
+							break;
+					}					
 				}
 				// current stack is:
 				// value field receiver value
-				codeStream.generateEmulatedWriteAccessForField(fieldBinding);
+				codeStream.generateEmulatedWriteAccessForField(codegenField);
 			}
 			return;
 		case Binding.LOCAL : // assigning to a local variable
-			LocalVariableBinding localBinding = (LocalVariableBinding) this.codegenBinding;
+			LocalVariableBinding localBinding = (LocalVariableBinding) this.binding;
 			if (valueRequired) {
-				if ((localBinding.type == TypeBinding.LONG) || (localBinding.type == TypeBinding.DOUBLE)) {
-					codeStream.dup2();
-				} else {
-					codeStream.dup();
-				}
+				switch (localBinding.type.id) {
+					case TypeIds.T_long :
+					case TypeIds.T_double :
+						codeStream.dup2();
+						break;
+					default:
+						codeStream.dup();
+						break;
+				}				
 			}
 			codeStream.store(localBinding, false);
 	}

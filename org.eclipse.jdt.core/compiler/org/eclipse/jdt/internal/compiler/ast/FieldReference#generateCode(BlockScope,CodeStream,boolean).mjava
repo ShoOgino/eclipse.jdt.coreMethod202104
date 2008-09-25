@@ -14,9 +14,10 @@ public void generateCode(BlockScope currentScope, CodeStream codeStream, boolean
 		codeStream.recordPositionsFrom(pc, this.sourceStart);
 		return;
 	}
-	boolean isStatic = this.codegenBinding.isStatic();
+	FieldBinding codegenBinding = this.binding.original();
+	boolean isStatic = codegenBinding.isStatic();
 	boolean isThisReceiver = this.receiver instanceof ThisReference;
-	Constant fieldConstant = this.codegenBinding.constant();
+	Constant fieldConstant = codegenBinding.constant();
 	if (fieldConstant != Constant.NotAConstant) {
 		if (!isThisReceiver) {
 			this.receiver.generateCode(currentScope, codeStream, !isStatic);
@@ -37,7 +38,7 @@ public void generateCode(BlockScope currentScope, CodeStream codeStream, boolean
 			|| (this.genericCast != null)) {
 		this.receiver.generateCode(currentScope, codeStream, !isStatic);
 		pc = codeStream.position;
-		if (this.codegenBinding.declaringClass == null) { // array length
+		if (codegenBinding.declaringClass == null) { // array length
 			codeStream.arraylength();
 			if (valueRequired) {
 				codeStream.generateImplicitConversion(this.implicitConversion);
@@ -47,10 +48,11 @@ public void generateCode(BlockScope currentScope, CodeStream codeStream, boolean
 			}
 		} else {
 			if (this.syntheticAccessors == null || this.syntheticAccessors[FieldReference.READ] == null) {
+				TypeBinding constantPoolDeclaringClass = CodeStream.getConstantPoolDeclaringClass(currentScope, codegenBinding, this.actualReceiverType, this.receiver.isImplicitThis());
 				if (isStatic) {
-					codeStream.getstatic(this.codegenBinding);
+					codeStream.fieldAccess(Opcodes.OPC_getstatic, codegenBinding, constantPoolDeclaringClass);
 				} else {
-					codeStream.getfield(this.codegenBinding);
+					codeStream.fieldAccess(Opcodes.OPC_getfield, codegenBinding, constantPoolDeclaringClass);
 				}
 			} else {
 				codeStream.invoke(Opcodes.OPC_invokestatic, this.syntheticAccessors[FieldReference.READ], null /* default declaringClass */);
@@ -63,7 +65,7 @@ public void generateCode(BlockScope currentScope, CodeStream codeStream, boolean
 				boolean isUnboxing = (this.implicitConversion & TypeIds.UNBOXING) != 0;
 				// conversion only generated if unboxing
 				if (isUnboxing) codeStream.generateImplicitConversion(this.implicitConversion);
-				switch (isUnboxing ? postConversionType(currentScope).id : this.codegenBinding.type.id) {
+				switch (isUnboxing ? postConversionType(currentScope).id : codegenBinding.type.id) {
 					case T_long :
 					case T_double :
 						codeStream.pop2();
@@ -77,14 +79,15 @@ public void generateCode(BlockScope currentScope, CodeStream codeStream, boolean
 		if (isThisReceiver) {
 			if (isStatic){
 				// if no valueRequired, still need possible side-effects of <clinit> invocation, if field belongs to different class
-				if (this.binding.original().declaringClass != this.receiverType.erasure()) {
+				if (this.binding.original().declaringClass != this.actualReceiverType.erasure()) {
 					MethodBinding accessor = this.syntheticAccessors == null ? null : this.syntheticAccessors[FieldReference.READ];
 					if (accessor == null) {
-						codeStream.getstatic(this.codegenBinding);
+						TypeBinding constantPoolDeclaringClass = CodeStream.getConstantPoolDeclaringClass(currentScope, codegenBinding, this.actualReceiverType, this.receiver.isImplicitThis());
+						codeStream.fieldAccess(Opcodes.OPC_getstatic, codegenBinding, constantPoolDeclaringClass);
 					} else {
 						codeStream.invoke(Opcodes.OPC_invokestatic, accessor, null /* default declaringClass */);
 					}
-					switch (this.codegenBinding.type.id) {
+					switch (codegenBinding.type.id) {
 						case T_long :
 						case T_double :
 							codeStream.pop2();

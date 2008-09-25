@@ -1,86 +1,59 @@
 public void generateCompoundAssignment(BlockScope currentScope, CodeStream codeStream, Expression expression, int operator, int assignmentImplicitConversion, boolean valueRequired) {
+    FieldBinding lastFieldBinding = this.otherBindings == null ? (FieldBinding) this.binding : this.otherBindings[this.otherBindings.length-1];
+	if (lastFieldBinding.canBeSeenBy(getFinalReceiverType(), this, currentScope)) {
+		super.generateCompoundAssignment(currentScope, codeStream, expression, operator, assignmentImplicitConversion, valueRequired);
+		return;
+	}
+	lastFieldBinding = generateReadSequence(currentScope, codeStream);
+	if (lastFieldBinding.isStatic()){
+		codeStream.generateEmulationForField(lastFieldBinding);
+		codeStream.swap();
+		codeStream.aconst_null();
+		codeStream.swap();
+		codeStream.generateEmulatedReadAccessForField(lastFieldBinding);
+	} else {
+		codeStream.generateEmulationForField(lastFieldBinding);
+		codeStream.swap();
+		codeStream.dup();
 
-	FieldBinding lastFieldBinding = generateReadSequence(currentScope, codeStream);
-	if (lastFieldBinding.canBeSeenBy(getReceiverType(currentScope), this, currentScope)) {
-		if (lastFieldBinding.isStatic()){
-			codeStream.getstatic(lastFieldBinding);
+		codeStream.generateEmulatedReadAccessForField(lastFieldBinding);
+	}
+	// the last field access is a write access
+	// perform the actual compound operation
+	int operationTypeID;
+	if ((operationTypeID = (this.implicitConversion & IMPLICIT_CONVERSION_MASK) >> 4) == T_JavaLangString) {
+		codeStream.generateStringConcatenationAppend(currentScope, null, expression);
+	} else {
+		// promote the array reference to the suitable operation type
+		codeStream.generateImplicitConversion(this.implicitConversion);
+		// generate the increment value (will by itself  be promoted to the operation value)
+		if (expression == IntLiteral.One){ // prefix operation
+			codeStream.generateConstant(expression.constant, this.implicitConversion);
 		} else {
-			codeStream.dup();
-			codeStream.getfield(lastFieldBinding);
+			expression.generateCode(currentScope, codeStream, true);
 		}
-		// the last field access is a write access
-		// perform the actual compound operation
-		int operationTypeID;
-		switch(operationTypeID = (this.implicitConversion & IMPLICIT_CONVERSION_MASK) >> 4) {
-			case T_JavaLangString :
-			case T_JavaLangObject :
-			case T_undefined :
-				codeStream.generateStringConcatenationAppend(currentScope, null, expression);
+		// perform the operation
+		codeStream.sendOperator(operator, operationTypeID);
+		// cast the value back to the array reference type
+		codeStream.generateImplicitConversion(assignmentImplicitConversion);
+	}
+	// actual assignment
+
+	// current stack is:
+	// field receiver value
+	if (valueRequired) {
+		switch (lastFieldBinding.type.id) {
+			case TypeIds.T_long :
+			case TypeIds.T_double :
+				codeStream.dup2_x2();
 				break;
 			default :
-				// promote the array reference to the suitable operation type
-				codeStream.generateImplicitConversion(this.implicitConversion);
-				// generate the increment value (will by itself  be promoted to the operation value)
-				if (expression == IntLiteral.One){ // prefix operation
-					codeStream.generateConstant(expression.constant, this.implicitConversion);
-				} else {
-					expression.generateCode(currentScope, codeStream, true);
-				}
-				// perform the operation
-				codeStream.sendOperator(operator, operationTypeID);
-				// cast the value back to the array reference type
-				codeStream.generateImplicitConversion(assignmentImplicitConversion);
-		}
-		// actual assignment
-		fieldStore(codeStream, lastFieldBinding, null, valueRequired);
-	} else {
-		if (lastFieldBinding.isStatic()){
-			codeStream.generateEmulationForField(lastFieldBinding);
-			codeStream.swap();
-			codeStream.aconst_null();
-			codeStream.swap();
-
-			codeStream.generateEmulatedReadAccessForField(lastFieldBinding);
-		} else {
-			codeStream.generateEmulationForField(lastFieldBinding);
-			codeStream.swap();
-			codeStream.dup();
-
-			codeStream.generateEmulatedReadAccessForField(lastFieldBinding);
-		}
-		// the last field access is a write access
-		// perform the actual compound operation
-		int operationTypeID;
-		if ((operationTypeID = (this.implicitConversion & IMPLICIT_CONVERSION_MASK) >> 4) == T_JavaLangString) {
-			codeStream.generateStringConcatenationAppend(currentScope, null, expression);
-		} else {
-			// promote the array reference to the suitable operation type
-			codeStream.generateImplicitConversion(this.implicitConversion);
-			// generate the increment value (will by itself  be promoted to the operation value)
-			if (expression == IntLiteral.One){ // prefix operation
-				codeStream.generateConstant(expression.constant, this.implicitConversion);
-			} else {
-				expression.generateCode(currentScope, codeStream, true);
-			}
-			// perform the operation
-			codeStream.sendOperator(operator, operationTypeID);
-			// cast the value back to the array reference type
-			codeStream.generateImplicitConversion(assignmentImplicitConversion);
-		}
-		// actual assignment
-
-		// current stack is:
-		// field receiver value
-		if (valueRequired) {
-			if ((lastFieldBinding.type == TypeBinding.LONG) || (lastFieldBinding.type == TypeBinding.DOUBLE)) {
-				codeStream.dup2_x2();
-			} else {
 				codeStream.dup_x2();
-			}
+			break;	
 		}
-		// current stack is:
-		// value field receiver value
-		codeStream.generateEmulatedWriteAccessForField(lastFieldBinding);
 	}
+	// current stack is:
+	// value field receiver value
+	codeStream.generateEmulatedWriteAccessForField(lastFieldBinding);
 }
 
