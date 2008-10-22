@@ -1,0 +1,264 @@
+	public static void suggestVariableNames(
+			int variableKind,
+			int baseNameKind,
+			char[] baseName,
+			IJavaProject javaProject,
+			int dim,
+			char[] internalPrefix,
+			char[][] excluded,
+			boolean evaluateDefault,
+			INamingRequestor requestor) {
+		
+		if(baseName == null || baseName.length == 0)
+			return;
+		
+		Map options;
+		if (javaProject != null) {
+			options = javaProject.getOptions(true);
+		} else {
+			options = JavaCore.getOptions();
+		}
+		CompilerOptions compilerOptions = new CompilerOptions(options);
+		AssistOptions assistOptions = new AssistOptions(options);
+		
+		boolean isConstantField = false;
+		
+		char[][] prefixes = null;
+		char[][] suffixes = null;
+		switch (variableKind) {
+			case VK_INSTANCE_FIELD:
+				prefixes = assistOptions.fieldPrefixes;
+				suffixes = assistOptions.fieldSuffixes;
+				break;
+			case VK_STATIC_FIELD:
+				prefixes = assistOptions.staticFieldPrefixes;
+				suffixes = assistOptions.staticFieldSuffixes;
+				break;
+			case VK_CONSTANT_FIELD:
+				isConstantField = true;
+				prefixes = assistOptions.staticFinalFieldPrefixes;
+				suffixes = assistOptions.staticFinalFieldSuffixes;
+				break;
+			case VK_LOCAL:
+				prefixes = assistOptions.localPrefixes;
+				suffixes = assistOptions.localSuffixes;
+				break;
+			case VK_PARAMETER:
+				prefixes = assistOptions.argumentPrefixes;
+				suffixes = assistOptions.argumentSuffixes;
+				break;
+		}
+		
+		if(prefixes == null || prefixes.length == 0) {
+			prefixes = new char[1][0];
+		} else {
+			int length = prefixes.length;
+			System.arraycopy(prefixes, 0, prefixes = new char[length+1][], 0, length);
+			prefixes[length] = CharOperation.NO_CHAR;
+		}
+
+		if(suffixes == null || suffixes.length == 0) {
+			suffixes = new char[1][0];
+		} else {
+			int length = suffixes.length;
+			System.arraycopy(suffixes, 0, suffixes = new char[length+1][], 0, length);
+			suffixes[length] = CharOperation.NO_CHAR;
+		}
+		
+		if(internalPrefix == null) {
+			internalPrefix = CharOperation.NO_CHAR;
+		} else {
+			internalPrefix = removePrefix(internalPrefix, prefixes);
+		}
+
+		char[][] tempNames = null;
+		
+		Scanner nameScanner = getNameScanner(compilerOptions);
+		if (baseNameKind == BK_SIMPLE_TYPE_NAME) {
+			boolean isBaseType = false;
+			
+			try{
+				nameScanner.setSource(baseName);
+				switch (nameScanner.getNextToken()) {
+					case TerminalTokens.TokenNameint :
+					case TerminalTokens.TokenNamebyte :
+					case TerminalTokens.TokenNameshort :
+					case TerminalTokens.TokenNamechar :
+					case TerminalTokens.TokenNamelong :
+					case TerminalTokens.TokenNamefloat :
+					case TerminalTokens.TokenNamedouble :
+					case TerminalTokens.TokenNameboolean :
+						isBaseType = true;
+						break;
+				}
+			} catch(InvalidInputException e){
+				// ignore
+			}
+			if (isBaseType) {
+				// compute variable name from base type
+				if (internalPrefix.length > 0) return;
+	
+				tempNames = computeBaseTypeNames(baseName, isConstantField, excluded);
+			} else {
+				// compute variable name for non base type
+				tempNames = computeNonBaseTypeNames(baseName, isConstantField);
+			}
+		} else {
+			tempNames = new char[][]{baseName};
+		}
+
+		boolean acceptDefaultName = true;
+		SimpleSetOfCharArray foundNames = new SimpleSetOfCharArray();
+
+		for (int i = 0; i < tempNames.length; i++) {
+			char[] tempName = tempNames[i];
+			
+			// add English plural form is necessary
+			if(dim > 0) {
+				int length = tempName.length;
+				
+				if (isConstantField) {
+					if (tempName[length-1] == 'S'){
+						if(tempName.length > 1 && tempName[length-2] == 'S') {
+							System.arraycopy(tempName, 0, tempName = new char[length + 2], 0, length);
+							tempName[length] = 'E';
+							tempName[length+1] = 'S';
+						}
+					} else if(tempName[length-1] == 'Y') {
+						System.arraycopy(tempName, 0, tempName = new char[length + 2], 0, length);
+						tempName[length-1] = 'I';
+						tempName[length] = 'E';
+						tempName[length+1] = 'S';
+					} else {
+						System.arraycopy(tempName, 0, tempName = new char[length + 1], 0, length);
+						tempName[length] = 'S';
+					}
+				} else {
+					if (tempName[length-1] == 's'){
+						if(tempName.length > 1 && tempName[length-2] == 's') {
+							System.arraycopy(tempName, 0, tempName = new char[length + 2], 0, length);
+							tempName[length] = 'e';
+							tempName[length+1] = 's';
+						}
+					} else if(tempName[length-1] == 'y') {
+						System.arraycopy(tempName, 0, tempName = new char[length + 2], 0, length);
+						tempName[length-1] = 'i';
+						tempName[length] = 'e';
+						tempName[length+1] = 's';
+					} else {
+						System.arraycopy(tempName, 0, tempName = new char[length + 1], 0, length);
+						tempName[length] = 's';
+					}
+				}
+			}
+			
+			char[] unprefixedName = tempName;
+			
+			int matchingIndex = -1;
+			if (!isConstantField) {
+				unprefixedName[0] = ScannerHelper.toUpperCase(unprefixedName[0]);
+				
+				done : for (int j = 0; j <= internalPrefix.length; j++) {
+					if(j == internalPrefix.length ||
+							CharOperation.prefixEquals(CharOperation.subarray(internalPrefix, j, -1), unprefixedName, j != 0 /*do not check case when there is no prefix*/)) {
+						matchingIndex = j;
+						break done;
+					}
+				}
+			} else {
+				done : for (int j = 0; j <= internalPrefix.length; j++) {
+					if(j == internalPrefix.length) {
+						matchingIndex = j;
+						break done;
+					} else if(CharOperation.prefixEquals(CharOperation.subarray(internalPrefix, j, -1), unprefixedName, j != 0 /*do not check case when there is no prefix*/)) {
+						if (j == 0 || internalPrefix[j - 1] == '_') {
+							matchingIndex = j;
+							break done;
+						}
+						
+					}
+				}
+			}
+
+			if(matchingIndex > -1) {
+				if (!isConstantField) {
+					tempName = CharOperation.concat(CharOperation.subarray(internalPrefix, 0, matchingIndex), unprefixedName);
+					if(matchingIndex == 0) tempName[0] = ScannerHelper.toLowerCase(tempName[0]);
+				} else {
+					if(matchingIndex != 0 && tempName[0] != '_' && internalPrefix[matchingIndex - 1] != '_') {
+						tempName = CharOperation.concat(CharOperation.subarray(CharOperation.toUpperCase(internalPrefix), 0, matchingIndex), unprefixedName, '_');
+					} else {
+						tempName = CharOperation.concat(CharOperation.subarray(CharOperation.toUpperCase(internalPrefix), 0, matchingIndex), unprefixedName);
+					}
+				}
+				
+				for (int k = 0; k < prefixes.length; k++) {
+					if (!isConstantField) {
+						if(prefixes[k].length > 0
+							&& ScannerHelper.isLetterOrDigit(prefixes[k][prefixes[k].length - 1])) {
+							tempName[0] = ScannerHelper.toUpperCase(tempName[0]);
+						} else {
+							tempName[0] = ScannerHelper.toLowerCase(tempName[0]);
+						}
+					}
+					char[] prefixName = CharOperation.concat(prefixes[k], tempName);
+					for (int l = 0; l < suffixes.length; l++) {
+						char[] suffixName = CharOperation.concat(prefixName, suffixes[l]);
+						suffixName =
+							excludeNames(
+								suffixName,
+								prefixName,
+								suffixes[l],
+								excluded);
+						try{
+							nameScanner.setSource(suffixName);
+							switch (nameScanner.getNextToken()) {
+								case TerminalTokens.TokenNameIdentifier :
+									int token = nameScanner.getNextToken();
+									if (token == TerminalTokens.TokenNameEOF && nameScanner.startPosition == suffixName.length) {
+										if (!foundNames.includes(suffixName)) {
+											acceptName(suffixName, prefixes[k], suffixes[l],  k == 0, l == 0, internalPrefix.length - matchingIndex, requestor);
+											foundNames.add(suffixName);
+											acceptDefaultName = false;
+										}
+									}
+									break;
+								default:
+									suffixName = CharOperation.concat(
+										prefixName,
+										String.valueOf(1).toCharArray(),
+										suffixes[l]
+									);
+									suffixName =
+										excludeNames(
+											suffixName,
+											prefixName,
+											suffixes[l],
+											excluded);
+									nameScanner.setSource(suffixName);
+									switch (nameScanner.getNextToken()) {
+										case TerminalTokens.TokenNameIdentifier :
+											token = nameScanner.getNextToken();
+											if (token == TerminalTokens.TokenNameEOF && nameScanner.startPosition == suffixName.length) {
+												if (!foundNames.includes(suffixName)) {
+													acceptName(suffixName, prefixes[k], suffixes[l], k == 0, l == 0, internalPrefix.length - matchingIndex, requestor);
+													foundNames.add(suffixName);
+													acceptDefaultName = false;
+												}
+											}
+									}
+							}
+						} catch(InvalidInputException e){
+							// ignore
+						}
+					}
+				}
+			}
+		}
+		// if no names were found
+		if(evaluateDefault && acceptDefaultName) {
+			char[] name = excludeNames(DEFAULT_NAME, DEFAULT_NAME, CharOperation.NO_CHAR, excluded);
+			requestor.acceptNameWithoutPrefixAndSuffix(name, 0);
+		}
+	}
+
