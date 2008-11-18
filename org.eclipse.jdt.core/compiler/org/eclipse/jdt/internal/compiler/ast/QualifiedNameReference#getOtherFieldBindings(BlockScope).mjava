@@ -1,27 +1,7 @@
 public TypeBinding getOtherFieldBindings(BlockScope scope) {
 	// At this point restrictiveFlag may ONLY have two potential value : FIELD LOCAL (i.e cast <<(VariableBinding) binding>> is valid)
 	int length = this.tokens.length;
-	FieldBinding field;
-	if ((this.bits & Binding.FIELD) != 0) {
-		field = (FieldBinding) this.binding;
-		if (!field.isStatic()) {
-			//must check for the static status....
-			if (this.indexOfFirstFieldBinding > 1  //accessing to a field using a type as "receiver" is allowed only with static field
-					 || scope.methodScope().isStatic) { 	// the field is the first token of the qualified reference....
-				scope.problemReporter().staticFieldAccessToNonStaticVariable(this, field);
-				return null;
-			 }
-		} else if (this.indexOfFirstFieldBinding > 1
-					&& field.declaringClass != this.actualReceiverType
-					&& field.declaringClass.canBeSeenBy(scope)) {
-			scope.problemReporter().indirectAccessToStaticField(this, field);
-		}
-		// only last field is actually a write access if any
-		if (isFieldUseDeprecated(field, scope, (this.bits & ASTNode.IsStrictlyAssigned) != 0 && this.indexOfFirstFieldBinding == length))
-			scope.problemReporter().deprecatedField(field, this);
-	} else {
-		field = null;
-	}
+	FieldBinding field = ((this.bits & Binding.FIELD) != 0) ? (FieldBinding) this.binding : null;
 	TypeBinding type = ((VariableBinding) this.binding).type;
 	int index = this.indexOfFirstFieldBinding;
 	if (index == length) { //	restrictiveFlag == FIELD
@@ -73,11 +53,18 @@ public TypeBinding getOtherFieldBindings(BlockScope scope) {
 			}
 
 			if (field.isStatic()) {
-				// check if accessing enum static field in initializer
-				ReferenceBinding declaringClass = field.declaringClass;
+				ReferenceBinding declaringClass = field.original().declaringClass;
 				if (declaringClass.isEnum()) {
 					MethodScope methodScope = scope.methodScope();
 					SourceTypeBinding sourceType = methodScope.enclosingSourceType();
+					if ((this.bits & ASTNode.IsStrictlyAssigned) == 0
+							&& sourceType == declaringClass
+							&& methodScope.lastVisibleFieldID >= 0
+							&& field.id >= methodScope.lastVisibleFieldID
+							&& (!field.isStatic() || methodScope.isStatic)) {
+						scope.problemReporter().forwardReference(this, index, field);
+					}					
+					// check if accessing enum static field in initializer
 					if ((sourceType == declaringClass || sourceType.superclass == declaringClass) // enum constant body
 							&& field.constant() == Constant.NotAConstant
 							&& !methodScope.isStatic
