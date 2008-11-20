@@ -1,55 +1,62 @@
 void checkInheritedMethods(MethodBinding[] methods, int length) {
-	if (length > 1) {
-		int[] overriddenInheritedMethods = findOverriddenInheritedMethods(methods, length);
-		if (overriddenInheritedMethods != null) {
-			// detected some overridden methods that can be ignored when checking return types
-			// but cannot ignore an overridden inherited method completely when it comes to checking for bridge methods
-			int index = 0;
-			MethodBinding[] closestMethods = new MethodBinding[length];
-			for (int i = 0; i < length; i++)
-				if (overriddenInheritedMethods[i] == 0)
-					closestMethods[index++] = methods[i];
-			if (index > 1 && !checkInheritedReturnTypes(closestMethods, index))
-				return;
-		} else if (!checkInheritedReturnTypes(methods, length)) {
-			return;
-		}
-	}
+	/*
+	1. find concrete method
+	2. if it doesn't exist then find first inherited abstract method whose return type is compatible with all others
+	   if no such method exists then report incompatible return type error
+	   otherwise report abstract method must be implemented
+	3. if concrete method exists, check to see if its return type is compatible with all others
+	   if it is then check concrete method against abstract methods
+	   if its not, then find most specific abstract method & report abstract method must be implemented since concrete method is insufficient
+	   if no most specific return type abstract method exists, then report incompatible return type with all inherited methods 
+	*/
 
-	MethodBinding concreteMethod = null;
-	if (!this.type.isInterface()) {  // ignore concrete methods for interfaces
-		for (int i = length; --i >= 0;) {  // Remember that only one of the methods can be non-abstract
-			if (!methods[i].isAbstract()) {
-				concreteMethod = methods[i];
-				break;
-			}
-		}
-	}
+	MethodBinding concreteMethod = this.type.isInterface() || methods[0].isAbstract() ? null : methods[0];
 	if (concreteMethod == null) {
-		if (!this.type.isAbstract()) {
-			for (int i = length; --i >= 0;) {
-				if (mustImplementAbstractMethod(methods[i].declaringClass)) {
-					TypeDeclaration typeDeclaration = this.type.scope.referenceContext;
-					if (typeDeclaration != null) {
-						MethodDeclaration missingAbstractMethod = typeDeclaration.addMissingAbstractMethodFor(methods[0]);
-						missingAbstractMethod.scope.problemReporter().abstractMethodMustBeImplemented(this.type, methods[0]);
-					} else {
-						problemReporter().abstractMethodMustBeImplemented(this.type, methods[0]);
-					}
-					return;
+		MethodBinding bestAbstractMethod = length == 1 ? methods[0] : findBestInheritedAbstractMethod(methods, length);
+		if (bestAbstractMethod == null) {
+			problemReporter().inheritedMethodsHaveIncompatibleReturnTypes(this.type, methods, length);
+		} else if (mustImplementAbstractMethod(bestAbstractMethod.declaringClass)) {
+			TypeDeclaration typeDeclaration = this.type.scope.referenceContext;
+			MethodBinding superclassAbstractMethod = methods[0];
+			if (superclassAbstractMethod == bestAbstractMethod || superclassAbstractMethod.declaringClass.isInterface()) {
+				if (typeDeclaration != null) {
+					MethodDeclaration missingAbstractMethod = typeDeclaration.addMissingAbstractMethodFor(bestAbstractMethod);
+					missingAbstractMethod.scope.problemReporter().abstractMethodMustBeImplemented(this.type, bestAbstractMethod);
+				} else {
+					problemReporter().abstractMethodMustBeImplemented(this.type, bestAbstractMethod);
+				}
+			} else {
+				if (typeDeclaration != null) {
+					MethodDeclaration missingAbstractMethod = typeDeclaration.addMissingAbstractMethodFor(bestAbstractMethod);
+					missingAbstractMethod.scope.problemReporter().abstractMethodMustBeImplemented(this.type, bestAbstractMethod, superclassAbstractMethod);
+				} else {
+					problemReporter().abstractMethodMustBeImplemented(this.type, bestAbstractMethod, superclassAbstractMethod);
 				}
 			}
 		}
 		return;
 	}
+	if (length < 2) return; // nothing else to check
 
-	if (length > 1) {
-		MethodBinding[] abstractMethods = new MethodBinding[length - 1];
-		int index = 0;
-		for (int i = length; --i >= 0;)
-			if (methods[i] != concreteMethod)
-				abstractMethods[index++] = methods[i];
-		checkConcreteInheritedMethod(concreteMethod, abstractMethods);
+	int index = length;
+	while (--index > 0 && checkInheritedReturnTypes(concreteMethod, methods[index])) {/*empty*/}
+	if (index > 0) {
+		// concreteMethod is not the best match
+		MethodBinding bestAbstractMethod = findBestInheritedAbstractMethod(methods, length);
+		if (bestAbstractMethod == null)
+			problemReporter().inheritedMethodsHaveIncompatibleReturnTypes(this.type, methods, length);
+		else // can only happen in >= 1.5 since return types must be equal prior to 1.5
+			problemReporter().abstractMethodMustBeImplemented(this.type, bestAbstractMethod, concreteMethod);
+		return;
 	}
+
+	MethodBinding[] abstractMethods = new MethodBinding[length - 1];
+	index = 0;
+	for (int i = 0; i < length; i++)
+		if (methods[i].isAbstract())
+			abstractMethods[index++] = methods[i];
+	if (index < abstractMethods.length)
+		System.arraycopy(abstractMethods, 0, abstractMethods = new MethodBinding[index], 0, index);
+	checkConcreteInheritedMethod(concreteMethod, abstractMethods);
 }
 
