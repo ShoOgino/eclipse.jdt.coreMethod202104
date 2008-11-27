@@ -126,15 +126,23 @@ void write(DataOutputStream out) throws IOException {
 	}
 
 /*
+ * char[][]	Interned root names
  * char[][][]	Interned qualified names
  * char[][]	Interned simple names
  */
+	SimpleLookupTable internedRootNames = new SimpleLookupTable(3);
 	SimpleLookupTable internedQualifiedNames = new SimpleLookupTable(31);
 	SimpleLookupTable internedSimpleNames = new SimpleLookupTable(31);
 	valueTable = this.references.valueTable;
 	for (int i = 0, l = valueTable.length; i < l; i++) {
 		if (valueTable[i] != null) {
 			ReferenceCollection collection = (ReferenceCollection) valueTable[i];
+			char[][] rNames = collection.rootReferences;
+			for (int j = 0, m = rNames.length; j < m; j++) {
+				char[] rName = rNames[j];
+				if (!internedRootNames.containsKey(rName)) // remember the names have been interned
+					internedRootNames.put(rName, new Integer(internedRootNames.elementSize));
+			}
 			char[][][] qNames = collection.qualifiedNameReferences;
 			for (int j = 0, m = qNames.length; j < m; j++) {
 				char[][] qName = qNames[j];
@@ -155,9 +163,20 @@ void write(DataOutputStream out) throws IOException {
 			}
 		}
 	}
-	char[][] internedArray = new char[internedSimpleNames.elementSize][];
+	char[][] internedArray = new char[internedRootNames.elementSize][];
+	Object[] rootNames = internedRootNames.keyTable;
+	Object[] positions = internedRootNames.valueTable;
+	for (int i = positions.length; --i >= 0; ) {
+		if (positions[i] != null) {
+			int index = ((Integer) positions[i]).intValue();
+			internedArray[index] = (char[]) rootNames[i];
+		}
+	}
+	writeNames(internedArray, out);
+	// now write the interned simple names
+	internedArray = new char[internedSimpleNames.elementSize][];
 	Object[] simpleNames = internedSimpleNames.keyTable;
-	Object[] positions = internedSimpleNames.valueTable;
+	positions = internedSimpleNames.valueTable;
 	for (int i = positions.length; --i >= 0; ) {
 		if (positions[i] != null) {
 			int index = ((Integer) positions[i]).intValue();
@@ -219,6 +238,13 @@ void write(DataOutputStream out) throws IOException {
 				out.writeInt(sLength);
 				for (int j = 0; j < sLength; j++) {
 					index = (Integer) internedSimpleNames.get(sNames[j]);
+					out.writeInt(index.intValue());
+				}
+				char[][] rNames = collection.rootReferences;
+				int rLength = rNames.length;
+				out.writeInt(rLength);
+				for (int j = 0; j < rLength; j++) {
+					index = (Integer) internedRootNames.get(rNames[j]);
 					out.writeInt(index.intValue());
 				}
 			}
