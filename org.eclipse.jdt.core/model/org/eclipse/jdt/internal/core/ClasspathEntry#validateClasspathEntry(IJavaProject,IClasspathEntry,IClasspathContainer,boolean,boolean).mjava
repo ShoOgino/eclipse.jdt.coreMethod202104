@@ -1,0 +1,187 @@
+	private static IJavaModelStatus validateClasspathEntry(IJavaProject project, IClasspathEntry entry, IClasspathContainer entryContainer, boolean checkSourceAttachment, boolean referredByContainer){
+
+		IWorkspaceRoot workspaceRoot = ResourcesPlugin.getWorkspace().getRoot();
+		IPath path = entry.getPath();
+
+		// Build some common strings for status message
+		String projectName = project.getElementName();
+		String entryPathMsg = projectName.equals(path.segment(0)) ? path.removeFirstSegments(1).makeRelative().toString() : path.toString();
+
+		switch(entry.getEntryKind()){
+
+			// container entry check
+			case IClasspathEntry.CPE_CONTAINER :
+				if (path.segmentCount() >= 1){
+					try {
+						IJavaModelStatus status = null;
+						// Validate extra attributes
+						IClasspathAttribute[] extraAttributes = entry.getExtraAttributes();
+						if (extraAttributes != null) {
+							int length = extraAttributes.length;
+							HashSet set = new HashSet(length);
+							for (int i=0; i<length; i++) {
+								String attName = extraAttributes[i].getName();
+								if (!set.add(attName)) {
+									status = new JavaModelStatus(IJavaModelStatusConstants.NAME_COLLISION, Messages.bind(Messages.classpath_duplicateEntryExtraAttribute, new String[] {attName, entryPathMsg, projectName}));
+									break;
+								}
+							}
+						}
+						IClasspathContainer container = JavaModelManager.getJavaModelManager().getClasspathContainer(path, project);
+						// container retrieval is performing validation check on container entry kinds.
+						if (container == null) {
+							if (status != null)
+								return status;
+							return new JavaModelStatus(IJavaModelStatusConstants.CP_CONTAINER_PATH_UNBOUND, project, path);
+						} else if (container == JavaModelManager.CONTAINER_INITIALIZATION_IN_PROGRESS) {
+							// don't create a marker if initialization is in progress (case of cp initialization batching)
+							return JavaModelStatus.VERIFIED_OK;
+						}
+						IClasspathEntry[] containerEntries = container.getClasspathEntries();
+						if (containerEntries != null){
+							for (int i = 0, length = containerEntries.length; i < length; i++){
+								IClasspathEntry containerEntry = containerEntries[i];
+								int kind = containerEntry == null ? 0 : containerEntry.getEntryKind();
+								if (containerEntry == null
+									|| kind == IClasspathEntry.CPE_SOURCE
+									|| kind == IClasspathEntry.CPE_VARIABLE
+									|| kind == IClasspathEntry.CPE_CONTAINER){
+										String description = container.getDescription();
+										if (description == null) description = path.makeRelative().toString();
+										return new JavaModelStatus(IJavaModelStatusConstants.INVALID_CP_CONTAINER_ENTRY, project, path);
+								}
+								IJavaModelStatus containerEntryStatus = validateClasspathEntry(project, containerEntry, container, checkSourceAttachment, true/*referred by container*/);
+								if (!containerEntryStatus.isOK()){
+									return containerEntryStatus;
+								}
+							}
+						}
+					} catch(JavaModelException e){
+						return new JavaModelStatus(e);
+					}
+				} else {
+					return new JavaModelStatus(IJavaModelStatusConstants.INVALID_CLASSPATH, Messages.bind(Messages.classpath_illegalContainerPath, new String[] {entryPathMsg, projectName}));
+				}
+				break;
+
+			// variable entry check
+			case IClasspathEntry.CPE_VARIABLE :
+				if (path.segmentCount() >= 1){
+					try {
+						entry = JavaCore.getResolvedClasspathEntry(entry);
+					} catch (AssertionFailedException e) {
+						// Catch the assertion failure and throw java model exception instead
+						// see bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=55992
+						return new JavaModelStatus(IJavaModelStatusConstants.INVALID_PATH, e.getMessage());
+					}
+					if (entry == null){
+						return new JavaModelStatus(IJavaModelStatusConstants.CP_VARIABLE_PATH_UNBOUND, project, path);
+					}
+
+					// get validation status
+					IJavaModelStatus status = validateClasspathEntry(project, entry, null, checkSourceAttachment, false/*not referred by container*/);
+					if (!status.isOK()) return status;
+
+					// return deprecation status if any
+					String variableName = path.segment(0);
+					String deprecatedMessage = JavaCore.getClasspathVariableDeprecationMessage(variableName);
+					if (deprecatedMessage != null) {
+						return new JavaModelStatus(IStatus.WARNING, IJavaModelStatusConstants.DEPRECATED_VARIABLE, project, path, deprecatedMessage);
+					}
+					return status;
+				} else {
+					return new JavaModelStatus(IJavaModelStatusConstants.INVALID_CLASSPATH, Messages.bind(Messages.classpath_illegalVariablePath, new String[] {entryPathMsg, projectName}));
+				}
+
+			// library entry check
+			case IClasspathEntry.CPE_LIBRARY :
+				path = ClasspathEntry.resolveDotDot(path);
+				
+				// do not validate entries from Class-Path: in manifest
+				// (these entries are considered optional since the user cannot act on them)
+				// see https://bugs.eclipse.org/bugs/show_bug.cgi?id=252392
+				
+				String containerInfo = null;
+				if (entryContainer != null) {
+					if (entryContainer instanceof UserLibraryClasspathContainer) {
+						containerInfo = Messages.bind(Messages.classpath_userLibraryInfo, new String[] {entryContainer.getDescription()});
+					} else {
+						containerInfo = Messages.bind(Messages.classpath_containerInfo, new String[] {entryContainer.getDescription()});
+					}
+				}
+				IJavaModelStatus status = validateLibraryEntry(path, project, containerInfo, checkSourceAttachment ? entry.getSourceAttachmentPath() : null, entryPathMsg);
+				if (!status.isOK())
+					return status;
+				break;
+
+			// project entry check
+			case IClasspathEntry.CPE_PROJECT :
+				if (path.isAbsolute() && path.segmentCount() == 1) {
+					IProject prereqProjectRsc = workspaceRoot.getProject(path.segment(0));
+					IJavaProject prereqProject = JavaCore.create(prereqProjectRsc);
+					try {
+						if (!prereqProjectRsc.exists() || !prereqProjectRsc.hasNature(JavaCore.NATURE_ID)){
+							return new JavaModelStatus(IJavaModelStatusConstants.INVALID_CLASSPATH, Messages.bind(Messages.classpath_unboundProject, new String[] {path.segment(0), projectName}));
+						}
+						if (!prereqProjectRsc.isOpen()){
+							return new JavaModelStatus(IJavaModelStatusConstants.INVALID_CLASSPATH, Messages.bind(Messages.classpath_closedProject, new String[] {path.segment(0)}));
+						}
+						if (!JavaCore.IGNORE.equals(project.getOption(JavaCore.CORE_INCOMPATIBLE_JDK_LEVEL, true))) {
+							long projectTargetJDK = CompilerOptions.versionToJdkLevel(project.getOption(JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM, true));
+							long prereqProjectTargetJDK = CompilerOptions.versionToJdkLevel(prereqProject.getOption(JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM, true));
+							if (prereqProjectTargetJDK > projectTargetJDK) {
+								return new JavaModelStatus(IJavaModelStatusConstants.INCOMPATIBLE_JDK_LEVEL,
+										project, path, 
+										Messages.bind(Messages.classpath_incompatibleLibraryJDKLevel,
+												new String[] {
+													project.getElementName(),
+													CompilerOptions.versionFromJdkLevel(projectTargetJDK), 
+													path.makeRelative().toString(),
+													CompilerOptions.versionFromJdkLevel(prereqProjectTargetJDK)}));
+							}
+						}
+					} catch (CoreException e){
+						return new JavaModelStatus(IJavaModelStatusConstants.INVALID_CLASSPATH, Messages.bind(Messages.classpath_unboundProject, new String[] {path.segment(0), projectName}));
+					}
+				} else {
+					return new JavaModelStatus(IJavaModelStatusConstants.INVALID_CLASSPATH, Messages.bind(Messages.classpath_illegalProjectPath, new String[] {path.toString(), projectName}));
+				}
+				break;
+
+			// project source folder
+			case IClasspathEntry.CPE_SOURCE :
+				if (((entry.getInclusionPatterns() != null && entry.getInclusionPatterns().length > 0)
+				        	|| (entry.getExclusionPatterns() != null && entry.getExclusionPatterns().length > 0))
+						&& JavaCore.DISABLED.equals(project.getOption(JavaCore.CORE_ENABLE_CLASSPATH_EXCLUSION_PATTERNS, true))) {
+					return new JavaModelStatus(IJavaModelStatusConstants.DISABLED_CP_EXCLUSION_PATTERNS, project, path);
+				}
+				if (entry.getOutputLocation() != null && JavaCore.DISABLED.equals(project.getOption(JavaCore.CORE_ENABLE_CLASSPATH_MULTIPLE_OUTPUT_LOCATIONS, true))) {
+					return new JavaModelStatus(IJavaModelStatusConstants.DISABLED_CP_MULTIPLE_OUTPUT_LOCATIONS, project, path);
+				}
+				if (path.isAbsolute() && !path.isEmpty()) {
+					IPath projectPath= project.getProject().getFullPath();
+					if (!projectPath.isPrefixOf(path) || JavaModel.getTarget(path, true) == null){
+						return new JavaModelStatus(IJavaModelStatusConstants.INVALID_CLASSPATH, Messages.bind(Messages.classpath_unboundSourceFolder, new String[] {entryPathMsg, projectName}));
+					}
+				} else {
+					return new JavaModelStatus(IJavaModelStatusConstants.INVALID_CLASSPATH, Messages.bind(Messages.classpath_illegalSourceFolderPath, new String[] {entryPathMsg, projectName}));
+				}
+				break;
+		}
+
+		// Validate extra attributes
+		IClasspathAttribute[] extraAttributes = entry.getExtraAttributes();
+		if (extraAttributes != null) {
+			int length = extraAttributes.length;
+			HashSet set = new HashSet(length);
+			for (int i=0; i<length; i++) {
+				String attName = extraAttributes[i].getName();
+				if (!set.add(attName)) {
+					return new JavaModelStatus(IJavaModelStatusConstants.NAME_COLLISION, Messages.bind(Messages.classpath_duplicateEntryExtraAttribute, new String[] {attName, entryPathMsg, projectName}));
+				}
+			}
+		}
+
+		return JavaModelStatus.VERIFIED_OK;
+	}
+
