@@ -2,17 +2,37 @@
  * @see ISourceElementRequestor
  */
 public void exitField(int initializationStart, int declarationEnd, int declarationSourceEnd) {
-	SourceFieldElementInfo info = (SourceFieldElementInfo) this.infoStack.pop();
-	info.setSourceRangeEnd(declarationSourceEnd);
-	setChildren(info);
+	JavaElement handle = (JavaElement) this.handleStack.peek();
+	FieldInfo fieldInfo = (FieldInfo) this.infoStack.peek();
+	IJavaElement[] elements = getChildren(fieldInfo);
+	SourceFieldElementInfo info = elements.length == 0 ? new SourceFieldElementInfo() : new SourceFieldWithChildrenInfo(elements);
+	info.setNameSourceStart(fieldInfo.nameSourceStart);
+	info.setNameSourceEnd(fieldInfo.nameSourceEnd);
+	info.setSourceRangeStart(fieldInfo.declarationStart);
+	info.setFlags(fieldInfo.modifiers);
+	char[] typeName = JavaModelManager.getJavaModelManager().intern(fieldInfo.type);
+	info.setTypeName(typeName);
+	this.newElements.put(handle, info);
 
+	if (fieldInfo.annotations != null) {
+		int length = fieldInfo.annotations.length;
+		this.unitInfo.annotationNumber += length;
+		for (int i = 0; i < length; i++) {
+			org.eclipse.jdt.internal.compiler.ast.Annotation annotation = fieldInfo.annotations[i];
+			acceptAnnotation(annotation, info, handle);
+		}
+	}
+	info.setSourceRangeEnd(declarationSourceEnd);
+	this.handleStack.pop();
+	this.infoStack.pop();
+	
 	// remember initializer source if field is a constant
 	if (initializationStart != -1) {
 		int flags = info.flags;
 		Object typeInfo;
 		if (Flags.isStatic(flags) && Flags.isFinal(flags)
-				|| ((typeInfo = this.infoStack.peek()) instanceof SourceTypeElementInfo
-					 && (Flags.isInterface(((SourceTypeElementInfo)typeInfo).flags)))) {
+				|| ((typeInfo = this.infoStack.peek()) instanceof TypeInfo
+					 && (Flags.isInterface(((TypeInfo)typeInfo).modifiers)))) {
 			int length = declarationEnd - initializationStart;
 			if (length > 0) {
 				char[] initializer = new char[length];
@@ -21,6 +41,5 @@ public void exitField(int initializationStart, int declarationEnd, int declarati
 			}
 		}
 	}
-	this.handleStack.pop();
 }
 
