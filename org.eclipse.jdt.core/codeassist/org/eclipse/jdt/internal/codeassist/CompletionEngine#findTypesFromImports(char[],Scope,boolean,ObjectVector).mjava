@@ -1,0 +1,124 @@
+	private void findTypesFromImports(char[] token, Scope scope, boolean proposeType, ObjectVector typesFound) {
+		ImportBinding[] importBindings = scope.compilationUnitScope().imports;
+		next : for (int i = 0; i < importBindings.length; i++) {
+			ImportBinding importBinding = importBindings[i];
+			if(importBinding.isValidBinding()) {
+				Binding binding = importBinding.resolvedImport;
+				if(binding != null && binding.isValidBinding()) {
+					if(importBinding.onDemand) {
+						if (importBinding.isStatic()) {
+							if((binding.kind() & Binding.TYPE) != 0) {
+								this.findMemberTypes(
+										token,
+										(ReferenceBinding) binding,
+										scope,
+										scope.enclosingSourceType(),
+										true,
+										false,
+										true,
+										true,
+										false,
+										null,
+										typesFound,
+										null,
+										null,
+										null,
+										false);
+							}
+						}
+					} else {
+						if ((binding.kind() & Binding.TYPE) != 0) {
+							ReferenceBinding typeBinding = (ReferenceBinding) binding;
+							int typeLength = token.length;
+
+							if (!typeBinding.isStatic()) continue next;
+
+							if (typeLength > typeBinding.sourceName.length)	continue next;
+
+							if (!CharOperation.prefixEquals(token, typeBinding.sourceName, false)
+									&& !(this.options.camelCaseMatch && CharOperation.camelCaseMatch(token, typeBinding.sourceName))) continue next;
+							
+							int accessibility = IAccessRule.K_ACCESSIBLE;
+							if(typeBinding.hasRestrictedAccess()) {
+								AccessRestriction accessRestriction = this.lookupEnvironment.getAccessRestriction(typeBinding);
+								if(accessRestriction != null) {
+									switch (accessRestriction.getProblemId()) {
+										case IProblem.ForbiddenReference:
+											if (this.options.checkForbiddenReference) {
+												continue next;
+											}
+											accessibility = IAccessRule.K_NON_ACCESSIBLE;
+											break;
+										case IProblem.DiscouragedReference:
+											if (this.options.checkDiscouragedReference) {
+												continue next;
+											}
+											accessibility = IAccessRule.K_DISCOURAGED;
+											break;
+									}
+								}
+							}
+							
+							if (typesFound.contains(typeBinding)) continue next;
+							
+							typesFound.add(typeBinding);
+							
+							if(this.assistNodeIsClass) {
+								if(!typeBinding.isClass()) continue;
+							} else if(this.assistNodeIsInterface) {
+								if(!typeBinding.isInterface() && !typeBinding.isAnnotationType()) continue;
+							} else if (this.assistNodeIsAnnotation) {
+								if(!typeBinding.isAnnotationType()) continue;
+							}
+							
+							int relevance = computeBaseRelevance();
+							relevance += computeRelevanceForResolution();
+							relevance += computeRelevanceForInterestingProposal();
+							relevance += computeRelevanceForCaseMatching(token, typeBinding.sourceName);
+							relevance += computeRelevanceForExpectingType(typeBinding);
+							relevance += computeRelevanceForQualification(false);
+							relevance += computeRelevanceForRestrictions(accessibility);
+			
+							if (typeBinding.isAnnotationType()) {
+								relevance += computeRelevanceForAnnotation();
+								relevance += computeRelevanceForAnnotationTarget(typeBinding);
+							} else if (typeBinding.isInterface()) {
+								relevance += computeRelevanceForInterface();
+							} else if(typeBinding.isClass()){
+								relevance += computeRelevanceForClass();
+								relevance += computeRelevanceForException(typeBinding.sourceName);
+							}
+							
+							if (proposeType && hasStaticMemberTypes(typeBinding, scope.enclosingSourceType(), this.unitScope)) {
+								this.noProposal = false;
+								if(!this.requestor.isIgnored(CompletionProposal.TYPE_REF)) {
+									InternalCompletionProposal proposal =  createProposal(CompletionProposal.TYPE_REF, this.actualCompletionPosition);
+									proposal.setDeclarationSignature(typeBinding.qualifiedPackageName());
+									proposal.setSignature(getSignature(typeBinding));
+									proposal.setPackageName(typeBinding.qualifiedPackageName());
+									proposal.setTypeName(typeBinding.qualifiedSourceName());
+									proposal.setCompletion(typeBinding.sourceName());
+									proposal.setFlags(typeBinding.modifiers);
+									proposal.setReplaceRange(this.startPosition - this.offset, this.endPosition - this.offset);
+									proposal.setTokenRange(this.tokenStart - this.offset, this.tokenEnd - this.offset);
+									proposal.setRelevance(relevance);
+									this.requestor.accept(proposal);
+									if(DEBUG) {
+										this.printDebug(proposal);
+									}
+								}
+							}
+							
+							findConstructorsOrAnonymousTypes(
+									typeBinding,
+									scope,
+									FakeInvocationSite,
+									false,
+									relevance);
+						}
+					}
+				}
+			}
+		}
+	}
+

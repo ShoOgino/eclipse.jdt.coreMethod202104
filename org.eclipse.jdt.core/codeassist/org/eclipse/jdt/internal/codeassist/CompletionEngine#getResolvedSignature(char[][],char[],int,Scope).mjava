@@ -1,0 +1,84 @@
+	private char[] getResolvedSignature(char[][] parameterTypes, char[] fullyQualifiedTypeName, int parameterCount, Scope scope) {
+		char[][] cn = CharOperation.splitOn('.', fullyQualifiedTypeName);
+
+		TypeReference ref;
+		if (cn.length == 1) {
+			ref = new SingleTypeReference(cn[0], 0);
+		} else {
+			ref = new QualifiedTypeReference(cn,new long[cn.length]);
+		}
+		
+		TypeBinding guessedType = null;
+		INameEnvironment oldNameEnvironment = this.lookupEnvironment.nameEnvironment;
+		this.lookupEnvironment.nameEnvironment = getNoCacheNameEnvironment();
+		try {
+			switch (scope.kind) {
+				case Scope.METHOD_SCOPE :
+				case Scope.BLOCK_SCOPE :
+					guessedType = ref.resolveType((BlockScope)scope);
+					break;
+				case Scope.CLASS_SCOPE :
+					guessedType = ref.resolveType((ClassScope)scope);
+					break;
+			}
+		} finally {
+			this.lookupEnvironment.nameEnvironment = oldNameEnvironment;
+		}
+
+		if (guessedType != null && guessedType.isValidBinding()) {
+			if (guessedType instanceof ReferenceBinding) {
+				ReferenceBinding refBinding = (ReferenceBinding) guessedType;
+				
+				MethodBinding bestConstructor = null;
+				int[] bestMatchingLengths = null;
+				
+				MethodBinding[] methods = refBinding.methods();
+				next : for (int i = 0; i < methods.length; i++) {
+					MethodBinding method = methods[i];
+					
+					if (!method.isConstructor()) break next;
+					
+					TypeBinding[] parameters = method.parameters;
+					//TODO take careful of member types
+					int parametersLength = parameters == null ? 0 : parameters.length;
+					if (parameterCount != parametersLength) continue next;
+					
+					int[] matchingLengths = new int[parameterCount];
+					for (int j = 0; j < parametersLength; j++) {
+						TypeBinding parameter = parameters[j];
+						
+						char[] parameterTypeName;
+						if (parameter instanceof ReferenceBinding) {
+							parameterTypeName = CharOperation.concatWith(((ReferenceBinding)parameter).compoundName, '.');
+						} else {
+							parameterTypeName = parameter.sourceName();
+						}
+						
+						if (!CharOperation.endsWith(parameterTypeName, parameterTypes[j])) {
+							continue next;
+						}
+						
+						int matchingLength = parameterTypes[j].length;
+						
+						if (bestMatchingLengths != null) {
+							if (bestMatchingLengths[j] > matchingLength) {
+								continue next;
+							}
+						}
+						
+						matchingLengths[j] = matchingLength;
+					}
+					
+					
+					bestConstructor = method;
+					bestMatchingLengths = matchingLengths;
+				}
+				
+				if (bestConstructor == null) return null;
+				return getSignature(bestConstructor);
+			}
+		}
+		
+		return null;
+	}
+

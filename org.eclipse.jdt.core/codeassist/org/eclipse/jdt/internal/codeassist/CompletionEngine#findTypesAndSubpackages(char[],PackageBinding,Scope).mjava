@@ -2,10 +2,18 @@
 		char[] token,
 		PackageBinding packageBinding,
 		Scope scope) {
+		
+		boolean allowingLongComputationProposals = isAllowingLongComputationProposals();
 
 		boolean proposeType =
 			!this.requestor.isIgnored(CompletionProposal.TYPE_REF) ||
 			((this.assistNodeInJavadoc & CompletionOnJavadoc.TEXT) != 0 && !this.requestor.isIgnored(CompletionProposal.JAVADOC_TYPE_REF));
+		
+		boolean proposeConstructor =
+			allowingLongComputationProposals &&
+			this.assistNodeIsConstructor &&
+			(!isIgnored(CompletionProposal.CONSTRUCTOR_INVOCATION, CompletionProposal.TYPE_REF) ||
+					!isIgnored(CompletionProposal.ANONYMOUS_CLASS_CONSTRUCTOR_INVOCATION, CompletionProposal.TYPE_REF));
 
 		char[] qualifiedName =
 			CharOperation.concatWith(packageBinding.compoundName, token, '.');
@@ -23,7 +31,7 @@
 
 		this.qualifiedCompletionToken = qualifiedName;
 
-		if (proposeType && this.unitScope != null) {
+		if ((proposeType || proposeConstructor) && this.unitScope != null) {
 			int typeLength = qualifiedName.length;
 			SourceTypeBinding[] types = this.unitScope.topLevelTypes;
 
@@ -69,7 +77,7 @@
 					}
 				}
 
-				this.knownTypes.put(CharOperation.concat(sourceType.qualifiedPackageName(), sourceType.sourceName(), '.'), this);
+				this.knownTypes.put(CharOperation.concat(sourceType.qualifiedPackageName(), sourceType.sourceName(), '.'), KNOWN_TYPE_WITH_KNOWN_CONSTRUCTORS);
 
 				int relevance = computeBaseRelevance();
 				relevance += computeRelevanceForResolution();
@@ -87,8 +95,13 @@
 					relevance += computeRelevanceForClass();
 					relevance += computeRelevanceForException(sourceType.sourceName);
 				}
+				
 				this.noProposal = false;
-				if(proposeType) {
+				if(proposeType &&
+						(!this.assistNodeIsConstructor ||
+								!allowingLongComputationProposals ||
+								hasStaticMemberTypes(sourceType, null, this.unitScope) ||
+								hasMemberTypesInEnclosingScope(sourceType, scope))) {
 					char[] typeName = sourceType.sourceName();
 					createTypeProposal(
 							sourceType,
@@ -101,10 +114,31 @@
 							null,
 							false);
 				}
+				
+				if (proposeConstructor) {
+					findConstructorsOrAnonymousTypes(
+							sourceType,
+							scope,
+							FakeInvocationSite,
+							false,
+							relevance);
+				}
 			}
 		}
 
-		if(proposeType) {
+		if (proposeConstructor) {
+
+			
+			checkCancel();
+			
+			this.foundConstructorsCount = 0;
+			this.nameEnvironment.findConstructorDeclarations(
+					qualifiedName,
+					this.options.camelCaseMatch,
+					this,
+					this.monitor);
+			acceptConstructors(scope);
+		} if(proposeType) {
 			int searchFor = IJavaSearchConstants.TYPE;
 			if(this.assistNodeIsClass) {
 				searchFor = IJavaSearchConstants.CLASS;
@@ -128,6 +162,7 @@
 					this.monitor);
 			acceptTypes(scope);
 		}
+		
 		if(!this.requestor.isIgnored(CompletionProposal.PACKAGE_REF)) {
 			this.nameEnvironment.findPackages(qualifiedName, this);
 		}

@@ -85,9 +85,12 @@
 			if (tagBits != 0) {
 				addBinaryStandardAnnotations(tagBits);
 			}
+			
+			int extraFlags = ExtraFlags.getExtraFlags(reader);
 
 			// first reference all methods declarations and field declarations
 			MethodInfo[] methods = (MethodInfo[]) reader.getMethods();
+			boolean noConstructor = true;
 			if (methods != null) {
 				for (int i = 0, max = methods.length; i < max; i++) {
 					MethodInfo method = methods[i];
@@ -97,7 +100,26 @@
 					char[] returnType = decodeReturnType(descriptor);
 					char[][] exceptionTypes = replace('/', '.', method.getExceptionTypeNames());
 					if (isConstructor) {
-						addConstructorDeclaration(className, parameterTypes, exceptionTypes);
+						noConstructor = false;
+						char[] signature = method.getGenericSignature();
+						if (signature == null) {
+							if (reader.isNestedType() && ((modifiers & ClassFileConstants.AccStatic) == 0)) {
+								signature = removeFirstSyntheticParameter(descriptor);
+							} else {
+								signature = descriptor;
+							}
+						}
+						addConstructorDeclaration(
+								name,
+								parameterTypes == null ? 0 : parameterTypes.length,
+								signature,	
+								parameterTypes,
+								method.getArgumentNames(),
+								method.getModifiers(),
+								packageName,
+								modifiers,
+								exceptionTypes,
+								extraFlags);
 					} else {
 						if (!method.isClinit()) {
 							addMethodDeclaration(method.getSelector(), parameterTypes, returnType, exceptionTypes);
@@ -116,6 +138,9 @@
 						addBinaryStandardAnnotations(tagBits);
 					}
 				}
+			}
+			if (noConstructor) {
+				addDefaultConstructorDeclaration(className, packageName, modifiers, extraFlags);
 			}
 			FieldInfo[] fields = (FieldInfo[]) reader.getFields();
 			if (fields != null) {

@@ -1,0 +1,76 @@
+public void testBug6930_24() throws Exception {
+	Hashtable oldOptions = JavaCore.getOptions();
+	
+	try {
+		Hashtable options = new Hashtable(oldOptions);
+		options.put(JavaCore.CODEASSIST_VISIBILITY_CHECK, JavaCore.ENABLED);
+		JavaCore.setOptions(options);
+		
+		IJavaProject p = createJavaProject("P", new String[] {"src"}, new String[]{"JCL_LIB", "/P/lib6930.jar"}, "bin");
+		
+		createFolder("/P/src/p6930");
+		
+		createFile(
+				"/P/src/p6930/AllConstructors24a.java",
+				"package p6930;\n" +
+				"public class AllConstructors24a {\n" +
+				"	public AllConstructors24a(){}\n" +
+				"	private static class AllConstructorsInner{}\n" +
+				"}");
+		
+		createJar(new String[] {
+			"p6930/AllConstructors24b.java",
+			"package p6930;\n" +
+			"public class AllConstructors24b {\n" +
+			"	public AllConstructors24b(){}\n" +
+			"	private static class AllConstructorsInner{}\n" +
+			"}"
+		}, p.getProject().getLocation().append("lib6930.jar").toOSString());
+		
+		refresh(p);
+		
+		waitUntilIndexesReady();
+		
+		this.workingCopies = new ICompilationUnit[2];
+		this.workingCopies[0] = getWorkingCopy(
+				"/P/src/test/Test.java",
+				"package test;\n"+
+				"public class Test {\n" +
+				"  void foo() {\n" +
+				"    new AllConstructors\n" +
+				"  }\n" +
+				"}");
+		
+		this.workingCopies[1] = getWorkingCopy(
+				"/P/src/p6930/AllConstructors24c.java",
+				"package p6930;"+
+				"public class AllConstructors24c {\n" +
+				"	public AllConstructors24c(){}\n" +
+				"	private static class AllConstructorsInner{}\n" +
+				"}");
+
+		// do completion
+		CompletionTestsRequestor2 requestor = new CompletionTestsRequestor2(true, false, false, true, true);
+		requestor.allowAllRequiredProposals();
+		NullProgressMonitor monitor = new NullProgressMonitor();
+
+	    String str = this.workingCopies[0].getSource();
+	    String completeBehind = "AllConstructors";
+	    int cursorLocation = str.lastIndexOf(completeBehind) + completeBehind.length();
+	    this.workingCopies[0].codeComplete(cursorLocation, requestor, this.wcOwner, monitor);
+	    
+	    assertResults(
+			"AllConstructors24a[CONSTRUCTOR_INVOCATION]{(), Lp6930.AllConstructors24a;, ()V, AllConstructors24a, null, "+(R_DEFAULT + R_RESOLVED + R_INTERESTING + R_CASE + R_NON_RESTRICTED)+"}\n" +
+			"   AllConstructors24a[TYPE_REF]{p6930.AllConstructors24a, p6930, Lp6930.AllConstructors24a;, null, null, "+(R_DEFAULT + R_RESOLVED + R_INTERESTING + R_CASE + R_NON_RESTRICTED)+"}\n" +
+			"AllConstructors24b[CONSTRUCTOR_INVOCATION]{(), Lp6930.AllConstructors24b;, ()V, AllConstructors24b, null, "+(R_DEFAULT + R_RESOLVED + R_INTERESTING + R_CASE + R_NON_RESTRICTED)+"}\n" +
+			"   AllConstructors24b[TYPE_REF]{p6930.AllConstructors24b, p6930, Lp6930.AllConstructors24b;, null, null, "+(R_DEFAULT + R_RESOLVED + R_INTERESTING + R_CASE + R_NON_RESTRICTED)+"}\n" +
+			"AllConstructors24c[CONSTRUCTOR_INVOCATION]{(), Lp6930.AllConstructors24c;, ()V, AllConstructors24c, null, "+(R_DEFAULT + R_RESOLVED + R_INTERESTING + R_CASE + R_NON_RESTRICTED)+"}\n" +
+			"   AllConstructors24c[TYPE_REF]{p6930.AllConstructors24c, p6930, Lp6930.AllConstructors24c;, null, null, "+(R_DEFAULT + R_RESOLVED + R_INTERESTING + R_CASE + R_NON_RESTRICTED)+"}",
+			requestor.getResults());
+	} finally {
+		deleteProject("P");
+		
+		JavaCore.setOptions(oldOptions);
+	}
+}
+

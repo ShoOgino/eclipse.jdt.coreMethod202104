@@ -2,14 +2,23 @@
 
 		if (token == null)
 			return;
-
+		
+		boolean allowingLongComputationProposals = isAllowingLongComputationProposals();
+		
 		boolean proposeType =
 			!this.requestor.isIgnored(CompletionProposal.TYPE_REF) ||
 			((this.assistNodeInJavadoc & CompletionOnJavadoc.TEXT) != 0 && !this.requestor.isIgnored(CompletionProposal.JAVADOC_TYPE_REF));
 
 		boolean proposeAllMemberTypes = !this.assistNodeIsConstructor;
+		
+		boolean proposeConstructor =
+			allowingLongComputationProposals &&
+			this.assistNodeIsConstructor &&
+			(!isIgnored(CompletionProposal.CONSTRUCTOR_INVOCATION, CompletionProposal.TYPE_REF) ||
+					!isIgnored(CompletionProposal.ANONYMOUS_CLASS_CONSTRUCTOR_INVOCATION, CompletionProposal.TYPE_REF));
+		
 
-		if (proposeType && scope.enclosingSourceType() != null) {
+		if ((proposeType || proposeConstructor) && scope.enclosingSourceType() != null) {
 			
 			checkCancel();
 			
@@ -28,7 +37,7 @@
 
 		boolean isEmptyPrefix = token.length == 0;
 
-		if (proposeType && this.unitScope != null) {
+		if ((proposeType || proposeConstructor) && this.unitScope != null) {
 			
 			ReferenceBinding outerInvocationType = scope.enclosingSourceType();
 			if(outerInvocationType != null) {
@@ -69,7 +78,7 @@
 				if (typeLength > sourceType.sourceName.length) continue next;
 
 				if (!CharOperation.prefixEquals(token, sourceType.sourceName, false)
-						&& !(this.options.camelCaseMatch && CharOperation.camelCaseMatch(token, sourceType.sourceName))) continue;
+						&& !(this.options.camelCaseMatch && CharOperation.camelCaseMatch(token, sourceType.sourceName))) continue next;
 
 				if (this.assistNodeIsAnnotation && !hasPossibleAnnotationTarget(sourceType, scope)) {
 					continue next;
@@ -80,8 +89,8 @@
 
 					if (sourceType == otherType) continue next;
 				}
-
-				this.knownTypes.put(CharOperation.concat(sourceType.qualifiedPackageName(), sourceType.sourceName(), '.'), this);
+				
+				typesFound.add(sourceType);
 
 				if(this.assistNodeIsClass) {
 					if(!sourceType.isClass()) continue next;
@@ -112,8 +121,14 @@
 					relevance += computeRelevanceForClass();
 					relevance += computeRelevanceForException(sourceType.sourceName);
 				}
+				
+				
 				this.noProposal = false;
-				if(proposeType) {
+				if(proposeType &&
+						(!this.assistNodeIsConstructor ||
+								!allowingLongComputationProposals ||
+								hasStaticMemberTypes(sourceType, null, this.unitScope) ||
+								hasMemberTypesInEnclosingScope(sourceType, scope))) {
 					char[] typeName = sourceType.sourceName();
 					createTypeProposal(
 							sourceType,
@@ -126,127 +141,40 @@
 							null,
 							false);
 				}
+				
+				if (proposeConstructor) {
+					findConstructorsOrAnonymousTypes(
+							sourceType,
+							scope,
+							FakeInvocationSite,
+							false,
+							relevance);
+				}
 			}
 		}
 
-		if(proposeType) {
+		if (proposeConstructor && !isEmptyPrefix) {
+			
+			checkCancel();
+			
+			findTypesFromImports(token, scope, proposeType, typesFound);
+		} else if(proposeType) {
 			
 			checkCancel();
 			
 			findTypesFromStaticImports(token, scope, proposeAllMemberTypes, typesFound);
 		}
+		
+		if (proposeConstructor) {
+			
+			checkCancel();
+			
+			findTypesFromExpectedTypes(token, scope, typesFound, proposeType, proposeConstructor);
+		}
 
 		if (isEmptyPrefix && !this.assistNodeIsAnnotation) {
-			if(proposeType && this.expectedTypesPtr > -1) {
-				next : for (int i = 0; i <= this.expectedTypesPtr; i++) {
-					
-					checkCancel();
-					
-					if(this.expectedTypes[i] instanceof ReferenceBinding) {
-						ReferenceBinding refBinding = (ReferenceBinding)this.expectedTypes[i];
-
-						if(refBinding.isTypeVariable() && this.assistNodeIsConstructor) {
-							// don't propose type variable if the completion is a constructor ('new |')
-							continue next;
-						}
-						if (this.options.checkDeprecation &&
-								refBinding.isViewedAsDeprecated() &&
-								!scope.isDefinedInSameUnit(refBinding))
-							continue next;
-
-						int accessibility = IAccessRule.K_ACCESSIBLE;
-						if(refBinding.hasRestrictedAccess()) {
-							AccessRestriction accessRestriction = this.lookupEnvironment.getAccessRestriction(refBinding);
-							if(accessRestriction != null) {
-								switch (accessRestriction.getProblemId()) {
-									case IProblem.ForbiddenReference:
-										if (this.options.checkForbiddenReference) {
-											continue next;
-										}
-										accessibility = IAccessRule.K_NON_ACCESSIBLE;
-										break;
-									case IProblem.DiscouragedReference:
-										if (this.options.checkDiscouragedReference) {
-											continue next;
-										}
-										accessibility = IAccessRule.K_DISCOURAGED;
-										break;
-								}
-							}
-						}
-
-						for (int j = 0; j < typesFound.size(); j++) {
-							ReferenceBinding typeFound = (ReferenceBinding)typesFound.elementAt(j);
-							if (typeFound == refBinding) {
-								continue next;
-							}
-						}
-
-						boolean inSameUnit = this.unitScope.isDefinedInSameUnit(refBinding);
-
-						// top level types of the current unit are already proposed.
-						if(!inSameUnit || (inSameUnit && refBinding.isMemberType())) {
-							char[] packageName = refBinding.qualifiedPackageName();
-							char[] typeName = refBinding.sourceName();
-							char[] completionName = typeName;
-
-							boolean isQualified = false;
-							if (!this.insideQualifiedReference && !refBinding.isMemberType()) {
-								if (mustQualifyType(packageName, typeName, null, refBinding.modifiers)) {
-									if (packageName == null || packageName.length == 0)
-										if (this.unitScope != null && this.unitScope.fPackage.compoundName != CharOperation.NO_CHAR_CHAR)
-											continue next; // ignore types from the default package from outside it
-									completionName = CharOperation.concat(packageName, typeName, '.');
-									isQualified = true;
-								}
-							}
-
-							if(this.assistNodeIsClass) {
-								if(!refBinding.isClass()) continue next;
-							} else if(this.assistNodeIsInterface) {
-								if(!refBinding.isInterface() && !refBinding.isAnnotationType()) continue next;
-							} else if (this.assistNodeIsAnnotation) {
-								if(!refBinding.isAnnotationType()) continue next;
-							}
-
-							int relevance = computeBaseRelevance();
-							relevance += computeRelevanceForResolution();
-							relevance += computeRelevanceForInterestingProposal();
-							relevance += computeRelevanceForCaseMatching(token, typeName);
-							relevance += computeRelevanceForExpectingType(refBinding);
-							relevance += computeRelevanceForQualification(isQualified);
-							relevance += computeRelevanceForRestrictions(accessibility);
-
-							if(refBinding.isClass()) {
-								relevance += computeRelevanceForClass();
-								relevance += computeRelevanceForException(typeName);
-							} else if(refBinding.isEnum()) {
-								relevance += computeRelevanceForEnum();
-							} else if(refBinding.isInterface()) {
-								relevance += computeRelevanceForInterface();
-							}
-
-							this.noProposal = false;
-							if(!this.requestor.isIgnored(CompletionProposal.TYPE_REF)) {
-								InternalCompletionProposal proposal =  createProposal(CompletionProposal.TYPE_REF, this.actualCompletionPosition);
-								proposal.setDeclarationSignature(packageName);
-								proposal.setSignature(getSignature(refBinding));
-								proposal.setPackageName(packageName);
-								proposal.setTypeName(typeName);
-								proposal.setCompletion(completionName);
-								proposal.setFlags(refBinding.modifiers);
-								proposal.setReplaceRange(this.startPosition - this.offset, this.endPosition - this.offset);
-								proposal.setTokenRange(this.tokenStart - this.offset, this.tokenEnd - this.offset);
-								proposal.setRelevance(relevance);
-								proposal.setAccessibility(accessibility);
-								this.requestor.accept(proposal);
-								if(DEBUG) {
-									this.printDebug(proposal);
-								}
-							}
-						}
-					}
-				}
+			if (!proposeConstructor) {
+				findTypesFromExpectedTypes(token, scope, typesFound, proposeType, proposeConstructor);
 			}
 		} else {
 			if(!isEmptyPrefix && !this.requestor.isIgnored(CompletionProposal.KEYWORD)) {
@@ -260,7 +188,8 @@
 					}
 				}
 			}
-			if(proposeType) {
+			
+			if (proposeConstructor) {
 				int l = typesFound.size();
 				for (int i = 0; i < l; i++) {
 					ReferenceBinding typeFound = (ReferenceBinding) typesFound.elementAt(i);
@@ -269,7 +198,28 @@
 								typeFound.qualifiedPackageName(),
 								typeFound.qualifiedSourceName(),
 								'.');
-					this.knownTypes.put(fullyQualifiedTypeName, this);
+					this.knownTypes.put(fullyQualifiedTypeName, KNOWN_TYPE_WITH_KNOWN_CONSTRUCTORS);
+				}
+				
+				checkCancel();
+				
+				this.foundConstructorsCount = 0;
+				this.nameEnvironment.findConstructorDeclarations(
+						token,
+						this.options.camelCaseMatch,
+						this,
+						this.monitor);
+				acceptConstructors(scope);
+			} else if (proposeType) {
+				int l = typesFound.size();
+				for (int i = 0; i < l; i++) {
+					ReferenceBinding typeFound = (ReferenceBinding) typesFound.elementAt(i);
+					char[] fullyQualifiedTypeName =
+						CharOperation.concat(
+								typeFound.qualifiedPackageName(),
+								typeFound.qualifiedSourceName(),
+								'.');
+					this.knownTypes.put(fullyQualifiedTypeName, KNOWN_TYPE_WITH_KNOWN_CONSTRUCTORS);
 				}
 				int searchFor = IJavaSearchConstants.TYPE;
 				if(this.assistNodeIsClass) {

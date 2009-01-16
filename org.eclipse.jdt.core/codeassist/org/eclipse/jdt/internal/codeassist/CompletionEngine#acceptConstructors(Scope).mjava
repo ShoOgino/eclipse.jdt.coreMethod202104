@@ -1,0 +1,317 @@
+	private void acceptConstructors(Scope scope) {
+		final boolean DEFER_QUALIFIED_PROPOSALS = false;
+		
+		this.checkCancel();
+		
+		if(this.acceptedConstructors == null) return;
+
+		int length = this.acceptedConstructors.size();
+
+		if(length == 0) return;
+		
+		HashtableOfObject onDemandFound = new HashtableOfObject();
+		
+		ArrayList deferredProposals = new ArrayList();
+		
+		try {
+			next : for (int i = 0; i < length; i++) {
+				
+				// does not check cancellation for every types to avoid performance loss
+				if ((i % CHECK_CANCEL_FREQUENCY) == 0) checkCancel();
+				
+				AcceptedConstructor acceptedConstructor = (AcceptedConstructor)this.acceptedConstructors.elementAt(i);
+				final int typeModifiers = acceptedConstructor.typeModifiers;
+				final char[] packageName = acceptedConstructor.packageName;
+				final char[] simpleTypeName = acceptedConstructor.simpleTypeName;
+				final int modifiers = acceptedConstructor.modifiers;
+				final int parameterCount = acceptedConstructor.parameterCount;
+				final char[] signature = acceptedConstructor.signature;
+				final char[][] parameterTypes = acceptedConstructor.parameterTypes;
+				final char[][] parameterNames = acceptedConstructor.parameterNames;
+				final int extraFlags = acceptedConstructor.extraFlags;
+				final int accessibility = acceptedConstructor.accessibility;
+				
+				boolean proposeType = (extraFlags & ExtraFlags.HasNonPrivateStaticMemberTypes) != 0;
+				
+				char[] fullyQualifiedName = CharOperation.concat(packageName, simpleTypeName, '.');
+						
+				Object knownTypeKind = this.knownTypes.get(fullyQualifiedName);
+				if (knownTypeKind != null) {
+					if (knownTypeKind == KNOWN_TYPE_WITH_KNOWN_CONSTRUCTORS) {
+						// the type and its constructors are already accepted
+						continue next;
+					}
+					// this type is already accepted
+					proposeType = false;
+				} else {
+					this.knownTypes.put(fullyQualifiedName, KNOWN_TYPE_WITH_UNKNOWN_CONSTRUCTORS);
+				}
+				
+				boolean proposeConstructor = true;
+					
+				if (this.options.checkVisibility) {
+					if((modifiers & ClassFileConstants.AccPublic) == 0) {
+						if((modifiers & ClassFileConstants.AccPrivate) != 0) {
+							if (!proposeType) continue next;
+							proposeConstructor = false;
+						} else {
+							if (this.currentPackageName == null) {
+								initializePackageCache();
+							}
+							
+							if(!CharOperation.equals(packageName, this.currentPackageName)) {
+								if (!proposeType) continue next;
+								proposeConstructor = false;
+							}
+						}
+					}
+				}
+				
+				acceptedConstructor.fullyQualifiedName = fullyQualifiedName;
+				acceptedConstructor.proposeType = proposeType;
+				acceptedConstructor.proposeConstructor = proposeConstructor;
+				
+				
+				if(!this.importCachesInitialized) {
+					initializeImportCaches();
+				}
+				
+				for (int j = 0; j < this.importCacheCount; j++) {
+					char[][] importName = this.importsCache[j];
+					if(CharOperation.equals(simpleTypeName, importName[0])) {
+						if (proposeType) {
+							proposeType(
+									packageName,
+									simpleTypeName,
+									typeModifiers,
+									accessibility,
+									simpleTypeName,
+									fullyQualifiedName,
+									!CharOperation.equals(fullyQualifiedName, importName[1]),
+									scope);
+						}
+						
+						if (proposeConstructor && !Flags.isEnum(typeModifiers)) {
+							boolean isQualified = !CharOperation.equals(fullyQualifiedName, importName[1]);
+							if (!isQualified) {
+								proposeConstructor(
+										simpleTypeName,
+										parameterCount,
+										signature,
+										parameterTypes,
+										parameterNames,
+										modifiers,
+										packageName,
+										typeModifiers,
+										accessibility,
+										simpleTypeName,
+										fullyQualifiedName,
+										isQualified,
+										scope,
+										extraFlags);
+							} else {
+								acceptedConstructor.mustBeQualified = true;
+								if (DEFER_QUALIFIED_PROPOSALS) {
+									deferredProposals.add(acceptedConstructor);
+								} else {
+									proposeConstructor(acceptedConstructor, scope);
+								}
+							}
+						}
+						continue next;
+					}
+				}
+
+
+				if (CharOperation.equals(this.currentPackageName, packageName)) {
+					if (proposeType) {
+						proposeType(
+								packageName,
+								simpleTypeName,
+								typeModifiers,
+								accessibility,
+								simpleTypeName,
+								fullyQualifiedName,
+								false,
+								scope);
+					}
+					
+					if (proposeConstructor && !Flags.isEnum(typeModifiers)) {
+						proposeConstructor(
+								simpleTypeName,
+								parameterCount,
+								signature,
+								parameterTypes,
+								parameterNames,
+								modifiers,
+								packageName,
+								typeModifiers,
+								accessibility,
+								simpleTypeName,
+								fullyQualifiedName,
+								false,
+								scope,
+								extraFlags);
+					}
+					continue next;
+				} else {
+					char[] fullyQualifiedEnclosingTypeOrPackageName = null;
+
+					AcceptedConstructor foundConstructor = null;
+					if((foundConstructor = (AcceptedConstructor)onDemandFound.get(simpleTypeName)) == null) {
+						for (int j = 0; j < this.onDemandImportCacheCount; j++) {
+							ImportBinding importBinding = this.onDemandImportsCache[j];
+
+							char[][] importName = importBinding.compoundName;
+							char[] importFlatName = CharOperation.concatWith(importName, '.');
+
+							if(fullyQualifiedEnclosingTypeOrPackageName == null) {
+								fullyQualifiedEnclosingTypeOrPackageName = packageName;
+							}
+							if(CharOperation.equals(fullyQualifiedEnclosingTypeOrPackageName, importFlatName)) {
+								if(importBinding.isStatic()) {
+									if((typeModifiers & ClassFileConstants.AccStatic) != 0) {
+										onDemandFound.put(
+												simpleTypeName,
+												acceptedConstructor);
+										continue next;
+									}
+								} else {
+									onDemandFound.put(
+											simpleTypeName,
+											acceptedConstructor);
+									continue next;
+								}
+							}
+						}
+					} else if(!foundConstructor.mustBeQualified){
+						done : for (int j = 0; j < this.onDemandImportCacheCount; j++) {
+							ImportBinding importBinding = this.onDemandImportsCache[j];
+
+							char[][] importName = importBinding.compoundName;
+							char[] importFlatName = CharOperation.concatWith(importName, '.');
+
+							if(fullyQualifiedEnclosingTypeOrPackageName == null) {
+								fullyQualifiedEnclosingTypeOrPackageName = packageName;
+							}
+							if(CharOperation.equals(fullyQualifiedEnclosingTypeOrPackageName, importFlatName)) {
+								if(importBinding.isStatic()) {
+									if((typeModifiers & ClassFileConstants.AccStatic) != 0) {
+										foundConstructor.mustBeQualified = true;
+										break done;
+									}
+								} else {
+									foundConstructor.mustBeQualified = true;
+									break done;
+								}
+							}
+						}
+					}
+					if (proposeType) {
+						proposeType(
+								packageName,
+								simpleTypeName,
+								typeModifiers,
+								accessibility,
+								simpleTypeName,
+								fullyQualifiedName,
+								true,
+								scope);
+					}
+					
+					if (proposeConstructor && !Flags.isEnum(typeModifiers)) {
+						acceptedConstructor.mustBeQualified = true;
+						if (DEFER_QUALIFIED_PROPOSALS) {
+							deferredProposals.add(acceptedConstructor);
+						} else {
+							proposeConstructor(acceptedConstructor, scope);
+						}
+					}
+				}
+			}
+		
+			char[][] keys = onDemandFound.keyTable;
+			Object[] values = onDemandFound.valueTable;
+			int max = keys.length;
+			for (int i = 0; i < max; i++) {
+				
+				// does not check cancellation for every types to avoid performance loss
+				if ((i % CHECK_CANCEL_FREQUENCY) == 0) checkCancel();
+				
+				if(keys[i] != null) {
+					AcceptedConstructor value = (AcceptedConstructor) values[i];
+					if(value != null) {
+						if (value.proposeType) {
+							proposeType(
+									value.packageName,
+									value.simpleTypeName,
+									value.typeModifiers,
+									value.accessibility,
+									value.simpleTypeName,
+									value.fullyQualifiedName,
+									value.mustBeQualified,
+									scope);
+						}
+						
+						if (value.proposeConstructor && !Flags.isEnum(value.modifiers)) {
+							if (!value.mustBeQualified) {
+								proposeConstructor(
+										value.simpleTypeName,
+										value.parameterCount,
+										value.signature,
+										value.parameterTypes,
+										value.parameterNames,
+										value.modifiers,
+										value.packageName,
+										value.typeModifiers,
+										value.accessibility,
+										value.simpleTypeName,
+										value.fullyQualifiedName,
+										value.mustBeQualified,
+										scope,
+										value.extraFlags);
+							} else {
+								if (DEFER_QUALIFIED_PROPOSALS) {
+									deferredProposals.add(value);
+								} else {
+									proposeConstructor(value, scope);
+								}
+							}
+						}
+					}
+				}
+			}
+			
+			if (DEFER_QUALIFIED_PROPOSALS) {
+				int size = deferredProposals.size();
+				for (int i = 0; i < size; i++) {
+					
+					// does not check cancellation for every types to avoid performance loss
+					if ((i % CHECK_CANCEL_FREQUENCY) == 0) checkCancel();
+				
+					AcceptedConstructor deferredProposal = (AcceptedConstructor)deferredProposals.get(i);
+					
+					if (deferredProposal.proposeConstructor) {
+						proposeConstructor(
+								deferredProposal.simpleTypeName,
+								deferredProposal.parameterCount,
+								deferredProposal.signature,
+								deferredProposal.parameterTypes,
+								deferredProposal.parameterNames,
+								deferredProposal.modifiers,
+								deferredProposal.packageName,
+								deferredProposal.typeModifiers,
+								deferredProposal.accessibility,
+								deferredProposal.simpleTypeName,
+								deferredProposal.fullyQualifiedName,
+								deferredProposal.mustBeQualified,
+								scope,
+								deferredProposal.extraFlags);
+					}
+				}
+			}
+		} finally {
+			this.acceptedTypes = null; // reset
+		}
+	}
+
