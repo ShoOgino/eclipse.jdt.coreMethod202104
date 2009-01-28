@@ -1,0 +1,28 @@
+/*
+ * Ensures that IBuffer.ITextEditCapability.applyTextEdit() is not called when doing a Java model operation
+ * on a compilation unit since some implementations don't support such a call
+ * (see https://bugs.eclipse.org/bugs/show_bug.cgi?id=262389)
+ */
+public void testApplyEdit3() throws CoreException {
+	class DisabledTestBuffer extends Buffer implements IBuffer.ITextEditCapability {
+		public DisabledTestBuffer(IFile file, IOpenable owner, boolean readOnly) {
+			super(file, owner, readOnly);
+		}
+		public UndoEdit applyTextEdit(TextEdit edit, IProgressMonitor monitor) throws JavaModelException {
+			throw new RuntimeException("Should not call applyTextEdit()");
+		}
+	}
+	this.workingCopy = getWorkingCopy("/P/src/X.java", "public class X {}", new WorkingCopyOwner() {
+		public IBuffer createBuffer(ICompilationUnit copy) {
+			return new DisabledTestBuffer((IFile) copy.getResource(), copy, false);
+		}
+	});
+	this.workingCopy.createType("class Y {}", null, false, null);
+	assertSourceEquals(
+		"Unexpeted source", 
+		"public class X {}\n" + 
+		"\n" + 
+		"class Y {}",
+		this.workingCopy.getSource());
+}
+
