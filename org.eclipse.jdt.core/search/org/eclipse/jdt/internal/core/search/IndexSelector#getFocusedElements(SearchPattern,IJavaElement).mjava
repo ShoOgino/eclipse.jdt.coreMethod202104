@@ -1,0 +1,41 @@
+/*
+ * Create the list of focused jars or projects.
+ */
+private static IJavaElement[] getFocusedElements(SearchPattern pattern, IJavaElement focusElement) throws JavaModelException {
+	if (pattern instanceof MethodPattern) {
+		// For method pattern, it needs to walk along the focus type super hierarchy
+		// and add jars/projects of all the encountered types.
+		IType type = (IType) pattern.focus.getAncestor(IJavaElement.TYPE);
+		MethodPattern methodPattern = (MethodPattern) pattern;
+		String selector = new String(methodPattern.selector);
+		int parameterCount = methodPattern.parameterCount;
+		ITypeHierarchy superHierarchy = type.newSupertypeHierarchy(null);
+		IType[] allTypes = superHierarchy.getAllSupertypes(type);
+		int length = allTypes.length;
+		SimpleSet focusSet = new SimpleSet(length+1);
+		focusSet.add(focusElement);
+		for (int i=0; i<length; i++) {
+			IMethod[] methods = allTypes[i].getMethods();
+			int mLength = methods.length;
+			for (int m=0; m<mLength; m++) {
+				if (parameterCount == methods[m].getNumberOfParameters() && methods[m].getElementName().equals(selector)) {
+					IPackageFragmentRoot root = (IPackageFragmentRoot) allTypes[i].getAncestor(IJavaElement.PACKAGE_FRAGMENT_ROOT);
+					IJavaElement element = root.isArchive() ? root : root.getParent();
+					focusSet.add(element);
+				}
+			}
+		}
+		// Rebuilt a contiguous array
+		IJavaElement[] focuses = new IJavaElement[focusSet.elementSize];
+		Object[] values = focusSet.values;
+		int count = 0;
+		for (int i = values.length; --i >= 0;) {
+			if (values[i] != null) {
+				focuses[count++] = (IJavaElement) values[i];
+			}
+		}
+		return focuses;
+	}
+	return new IJavaElement[] { focusElement };
+}
+
