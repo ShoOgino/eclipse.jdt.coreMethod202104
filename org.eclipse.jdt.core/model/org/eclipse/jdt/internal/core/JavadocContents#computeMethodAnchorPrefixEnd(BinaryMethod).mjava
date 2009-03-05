@@ -1,0 +1,67 @@
+	private String computeMethodAnchorPrefixEnd(BinaryMethod method) throws JavaModelException {
+		String typeQualifiedName = null;
+		if (this.type.isMember()) {
+			IType currentType = this.type;
+			StringBuffer buffer = new StringBuffer();
+			while (currentType != null) {
+				buffer.insert(0, currentType.getElementName());
+				currentType = currentType.getDeclaringType();
+				if (currentType != null) {
+					buffer.insert(0, '.');
+				}
+			}
+			typeQualifiedName = new String(buffer.toString());
+		} else {
+			typeQualifiedName = this.type.getElementName();
+		}
+		
+		String methodName = method.getElementName();
+		if (method.isConstructor()) {
+			methodName = typeQualifiedName;
+		}
+		IBinaryMethod info = (IBinaryMethod) method.getElementInfo();
+
+		char[] genericSignature = info.getGenericSignature();
+		String anchor = null;
+		if (genericSignature != null) {
+			genericSignature = CharOperation.replaceOnCopy(genericSignature, '/', '.');
+			anchor = Util.toAnchor(0, genericSignature, methodName, Flags.isVarargs(method.getFlags()));
+			if (anchor == null) throw new JavaModelException(new JavaModelStatus(IJavaModelStatusConstants.UNKNOWN_JAVADOC_FORMAT, method));
+		} else {
+			anchor = Signature.toString(method.getSignature().replace('/', '.'), methodName, null, true, false, Flags.isVarargs(method.getFlags()));
+		}
+		IType declaringType = this.type;
+		if (declaringType.isMember()) {
+			int depth = 0;
+			final String packageFragmentName = declaringType.getPackageFragment().getElementName();
+			// might need to remove a part of the signature corresponding to the synthetic argument
+			final IJavaProject javaProject = declaringType.getJavaProject();
+			char[][] typeNames = CharOperation.splitOn('.', typeQualifiedName.toCharArray());
+			if (!Flags.isStatic(declaringType.getFlags())) depth++;
+			StringBuffer typeName = new StringBuffer();
+			for (int i = 0, max = typeNames.length; i < max; i++) {
+				if (typeName.length() == 0) {
+					typeName.append(typeNames[i]);
+				} else {
+					typeName.append('.').append(typeNames[i]);
+				}
+				IType resolvedType = javaProject.findType(packageFragmentName, String.valueOf(typeName));
+				if (resolvedType != null && resolvedType.isMember() && !Flags.isStatic(resolvedType.getFlags())) depth++;
+			}
+			if (depth != 0) {
+				int indexOfOpeningParen = anchor.indexOf('(');
+				if (indexOfOpeningParen == -1) return null;
+				int index = indexOfOpeningParen;
+				indexOfOpeningParen++;
+				for (int i = 0; i < depth; i++) {
+					int indexOfComma = anchor.indexOf(',', index);
+					if (indexOfComma != -1) {
+						index = indexOfComma + 2;
+					}
+				}
+				anchor = anchor.substring(0, indexOfOpeningParen) + anchor.substring(index);
+			}
+		}
+		return anchor + JavadocConstants.ANCHOR_PREFIX_END;
+	}
+
