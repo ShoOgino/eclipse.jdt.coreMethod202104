@@ -1,7 +1,7 @@
 	protected void processAnnotations() {
 		int newUnitSize = 0;
 		int newClassFilesSize = 0;
-		int bottom = 0;
+		int bottom = this.annotationProcessorStartIndex;
 		int top = this.totalUnits;
 		ReferenceBinding[] binaryTypeBindingsTemp = this.referenceBindings;
 		if (top == 0 && binaryTypeBindingsTemp == null) return;
@@ -27,14 +27,22 @@
 			binaryTypeBindingsTemp = newClassFiles;
 			newClassFilesSize = newClassFiles.length;
 			if (newUnitSize != 0) {
-				// we reset the compiler in order to restart with the new units
-				internalBeginToCompile(newUnits, newUnitSize);
+				ICompilationUnit[] newProcessedUnits = (ICompilationUnit[]) newUnits.clone(); // remember new units in case a source type collision occurs
+				try {
+					this.lookupEnvironment.isProcessingAnnotations = true;
+					internalBeginToCompile(newUnits, newUnitSize);
+				} catch (SourceTypeCollisionException e) {
+					e.newAnnotationProcessorUnits = newProcessedUnits;
+					throw e;
+				} finally {
+					this.lookupEnvironment.isProcessingAnnotations = false;
+					this.annotationProcessorManager.reset();
+				}
 				bottom = top;
 				top = this.totalUnits; // last unit added
 			} else {
 				bottom = top;
 			}
-			this.annotationProcessorManager.reset();
 		} while (newUnitSize != 0 || newClassFilesSize != 0);
 		// one more loop to create possible resources
 		// this loop cannot create any java source files
