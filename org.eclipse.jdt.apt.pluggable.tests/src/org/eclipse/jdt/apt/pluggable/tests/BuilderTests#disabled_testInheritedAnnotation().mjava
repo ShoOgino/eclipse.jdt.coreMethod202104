@@ -1,0 +1,65 @@
+	/**
+	 * Verify that a class whose superclass is annotated with an inherited annotation
+	 * gets treated the same as if the annotation were present on the class itself.
+	 * See <a href="http://bugs.eclipse.org/270754">Bug 270754</a>.
+	 */
+	public void disabled_testInheritedAnnotation() throws Throwable {
+		ProcessorTestStatus.reset();
+		IJavaProject jproj = createJavaProject(_projectName);
+		disableJava5Factories(jproj);
+		IProject proj = jproj.getProject();
+		IPath projPath = proj.getFullPath();
+		IPath root = projPath.append("src");
+		
+		env.addClass(root, "", "Base",
+				"import org.eclipse.jdt.apt.pluggable.tests.annotations.InheritedTrigger;\n" +
+				"@InheritedTrigger(0)\n" +
+				"public class Base {}"
+		);
+
+		// Because Sub extends Base, it should be treated as if it were annotated with InheritedTrigger
+		env.addClass(root, "", "Sub",
+				"public class Sub extends Base {\n" +
+				"}"
+		);
+			
+		AptConfig.setEnabled(jproj, true);
+		
+		fullBuild();
+		expectingNoProblems();
+		List<String> elements = InheritedAnnoProc.getProcessedElements();
+		assertTrue(elements.contains("Base"));
+		assertTrue(elements.contains("Sub"));
+		assertTrue("Processor did not run", ProcessorTestStatus.processorRan());
+		assertEquals("Processor reported errors", ProcessorTestStatus.NO_ERRORS, ProcessorTestStatus.getErrors());
+
+		// Modify base class and verify that both base and subclass get processed
+		InheritedAnnoProc.clearProcessedElements();
+		env.addClass(root, "", "Base",
+				"import org.eclipse.jdt.apt.pluggable.tests.annotations.InheritedTrigger;\n" +
+				"@InheritedTrigger(1)\n" +
+				"public class Base {}"
+		);
+		incrementalBuild();
+		expectingNoProblems();
+		elements = InheritedAnnoProc.getProcessedElements();
+		assertTrue(elements.contains("Base"));
+		assertTrue(elements.contains("Sub"));
+		assertTrue("Processor did not run", ProcessorTestStatus.processorRan());
+		assertEquals("Processor reported errors", ProcessorTestStatus.NO_ERRORS, ProcessorTestStatus.getErrors());
+		
+		// Modify subclass and verify that it gets processed
+		InheritedAnnoProc.clearProcessedElements();
+		env.addClass(root, "", "Sub",
+				"public class Sub extends Base {\n" +
+				" // this line is new\n" +
+				"}"
+		);
+		incrementalBuild();
+		expectingNoProblems();
+		elements = InheritedAnnoProc.getProcessedElements();
+		assertTrue(elements.contains("Sub"));
+		assertTrue("Processor did not run", ProcessorTestStatus.processorRan());
+		assertEquals("Processor reported errors", ProcessorTestStatus.NO_ERRORS, ProcessorTestStatus.getErrors());
+	}	
+
