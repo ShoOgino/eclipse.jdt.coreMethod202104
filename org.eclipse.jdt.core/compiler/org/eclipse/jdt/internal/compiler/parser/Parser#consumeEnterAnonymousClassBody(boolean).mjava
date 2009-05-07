@@ -1,21 +1,11 @@
-protected void consumeEnterAnonymousClassBody() {
+protected void consumeEnterAnonymousClassBody(boolean qualified) {
 	// EnterAnonymousClassBody ::= $empty
-
-	if (this.indexOfAssistIdentifier() < 0) {
-		super.consumeEnterAnonymousClassBody();
-		return;
-	}
-
-	// trick to avoid creating a selection on type reference
-	char [] oldIdent = assistIdentifier();
-	setAssistIdentifier(null);
 	TypeReference typeReference = getTypeReference(0);
-	setAssistIdentifier(oldIdent);
 
 	TypeDeclaration anonymousType = new TypeDeclaration(this.compilationUnit.compilationResult);
 	anonymousType.name = CharOperation.NO_CHAR;
 	anonymousType.bits |= (ASTNode.IsAnonymousType|ASTNode.IsLocalType);
-	QualifiedAllocationExpression alloc = new SelectionOnQualifiedAllocationExpression(anonymousType);
+	QualifiedAllocationExpression alloc = new QualifiedAllocationExpression(anonymousType);
 	markEnclosingMemberWithLocalType();
 	pushOnAstStack(anonymousType);
 
@@ -30,7 +20,12 @@ protected void consumeEnterAnonymousClassBody() {
 			0,
 			argumentLength);
 	}
-
+	
+	if (qualified) {
+		this.expressionLengthPtr--;
+		alloc.enclosingInstance = this.expressionStack[this.expressionPtr--];
+	}
+	
 	alloc.type = typeReference;
 
 	anonymousType.sourceEnd = alloc.sourceEnd;
@@ -39,22 +34,22 @@ protected void consumeEnterAnonymousClassBody() {
 	alloc.sourceStart = this.intStack[this.intPtr--];
 	pushOnExpressionStack(alloc);
 
-	this.assistNode = alloc;
-	this.lastCheckPoint = alloc.sourceEnd + 1;
-	if (!this.diet){
-		this.restartRecovery	= true;	// force to restart in recovery mode
-		this.lastIgnoredToken = -1;
-		this.currentToken = 0; // opening brace already taken into account
-		this.hasReportedError = true;
-	}
-
 	anonymousType.bodyStart = this.scanner.currentPosition;
 	this.listLength = 0; // will be updated when reading super-interfaces
+
+	// flush the comments related to the anonymous
+	this.scanner.commentPtr = -1;
+
 	// recovery
 	if (this.currentElement != null){
 		this.lastCheckPoint = anonymousType.bodyStart;
 		this.currentElement = this.currentElement.add(anonymousType, 0);
-		this.currentToken = 0; // opening brace already taken into account
+		if (!(this.currentElement instanceof RecoveredAnnotation)) {
+			this.currentToken = 0; // opening brace already taken into account
+		} else {
+			this.ignoreNextOpeningBrace = true;
+			this.currentElement.bracketBalance++;
+		}
 		this.lastIgnoredToken = -1;
 	}
 }
