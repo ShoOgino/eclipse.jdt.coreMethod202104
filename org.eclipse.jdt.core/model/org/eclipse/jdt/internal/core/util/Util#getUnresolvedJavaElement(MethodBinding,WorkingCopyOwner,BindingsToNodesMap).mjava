@@ -45,24 +45,28 @@
 			org.eclipse.jdt.internal.compiler.lookup.MethodBinding original = methodBinding.original();
 			String selector = original.isConstructor() ? declaringType.getElementName() : new String(original.selector);
 			boolean isBinary = declaringType.isBinary();
+			ReferenceBinding enclosingType = original.declaringClass.enclosingType();
+			boolean isInnerBinaryTypeConstructor = isBinary && original.isConstructor() && enclosingType != null;
 			TypeBinding[] parameters = original.parameters;
 			int length = parameters == null ? 0 : parameters.length;
-			if (isBinary) {
-				ReferenceBinding enclosingType = original.declaringClass.enclosingType();
-				boolean isInnerBinaryTypeConstructor = original.isConstructor() && enclosingType != null;
-				int declaringIndex = isInnerBinaryTypeConstructor ? 1 : 0;
-				String[] parameterSignatures = new String[declaringIndex + length];
-				if (isInnerBinaryTypeConstructor) {
-					parameterSignatures[0] = new String(enclosingType.genericTypeSignature()).replace('/', '.');
-				}
-				for (int i = 0;  i < length; i++) {
-					char[] signature = parameters[i].genericTypeSignature();
+			int declaringIndex = isInnerBinaryTypeConstructor ? 1 : 0;
+			String[] parameterSignatures = new String[declaringIndex + length];
+			if (isInnerBinaryTypeConstructor)
+				parameterSignatures[0] = new String(enclosingType.genericTypeSignature()).replace('/', '.');
+			for (int i = 0;  i < length; i++) {
+				char[] signature = parameters[i].genericTypeSignature();
+				if (isBinary) {
 					signature = CharOperation.replaceOnCopy(signature, '/', '.');
-					parameterSignatures[declaringIndex + i] = new String(signature);
+				} else {
+					signature = toUnresolvedTypeSignature(signature);
 				}
-				IMethod result = declaringType.getMethod(selector, parameterSignatures);
-				return (JavaElement) result;
+				parameterSignatures[declaringIndex + i] = new String(signature);
 			}
+			IMethod result = declaringType.getMethod(selector, parameterSignatures);
+			if (isBinary)
+				return (JavaElement) result;
+			if (result.exists()) // if perfect match (see https://bugs.eclipse.org/bugs/show_bug.cgi?id=249567 )
+				return (JavaElement) result;
 			IMethod[] methods = null;
 			try {
 				methods = declaringType.getMethods();
@@ -70,7 +74,10 @@
 				// declaring type doesn't exist
 				return null;
 			}
-			return findMethod(selector, parameters, methods);
+			IMethod[] candidates = Member.findMethods(result, methods);
+			if (candidates == null || candidates.length == 0)
+				return null;
+			return (JavaElement) candidates[0];
 		}
 	}
 
