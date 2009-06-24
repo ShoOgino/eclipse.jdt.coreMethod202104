@@ -5,10 +5,12 @@
 		TypeBinding elementType = this.elementVariable.type.resolvedType;
 		TypeBinding collectionType = this.collection == null ? null : this.collection.resolveType(this.scope);
 
+		TypeBinding expectedCollectionType = null;
 		if (elementType != null && collectionType != null) {
 			if (collectionType.isArrayType()) { // for(E e : E[])
 				this.kind = ARRAY;
-				this.collection.computeConversion(this.scope,collectionType, collectionType);
+				expectedCollectionType = upperScope.createArrayType(elementType, 1);
+				this.collection.computeConversion(this.scope, expectedCollectionType, collectionType);
 				this.collectionElementType = ((ArrayBinding) collectionType).elementsType();
 				if (!this.collectionElementType.isCompatibleWith(elementType)
 						&& !this.scope.isBoxingCompatibleWith(this.collectionElementType, elementType)) {
@@ -17,6 +19,7 @@
 				// in case we need to do a conversion
 				int compileTimeTypeID = this.collectionElementType.id;
 				if (elementType.isBaseType()) {
+					expectedCollectionType = null;
 					if (!this.collectionElementType.isBaseType()) {
 						compileTimeTypeID = this.scope.environment().computeBoxingType(this.collectionElementType).id;
 						this.elementVariableImplicitWidening = UNBOXING;
@@ -27,30 +30,29 @@
 					} else {
 						this.elementVariableImplicitWidening = (elementType.id << 4) + compileTimeTypeID;
 					}
-				} else {
-					if (this.collectionElementType.isBaseType()) {
-						int boxedID = this.scope.environment().computeBoxingType(this.collectionElementType).id;
-						this.elementVariableImplicitWidening = BOXING | (compileTimeTypeID << 4) | compileTimeTypeID; // use primitive type in implicit conversion
-						compileTimeTypeID = boxedID;
-						this.scope.problemReporter().autoboxing(this.collection, this.collectionElementType, elementType);
-					}
+				} else if (this.collectionElementType.isBaseType()) {
+					expectedCollectionType = null;
+					int boxedID = this.scope.environment().computeBoxingType(this.collectionElementType).id;
+					this.elementVariableImplicitWidening = BOXING | (compileTimeTypeID << 4) | compileTimeTypeID; // use primitive type in implicit conversion
+					compileTimeTypeID = boxedID;
+					this.scope.problemReporter().autoboxing(this.collection, this.collectionElementType, elementType);
 				}
 			} else if (collectionType instanceof ReferenceBinding) {
-			    ReferenceBinding iterableType = ((ReferenceBinding)collectionType).findSuperTypeOriginatingFrom(T_JavaLangIterable, false /*Iterable is not a class*/);
-			    checkIterable: {
-			    	if (iterableType == null) break checkIterable;
+				ReferenceBinding iterableType = ((ReferenceBinding)collectionType).findSuperTypeOriginatingFrom(T_JavaLangIterable, false /*Iterable is not a class*/);
+				checkIterable: {
+					if (iterableType == null) break checkIterable;
 
 					this.iteratorReceiverType = collectionType.erasure();
 					if (((ReferenceBinding)this.iteratorReceiverType).findSuperTypeOriginatingFrom(T_JavaLangIterable, false) == null) {
 						this.iteratorReceiverType = iterableType; // handle indirect inheritance thru variable secondary bound
-	   					this.collection.computeConversion(this.scope, iterableType, collectionType);
+						this.collection.computeConversion(this.scope, iterableType, collectionType);
 					} else {
-	   					this.collection.computeConversion(this.scope, collectionType, collectionType);
+						this.collection.computeConversion(this.scope, collectionType, collectionType);
 					}
 
-			    	TypeBinding[] arguments = null;
-			    	switch (iterableType.kind()) {
-			    		case Binding.RAW_TYPE : // for(Object o : Iterable)
+					TypeBinding[] arguments = null;
+					switch (iterableType.kind()) {
+						case Binding.RAW_TYPE : // for(Object o : Iterable)
 							this.kind = RAW_ITERABLE;
 							this.collectionElementType = this.scope.getJavaLangObject();
 							if (!this.collectionElementType.isCompatibleWith(elementType)
@@ -58,20 +60,20 @@
 								this.scope.problemReporter().notCompatibleTypesErrorInForeach(this.collection, this.collectionElementType, elementType);
 							}
 							// no conversion needed as only for reference types
-			    			break checkIterable;
+							break checkIterable;
 
-			    		case Binding.GENERIC_TYPE : // for (T t : Iterable<T>) - in case used inside Iterable itself
-			    			arguments = iterableType.typeVariables();
-			    			break;
+						case Binding.GENERIC_TYPE : // for (T t : Iterable<T>) - in case used inside Iterable itself
+							arguments = iterableType.typeVariables();
+							break;
 
-			    		case Binding.PARAMETERIZED_TYPE : // for(E e : Iterable<E>)
-			    			arguments = ((ParameterizedTypeBinding)iterableType).arguments;
-			    			break;
+						case Binding.PARAMETERIZED_TYPE : // for(E e : Iterable<E>)
+							arguments = ((ParameterizedTypeBinding)iterableType).arguments;
+							break;
 
-			    		default:
-			    			break checkIterable;
-			    	}
-			    	// generic or parameterized case
+						default:
+							break checkIterable;
+					}
+					// generic or parameterized case
 					if (arguments.length != 1) break checkIterable; // per construction can only be one
 					this.kind = GENERIC_ITERABLE;
 
@@ -99,7 +101,7 @@
 							compileTimeTypeID = boxedID;
 						}
 					}
-			    }
+				}
 			}
 			switch(this.kind) {
 				case ARRAY :
@@ -107,13 +109,16 @@
 					this.indexVariable = new LocalVariableBinding(SecretIndexVariableName, TypeBinding.INT, ClassFileConstants.AccDefault, false);
 					this.scope.addLocalVariable(this.indexVariable);
 					this.indexVariable.setConstant(Constant.NotAConstant); // not inlinable
-
 					// allocate #max secret variable
 					this.maxVariable = new LocalVariableBinding(SecretMaxVariableName, TypeBinding.INT, ClassFileConstants.AccDefault, false);
 					this.scope.addLocalVariable(this.maxVariable);
 					this.maxVariable.setConstant(Constant.NotAConstant); // not inlinable
 					// add #array secret variable (of collection type)
-					this.collectionVariable = new LocalVariableBinding(SecretCollectionVariableName, collectionType, ClassFileConstants.AccDefault, false);
+					if (expectedCollectionType == null) {
+						this.collectionVariable = new LocalVariableBinding(SecretCollectionVariableName, collectionType, ClassFileConstants.AccDefault, false);
+					} else {
+						this.collectionVariable = new LocalVariableBinding(SecretCollectionVariableName, expectedCollectionType, ClassFileConstants.AccDefault, false);
+					}
 					this.scope.addLocalVariable(this.collectionVariable);
 					this.collectionVariable.setConstant(Constant.NotAConstant); // not inlinable
 					break;
