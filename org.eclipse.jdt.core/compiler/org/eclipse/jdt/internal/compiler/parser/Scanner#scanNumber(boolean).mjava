@@ -1,42 +1,101 @@
-public int scanNumber(boolean dotPrefix) throws InvalidInputException {
+	public int scanNumber(boolean dotPrefix) throws InvalidInputException {
 
-	//when entering this method the currentCharacter is the first
-	//digit of the number. It may be preceeded by a '.' when
-	//dotPrefix is true
+		//when entering this method the currentCharacter is the first
+		//digit of the number. It may be preceeded by a '.' when
+		//dotPrefix is true
 
-	boolean floating = dotPrefix;
-	if ((!dotPrefix) && (this.currentCharacter == '0')) {
-		if (getNextChar('x', 'X') >= 0) { //----------hexa-----------------
-			int start = this.currentPosition;
-			while (getNextCharAsDigit(16)){/*empty*/}
-			int end = this.currentPosition;
-			if (getNextChar('l', 'L') >= 0) {
-				if (end == start) {
-					throw new InvalidInputException(INVALID_HEXA);
-				}
-				return TokenNameLongLiteral;
-			} else if (getNextChar('.')) {
-				if (this.sourceLevel < ClassFileConstants.JDK1_5) {
+		boolean floating = dotPrefix;
+		if (!dotPrefix && (this.currentCharacter == '0')) {
+			if (getNextChar('x', 'X') >= 0) { //----------hexa-----------------
+				int start = this.currentPosition;
+				consumeDigits(16, true);
+				int end = this.currentPosition;
+				if (getNextChar('l', 'L') >= 0) {
 					if (end == start) {
 						throw new InvalidInputException(INVALID_HEXA);
 					}
-					this.currentPosition = end;
-					return TokenNameIntegerLiteral;
-				}
-				// hexadecimal floating point literal
-				// read decimal part
-				boolean hasNoDigitsBeforeDot = end == start;
-				start = this.currentPosition;
-				while (getNextCharAsDigit(16)){/*empty*/}
-				end = this.currentPosition;
-				if (hasNoDigitsBeforeDot && end == start) {
-					throw new InvalidInputException(INVALID_HEXA);
-				}
+					return TokenNameLongLiteral;
+				} else if (getNextChar('.')) {
+					// hexadecimal floating point literal
+					// read decimal part
+					boolean hasNoDigitsBeforeDot = end == start;
+					start = this.currentPosition;
+					consumeDigits(16, true);
+					end = this.currentPosition;
+					if (hasNoDigitsBeforeDot && end == start) {
+						if (this.sourceLevel < ClassFileConstants.JDK1_5) {
+							throw new InvalidInputException(ILLEGAL_HEXA_LITERAL);
+						}
+						throw new InvalidInputException(INVALID_HEXA);
+					}
 
-				if (getNextChar('p', 'P') >= 0) { // consume next character
+					if (getNextChar('p', 'P') >= 0) { // consume next character
+						this.unicodeAsBackSlash = false;
+						if (((this.currentCharacter = this.source[this.currentPosition++]) == '\\')
+								&& (this.source[this.currentPosition] == 'u')) {
+							getNextUnicodeChar();
+						} else {
+							if (this.withoutUnicodePtr != 0) {
+								unicodeStore();
+							}
+						}
+
+						if ((this.currentCharacter == '-')
+								|| (this.currentCharacter == '+')) { // consume next character
+							this.unicodeAsBackSlash = false;
+							if (((this.currentCharacter = this.source[this.currentPosition++]) == '\\')
+									&& (this.source[this.currentPosition] == 'u')) {
+								getNextUnicodeChar();
+							} else {
+								if (this.withoutUnicodePtr != 0) {
+									unicodeStore();
+								}
+							}
+						}
+						if (!ScannerHelper.isDigit(this.currentCharacter)) {
+							if (this.sourceLevel < ClassFileConstants.JDK1_5) {
+								throw new InvalidInputException(ILLEGAL_HEXA_LITERAL);
+							}
+							if (this.currentCharacter == '_') {
+								// wrongly place '_'
+								consumeDigits(10);
+								throw new InvalidInputException(INVALID_UNDERSCORE);
+							}
+							throw new InvalidInputException(INVALID_HEXA);
+						}
+						consumeDigits(10, true);
+						if (getNextChar('f', 'F') >= 0) {
+							if (this.sourceLevel < ClassFileConstants.JDK1_5) {
+								throw new InvalidInputException(ILLEGAL_HEXA_LITERAL);
+							}
+							return TokenNameFloatingPointLiteral;
+						}
+						if (getNextChar('d', 'D') >= 0) {
+							if (this.sourceLevel < ClassFileConstants.JDK1_5) {
+								throw new InvalidInputException(ILLEGAL_HEXA_LITERAL);
+							}
+							return TokenNameDoubleLiteral;
+						}
+						if (getNextChar('l', 'L') >= 0) {
+							if (this.sourceLevel < ClassFileConstants.JDK1_5) {
+								throw new InvalidInputException(ILLEGAL_HEXA_LITERAL);
+							}
+							throw new InvalidInputException(INVALID_HEXA);
+						}
+						if (this.sourceLevel < ClassFileConstants.JDK1_5) {
+							throw new InvalidInputException(ILLEGAL_HEXA_LITERAL);
+						}
+						return TokenNameDoubleLiteral;
+					} else {
+						if (this.sourceLevel < ClassFileConstants.JDK1_5) {
+							throw new InvalidInputException(ILLEGAL_HEXA_LITERAL);
+						}
+						throw new InvalidInputException(INVALID_HEXA);
+					}
+				} else if (getNextChar('p', 'P') >= 0) { // consume next character
 					this.unicodeAsBackSlash = false;
 					if (((this.currentCharacter = this.source[this.currentPosition++]) == '\\')
-						&& (this.source[this.currentPosition] == 'u')) {
+							&& (this.source[this.currentPosition] == 'u')) {
 						getNextUnicodeChar();
 					} else {
 						if (this.withoutUnicodePtr != 0) {
@@ -45,10 +104,10 @@ public int scanNumber(boolean dotPrefix) throws InvalidInputException {
 					}
 
 					if ((this.currentCharacter == '-')
-						|| (this.currentCharacter == '+')) { // consume next character
+							|| (this.currentCharacter == '+')) { // consume next character
 						this.unicodeAsBackSlash = false;
 						if (((this.currentCharacter = this.source[this.currentPosition++]) == '\\')
-							&& (this.source[this.currentPosition] == 'u')) {
+								&& (this.source[this.currentPosition] == 'u')) {
 							getNextUnicodeChar();
 						} else {
 							if (this.withoutUnicodePtr != 0) {
@@ -57,177 +116,187 @@ public int scanNumber(boolean dotPrefix) throws InvalidInputException {
 						}
 					}
 					if (!ScannerHelper.isDigit(this.currentCharacter)) {
-						throw new InvalidInputException(INVALID_HEXA);
+						if (this.sourceLevel < ClassFileConstants.JDK1_5) {
+							throw new InvalidInputException(ILLEGAL_HEXA_LITERAL);
+						}
+						if (this.currentCharacter == '_') {
+							// wrongly place '_'
+							consumeDigits(10);
+							throw new InvalidInputException(INVALID_UNDERSCORE);
+						}
+						throw new InvalidInputException(INVALID_FLOAT);
 					}
-					while (getNextCharAsDigit()){/*empty*/}
+					consumeDigits(10, true);
 					if (getNextChar('f', 'F') >= 0) {
+						if (this.sourceLevel < ClassFileConstants.JDK1_5) {
+							throw new InvalidInputException(ILLEGAL_HEXA_LITERAL);
+						}
 						return TokenNameFloatingPointLiteral;
 					}
 					if (getNextChar('d', 'D') >= 0) {
+						if (this.sourceLevel < ClassFileConstants.JDK1_5) {
+							throw new InvalidInputException(ILLEGAL_HEXA_LITERAL);
+						}
 						return TokenNameDoubleLiteral;
 					}
 					if (getNextChar('l', 'L') >= 0) {
+						if (this.sourceLevel < ClassFileConstants.JDK1_5) {
+							throw new InvalidInputException(ILLEGAL_HEXA_LITERAL);
+						}
 						throw new InvalidInputException(INVALID_HEXA);
 					}
+					if (this.sourceLevel < ClassFileConstants.JDK1_5) {
+						throw new InvalidInputException(ILLEGAL_HEXA_LITERAL);
+					}
 					return TokenNameDoubleLiteral;
 				} else {
-					throw new InvalidInputException(INVALID_HEXA);
-				}
-			} else if (getNextChar('p', 'P') >= 0) { // consume next character
-				if (this.sourceLevel < ClassFileConstants.JDK1_5) {
-					// if we are in source level < 1.5 we report an integer literal
-					this.currentPosition = end;
+					if (end == start)
+						throw new InvalidInputException(INVALID_HEXA);
 					return TokenNameIntegerLiteral;
 				}
-				this.unicodeAsBackSlash = false;
-				if (((this.currentCharacter = this.source[this.currentPosition++]) == '\\')
-					&& (this.source[this.currentPosition] == 'u')) {
-					getNextUnicodeChar();
-				} else {
-					if (this.withoutUnicodePtr != 0) {
-						unicodeStore();
+			} else if (getNextChar('b', 'B') >= 0) { //----------binary-----------------
+				int start = this.currentPosition;
+				consumeDigits(2, true);
+				int end = this.currentPosition;
+				if (end == start) {
+					if (this.sourceLevel < ClassFileConstants.JDK1_7) {
+						throw new InvalidInputException(ILLEGAL_BINARY_LITERAL);
 					}
+					throw new InvalidInputException(INVALID_BINARY);
 				}
-
-				if ((this.currentCharacter == '-')
-					|| (this.currentCharacter == '+')) { // consume next character
-					this.unicodeAsBackSlash = false;
-					if (((this.currentCharacter = this.source[this.currentPosition++]) == '\\')
-						&& (this.source[this.currentPosition] == 'u')) {
-						getNextUnicodeChar();
-					} else {
-						if (this.withoutUnicodePtr != 0) {
-							unicodeStore();
-						}
-					}
-				}
-				if (!ScannerHelper.isDigit(this.currentCharacter))
-					throw new InvalidInputException(INVALID_FLOAT);
-				while (getNextCharAsDigit()){/*empty*/}
-				if (getNextChar('f', 'F') >= 0)
-					return TokenNameFloatingPointLiteral;
-				if (getNextChar('d', 'D') >= 0)
-					return TokenNameDoubleLiteral;
 				if (getNextChar('l', 'L') >= 0) {
-					throw new InvalidInputException(INVALID_HEXA);
+					if (this.sourceLevel < ClassFileConstants.JDK1_7) {
+						throw new InvalidInputException(ILLEGAL_BINARY_LITERAL);
+					}
+					return TokenNameLongLiteral;
 				}
-				return TokenNameDoubleLiteral;
-			} else {
-				if (end == start)
-					throw new InvalidInputException(INVALID_HEXA);
+				if (this.sourceLevel < ClassFileConstants.JDK1_7) {
+					throw new InvalidInputException(ILLEGAL_BINARY_LITERAL);
+				}
 				return TokenNameIntegerLiteral;
 			}
-		}
 
-		//there is x or X in the number
-		//potential octal ! ... some one may write 000099.0 ! thus 00100 < 00078.0 is true !!!!! crazy language
-		if (getNextCharAsDigit()) { //-------------potential octal-----------------
-			while (getNextCharAsDigit()){/*empty*/}
+			//there is no x or X nor b or B in the number
+			//potential octal
+			if (getNextCharAsDigit()) { //-------------potential octal-----------------
+				consumeDigits(10);
 
-			if (getNextChar('l', 'L') >= 0) {
-				return TokenNameLongLiteral;
-			}
-
-			if (getNextChar('f', 'F') >= 0) {
-				return TokenNameFloatingPointLiteral;
-			}
-
-			if (getNextChar('d', 'D') >= 0) {
-				return TokenNameDoubleLiteral;
-			} else { //make the distinction between octal and float ....
-				boolean isInteger = true;
-				if (getNextChar('.')) {
-					isInteger = false;
-					while (getNextCharAsDigit()){/*empty*/}
+				if (getNextChar('l', 'L') >= 0) {
+					return TokenNameLongLiteral;
 				}
-				if (getNextChar('e', 'E') >= 0) { // consume next character
-					isInteger = false;
-					this.unicodeAsBackSlash = false;
-					if (((this.currentCharacter = this.source[this.currentPosition++]) == '\\')
-						&& (this.source[this.currentPosition] == 'u')) {
-						getNextUnicodeChar();
-					} else {
-						if (this.withoutUnicodePtr != 0) {
-							unicodeStore();
-						}
-					}
 
-					if ((this.currentCharacter == '-')
-						|| (this.currentCharacter == '+')) { // consume next character
+				if (getNextChar('f', 'F') >= 0) {
+					return TokenNameFloatingPointLiteral;
+				}
+
+				if (getNextChar('d', 'D') >= 0) {
+					return TokenNameDoubleLiteral;
+				} else { //make the distinction between octal and float ....
+					boolean isInteger = true;
+					if (getNextChar('.')) {
+						isInteger = false;
+						consumeDigits(10);
+					}
+					if (getNextChar('e', 'E') >= 0) { // consume next character
+						isInteger = false;
 						this.unicodeAsBackSlash = false;
 						if (((this.currentCharacter = this.source[this.currentPosition++]) == '\\')
-							&& (this.source[this.currentPosition] == 'u')) {
+								&& (this.source[this.currentPosition] == 'u')) {
 							getNextUnicodeChar();
 						} else {
 							if (this.withoutUnicodePtr != 0) {
 								unicodeStore();
 							}
 						}
+
+						if ((this.currentCharacter == '-')
+								|| (this.currentCharacter == '+')) { // consume next character
+							this.unicodeAsBackSlash = false;
+							if (((this.currentCharacter = this.source[this.currentPosition++]) == '\\')
+									&& (this.source[this.currentPosition] == 'u')) {
+								getNextUnicodeChar();
+							} else {
+								if (this.withoutUnicodePtr != 0) {
+									unicodeStore();
+								}
+							}
+						}
+						if (!ScannerHelper.isDigit(this.currentCharacter)) {
+							if (this.currentCharacter == '_') {
+								// wrongly place '_'
+								consumeDigits(10);
+								throw new InvalidInputException(INVALID_UNDERSCORE);
+							}
+							throw new InvalidInputException(INVALID_FLOAT);
+						}
+						consumeDigits(10, true);
 					}
-					if (!ScannerHelper.isDigit(this.currentCharacter))
-						throw new InvalidInputException(INVALID_FLOAT);
-					while (getNextCharAsDigit()){/*empty*/}
+					if (getNextChar('f', 'F') >= 0)
+						return TokenNameFloatingPointLiteral;
+					if (getNextChar('d', 'D') >= 0 || !isInteger)
+						return TokenNameDoubleLiteral;
+					return TokenNameIntegerLiteral;
 				}
-				if (getNextChar('f', 'F') >= 0)
-					return TokenNameFloatingPointLiteral;
-				if (getNextChar('d', 'D') >= 0 || !isInteger)
-					return TokenNameDoubleLiteral;
-				return TokenNameIntegerLiteral;
-			}
-		} else {
-			/* carry on */
-		}
-	}
-
-	while (getNextCharAsDigit()){/*empty*/}
-
-	if ((!dotPrefix) && (getNextChar('l', 'L') >= 0))
-		return TokenNameLongLiteral;
-
-	if ((!dotPrefix) && (getNextChar('.'))) { //decimal part that can be empty
-		while (getNextCharAsDigit()){/*empty*/}
-		floating = true;
-	}
-
-	//if floating is true both exponant and suffix may be optional
-
-	if (getNextChar('e', 'E') >= 0) {
-		floating = true;
-		// consume next character
-		this.unicodeAsBackSlash = false;
-		if (((this.currentCharacter = this.source[this.currentPosition++]) == '\\')
-			&& (this.source[this.currentPosition] == 'u')) {
-			getNextUnicodeChar();
-		} else {
-			if (this.withoutUnicodePtr != 0) {
-				unicodeStore();
+			} else {
+				/* carry on */
 			}
 		}
 
-		if ((this.currentCharacter == '-')
-			|| (this.currentCharacter == '+')) { // consume next character
+		consumeDigits(10);
+
+		if ((!dotPrefix) && (getNextChar('l', 'L') >= 0))
+			return TokenNameLongLiteral;
+
+		if ((!dotPrefix) && (getNextChar('.'))) { //decimal part that can be empty
+			consumeDigits(10, true);
+			floating = true;
+		}
+
+		//if floating is true both exponant and suffix may be optional
+
+		if (getNextChar('e', 'E') >= 0) {
+			floating = true;
+			// consume next character
 			this.unicodeAsBackSlash = false;
 			if (((this.currentCharacter = this.source[this.currentPosition++]) == '\\')
-				&& (this.source[this.currentPosition] == 'u')) {
+					&& (this.source[this.currentPosition] == 'u')) {
 				getNextUnicodeChar();
 			} else {
 				if (this.withoutUnicodePtr != 0) {
 					unicodeStore();
 				}
 			}
+
+			if ((this.currentCharacter == '-')
+					|| (this.currentCharacter == '+')) { // consume next character
+				this.unicodeAsBackSlash = false;
+				if (((this.currentCharacter = this.source[this.currentPosition++]) == '\\')
+						&& (this.source[this.currentPosition] == 'u')) {
+					getNextUnicodeChar();
+				} else {
+					if (this.withoutUnicodePtr != 0) {
+						unicodeStore();
+					}
+				}
+			}
+			if (!ScannerHelper.isDigit(this.currentCharacter)) {
+				if (this.currentCharacter == '_') {
+					// wrongly place '_'
+					consumeDigits(10);
+					throw new InvalidInputException(INVALID_UNDERSCORE);
+				}
+				throw new InvalidInputException(INVALID_FLOAT);
+			}
+			consumeDigits(10, true);
 		}
-		if (!ScannerHelper.isDigit(this.currentCharacter))
-			throw new InvalidInputException(INVALID_FLOAT);
-		while (getNextCharAsDigit()){/*empty*/}
+
+		if (getNextChar('d', 'D') >= 0)
+			return TokenNameDoubleLiteral;
+		if (getNextChar('f', 'F') >= 0)
+			return TokenNameFloatingPointLiteral;
+
+		//the long flag has been tested before
+
+		return floating ? TokenNameDoubleLiteral : TokenNameIntegerLiteral;
 	}
-
-	if (getNextChar('d', 'D') >= 0)
-		return TokenNameDoubleLiteral;
-	if (getNextChar('f', 'F') >= 0)
-		return TokenNameFloatingPointLiteral;
-
-	//the long flag has been tested before
-
-	return floating ? TokenNameDoubleLiteral : TokenNameIntegerLiteral;
-}
 
