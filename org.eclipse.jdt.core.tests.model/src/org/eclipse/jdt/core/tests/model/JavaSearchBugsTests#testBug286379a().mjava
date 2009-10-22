@@ -1,0 +1,56 @@
+/**
+ * @bug 286379: [search] Problem while searching class
+ * @test Ensure that no IAE occurs when there is a change in JavaLikeNames.
+ * @see "https://bugs.eclipse.org/bugs/show_bug.cgi?id=286379"
+ */
+public void testBug286379a() throws CoreException {
+	IContentType javaContentType = Platform.getContentTypeManager().getContentType(JavaCore.JAVA_SOURCE_CONTENT_TYPE);
+	ICompilationUnit cu = null;
+	try {
+		assertNotNull("We should have got a Java Source content type!", javaContentType);
+		javaContentType.addFileSpec("torem", IContentType.FILE_EXTENSION_SPEC);
+		createJavaProject("P");
+		createFolder("/P/p");			
+		createFile(
+			"/P/p/Xtorem.torem",
+			"package p;\n" +
+			"public class Xtorem {\n" +
+			"}"
+		);
+		waitUntilIndexesReady();
+		cu = getCompilationUnit("/P/p/Xtorem.torem");
+		cu.becomeWorkingCopy(null);
+		IType type = cu.getType("Xtorem");
+		
+		// Ensure that the Xtorem class is really found
+		TestCollector collector = new TestCollector();
+		new SearchEngine().search(
+				SearchPattern.createPattern(type, IJavaSearchConstants.DECLARATIONS),
+				new SearchParticipant[] {SearchEngine.getDefaultSearchParticipant()},
+				SearchEngine.createWorkspaceScope(),
+				collector,
+				null
+			);
+		assertSearchResults("p/Xtorem.torem p.Xtorem", collector);
+		
+		// Ensure that removal of the content type doesn't cause any further exception
+		// during the search and also ensure that the search doesn't return any result
+		javaContentType.removeFileSpec("torem", IContentType.FILE_EXTENSION_SPEC);		
+		collector = new TestCollector();
+		new SearchEngine().search(
+				SearchPattern.createPattern(type, IJavaSearchConstants.DECLARATIONS),
+				new SearchParticipant[] {SearchEngine.getDefaultSearchParticipant()},
+				SearchEngine.createWorkspaceScope(),
+				collector,
+				null
+			);
+		assertSearchResults("No results expected", "", collector);
+	} finally {
+		if (cu != null)
+			cu.discardWorkingCopy();
+		if (javaContentType != null)
+			javaContentType.removeFileSpec("torem", IContentType.FILE_EXTENSION_SPEC);
+		deleteProject("P");
+	}
+}
+

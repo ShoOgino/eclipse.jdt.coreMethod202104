@@ -10,6 +10,9 @@ public Index[] getIndexes(IPath[] locations, IProgressMonitor progressMonitor) {
 	int length = locations.length;
 	Index[] locatedIndexes = new Index[length];
 	int count = 0;
+	if (this.javaLikeNamesChanged) {
+		this.javaLikeNamesChanged = hasJavaLikeNamesChanged();
+	}
 	for (int i = 0; i < length; i++) {
 		if (progressMonitor != null && progressMonitor.isCanceled()) {
 			throw new OperationCanceledException();
@@ -20,11 +23,30 @@ public Index[] getIndexes(IPath[] locations, IProgressMonitor progressMonitor) {
 		if (index == null) {
 			// only need containerPath if the index must be built
 			IPath containerPath = (IPath) this.indexLocations.keyForValue(indexLocation);
-			if (containerPath != null) // sanity check
+			if (containerPath != null) {// sanity check
 				index = getIndex(containerPath, indexLocation, true /*reuse index file*/, false /*do not create if none*/);
+				if (index != null && this.javaLikeNamesChanged && !index.isIndexForJar()) {
+					// When a change in java like names extension has been detected, all
+					// non jar files indexes (i.e. containing sources) need to be rebuilt.
+					// see bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=286379
+					File indexFile = index.getIndexFile();
+					if (indexFile.exists()) {
+						if (DEBUG)
+							Util.verbose("Change in javaLikeNames - removing index file for " + containerPath ); //$NON-NLS-1$
+						indexFile.delete();
+					}
+					this.indexes.put(indexLocation, null);
+					rebuildIndex(indexLocation, containerPath);
+					index = null;
+				}
+			}
 		}
 		if (index != null)
 			locatedIndexes[count++] = index; // only consider indexes which are ready
+	}
+	if (this.javaLikeNamesChanged) {
+		writeJavaLikeNamesFile();
+		this.javaLikeNamesChanged = false;
 	}
 	if (count < length) {
 		System.arraycopy(locatedIndexes, 0, locatedIndexes=new Index[count], 0, count);
