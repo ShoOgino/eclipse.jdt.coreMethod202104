@@ -6,29 +6,86 @@
 			// preserve line breaks in wrapping if specified
 			// see bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=198074
 			if (this.currentAlignment != null && !this.formatter.preferences.join_wrapped_lines) {
-				// insert a new line only if it has not been already done before
-				// see bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=283476
-				if (this.lastNumberOfNewLines == 0) {
+				// Insert a new line only if it has not been already done before
+				// (see bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=283476)
+				// or when there's no direct member alignment
+				// (additional fix for bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=286601)
+				if (this.lastNumberOfNewLines == 0 || this.memberAlignment == null || this.memberAlignment.location.inputOffset < this.currentAlignment.location.inputOffset) {
+					
+					// Debug
+					if (DefaultCodeFormatter.DEBUG) {
+						System.out.println("Preserve empty lines:"); //$NON-NLS-1$
+						System.out.println(" - indentation level = "+this.indentationLevel); //$NON-NLS-1$
+						System.out.println(" - current alignment: "); //$NON-NLS-1$
+						System.out.print(this.currentAlignment.toString(new StringBuffer(), 1));
+						if (this.memberAlignment != null) {
+							System.out.println(" - member alignment: "); //$NON-NLS-1$
+							System.out.print(this.memberAlignment.toString(new StringBuffer(), 1));
+						}
+					}
+
 					// Reset indentation level to the location output
 					this.indentationLevel = this.currentAlignment.location.outputIndentationLevel;
-					this.numberOfIndentations = this.currentAlignment.location.numberOfIndentations;
-					this.formatter.lastLocalDeclarationSourceStart = this.currentAlignment.location.lastLocalDeclarationSourceStart;
-					// Create new line keeping the existing indentation
+
+					// Create new line
 					StringBuffer buffer = new StringBuffer(getNewLine());
+					
+					// Look for current indentation
 					int currentColumn = getCurrentIndentation(this.scanner.currentPosition);
-					Alignment rootAlignment = this.currentAlignment;
-					while (rootAlignment.enclosing != null) {
-						rootAlignment = rootAlignment.enclosing;
+					
+					// Determine whether the alignment indentation can be used or not
+					// So far, the best algorithm is to use it when
+					// 1. this is not the opening brace of a local declaration assignment
+					// 2. this is not the first opening brace
+					//     or this is an array initializer alignment 
+					//     or this is an binary expression alignment
+					// 3. the indentation level is below the alignment break indentation
+					int currentTokenStartPosition = this.scanner.currentPosition;
+					int nextToken = -1;
+					try {
+						nextToken = this.scanner.getNextToken();
+					} catch (InvalidInputException e) {
+						// skip
 					}
-					Location location = rootAlignment.location;
-					if (currentColumn > location.inputColumn) {
-						int savedIndentation = this.indentationLevel;
-						this.indentationLevel += currentColumn - location.inputColumn;
-						printIndentationIfNecessary(buffer);
-						this.indentationLevel = savedIndentation;
-					} else {
-						printIndentationIfNecessary(buffer);
+					this.scanner.resetTo(currentTokenStartPosition, this.scannerEndPosition - 1);
+					boolean canUseAlignmentIndentation = (nextToken != TerminalTokens.TokenNameLBRACE || !this.currentAlignment.name.equals("localDeclarationAssignmentAlignment")); //$NON-NLS-1$
+					if (canUseAlignmentIndentation &&
+							(!this.formatBrace ||
+									this.currentAlignment.name.equals("array_initializer") || //$NON-NLS-1$
+									this.currentAlignment.name.equals("binaryExpressionAlignment")) && //$NON-NLS-1$
+							this.indentationLevel < this.currentAlignment.breakIndentationLevel) {
+						this.indentationLevel = this.currentAlignment.breakIndentationLevel;
 					}
+					
+					// Use the current indentation if over the computed indentation
+					if (this.indentationLevel < currentColumn) {
+						this.indentationLevel = currentColumn;
+					}
+					
+					// Debug
+					if (DefaultCodeFormatter.DEBUG) {
+						System.out.println(" - format brace = "+this.formatBrace); //$NON-NLS-1$
+						System.out.println(" - current column = "+currentColumn); //$NON-NLS-1$
+						System.out.println(" - current position = "+this.scanner.currentPosition); //$NON-NLS-1$
+						System.out.print(" - current line = "); //$NON-NLS-1$
+						int linePtr = Arrays.binarySearch(this.lineEnds, this.scanner.currentPosition);
+						if (linePtr < 0) {
+							linePtr = -linePtr - 1;
+						}
+						int i = getLineEnd(linePtr)+1;
+						while (this.scanner.source[i] != '\r') {
+							System.out.print(this.scanner.source[i++]);
+						}
+						System.out.println();
+						System.out.println(" - indentation level = "+this.indentationLevel); //$NON-NLS-1$
+						System.out.println();
+					}
+					
+					// Set the flag to indicate that a specific indentation is currently in used
+					this.preserveLineBreakIndentation = true;
+					
+					// Print the computed indentation in the buffer
+					printIndentationIfNecessary(buffer);
 					return buffer.toString();
 				}
 			}
