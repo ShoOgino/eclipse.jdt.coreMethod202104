@@ -8,10 +8,24 @@ void checkForBridgeMethod(MethodBinding currentMethod, MethodBinding inheritedMe
 		if (!isAcceptableReturnTypeOverride(currentMethod, inheritedMethod))
 			problemReporter(currentMethod).unsafeReturnTypeOverride(currentMethod, originalInherited, this.type);
 
-	if (this.type.addSyntheticBridgeMethod(originalInherited, currentMethod.original()) != null) {
+	MethodBinding bridge = this.type.addSyntheticBridgeMethod(originalInherited, currentMethod.original());
+	if (bridge != null) {
 		for (int i = 0, l = allInheritedMethods == null ? 0 : allInheritedMethods.length; i < l; i++) {
 			if (allInheritedMethods[i] != null && detectInheritedNameClash(originalInherited, allInheritedMethods[i].original()))
 				return;
+		}
+		// See if the new bridge clashes with any of the user methods of the class. For this check
+		// we should check for "method descriptor clash" and not just "method signature clash". Really
+		// what we are checking is whether there is a contention for the method dispatch table slot.
+		// See https://bugs.eclipse.org/bugs/show_bug.cgi?id=293615.
+		MethodBinding[] current = (MethodBinding[]) this.currentMethods.get(bridge.selector);
+		for (int i = current.length - 1; i >= 0; --i) {
+			final MethodBinding thisMethod = current[i];
+			if (thisMethod.areParameterErasuresEqual(bridge) && thisMethod.returnType.erasure() == bridge.returnType.erasure()) {
+				// use inherited method for problem reporting.
+				problemReporter(thisMethod).methodNameClash(thisMethod, inheritedMethod.declaringClass.isRawType() ? inheritedMethod : inheritedMethod.original());
+				return;	
+			}
 		}
 	}
 }
