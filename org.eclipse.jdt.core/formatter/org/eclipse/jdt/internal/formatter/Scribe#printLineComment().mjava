@@ -12,12 +12,64 @@
     	int start = currentTokenStartPosition;
     	int nextCharacterStart = currentTokenStartPosition;
 
-    	if (this.indentationLevel != 0) {
-    		if (!this.formatter.preferences.never_indent_line_comments_on_first_column
-    				|| !isOnFirstColumn(start)) {
-    			printIndentationIfNecessary();
+    	// Print comment line indentation
+    	int commentIndentationLevel;
+    	if (this.indentationLevel == 0) {
+    		commentIndentationLevel = this.column - 1;
+    	} else {
+    		if (this.formatter.preferences.never_indent_line_comments_on_first_column &&
+    			isOnFirstColumn(start)) {
+	   			commentIndentationLevel = this.column - 1;
+    		} else {
+    			// Indentation may be specific for contiguous comment
+    			// see bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=293300
+				if (this.lastLineComment.contiguous) {
+					// The leading spaces have been set while looping in the printComment(int) method
+					int currentCommentIndentation = getCurrentColumn(this.lastLineComment.leadingSpaces);
+					// Keep the current comment indentation when over the previous contiguous line comment
+					// and the previous comment has not been reindented
+					int lastCommentColumn = this.lastLineComment.currentColumn;
+					if (this.tabLength > 0) {
+						if ((currentCommentIndentation % this.tabLength) == 0) {
+							lastCommentColumn = (lastCommentColumn / this.tabLength) * this.tabLength;
+						} else {
+							currentCommentIndentation = ((currentCommentIndentation / this.tabLength) + 1) * this.tabLength;
+						}
+					}
+					if (currentCommentIndentation >= lastCommentColumn && this.lastLineComment.indentation != this.indentationLevel) {
+						int currentIndentationLevel = this.indentationLevel;
+						this.indentationLevel = this.lastLineComment.indentation ;
+						printIndentationIfNecessary();
+						this.indentationLevel = currentIndentationLevel;
+			   			commentIndentationLevel = this.lastLineComment.indentation ;
+					} else {
+						printIndentationIfNecessary();
+			   			commentIndentationLevel = this.column - 1;
+					}
+				} else {
+					if (this.currentAlignment != null && this.currentAlignment.name.equals("array_initializer") && //$NON-NLS-1$
+						this.indentationLevel < this.currentAlignment.breakIndentationLevel &&
+						this.lastLineComment.lines > 0)
+					{
+						int currentIndentationLevel = this.indentationLevel;
+						this.indentationLevel = this.currentAlignment.breakIndentationLevel;
+		    			printIndentationIfNecessary();
+						this.indentationLevel = currentIndentationLevel;
+			   			commentIndentationLevel = this.currentAlignment.breakIndentationLevel;
+					} else {
+		    			printIndentationIfNecessary();
+			   			commentIndentationLevel = this.column - 1;
+					}
+				}
     		}
     	}
+    	
+    	// Store line comment information
+   		this.lastLineComment.contiguous = true;
+		this.lastLineComment.currentColumn = getCurrentCommentColumn(currentTokenStartPosition);
+		this.lastLineComment.indentation = commentIndentationLevel;
+		
+		// Add pending space if necessary
     	if (this.pendingSpace) {
     		addInsertEdit(currentTokenStartPosition, " "); //$NON-NLS-1$
     	}
