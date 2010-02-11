@@ -4,15 +4,29 @@
  	    try {
 			this.scanner.resetTo(nodeStart , node.sourceEnd);
 	    	int length = 0;
-	    	int newLines = 0;
 	    	boolean newLine = false;
 			boolean headerLine = block.isHeaderLine() && this.lastNumberOfNewLines == 0;
 			int firstColumn = 1 + this.indentationLevel + BLOCK_LINE_PREFIX_LENGTH;
 			if (this.commentIndentation != null) firstColumn += this.commentIndentation.length();
 			if (headerLine) maxColumn++;
-	    	if (node.isText()) {
-	    		FormatJavadocText text = (FormatJavadocText)node;
-    			if (text.isImmutableHtmlTag()) {
+			FormatJavadocText text = null;
+			boolean isImmutableNode = node.isImmutable();
+			boolean nodeIsText = node.isText();
+			if (nodeIsText) {
+	    		text = (FormatJavadocText)node;
+			} else {
+				FormatJavadocBlock inlinedBlock = (FormatJavadocBlock)node;
+				if (isImmutableNode) {
+					text = (FormatJavadocText) inlinedBlock.getLastNode();
+		    		length += inlinedBlock.tagEnd - inlinedBlock.sourceStart + 1;  // tag length
+			    	if (nodeStart > (previousEnd+1)) {
+			    		length++; // include space between nodes
+			    	}
+					this.scanner.resetTo(text.sourceStart , node.sourceEnd);
+				}
+			}
+	    	if (text != null) {
+    			if (isImmutableNode) {
 			    	if (nodeStart > (previousEnd+1)) {
 			    		length++; // include space between nodes
 			    	}
@@ -22,8 +36,10 @@
 		    				int token = this.scanner.getNextToken();
 		    				switch (token) {
 		    					case TerminalTokens.TokenNameWHITESPACE:
-		    						if (CharOperation.indexOf('\n', this.scanner.source, this.scanner.startPosition, this.scanner.currentPosition) >= 0) {
-		    							return newLines;
+		    						if (nodeIsText) {
+			    						if (CharOperation.indexOf('\n', this.scanner.source, this.scanner.startPosition, this.scanner.currentPosition) >= 0) {
+			    							return 0;
+			    						}
 		    						}
 		    						length = 1;
 		    						break;
@@ -45,15 +61,10 @@
 	    				}
 	    				lastColumn += length;
 	    				if (lastColumn > maxColumn) {
-							newLines++;
-				    		if (headerLine) {
-								maxColumn--;
-								headerLine = false;
-			    			}
-							lastColumn = firstColumn;
+	    					return 1;
 						}
 	    			}
-	    			return newLines;
+	    			return 0;
     			}
     			if (text.isHtmlTag()) {
     				if (text.getHtmlTagID() == JAVADOC_SINGLE_BREAK_TAG_ID) {
