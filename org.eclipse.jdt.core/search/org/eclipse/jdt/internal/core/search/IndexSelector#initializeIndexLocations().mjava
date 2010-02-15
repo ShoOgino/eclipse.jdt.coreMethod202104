@@ -16,6 +16,22 @@ private void initializeIndexLocations() {
 		}
 	} else {
 		try {
+			// See whether the state builder might be used to reduce the number of index locations
+			boolean isAutoBuilding = ResourcesPlugin.getWorkspace().getDescription().isAutoBuilding();
+			char[][] focusQualifiedName = null;
+			if (isAutoBuilding && focus instanceof IJavaProject) {
+				IJavaElement javaElement = this.pattern.focus;
+				while (javaElement != null && !(javaElement instanceof ICompilationUnit) && !(javaElement instanceof IClassFile)) {
+					javaElement = javaElement.getParent();
+				}
+				if (javaElement != null) {
+					ICompilationUnit compilationUnit = (ICompilationUnit) javaElement;
+					char[][] qualifiedName = CharOperation.splitOn('.', compilationUnit.findPrimaryType().getFullyQualifiedName().toCharArray());
+					char[][][] qualifiedNames = ReferenceCollection.internQualifiedNames(new char[][][] {qualifiedName});
+					focusQualifiedName = qualifiedNames[0];
+				}
+			}
+
 			// find the projects from projectsAndJars that see the focus then walk those projects looking for the jars from projectsAndJars
 			int length = projectsAndJars.length;
 			JavaProject[] projectsCanSeeFocus = new JavaProject[length];
@@ -29,7 +45,7 @@ private void initializeIndexLocations() {
 				JavaProject project = (JavaProject) getJavaProject(path, model);
 				if (project != null) {
 					visitedProjects.add(project);
-					if (canSeeFocus(focuses, project)) {
+					if (canSeeFocus(focuses, project, focusQualifiedName)) {
 						locations.add(manager.computeIndexLocation(path));
 						projectsCanSeeFocus[projectIndex++] = project;
 					}
