@@ -1,4 +1,11 @@
-	public static void parse(ICompilationUnit[] compilationUnits, ASTRequestor astRequestor, int apiLevel, Map options, int flags, IProgressMonitor monitor) {
+	public static void parse(
+			String[] sourceUnits,
+			String[] encodings,
+			FileASTRequestor astRequestor,
+			int apiLevel,
+			Map options,
+			int flags,
+			IProgressMonitor monitor) {
 		try {
 			CompilerOptions compilerOptions = new CompilerOptions(options);
 			compilerOptions.ignoreMethodBodies = (flags & ICompilationUnit.IGNORE_METHOD_BODIES) != 0;
@@ -8,10 +15,23 @@
 						compilerOptions,
 						new DefaultProblemFactory()),
 				false);
-			int unitLength = compilationUnits.length;
+			int unitLength = sourceUnits.length;
 			if (monitor != null) monitor.beginTask("", unitLength); //$NON-NLS-1$
 			for (int i = 0; i < unitLength; i++) {
-				org.eclipse.jdt.internal.compiler.env.ICompilationUnit sourceUnit = (org.eclipse.jdt.internal.compiler.env.ICompilationUnit) compilationUnits[i];
+				char[] contents = null;
+				String encoding = encodings != null ? encodings[i] : null;
+				try {
+					contents = Util.getFileCharContent(new File(sourceUnits[i]), encoding);
+				} catch(IOException e) {
+					// go to the next unit
+					continue;
+				}
+				if (contents == null) {
+					// go to the next unit
+					continue;
+				}
+				org.eclipse.jdt.internal.compiler.batch.CompilationUnit compilationUnit = new org.eclipse.jdt.internal.compiler.batch.CompilationUnit(contents, sourceUnits[i], encoding);
+				org.eclipse.jdt.internal.compiler.env.ICompilationUnit sourceUnit = compilationUnit;
 				CompilationResult compilationResult = new CompilationResult(sourceUnit, 0, 0, compilerOptions.maxProblemsPerUnit);
 				CompilationUnitDeclaration compilationUnitDeclaration = parser.dietParse(sourceUnit, compilationResult);
 
@@ -32,10 +52,10 @@
 
 				// convert AST
 				CompilationUnit node = convert(compilationUnitDeclaration, parser.scanner.getSource(), apiLevel, options, false/*don't resolve binding*/, null/*no owner needed*/, null/*no binding table needed*/, flags /* flags */, monitor, true);
-				node.setTypeRoot(compilationUnits[i]);
+				node.setTypeRoot(null);
 
 				// accept AST
-				astRequestor.acceptAST(compilationUnits[i], node);
+				astRequestor.acceptAST(sourceUnits[i], node);
 
 				if (monitor != null) monitor.worked(1);
 			}

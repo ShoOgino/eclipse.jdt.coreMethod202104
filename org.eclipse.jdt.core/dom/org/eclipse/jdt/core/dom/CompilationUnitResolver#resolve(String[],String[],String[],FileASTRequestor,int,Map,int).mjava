@@ -1,10 +1,10 @@
 	private void resolve(
-			ICompilationUnit[] compilationUnits,
+			String[] sourceCompilationUnits,
+			String[] encodings,
 			String[] bindingKeys,
-			ASTRequestor astRequestor,
+			FileASTRequestor astRequestor,
 			int apiLevel,
 			Map compilerOptions,
-			WorkingCopyOwner owner,
 			int flags) {
 
 		// temporarily connect ourselves to the ASTResolver - must disconnect when done
@@ -12,9 +12,25 @@
 		this.bindingTables = new DefaultBindingResolver.BindingTables();
 		CompilationUnitDeclaration unit = null;
 		try {
-			int length = compilationUnits.length;
+			int length = sourceCompilationUnits.length;
 			org.eclipse.jdt.internal.compiler.env.ICompilationUnit[] sourceUnits = new org.eclipse.jdt.internal.compiler.env.ICompilationUnit[length];
-			System.arraycopy(compilationUnits, 0, sourceUnits, 0, length);
+			int count = 0;
+			for (int i = 0; i < length; i++) {
+				char[] contents = null;
+				String encoding = encodings != null ? encodings[i] : null;
+				String sourceUnitPath = sourceCompilationUnits[i];
+				try {
+					contents = Util.getFileCharContent(new File(sourceUnitPath), encoding);
+				} catch(IOException e) {
+					// go to the next unit
+					continue;
+				}
+				if (contents == null) {
+					// go to the next unit
+					continue;
+				}
+				sourceUnits[count++] = new org.eclipse.jdt.internal.compiler.batch.CompilationUnit(contents, sourceUnitPath, encoding);
+			}
 			beginToCompile(sourceUnits, bindingKeys);
 			// process all units (some more could be injected in the loop by the lookup environment)
 			for (int i = 0; i < this.totalUnits; i++) {
@@ -34,7 +50,7 @@
 
 					// requested AST
 					char[] fileName = unit.compilationResult.getFileName();
-					ICompilationUnit source = (ICompilationUnit) this.requestedSources.get(fileName);
+					org.eclipse.jdt.internal.compiler.env.ICompilationUnit source = (org.eclipse.jdt.internal.compiler.env.ICompilationUnit) this.requestedSources.get(fileName);
 					if (source != null) {
 						// convert AST
 						CompilationResult compilationResult = unit.compilationResult;
@@ -44,17 +60,17 @@
 						ast.setFlag(flags | AST.RESOLVED_BINDINGS);
 						ast.setDefaultNodeFlag(ASTNode.ORIGINAL);
 						ASTConverter converter = new ASTConverter(compilerOptions, true/*need to resolve bindings*/, this.monitor);
-						BindingResolver resolver = new DefaultBindingResolver(unit.scope, owner, this.bindingTables, (flags & ICompilationUnit.ENABLE_BINDINGS_RECOVERY) != 0, this.fromJavaProject);
+						BindingResolver resolver = new DefaultBindingResolver(unit.scope, null, this.bindingTables, (flags & ICompilationUnit.ENABLE_BINDINGS_RECOVERY) != 0, this.fromJavaProject);
 						ast.setBindingResolver(resolver);
 						converter.setAST(ast);
 						CompilationUnit compilationUnit = converter.convert(unit, contents);
-						compilationUnit.setTypeRoot(source);
+						compilationUnit.setTypeRoot(null);
 						compilationUnit.setLineEndTable(compilationResult.getLineSeparatorPositions());
 						ast.setDefaultNodeFlag(0);
 						ast.setOriginalModificationCount(ast.modificationCount());
 
 						// pass it to requestor
-						astRequestor.acceptAST(source, compilationUnit);
+						astRequestor.acceptAST(new String(source.getFileName()), compilationUnit);
 
 						worked(1);
 
@@ -66,12 +82,12 @@
 					Object key = this.requestedKeys.get(fileName);
 					if (key != null) {
 						if (key instanceof BindingKeyResolver) {
-							reportBinding(key, astRequestor, owner, unit);
+							reportBinding(key, astRequestor, unit);
 							worked(1);
 						} else if (key instanceof ArrayList) {
 							Iterator iterator = ((ArrayList) key).iterator();
 							while (iterator.hasNext()) {
-								reportBinding(iterator.next(), astRequestor, owner, unit);
+								reportBinding(iterator.next(), astRequestor, unit);
 								worked(1);
 							}
 						}
@@ -88,7 +104,7 @@
 			}
 
 			// remaining binding keys
-			DefaultBindingResolver resolver = new DefaultBindingResolver(this.lookupEnvironment, owner, this.bindingTables, (flags & ICompilationUnit.ENABLE_BINDINGS_RECOVERY) != 0, true);
+			DefaultBindingResolver resolver = new DefaultBindingResolver(this.lookupEnvironment, null, this.bindingTables, (flags & ICompilationUnit.ENABLE_BINDINGS_RECOVERY) != 0, true);
 			Object[] keys = this.requestedKeys.valueTable;
 			for (int j = 0, keysLength = keys.length; j < keysLength; j++) {
 				BindingKeyResolver keyResolver = (BindingKeyResolver) keys[j];

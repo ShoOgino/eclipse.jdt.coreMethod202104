@@ -1,5 +1,5 @@
 	private ASTNode internalCreateAST(IProgressMonitor monitor) {
-		boolean needToResolveBindings = this.resolveBindings;
+		boolean needToResolveBindings = (this.bits & CompilationUnitResolver.RESOLVE_BINDING) != 0;
 		switch(this.astKind) {
 			case K_CLASS_BODY_DECLARATIONS :
 			case K_EXPRESSION :
@@ -91,25 +91,39 @@
 							throw new IllegalStateException(String.valueOf(stringWriter.getBuffer()));
 						}
 					} else if (this.rawSource != null) {
-						needToResolveBindings = this.resolveBindings && this.unitName != null && this.project != null && this.compilerOptions != null;
+						needToResolveBindings = 
+							((this.bits & CompilationUnitResolver.RESOLVE_BINDING) != 0)
+							&& this.unitName != null
+							&& (this.project != null
+									|| this.classpaths != null
+									|| this.sourcepaths != null
+									|| ((this.bits & CompilationUnitResolver.INCLUDE_RUNNING_VM_BOOTCLASSPATH) != 0))
+							&& this.compilerOptions != null;
 						sourceUnit = new BasicCompilationUnit(this.rawSource, null, this.unitName == null ? "" : this.unitName, this.project); //$NON-NLS-1$
 					} else {
 						throw new IllegalStateException();
 					}
-					if (this.partial) {
+					if ((this.bits & CompilationUnitResolver.PARTIAL) != 0) {
 						searcher = new NodeSearcher(this.focalPointPosition);
 					}
 					int flags = 0;
-					if (this.statementsRecovery) flags |= ICompilationUnit.ENABLE_STATEMENTS_RECOVERY;
-					if (searcher == null && this.ignoreMethodBodies) flags |= ICompilationUnit.IGNORE_METHOD_BODIES;
+					if ((this.bits & CompilationUnitResolver.STATEMENT_RECOVERY) != 0) {
+						flags |= ICompilationUnit.ENABLE_STATEMENTS_RECOVERY;
+					}
+					if (searcher == null && ((this.bits & CompilationUnitResolver.IGNORE_METHOD_BODIES) != 0)) {
+						flags |= ICompilationUnit.IGNORE_METHOD_BODIES;
+					}
 					if (needToResolveBindings) {
-						if (this.bindingsRecovery) flags |= ICompilationUnit.ENABLE_BINDINGS_RECOVERY;
+						if ((this.bits & CompilationUnitResolver.BINDING_RECOVERY) != 0) {
+							flags |= ICompilationUnit.ENABLE_BINDINGS_RECOVERY;
+						}
 						try {
 							// parse and resolve
 							compilationUnitDeclaration =
 								CompilationUnitResolver.resolve(
 									sourceUnit,
 									this.project,
+									getClasspath(),
 									searcher,
 									this.compilerOptions,
 									this.workingCopyOwner,
@@ -141,11 +155,13 @@
 						wcOwner,
 						needToResolveBindings ? new DefaultBindingResolver.BindingTables() : null,
 						flags,
-						monitor);
+						monitor,
+						this.project != null);
 					result.setTypeRoot(this.typeRoot);
 					return result;
 				} finally {
-					if (compilationUnitDeclaration != null && this.resolveBindings) {
+					if (compilationUnitDeclaration != null
+							&& ((this.bits & CompilationUnitResolver.RESOLVE_BINDING) != 0)) {
 						compilationUnitDeclaration.cleanUp();
 					}
 				}
