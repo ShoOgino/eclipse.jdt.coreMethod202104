@@ -12,7 +12,9 @@
 			boolean hasLineComment = false;
 			boolean hasWhitespaces = false;
 			int lines = 0;
+			int previousFoundTaskCount = this.scanner.foundTaskCount;
 			while ((this.currentToken = this.scanner.getNextToken()) != TerminalTokens.TokenNameEOF) {
+				int foundTaskCount = this.scanner.foundTaskCount;
 				switch(this.currentToken) {
 					case TerminalTokens.TokenNameWHITESPACE :
 						char[] whiteSpaces = this.scanner.getCurrentTokenSource();
@@ -138,6 +140,16 @@
 						currentTokenStartPosition = this.scanner.currentPosition;
 						break;
 					case TerminalTokens.TokenNameCOMMENT_LINE :
+						if (this.editsEnabled && foundTaskCount > previousFoundTaskCount) {
+							setEditsEnabled(foundTaskCount, previousFoundTaskCount);
+							if (!this.editsEnabled && this.editsIndex > 1) {
+								OptimizedReplaceEdit currentEdit = this.edits[this.editsIndex-1];
+								if (this.scanner.startPosition == currentEdit.offset+currentEdit.length) {
+									printNewLinesBeforeDisablingComment();
+								}
+							}
+							previousFoundTaskCount = foundTaskCount;
+						}
 						if (rejectLineComment) break;
 						if (lines >= 1) {
 							if (lines > 1) {
@@ -153,8 +165,21 @@
 						currentTokenStartPosition = this.scanner.currentPosition;
 						hasLineComment = true;
 						lines = 0;
+						if (!this.editsEnabled && foundTaskCount > previousFoundTaskCount) {
+							setEditsEnabled(foundTaskCount, previousFoundTaskCount);
+						}
 						break;
 					case TerminalTokens.TokenNameCOMMENT_BLOCK :
+						if (this.editsEnabled && foundTaskCount > previousFoundTaskCount) {
+							setEditsEnabled(foundTaskCount, previousFoundTaskCount);
+							if (!this.editsEnabled && this.editsIndex > 1) {
+								OptimizedReplaceEdit currentEdit = this.edits[this.editsIndex-1];
+								if (this.scanner.startPosition == currentEdit.offset+currentEdit.length) {
+									printNewLinesBeforeDisablingComment();
+								}
+							}
+							previousFoundTaskCount = foundTaskCount;
+						}
 						if (trailing > NO_TRAILING_COMMENT && lines >= 1) {
 							// a block comment on next line means that there's no trailing comment
 							this.scanner.resetTo(this.scanner.getCurrentTokenStartPosition(), this.scannerEndPosition - 1);
@@ -177,8 +202,15 @@
 						hasLineComment = false;
 						hasComment = true;
 						lines = 0;
+						if (!this.editsEnabled && foundTaskCount > previousFoundTaskCount) {
+							setEditsEnabled(foundTaskCount, previousFoundTaskCount);
+						}
 						break;
 					case TerminalTokens.TokenNameCOMMENT_JAVADOC :
+						if (this.editsEnabled && foundTaskCount > previousFoundTaskCount) {
+							setEditsEnabled(foundTaskCount, previousFoundTaskCount);
+							previousFoundTaskCount = foundTaskCount;
+						}
 						if (trailing > NO_TRAILING_COMMENT) {
 							// a javadoc comment should not be considered as a trailing comment
 							this.scanner.resetTo(this.scanner.getCurrentTokenStartPosition(), this.scannerEndPosition - 1);
@@ -201,6 +233,9 @@
 						} else {
 							printBlockComment(true);
 						}
+						if (!this.editsEnabled && foundTaskCount > previousFoundTaskCount) {
+							setEditsEnabled(foundTaskCount, previousFoundTaskCount);
+						}
 						printNewLine();
 						currentTokenStartPosition = this.scanner.currentPosition;
 						hasLineComment = false;
@@ -213,6 +248,7 @@
 						this.scanner.resetTo(currentTokenStartPosition, this.scannerEndPosition - 1);
 						return;
 				}
+				previousFoundTaskCount = foundTaskCount;
 			}
 		} catch (InvalidInputException e) {
 			throw new AbortFormatting(e);
