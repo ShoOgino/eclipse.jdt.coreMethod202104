@@ -1,0 +1,139 @@
+	public ResolvedClasspath resolveClasspath(IClasspathEntry[] rawClasspath, IClasspathEntry[] referencedEntries, boolean usePreviousSession, boolean resolveChainedLibraries) throws JavaModelException {
+		JavaModelManager manager = JavaModelManager.getJavaModelManager();
+		ExternalFoldersManager externalFoldersManager = JavaModelManager.getExternalManager();
+		ResolvedClasspath result = new ResolvedClasspath();
+
+		Map referencedEntriesMap = new HashMap();
+		List rawLibrariesPath = new ArrayList();
+		LinkedHashSet resolvedEntries = new LinkedHashSet();
+		
+		if(resolveChainedLibraries) {
+			for (int index = 0; index < rawClasspath.length; index++) {
+				IClasspathEntry currentEntry = rawClasspath[index]; 
+				if (currentEntry.getEntryKind() == IClasspathEntry.CPE_LIBRARY) {
+					rawLibrariesPath.add(ClasspathEntry.resolveDotDot(currentEntry.getPath()));
+				}
+			}
+			if (referencedEntries != null) {
+				// The Set is required to keep the order intact while the referencedEntriesMap (Map)
+				// is used to map the referenced entries with path
+				LinkedHashSet referencedEntriesSet = new LinkedHashSet();
+				for (int index = 0; index < referencedEntries.length; index++) {
+					IPath path = referencedEntries[index].getPath();
+					if (!rawLibrariesPath.contains(path) && referencedEntriesMap.get(path) == null) {
+						referencedEntriesMap.put(path, referencedEntries[index]);
+						referencedEntriesSet.add(referencedEntries[index]);
+					}
+				}
+				result.referencedEntries = new IClasspathEntry[referencedEntriesSet.size()];
+				referencedEntriesSet.toArray(result.referencedEntries);
+			}
+		}
+		
+		int length = rawClasspath.length;
+		for (int i = 0; i < length; i++) {
+
+			IClasspathEntry rawEntry = rawClasspath[i];
+			IClasspathEntry resolvedEntry = rawEntry;
+
+			switch (rawEntry.getEntryKind()){
+
+				case IClasspathEntry.CPE_VARIABLE :
+					try {
+						resolvedEntry = manager.resolveVariableEntry(rawEntry, usePreviousSession);
+					} catch (ClasspathEntry.AssertionFailedException e) {
+						// Catch the assertion failure and set status instead
+						// see bug https://bugs.eclipse.org/bugs/show_bug.cgi?id=55992
+						result.unresolvedEntryStatus = new JavaModelStatus(IJavaModelStatusConstants.INVALID_PATH, e.getMessage());
+						break;
+					}
+					if (resolvedEntry == null) {
+						result.unresolvedEntryStatus = new JavaModelStatus(IJavaModelStatusConstants.CP_VARIABLE_PATH_UNBOUND, this, rawEntry.getPath());
+					} else {
+						// If the entry is already present in the rawReversetMap, it means the entry and the chained libraries
+						// have already been processed. So, skip it.
+						if (resolveChainedLibraries && resolvedEntry.getEntryKind() == IClasspathEntry.CPE_LIBRARY
+													&& result.rawReverseMap.get(resolvedEntry.getPath()) == null) {
+							// resolve Class-Path: in manifest
+							ClasspathEntry[] extraEntries = ((ClasspathEntry) resolvedEntry).resolvedChainedLibraries();
+							for (int j = 0, length2 = extraEntries.length; j < length2; j++) {
+								if (!rawLibrariesPath.contains(extraEntries[j].getPath())) {
+									addToResult(rawEntry, extraEntries[j], result, resolvedEntries, externalFoldersManager, referencedEntriesMap, true);
+								}
+							}
+						}
+						addToResult(rawEntry, resolvedEntry, result, resolvedEntries, externalFoldersManager, referencedEntriesMap, false);
+					}
+					break;
+
+				case IClasspathEntry.CPE_CONTAINER :
+					IClasspathContainer container = usePreviousSession ? manager.getPreviousSessionContainer(rawEntry.getPath(), this) : JavaCore.getClasspathContainer(rawEntry.getPath(), this);
+					if (container == null){
+						result.unresolvedEntryStatus = new JavaModelStatus(IJavaModelStatusConstants.CP_CONTAINER_PATH_UNBOUND, this, rawEntry.getPath());
+						break;
+					}
+
+					IClasspathEntry[] containerEntries = container.getClasspathEntries();
+					if (containerEntries == null) {
+						if (JavaModelManager.CP_RESOLVE_VERBOSE || JavaModelManager.CP_RESOLVE_VERBOSE_FAILURE) {
+							JavaModelManager.getJavaModelManager().verbose_missbehaving_container_null_entries(this, rawEntry.getPath());
+						}
+						break;
+					}
+
+					// container was bound
+					for (int j = 0, containerLength = containerEntries.length; j < containerLength; j++){
+						ClasspathEntry cEntry = (ClasspathEntry) containerEntries[j];
+						if (cEntry == null) {
+							if (JavaModelManager.CP_RESOLVE_VERBOSE || JavaModelManager.CP_RESOLVE_VERBOSE_FAILURE) {
+								JavaModelManager.getJavaModelManager().verbose_missbehaving_container(this, rawEntry.getPath(), containerEntries);
+							}
+							break;
+						}
+						// if container is exported or restricted, then its nested entries must in turn be exported  (21749) and/or propagate restrictions
+						cEntry = cEntry.combineWith((ClasspathEntry) rawEntry);
+						
+						if (cEntry.getEntryKind() == IClasspathEntry.CPE_LIBRARY) {
+							// resolve ".." in library path
+							cEntry = cEntry.resolvedDotDot();
+							
+							if (resolveChainedLibraries && result.rawReverseMap.get(cEntry.getPath()) == null) {
+								// resolve Class-Path: in manifest
+								ClasspathEntry[] extraEntries = cEntry.resolvedChainedLibraries();
+								for (int k = 0, length2 = extraEntries.length; k < length2; k++) {
+									if (!rawLibrariesPath.contains(extraEntries[k].getPath())) {
+										addToResult(rawEntry, extraEntries[k], result, resolvedEntries, externalFoldersManager, referencedEntriesMap, true);
+									}
+								}
+							}
+						}
+						addToResult(rawEntry, cEntry, result, resolvedEntries, externalFoldersManager, referencedEntriesMap, false);
+					}
+					break;
+
+				case IClasspathEntry.CPE_LIBRARY:
+					// resolve ".." in library path
+					resolvedEntry = ((ClasspathEntry) rawEntry).resolvedDotDot();
+					
+					if (resolveChainedLibraries && result.rawReverseMap.get(resolvedEntry.getPath()) == null) {
+						// resolve Class-Path: in manifest
+						ClasspathEntry[] extraEntries = ((ClasspathEntry) resolvedEntry).resolvedChainedLibraries();
+						for (int k = 0, length2 = extraEntries.length; k < length2; k++) {
+							if (!rawLibrariesPath.contains(extraEntries[k].getPath())) {
+								addToResult(rawEntry, extraEntries[k], result, resolvedEntries, externalFoldersManager, referencedEntriesMap, true);
+							}
+						}
+					}
+
+					addToResult(rawEntry, resolvedEntry, result, resolvedEntries, externalFoldersManager, referencedEntriesMap, false);
+					break;
+				default :
+					addToResult(rawEntry, resolvedEntry, result, resolvedEntries, externalFoldersManager, referencedEntriesMap, false);
+					break;
+			}
+		}
+		result.resolvedClasspath = new IClasspathEntry[resolvedEntries.size()];
+		resolvedEntries.toArray(result.resolvedClasspath);
+		return result;
+	}
+

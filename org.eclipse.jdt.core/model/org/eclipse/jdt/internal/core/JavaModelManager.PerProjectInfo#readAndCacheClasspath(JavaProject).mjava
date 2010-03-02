@@ -1,18 +1,24 @@
-		public synchronized IClasspathEntry[] readAndCacheClasspath(JavaProject javaProject) {
+		/**
+		 * Reads the classpath and caches the entries. Returns a two-dimensional array, where the number of elements in the row is fixed to 2.
+		 * The first element is an array of raw classpath entries and the second element is an array of referenced entries that may have been stored
+		 * by the client earlier. See {@link IJavaProject#getReferencedClasspathEntries()} for more details. 
+		 * 
+		 */		
+		public synchronized IClasspathEntry[][] readAndCacheClasspath(JavaProject javaProject) {
 			// read file entries and update status
-			IClasspathEntry[] classpath;
+			IClasspathEntry[][] classpath;
 			IJavaModelStatus status;
 			try {
 				classpath = javaProject.readFileEntriesWithException(null/*not interested in unknown elements*/);
 				status = JavaModelStatus.VERIFIED_OK;
 			} catch (CoreException e) {
-				classpath = JavaProject.INVALID_CLASSPATH;
+				classpath = new IClasspathEntry[][]{JavaProject.INVALID_CLASSPATH, ClasspathEntry.NO_ENTRIES};
 				status =
 					new JavaModelStatus(
 						IJavaModelStatusConstants.INVALID_CLASSPATH_FILE_FORMAT,
 						Messages.bind(Messages.classpath_cannotReadClasspathFile, javaProject.getElementName()));
 			} catch (IOException e) {
-				classpath = JavaProject.INVALID_CLASSPATH;
+				classpath = new IClasspathEntry[][]{JavaProject.INVALID_CLASSPATH, ClasspathEntry.NO_ENTRIES};
 				if (Messages.file_badFormat.equals(e.getMessage()))
 					status =
 						new JavaModelStatus(
@@ -24,7 +30,7 @@
 							IJavaModelStatusConstants.INVALID_CLASSPATH_FILE_FORMAT,
 							Messages.bind(Messages.classpath_cannotReadClasspathFile, javaProject.getElementName()));
 			} catch (ClasspathEntry.AssertionFailedException e) {
-				classpath = JavaProject.INVALID_CLASSPATH;
+				classpath = new IClasspathEntry[][]{JavaProject.INVALID_CLASSPATH, ClasspathEntry.NO_ENTRIES};
 				status =
 					new JavaModelStatus(
 						IJavaModelStatusConstants.INVALID_CLASSPATH_FILE_FORMAT,
@@ -32,19 +38,20 @@
 			}
 
 			// extract out the output location
+			int rawClasspathLength = classpath[0].length;
 			IPath output = null;
-			if (classpath.length > 0) {
-				IClasspathEntry entry = classpath[classpath.length - 1];
+			if (rawClasspathLength > 0) {
+				IClasspathEntry entry = classpath[0][rawClasspathLength - 1];
 				if (entry.getContentKind() == ClasspathEntry.K_OUTPUT) {
 					output = entry.getPath();
-					IClasspathEntry[] copy = new IClasspathEntry[classpath.length - 1];
-					System.arraycopy(classpath, 0, copy, 0, copy.length);
-					classpath = copy;
+					IClasspathEntry[] copy = new IClasspathEntry[rawClasspathLength - 1];
+					System.arraycopy(classpath[0], 0, copy, 0, copy.length);
+					classpath[0] = copy;
 				}
 			}
 
 			// store new raw classpath, new output and new status, and null out resolved info
-			setRawClasspath(classpath, output, status);
+			setRawClasspath(classpath[0], classpath[1], output, status);
 
 			return classpath;
 		}
