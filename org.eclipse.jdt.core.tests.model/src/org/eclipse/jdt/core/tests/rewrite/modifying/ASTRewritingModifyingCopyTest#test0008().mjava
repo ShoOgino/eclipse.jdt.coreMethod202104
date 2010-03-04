@@ -1,0 +1,122 @@
+	// https://bugs.eclipse.org/bugs/show_bug.cgi?id=304656
+	public void test0008() throws Exception {
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test0008", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test0008;\n" + 
+				"\n" + 
+				"public class TestClass {\n" + 
+				"    Thread t = new Thread(new Runnable(){\n" + 
+				"\n" + 
+				"        @Override\n" + 
+				"        public void run() {\n" + 
+				"            try {\n" + 
+				"                Thread.currentThread().sleep(1000);\n" + 
+				"            } catch (InterruptedException e) {\n" + 
+				"                e.printStackTrace();\n" + 
+				"            }\n" + 
+				"        }\n" + 
+				"        \n" + 
+				"    });\n" + 
+				"\n" + 
+				"    public void testMethod(){\n" + 
+				"        t.start();\n" + 
+				"    }\n" + 
+				"\n" + 
+				"    public static Thread staticTestMethod(Thread thread){\n" + 
+				"        return thread;\n" + 
+				"    }\n" + 
+				"}");
+		ICompilationUnit cu = pack1.createCompilationUnit("Test.java", buf.toString(), false, null);
+
+		ASTParser astParser = ASTParser.newParser(AST.JLS3);
+		astParser.setSource(cu);
+		ASTNode root = astParser.createAST(new NullProgressMonitor());
+		AST ast = root.getAST();
+
+		CompilationUnit compilationUnit = (CompilationUnit) root;
+		compilationUnit.recordModifications();
+		List types = compilationUnit.types();
+		for (int i = 0, max = types.size(); i < max; i++) {
+			TypeDeclaration td = (TypeDeclaration) types.get(i);
+			MethodDeclaration[] methods = td.getMethods();
+			for (int j = 0, max2 = methods.length; j < max2; j++) {
+				MethodDeclaration md = methods[j];
+				if (md.getName().getFullyQualifiedName().equals("testMethod")) {
+					List statements = md.getBody().statements();
+					ExpressionStatement es = (ExpressionStatement) statements.get(0);
+					MethodInvocation mi = (MethodInvocation) es.getExpression();
+					Expression existingExpression = mi.getExpression();
+					MethodInvocation threadNameInvocation = ast.newMethodInvocation();
+					threadNameInvocation.setExpression(null);
+					threadNameInvocation.setName(ast.newSimpleName("staticTestMethod"));
+					existingExpression.delete();
+					threadNameInvocation.arguments().add(existingExpression);
+					mi.setExpression(threadNameInvocation);
+
+
+					Block code = md.getBody();
+					TryStatement tryStatement = ast.newTryStatement();
+					List catches = tryStatement.catchClauses();
+					// create catch clause
+					CatchClause catchClause = ast.newCatchClause();
+					// exception to catch
+					SingleVariableDeclaration svd = ast.newSingleVariableDeclaration();
+					svd.setType(ast.newSimpleType(ast.newName("Throwable")));
+					svd.setName(ast.newSimpleName("e"));
+					catchClause.setException(svd);
+					// code to run on catch
+					Block catchBody = ast.newBlock();
+					List catchStatements = catchBody.statements();
+					// throw statement
+					ThrowStatement throwStatement = ast.newThrowStatement();
+					Expression throwExpression = ast.newName("e");
+					throwStatement.setExpression(throwExpression);
+					catchStatements.add(throwStatement);
+					catches.add(catchClause);
+					// create finally statement
+					Block finallyBlock = ast.newBlock();
+					statements = code.statements();
+					tryStatement.setFinally(finallyBlock);
+					code.delete();
+					tryStatement.setBody(code);
+					Block tryBlock = ast.newBlock();
+					tryBlock.statements().add(tryStatement);
+					md.setBody(tryBlock);
+				}
+			}
+
+		}
+		String preview = evaluateRewrite(cu, compilationUnit);
+
+		buf= new StringBuffer();
+		buf.append("package test0008;\n");
+		buf.append("\n");
+		buf.append("public class TestClass {\n");
+		buf.append("    Thread t = new Thread(new Runnable(){\n");
+		buf.append("\n");
+		buf.append("        @Override\n");
+		buf.append("        public void run() {\n");
+		buf.append("            try {\n");
+		buf.append("                Thread.currentThread().sleep(1000);\n");
+		buf.append("            } catch (InterruptedException e) {\n");
+		buf.append("                e.printStackTrace();\n");
+		buf.append("            }\n");
+		buf.append("        }\n");
+		buf.append("        \n");
+		buf.append("    });\n");
+		buf.append("\n");
+		buf.append("    public void testMethod(){\n");
+		buf.append("        try {\n");
+		buf.append("            staticTestMethod(t).start();\n");
+		buf.append("        } catch (Throwable e) {\n");
+		buf.append("        } finally {\n");
+		buf.append("        }\n");
+		buf.append("    }\n");
+		buf.append("\n");
+		buf.append("    public static Thread staticTestMethod(Thread thread){\n");
+		buf.append("        return thread;\n");
+		buf.append("    }\n");
+		buf.append("}");
+		assertEqualString(Util.convertToIndependantLineDelimiter(preview), Util.convertToIndependantLineDelimiter(buf.toString()));
+	}
+
