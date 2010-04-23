@@ -3,10 +3,25 @@
 		// look for outermost breakable one
 		int relativeDepth = 0, outerMostDepth = -1;
 		Alignment targetAlignment = this.currentAlignment;
+		int previousKind = -1;
+		boolean insideMessageArguments = false;
+		boolean insideMessageSend = false;
 		while (targetAlignment != null){
-			if (targetAlignment.tieBreakRule == Alignment.R_OUTERMOST && targetAlignment.couldBreak()){
+			boolean couldBreak = targetAlignment.tieBreakRule == Alignment.R_OUTERMOST ||
+				((insideMessageArguments || insideMessageSend) && targetAlignment.kind == Alignment.MESSAGE_ARGUMENTS
+						&& (!targetAlignment.wasReset() || previousKind != Alignment.MESSAGE_SEND));
+			if (couldBreak && targetAlignment.couldBreak()){
 				outerMostDepth = relativeDepth;
 			}
+			switch (targetAlignment.kind) {
+				case Alignment.MESSAGE_ARGUMENTS:
+					insideMessageArguments = true;
+					break;
+				case Alignment.MESSAGE_SEND:
+					insideMessageSend = true;
+					break;
+			}
+			previousKind = targetAlignment.kind;
 			targetAlignment = targetAlignment.enclosing;
 			relativeDepth++;
 		}
@@ -16,13 +31,40 @@
 		// look for innermost breakable one
 		relativeDepth = 0;
 		targetAlignment = this.currentAlignment;
-		while (targetAlignment != null){
-			if (targetAlignment.couldBreak()){
-				throw new AlignmentException(AlignmentException.LINE_TOO_LONG, relativeDepth);
+		AlignmentException alignmentException = null;
+		int msgArgsDepth = -1;
+		while (targetAlignment != null) {
+			if (targetAlignment.kind == Alignment.MESSAGE_ARGUMENTS) {
+				msgArgsDepth = relativeDepth;
+			}
+			if (alignmentException == null) {
+				if (targetAlignment.couldBreak()) {
+					// do not throw the exception immediately to have a chance to reset
+					// previously broken alignments (see bug 203588)
+					alignmentException = new AlignmentException(AlignmentException.LINE_TOO_LONG, relativeDepth);
+				}
+			} else if (targetAlignment.wasSplit) {
+				// reset the nearest already broken outermost alignment.
+				// Note that it's not done twice to avoid infinite loop while raising
+				// the exception on an innermost alignment...
+				if (!targetAlignment.wasReset()) {
+					targetAlignment.reset();
+					if (msgArgsDepth > alignmentException.relativeDepth) {
+						alignmentException.relativeDepth = msgArgsDepth;
+					}
+					throw alignmentException;
+				}
 			}
 			targetAlignment = targetAlignment.enclosing;
 			relativeDepth++;
 		}
+		if (alignmentException != null) {
+			throw alignmentException;
+		}
 		// did not find any breakable location - proceed
+		if (this.currentAlignment != null) {
+			this.currentAlignment.blockAlign = false;
+			this.currentAlignment.tooLong = true;
+		}
 	}
 
