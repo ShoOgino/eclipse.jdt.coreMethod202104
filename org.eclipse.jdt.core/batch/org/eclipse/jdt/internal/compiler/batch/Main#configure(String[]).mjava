@@ -45,7 +45,6 @@ public void configure(String[] argv) {
 	String usageSection = null;
 	boolean printVersionRequired = false;
 
-	boolean didSpecifyDefaultEncoding = false;
 	boolean didSpecifyDeprecation = false;
 	boolean didSpecifyCompliance = false;
 	boolean didSpecifyDisabledAnnotationProcessing = false;
@@ -54,6 +53,8 @@ public void configure(String[] argv) {
 	String customDestinationPath = null;
 	String currentSourceDirectory = null;
 	String currentArg = Util.EMPTY_STRING;
+	
+	Set specifiedEncodings = null;
 
 	// expand the command line if necessary
 	boolean needExpansion = false;
@@ -765,9 +766,23 @@ public void configure(String[] argv) {
 				mode = DEFAULT;
 				continue;
 			case INSIDE_DEFAULT_ENCODING :
-				if (didSpecifyDefaultEncoding) {
-					throw new IllegalArgumentException(
-						this.bind("configure.duplicateDefaultEncoding", currentArg)); //$NON-NLS-1$
+				if (specifiedEncodings != null) {
+					// check already defined encoding
+					if (!specifiedEncodings.contains(currentArg)) {
+						if (specifiedEncodings.size() > 1) {
+							this.logger.logWarning(
+									this.bind("configure.differentencodings", //$NON-NLS-1$
+									currentArg,
+									getAllEncodings(specifiedEncodings)));
+						} else {
+							this.logger.logWarning(
+									this.bind("configure.differentencoding", //$NON-NLS-1$
+									currentArg,
+									getAllEncodings(specifiedEncodings)));
+						}
+					}
+				} else {
+					specifiedEncodings = new HashSet();
 				}
 				try { // ensure encoding is supported
 					new InputStreamReader(new ByteArrayInputStream(new byte[0]), currentArg);
@@ -775,8 +790,8 @@ public void configure(String[] argv) {
 					throw new IllegalArgumentException(
 						this.bind("configure.unsupportedEncoding", currentArg)); //$NON-NLS-1$
 				}
+				specifiedEncodings.add(currentArg);
 				this.options.put(CompilerOptions.OPTION_Encoding, currentArg);
-				didSpecifyDefaultEncoding = true;
 				mode = DEFAULT;
 				continue;
 			case INSIDE_DESTINATION_PATH :
@@ -1033,6 +1048,11 @@ public void configure(String[] argv) {
 			endorsedDirClasspaths,
 			customEncoding);
 
+	if (specifiedEncodings != null && specifiedEncodings.size() > 1) {
+		this.logger.logWarning(this.bind("configure.multipleencodings", //$NON-NLS-1$
+				(String) this.options.get(CompilerOptions.OPTION_Encoding),
+				getAllEncodings(specifiedEncodings)));
+	}
 	if (this.pendingErrors != null) {
 		for (Iterator iterator = this.pendingErrors.iterator(); iterator.hasNext(); ) {
 			String message = (String) iterator.next();
