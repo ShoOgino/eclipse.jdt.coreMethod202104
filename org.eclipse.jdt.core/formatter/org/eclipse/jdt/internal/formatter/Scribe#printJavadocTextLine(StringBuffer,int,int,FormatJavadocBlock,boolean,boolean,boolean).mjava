@@ -6,7 +6,7 @@
 		boolean headerLine = block.isHeaderLine() && this.lastNumberOfNewLines == 0;
 
 		// First we need to know what is the indentation
-		StringBuffer tokensBuffer = new StringBuffer();
+		this.javadocTokensBuffer.setLength(0);
 		int firstColumn = 1 + this.indentationLevel + BLOCK_LINE_PREFIX_LENGTH;
 		int maxColumn = this.formatter.preferences.comment_line_length + 1;
 		if (headerLine) {
@@ -38,11 +38,11 @@
 				} catch (InvalidInputException iie) {
 					token = consumeInvalidToken(textEnd);
 				}
-	    		int tokensBufferLength = tokensBuffer.length();
+	    		int tokensBufferLength = this.javadocTokensBuffer.length();
     			int tokenStart = this.scanner.getCurrentTokenStartPosition();
 	    		int tokenLength = (this.scanner.atEnd() ? this.scanner.eofPosition : this.scanner.currentPosition) - tokenStart;
 				boolean insertSpace = (previousToken == TerminalTokens.TokenNameWHITESPACE || this.needSpace) && !textOnNewLine;
-				String tokensBufferString = tokensBuffer.toString().trim();
+				String tokensBufferString = this.javadocTokensBuffer.toString().trim();
 				switch (token) {
 					case TerminalTokens.TokenNameWHITESPACE:
 						if (tokensBufferLength > 0) {
@@ -54,17 +54,18 @@
 								this.lastNumberOfNewLines++;
 								this.line++;
 								if (newLineString == null) {
-									StringBuffer newLineBuffer = new StringBuffer(this.lineSeparator);
+									this.tempBuffer.setLength(0);
+									this.tempBuffer.append(this.lineSeparator);
 							    	this.column = 1;
-							    	printIndentationIfNecessary(newLineBuffer);
-						    		newLineBuffer.append(BLOCK_LINE_PREFIX);
+							    	printIndentationIfNecessary(this.tempBuffer);
+						    		this.tempBuffer.append(BLOCK_LINE_PREFIX);
 							    	this.column += BLOCK_LINE_PREFIX_LENGTH;
 									if (this.commentIndentation != null) {
-										newLineBuffer.append(this.commentIndentation);
+										this.tempBuffer.append(this.commentIndentation);
 								    	this.column += this.commentIndentation.length();
 									}
 						    		firstColumn = this.column;
-						    		newLineString = newLineBuffer.toString();
+						    		newLineString = this.tempBuffer.toString();
 								} else {
 									this.column = firstColumn;
 								}
@@ -77,10 +78,10 @@
 									headerLine = false;
 								}
 							} else {
-								buffer.append(tokensBuffer);
+								buffer.append(this.javadocTokensBuffer);
 								this.column += tokensBufferLength;
 							}
-							tokensBuffer.setLength(0);
+							this.javadocTokensBuffer.setLength(0);
 						}
 						textOnNewLine = false;
 						previousToken = token;
@@ -97,15 +98,15 @@
 	    		if (insertSpace) lastColumn++;
 				boolean shouldSplit = lastColumn > maxColumn // the max length is reached
 					&& (!isHtmlTag || previousToken == -1) // not an html tag or just at the beginning of it
-					&& token != TerminalTokens.TokenNameAT && (tokensBufferLength == 0 || tokensBuffer.charAt(tokensBufferLength-1) != '@'); // avoid to split just before a '@'
+					&& token != TerminalTokens.TokenNameAT && (tokensBufferLength == 0 || this.javadocTokensBuffer.charAt(tokensBufferLength-1) != '@'); // avoid to split just before a '@'
 				if (shouldSplit) {
 					// not enough space on the line
 					if ((tokensBufferLength > 0 || tokenLength < maxColumn) && !isHtmlTag && tokensBufferLength > 0 && (firstColumn+tokensBufferLength+tokenLength) >= maxColumn) {
 						// there won't be enough room even if we break the line before the buffered tokens
 						// So add the buffered tokens now
-						buffer.append(tokensBuffer);
+						buffer.append(this.javadocTokensBuffer);
 						this.column += tokensBufferLength;
-						tokensBuffer.setLength(0);
+						this.javadocTokensBuffer.setLength(0);
 						tokensBufferLength = 0;
 						textOnNewLine = false;
 					}
@@ -113,17 +114,18 @@
 						this.lastNumberOfNewLines++;
 						this.line++;
 						if (newLineString == null) {
-							StringBuffer newLineBuffer = new StringBuffer(this.lineSeparator);
+							this.tempBuffer.setLength(0);
+							this.tempBuffer.append(this.lineSeparator);
 					    	this.column = 1;
-					    	printIndentationIfNecessary(newLineBuffer);
-				    		newLineBuffer.append(BLOCK_LINE_PREFIX);
+					    	printIndentationIfNecessary(this.tempBuffer);
+				    		this.tempBuffer.append(BLOCK_LINE_PREFIX);
 					    	this.column += BLOCK_LINE_PREFIX_LENGTH;
 							if (this.commentIndentation != null) {
-								newLineBuffer.append(this.commentIndentation);
+								this.tempBuffer.append(this.commentIndentation);
 						    	this.column += this.commentIndentation.length();
 							}
 				    		firstColumn = this.column;
-				    		newLineString = newLineBuffer.toString();
+				    		newLineString = this.tempBuffer.toString();
 						} else {
 							this.column = firstColumn;
 						}
@@ -133,7 +135,7 @@
 			    		String tokensString = tokensBufferString;
 						buffer.append(tokensString);
 						this.column += tokensString.length();
-						tokensBuffer.setLength(0);
+						this.javadocTokensBuffer.setLength(0);
 						tokensBufferLength = 0;
 		    		}
 					buffer.append(this.scanner.source, tokenStart, tokenLength);
@@ -147,9 +149,9 @@
     			} else {
 					// append token to the line
 		    		if (insertSpace) {
-		    			tokensBuffer.append(' ');
+		    			this.javadocTokensBuffer.append(' ');
 		    		}
-					tokensBuffer.append(this.scanner.source, tokenStart, tokenLength);
+					this.javadocTokensBuffer.append(this.scanner.source, tokenStart, tokenLength);
     			}
 				previousToken = token;
     			this.needSpace = false;
@@ -162,9 +164,9 @@
 		finally {
 			this.scanner.skipComments = false;
 			// Add remaining buffered tokens
-			if (tokensBuffer.length() > 0) {
-				buffer.append(tokensBuffer);
-				this.column += tokensBuffer.length();
+			if (this.javadocTokensBuffer.length() > 0) {
+				buffer.append(this.javadocTokensBuffer);
+				this.column += this.javadocTokensBuffer.length();
 			}
 		}
     }
