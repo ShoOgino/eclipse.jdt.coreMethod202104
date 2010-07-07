@@ -1,0 +1,47 @@
+// https://bugs.eclipse.org/bugs/show_bug.cgi?id=304006
+// To verify that autocast works correctly even when the completion node
+// is preceeded by a number of unrelated instanceof expressions
+public void testBug304006c() throws JavaModelException {
+	this.workingCopies = new ICompilationUnit[1];
+	this.workingCopies[0] = getWorkingCopy(
+		"/Completion/src/test/CompletionAfterInstanceOf.java",
+		"package test;\n" +
+		"public class CompletionAfterInstanceOf {\n" +
+		"	public int foo() { return 1; }\n" +
+		"	public int returnZero(){ return 0;}\n" +
+		"	void bar(Object abc, Object xyz){\n" +
+		"       int i = 1, j;\n" +
+		"		if(i == 1)\n" +
+		"			if (abc instanceof CompletionAfterInstanceOf)\n" +
+		"				if(xyz instanceof CompletionAfterInstanceOf){\n" +
+		"					j = 1;\n" +
+		"					if(j == 1)\n" +
+		"						i = abc.r \n" +
+		"				}\n" +
+		"	}\n" +
+		"}\n");
+
+	CompletionTestsRequestor2 requestor = new CompletionTestsRequestor2(true, false, true, true, true, true);
+	requestor.allowAllRequiredProposals();
+	String str = this.workingCopies[0].getSource();
+	String completeBehind = "abc.r";
+	int cursorLocation = str.lastIndexOf(completeBehind) + completeBehind.length();
+	this.workingCopies[0].codeComplete(cursorLocation, requestor, this.wcOwner);
+
+	int relevance1 = R_DEFAULT + R_RESOLVED + R_INTERESTING + R_CASE + R_NON_STATIC + R_NON_RESTRICTED + R_EXACT_EXPECTED_TYPE;
+	int start1 = str.lastIndexOf("r") + "".length();
+	int end1 = start1 + "r".length();
+	int start2 = str.lastIndexOf("abc.r");
+	int end2 = start2 + "abc.r".length();
+	int start3 = str.lastIndexOf("abc.");
+	int end3 = start3 + "abc".length();
+	
+	assertResults(
+			"expectedTypesSignatures={I}\n" +
+			"expectedTypesKeys={I}",
+			requestor.getContext());
+	assertResults(
+			"returnZero[METHOD_REF_WITH_CASTED_RECEIVER]{((CompletionAfterInstanceOf)abc).returnZero(), Ltest.CompletionAfterInstanceOf;, ()I, Ltest.CompletionAfterInstanceOf;, returnZero, null, replace["+start2+", "+end2+"], token["+start1+", "+end1+"], receiver["+start3+", "+end3+"], " + (relevance1) + "}",
+			requestor.getResults());
+}
+
