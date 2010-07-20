@@ -1,0 +1,72 @@
+	/**
+	 * INTERNAL USE-ONLY
+	 * That method generates the attributes of a code attribute.
+	 * They could be:
+	 * - an exception attribute for each try/catch found inside the method
+	 * - a deprecated attribute
+	 * - a synthetic attribute for synthetic access methods
+	 *
+	 * It returns the number of attributes created for the code attribute.
+	 *
+	 * @param methodBinding org.eclipse.jdt.internal.compiler.lookup.MethodBinding
+	 * @return <CODE>int</CODE>
+	 */
+	public int generateMethodInfoAttributes(MethodBinding methodBinding) {
+		// leave two bytes for the attribute_number
+		this.contentsOffset += 2;
+		if (this.contentsOffset + 2 >= this.contents.length) {
+			resizeContents(2);
+		}
+		// now we can handle all the attribute for that method info:
+		// it could be:
+		// - a CodeAttribute
+		// - a ExceptionAttribute
+		// - a DeprecatedAttribute
+		// - a SyntheticAttribute
+
+		// Exception attribute
+		ReferenceBinding[] thrownsExceptions;
+		int attributesNumber = 0;
+		if ((thrownsExceptions = methodBinding.thrownExceptions) != Binding.NO_EXCEPTIONS) {
+			// The method has a throw clause. So we need to add an exception attribute
+			// check that there is enough space to write all the bytes for the exception attribute
+			attributesNumber += generateExceptionsAttribute(thrownsExceptions);
+		}
+		if (methodBinding.isDeprecated()) {
+			// Deprecated attribute
+			attributesNumber += generateDeprecatedAttribute();
+		}
+		if (this.targetJDK < ClassFileConstants.JDK1_5) {
+			if (methodBinding.isSynthetic()) {
+				attributesNumber += generateSyntheticAttribute();
+			}
+			if (methodBinding.isVarargs()) {
+				attributesNumber += generateVarargsAttribute();
+			}
+		}
+		// add signature attribute
+		char[] genericSignature = methodBinding.genericSignature();
+		if (genericSignature != null) {
+			attributesNumber += generateSignatureAttribute(genericSignature);
+		}
+		if (this.targetJDK >= ClassFileConstants.JDK1_4) {
+			AbstractMethodDeclaration methodDeclaration = methodBinding.sourceMethod();
+			if (methodDeclaration != null) {
+				Annotation[] annotations = methodDeclaration.annotations;
+				if (annotations != null) {
+					attributesNumber += generateRuntimeAnnotations(annotations);
+				}
+				if ((methodBinding.tagBits & TagBits.HasParameterAnnotations) != 0) {
+					Argument[] arguments = methodDeclaration.arguments;
+					if (arguments != null) {
+						attributesNumber += generateRuntimeAnnotationsForParameters(arguments);
+					}
+				}
+			}
+		}
+		if ((methodBinding.tagBits & TagBits.HasMissingType) != 0) {
+			this.missingTypes = methodBinding.collectMissingTypes(this.missingTypes);
+		}
+		return attributesNumber;
+	}
+
