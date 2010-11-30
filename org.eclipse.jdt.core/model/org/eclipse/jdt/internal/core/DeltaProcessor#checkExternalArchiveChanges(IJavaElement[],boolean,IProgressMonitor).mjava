@@ -1,0 +1,98 @@
+	/*
+	 * Check all external archive (referenced by given roots, projects or model) status and issue a corresponding root delta.
+	 * Also triggers index updates
+	 */
+	private void checkExternalArchiveChanges(IJavaElement[] elementsScope, boolean asynchronous, IProgressMonitor monitor) throws JavaModelException {
+		if (monitor != null && monitor.isCanceled())
+			throw new OperationCanceledException();
+		try {
+			if (monitor != null) monitor.beginTask("", 1); //$NON-NLS-1$
+
+			boolean hasExternalWorkingCopyProject = false;
+			for (int i = 0, length = elementsScope.length; i < length; i++) {
+				IJavaElement element = elementsScope[i];
+				this.state.addForRefresh(elementsScope[i]);
+				if (element.getElementType() == IJavaElement.JAVA_MODEL) {
+					// ensure external working copies' projects' caches are reset
+					HashSet projects = JavaModelManager.getJavaModelManager().getExternalWorkingCopyProjects();
+					if (projects != null) {
+						hasExternalWorkingCopyProject = true;
+						Iterator iterator = projects.iterator();
+						while (iterator.hasNext()) {
+							JavaProject project = (JavaProject) iterator.next();
+							project.resetCaches();
+						}
+					}
+				}
+			}
+			HashSet elementsToRefresh = this.state.removeExternalElementsToRefresh();
+			boolean hasDelta = elementsToRefresh != null && createExternalArchiveDelta(elementsToRefresh, monitor);
+			if (hasDelta){
+				IJavaElementDelta[] projectDeltas = this.currentDelta.getAffectedChildren();
+				final int length = projectDeltas.length;
+				final IProject[] projectsToTouch = new IProject[length];
+				for (int i = 0; i < length; i++) {
+					IJavaElementDelta delta = projectDeltas[i];
+					JavaProject javaProject = (JavaProject)delta.getElement();
+					projectsToTouch[i] = javaProject.getProject();
+				}
+				if (projectsToTouch.length > 0) {
+					if (asynchronous){
+						WorkspaceJob touchJob = new WorkspaceJob(Messages.updating_external_archives_jobName) {
+							
+							public IStatus runInWorkspace(IProgressMonitor progressMonitor) throws CoreException {
+								try {
+									if (progressMonitor != null)
+										progressMonitor.beginTask("", projectsToTouch.length); //$NON-NLS-1$
+									touchProjects(projectsToTouch, progressMonitor);
+								}
+								finally {
+									if (progressMonitor != null)
+										progressMonitor.done();
+								}
+								return Status.OK_STATUS;
+							}
+							
+							public boolean belongsTo(Object family) {
+								return ResourcesPlugin.FAMILY_MANUAL_REFRESH == family;
+							}
+						};
+						touchJob.schedule();
+					}
+					else {
+						// touch the projects to force them to be recompiled while taking the workspace lock
+						//	 so that there is no concurrency with the Java builder
+						// see https://bugs.eclipse.org/bugs/show_bug.cgi?id=96575
+						IWorkspaceRunnable runnable = new IWorkspaceRunnable() {
+							public void run(IProgressMonitor progressMonitor) throws CoreException {
+								for (int i = 0; i < projectsToTouch.length; i++) {
+									IProject project = projectsToTouch[i];
+
+									// touch to force a build of this project
+									if (JavaBuilder.DEBUG)
+										System.out.println("Touching project " + project.getName() + " due to external jar file change"); //$NON-NLS-1$ //$NON-NLS-2$
+									project.touch(progressMonitor);
+								}
+							}
+						};
+						try {
+							ResourcesPlugin.getWorkspace().run(runnable, monitor);
+						} catch (CoreException e) {
+							throw new JavaModelException(e);
+						}
+					}
+				}
+
+				if (this.currentDelta != null) { // if delta has not been fired while creating markers
+					fire(this.currentDelta, DEFAULT_CHANGE_EVENT);
+				}
+			} else if (hasExternalWorkingCopyProject) {
+				// flush jar type cache
+				JavaModelManager.getJavaModelManager().resetJarTypeCache();
+			}
+		} finally {
+			this.currentDelta = null;
+			if (monitor != null) monitor.done();
+		}
+	}
+
