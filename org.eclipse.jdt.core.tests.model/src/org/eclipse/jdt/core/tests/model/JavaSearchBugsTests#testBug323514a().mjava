@@ -1,0 +1,55 @@
+public void testBug323514a() throws Exception {
+	String libPath = getExternalResourcePath("lib323514.jar");
+	waitUntilIndexesReady();
+	try {
+		// Create project and external jar file
+		Util.createJar(
+			new String[] {
+				"p323514/Y323514.java",
+				"package p323514;\n" +
+				"public class Y323514 {}"
+			},
+			new HashMap(),
+			libPath);
+		IJavaProject javaProject = createJavaProject("P", new String[0], new String[] {libPath}, "");
+		waitUntilIndexesReady();
+		
+		// Close project and delete external jar file
+		IProject project = javaProject.getProject();
+		waitUntilIndexesReady();
+		project.close(null);
+		deleteExternalFile(libPath);
+		// Open project and recreate external jar file
+		Util.createJar(
+			new String[] {
+				"p323514/X323514.java",
+				"package p323514;\n" +
+				"public class X323514 {}"
+			},
+			new HashMap(),
+			libPath);
+		project.open(null);
+		// A refresh external archives seems to be necessary when the external
+		// archive has been modified while the project was closed... like a refresh
+		// in the workspace to see external files changes.
+		project.refreshLocal(IResource.DEPTH_INFINITE, null);
+		waitUntilIndexesReady();
+		
+		// Search
+		TypeNameMatchCollector collector = new TypeNameMatchCollector();
+		new SearchEngine().searchAllTypeNames(
+			null,
+			null,
+			BasicSearchEngine.createJavaSearchScope(new IJavaElement[] { javaProject }),
+			collector,
+			IJavaSearchConstants.WAIT_UNTIL_READY_TO_SEARCH,
+			null);
+		assertSearchResults(
+			"X323514 (not open) [in X323514.class [in p323514 [in "+ getExternalPath() + "lib323514.jar]]]",
+			collector);
+	} finally {
+		deleteExternalFile(libPath);
+		deleteProject("P");
+	}
+}
+
