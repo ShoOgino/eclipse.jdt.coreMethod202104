@@ -1,4 +1,4 @@
-	public ASTNode convert(org.eclipse.jdt.internal.compiler.ast.AbstractMethodDeclaration methodDeclaration) {
+	public ASTNode convert(boolean isInterface, org.eclipse.jdt.internal.compiler.ast.AbstractMethodDeclaration methodDeclaration) {
 		checkCanceled();
 		if (methodDeclaration instanceof org.eclipse.jdt.internal.compiler.ast.AnnotationMethodDeclaration) {
 			return convert((org.eclipse.jdt.internal.compiler.ast.AnnotationMethodDeclaration) methodDeclaration);
@@ -40,6 +40,10 @@
 		}
 		org.eclipse.jdt.internal.compiler.ast.ExplicitConstructorCall explicitConstructorCall = null;
 		if (isConstructor) {
+			if (isInterface) {
+				// interface cannot have a constructor
+				methodDecl.setFlags(methodDecl.getFlags() | ASTNode.MALFORMED);
+			}
 			org.eclipse.jdt.internal.compiler.ast.ConstructorDeclaration constructorDeclaration = (org.eclipse.jdt.internal.compiler.ast.ConstructorDeclaration) methodDeclaration;
 			explicitConstructorCall = constructorDeclaration.constructorCall;
 			switch(this.ast.apiLevel) {
@@ -64,19 +68,20 @@
 				methodDecl.setExtraDimensions(extraDimensions);
 				setTypeForMethodDeclaration(methodDecl, returnType, extraDimensions);
 			} else {
+				// no return type for a method that is not a constructor
+				methodDecl.setFlags(methodDecl.getFlags() | ASTNode.MALFORMED);
 				switch(this.ast.apiLevel) {
-					case AST.JLS2_INTERNAL :
-						methodDecl.setFlags(methodDecl.getFlags() | ASTNode.MALFORMED);
-						break;
 					case AST.JLS3 :
 						methodDecl.setReturnType2(null);
 				}
 			}
 		}
 		int declarationSourceStart = methodDeclaration.declarationSourceStart;
-		int declarationSourceEnd = methodDeclaration.bodyEnd;
-		methodDecl.setSourceRange(declarationSourceStart, declarationSourceEnd - declarationSourceStart + 1);
-		int closingPosition = retrieveRightBraceOrSemiColonPosition(methodDeclaration.bodyEnd + 1, methodDeclaration.declarationSourceEnd);
+		int bodyEnd = methodDeclaration.bodyEnd;
+		methodDecl.setSourceRange(declarationSourceStart, bodyEnd - declarationSourceStart + 1);
+		int declarationSourceEnd = methodDeclaration.declarationSourceEnd;
+		int rightBraceOrSemiColonPositionStart = bodyEnd == declarationSourceEnd ? bodyEnd : bodyEnd + 1;
+		int closingPosition = retrieveRightBraceOrSemiColonPosition(rightBraceOrSemiColonPositionStart, declarationSourceEnd);
 		if (closingPosition != -1) {
 			int startPosition = methodDecl.getStartPosition();
 			methodDecl.setSourceRange(startPosition, closingPosition - startPosition + 1);
@@ -85,7 +90,7 @@
 
 			start = retrieveStartBlockPosition(methodHeaderEnd, methodDeclaration.bodyStart);
 			if (start == -1) start = methodDeclaration.bodyStart; // use recovery position for body start
-			end = retrieveRightBrace(methodDeclaration.bodyEnd, methodDeclaration.declarationSourceEnd);
+			end = retrieveRightBrace(methodDeclaration.bodyEnd, declarationSourceEnd);
 			Block block = null;
 			if (start != -1 && end != -1) {
 				/*
@@ -111,14 +116,17 @@
 					}
 				}
 			}
-			if (block != null && (Modifier.isAbstract(methodDecl.getModifiers()) || Modifier.isNative(methodDecl.getModifiers()))) {
+			if (block != null
+					&& (Modifier.isAbstract(methodDecl.getModifiers())
+							|| Modifier.isNative(methodDecl.getModifiers())
+							|| isInterface)) {
 				methodDecl.setFlags(methodDecl.getFlags() | ASTNode.MALFORMED);
 			}
 		} else {
 			// syntax error in this method declaration
 			methodDecl.setFlags(methodDecl.getFlags() | ASTNode.MALFORMED);
 			if (!methodDeclaration.isNative() && !methodDeclaration.isAbstract()) {
-				start = retrieveStartBlockPosition(methodHeaderEnd, declarationSourceEnd);
+				start = retrieveStartBlockPosition(methodHeaderEnd, bodyEnd);
 				if (start == -1) start = methodDeclaration.bodyStart; // use recovery position for body start
 				end = methodDeclaration.bodyEnd;
 				// try to get the best end position
