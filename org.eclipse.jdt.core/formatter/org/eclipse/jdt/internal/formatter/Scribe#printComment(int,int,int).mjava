@@ -1,0 +1,290 @@
+	/*
+	 * Main method to print and format comments (javadoc, block and single line comments)
+	 */
+	void printComment(int kind, int trailing, int emptyLinesRules) {
+		final boolean rejectLineComment = kind  == CodeFormatter.K_MULTI_LINE_COMMENT || kind == CodeFormatter.K_JAVA_DOC;
+		final boolean rejectBlockComment = kind  == CodeFormatter.K_SINGLE_LINE_COMMENT || kind  == CodeFormatter.K_JAVA_DOC;
+		final boolean rejectJavadocComment = kind  == CodeFormatter.K_SINGLE_LINE_COMMENT || kind  == CodeFormatter.K_MULTI_LINE_COMMENT;
+		try {
+			// if we have a space between two tokens we ensure it will be dumped in the formatted string
+			int currentTokenStartPosition = this.scanner.currentPosition;
+			boolean hasComment = false;
+			boolean hasLineComment = false;
+			boolean hasWhitespaces = false;
+			int lines = 0;
+			while ((this.currentToken = this.scanner.getNextToken()) != TerminalTokens.TokenNameEOF) {
+				int foundTaskCount = this.scanner.foundTaskCount;
+				int tokenStartPosition = this.scanner.getCurrentTokenStartPosition();
+				switch(this.currentToken) {
+					case TerminalTokens.TokenNameWHITESPACE :
+						char[] whiteSpaces = this.scanner.getCurrentTokenSource();
+						int whitespacesEndPosition = this.scanner.getCurrentTokenEndPosition();
+						lines = 0;
+						for (int i = 0, max = whiteSpaces.length; i < max; i++) {
+							switch(whiteSpaces[i]) {
+								case '\r' :
+									if ((i + 1) < max) {
+										if (whiteSpaces[i + 1] == '\n') {
+											i++;
+										}
+									}
+									lines++;
+									break;
+								case '\n' :
+									lines++;
+							}
+						}
+						// If following token is a line comment on the same line or the line just after,
+						// then it might be not really formatted as a trailing comment
+						boolean realTrailing = trailing > NO_TRAILING_COMMENT;
+						if (realTrailing && this.scanner.currentCharacter == '/' && (lines == 0 || (lines == 1 && !hasLineComment && trailing == IMPORT_TRAILING_COMMENT))) {
+							// sometimes changing the trailing may not be the best idea
+							// for complex trailing comment, it's basically a good idea
+							boolean canChangeTrailing = (trailing & COMPLEX_TRAILING_COMMENT) != 0;
+							// for basic trailing comment preceded by a line comment, then it depends on the comments relative position
+							// when following comment column (after having been rounded) is below the preceding one,
+							// then it becomes not a good idea to change the trailing flag
+							if (trailing == BASIC_TRAILING_COMMENT && hasLineComment) {
+								int currentCommentIndentation = getCurrentIndentation(whiteSpaces, 0);
+								int relativeIndentation = currentCommentIndentation - this.lastLineComment.currentIndentation;
+								if (this.tabLength == 0) {
+									canChangeTrailing = relativeIndentation == 0;
+								} else {
+									canChangeTrailing = relativeIndentation > -this.tabLength;
+								}
+							}
+							// if the trailing can be change, then look at the following tokens
+							if (canChangeTrailing) {
+								int currentPosition = this.scanner.currentPosition;
+								if (this.scanner.getNextToken() == TerminalTokens.TokenNameCOMMENT_LINE) {
+									realTrailing = !hasLineComment;
+									switch (this.scanner.getNextToken()) {
+										case TerminalTokens.TokenNameCOMMENT_LINE:
+											// at least two contiguous line comments
+											// the formatter should not consider comments as trailing ones
+											realTrailing = false;
+											break;
+										case TerminalTokens.TokenNameWHITESPACE:
+											if (this.scanner.getNextToken() == TerminalTokens.TokenNameCOMMENT_LINE) {
+												// at least two contiguous line comments
+												// the formatter should not consider comments as trailing ones
+												realTrailing = false;
+											}
+											break;
+									}
+								}
+								this.scanner.resetTo(currentPosition, this.scanner.eofPosition - 1);
+							}
+						}
+						// Look whether comments line may be contiguous or not
+						// Note that when preceding token is a comment line, then only one line
+						// is enough to have an empty line as the line end is included in the comment line...
+						// If comments are contiguous, store the white spaces to be able to compute the current comment indentation
+						if (lines > 1 || (lines == 1 && hasLineComment)) {
+							this.lastLineComment.contiguous = false;
+						}
+						this.lastLineComment.leadingSpaces = whiteSpaces;
+						this.lastLineComment.lines = lines;
+						// Strategy to consume spaces and eventually leave at this stage
+						// depends on the fact that a trailing comment is expected or not
+						if (realTrailing) {
+							// if a line comment is consumed, no other comment can be on the same line after
+							if (hasLineComment) {
+								if (lines >= 1) {
+									currentTokenStartPosition = tokenStartPosition;
+									preserveEmptyLines(lines, currentTokenStartPosition);
+									addDeleteEdit(currentTokenStartPosition, whitespacesEndPosition);
+									this.scanner.resetTo(this.scanner.currentPosition, this.scannerEndPosition - 1);
+									return;
+								}
+								this.scanner.resetTo(currentTokenStartPosition, this.scannerEndPosition - 1);
+								return;
+							} 
+							// if one or several new lines are consumed, following comments cannot be considered as trailing ones
+							if (lines >= 1) {
+								if (hasComment) {
+									this.printNewLine(tokenStartPosition);
+								}
+								this.scanner.resetTo(currentTokenStartPosition, this.scannerEndPosition - 1);
+								return;
+							}
+							// delete consumed white spaces
+							hasWhitespaces = true;
+							currentTokenStartPosition = this.scanner.currentPosition;
+							addDeleteEdit(tokenStartPosition, whitespacesEndPosition);
+						} else {
+							if (lines == 0) {
+								hasWhitespaces = true;
+								if (hasLineComment && emptyLinesRules != PRESERVE_EMPTY_LINES_KEEP_LAST_NEW_LINES_INDENTATION) {
+									addReplaceEdit(tokenStartPosition, whitespacesEndPosition, getPreserveEmptyLines(0, emptyLinesRules));
+								} else {
+									addDeleteEdit(tokenStartPosition, whitespacesEndPosition);
+								}
+							} else if (hasLineComment) {
+								useAlignmentBreakIndentation(emptyLinesRules);
+								currentTokenStartPosition = tokenStartPosition;
+								preserveEmptyLines(lines, currentTokenStartPosition);
+								addDeleteEdit(currentTokenStartPosition, whitespacesEndPosition);
+							} else if (hasComment) {
+								useAlignmentBreakIndentation(emptyLinesRules);
+								if (lines == 1) {
+									this.printNewLine(tokenStartPosition);
+								} else {
+									preserveEmptyLines(lines - 1, tokenStartPosition);
+								}
+								addDeleteEdit(tokenStartPosition, whitespacesEndPosition);
+							} else if (lines != 0 && (!this.formatter.preferences.join_wrapped_lines || this.formatter.preferences.number_of_empty_lines_to_preserve != 0 || this.blank_lines_between_import_groups > 0)) {
+								addReplaceEdit(tokenStartPosition, whitespacesEndPosition, getPreserveEmptyLines(lines-1, emptyLinesRules));
+							} else {
+								useAlignmentBreakIndentation(emptyLinesRules);
+								addDeleteEdit(tokenStartPosition, whitespacesEndPosition);
+							}
+						}
+						currentTokenStartPosition = this.scanner.currentPosition;
+						break;
+					case TerminalTokens.TokenNameCOMMENT_LINE :
+						if (this.useTags && this.editsEnabled) {
+							boolean turnOff = false;
+							if (foundTaskCount > 0) {
+								setEditsEnabled(foundTaskCount);
+								turnOff = true;
+							} else if (this.tagsKind == this.currentToken
+								&& CharOperation.fragmentEquals(this.disablingTag, this.scanner.source, tokenStartPosition, true)) {
+    							this.editsEnabled = false;
+								turnOff = true;
+					    	}
+							if (turnOff) {
+								if (!this.editsEnabled && this.editsIndex > 1) {
+									OptimizedReplaceEdit currentEdit = this.edits[this.editsIndex-1];
+									if (this.scanner.startPosition == currentEdit.offset+currentEdit.length) {
+										printNewLinesBeforeDisablingComment();
+									}
+								}
+							}
+						}
+						if (rejectLineComment) break;
+						if (lines >= 1) {
+							if (lines > 1) {
+								preserveEmptyLines(lines - 1, this.scanner.getCurrentTokenStartPosition());
+							} else if (lines == 1) {
+								printNewLine(this.scanner.getCurrentTokenStartPosition());
+							}
+						} else if (hasWhitespaces) {
+							space();
+						}
+						hasWhitespaces = false;
+						printLineComment();
+						currentTokenStartPosition = this.scanner.currentPosition;
+						hasLineComment = true;
+						lines = 0;
+						if (this.useTags && !this.editsEnabled) {
+							if (foundTaskCount > 0) {
+								setEditsEnabled(foundTaskCount);
+							} else if (this.tagsKind == this.currentToken) {
+	    						this.editsEnabled = CharOperation.fragmentEquals(this.enablingTag, this.scanner.source, tokenStartPosition, true);
+					    	}
+						}
+						break;
+					case TerminalTokens.TokenNameCOMMENT_BLOCK :
+						if (this.useTags && this.editsEnabled) {
+							boolean turnOff = false;
+							if (foundTaskCount > 0) {
+								setEditsEnabled(foundTaskCount);
+								turnOff = true;
+							} else if (this.tagsKind == this.currentToken
+								&& CharOperation.fragmentEquals(this.disablingTag, this.scanner.source, tokenStartPosition, true)) {
+    							this.editsEnabled = false;
+								turnOff = true;
+					    	}
+							if (turnOff) {
+								if (!this.editsEnabled && this.editsIndex > 1) {
+									OptimizedReplaceEdit currentEdit = this.edits[this.editsIndex-1];
+									if (this.scanner.startPosition == currentEdit.offset+currentEdit.length) {
+										printNewLinesBeforeDisablingComment();
+									}
+								}
+							}
+						}
+						if (trailing > NO_TRAILING_COMMENT && lines >= 1) {
+							// a block comment on next line means that there's no trailing comment
+							this.scanner.resetTo(this.scanner.getCurrentTokenStartPosition(), this.scannerEndPosition - 1);
+							return;
+						}
+						this.lastLineComment.contiguous = false;
+						if (rejectBlockComment) break;
+						if (lines >= 1) {
+							if (lines > 1) {
+								preserveEmptyLines(lines - 1, this.scanner.getCurrentTokenStartPosition());
+							} else if (lines == 1) {
+								printNewLine(this.scanner.getCurrentTokenStartPosition());
+							}
+						} else if (hasWhitespaces) {
+							space();
+						}
+						hasWhitespaces = false;
+						printBlockComment(false);
+						currentTokenStartPosition = this.scanner.currentPosition;
+						hasLineComment = false;
+						hasComment = true;
+						lines = 0;
+						if (this.useTags && !this.editsEnabled) {
+							if (foundTaskCount > 0) {
+								setEditsEnabled(foundTaskCount);
+							} else if (this.tagsKind == this.currentToken) {
+	    						this.editsEnabled = CharOperation.fragmentEquals(this.enablingTag, this.scanner.source, tokenStartPosition, true);
+					    	}
+						}
+						break;
+					case TerminalTokens.TokenNameCOMMENT_JAVADOC :
+						if (this.useTags && this.editsEnabled && foundTaskCount > 0) {
+							setEditsEnabled(foundTaskCount);
+							if (!this.editsEnabled && this.editsIndex > 1) {
+								OptimizedReplaceEdit currentEdit = this.edits[this.editsIndex-1];
+								if (this.scanner.startPosition == currentEdit.offset+currentEdit.length) {
+									printNewLinesBeforeDisablingComment();
+								}
+							}
+						}
+						if (trailing > NO_TRAILING_COMMENT) {
+							// a javadoc comment should not be considered as a trailing comment
+							this.scanner.resetTo(this.scanner.getCurrentTokenStartPosition(), this.scannerEndPosition - 1);
+							return;
+						}
+						this.lastLineComment.contiguous = false;
+						if (rejectJavadocComment) break;
+						if (lines >= 1) {
+							if (lines > 1) {
+								preserveEmptyLines(lines - 1, this.scanner.getCurrentTokenStartPosition());
+							} else if (lines == 1) {
+								printNewLine(this.scanner.getCurrentTokenStartPosition());
+							}
+						} else if (hasWhitespaces) {
+							space();
+						}
+						hasWhitespaces = false;
+						if (includesJavadocComments()) {
+							printJavadocComment(this.scanner.startPosition, this.scanner.currentPosition);
+						} else {
+							printBlockComment(true);
+						}
+						if (this.useTags && !this.editsEnabled && foundTaskCount > 0) {
+							setEditsEnabled(foundTaskCount);
+						}
+						printNewLine();
+						currentTokenStartPosition = this.scanner.currentPosition;
+						hasLineComment = false;
+						hasComment = true;
+						lines = 0;
+						break;
+					default :
+						this.lastLineComment.contiguous = false;
+						// step back one token
+						this.scanner.resetTo(currentTokenStartPosition, this.scannerEndPosition - 1);
+						return;
+				}
+			}
+		} catch (InvalidInputException e) {
+			throw new AbortFormatting(e);
+		}
+	}
+

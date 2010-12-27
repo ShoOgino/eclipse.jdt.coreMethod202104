@@ -8,7 +8,6 @@
 		if (this.preferences.insert_space_after_opening_paren_in_switch) {
 			this.scribe.space();
 		}
-
 		switchStatement.expression.traverse(this, scope);
 		this.scribe.printNextToken(TerminalTokens.TokenNameRPAREN, this.preferences.insert_space_before_closing_paren_in_switch);
 		/*
@@ -18,77 +17,72 @@
 		formatOpeningBrace(switch_brace, this.preferences.insert_space_before_opening_brace_in_switch);
 		this.scribe.printNewLine();
 
-		if (this.preferences.indent_switchstatements_compare_to_switch) {
-			this.scribe.indent();
-		}
 		final Statement[] statements = switchStatement.statements;
+		int switchIndentationLevel = this.scribe.indentationLevel;
+		int caseIndentation = 0;
+		int statementIndentation = 0;
+		int breakIndentation = 0;
+		if (this.preferences.indent_switchstatements_compare_to_switch) {
+			caseIndentation++;
+			statementIndentation++;
+			breakIndentation++;
+		}
+		if (this.preferences.indent_switchstatements_compare_to_cases) {
+			statementIndentation++;
+		}
+		if (this.preferences.indent_breaks_compare_to_cases) {
+			breakIndentation++;
+		}
 		boolean wasACase = false;
-		boolean wasAStatement = false;
+		boolean wasABreak = false;
 		if (statements != null) {
 			int statementsLength = statements.length;
 			for (int i = 0; i < statementsLength; i++) {
 				final Statement statement = statements[i];
 				if (statement instanceof CaseStatement) {
+					if (wasABreak) {
+						this.scribe.setIndentation(switchIndentationLevel, caseIndentation);
+						this.scribe.printComment();
+					} else {
+						if (wasACase) {
+							this.scribe.printComment(Scribe.PRESERVE_EMPTY_LINES_IN_SWITCH_CASE);
+						} else {
+							this.scribe.printComment();
+						}
+						this.scribe.setIndentation(switchIndentationLevel, caseIndentation);
+					}
 					if (wasACase) {
 						this.scribe.printNewLine();
 					}
-					if ((wasACase && this.preferences.indent_switchstatements_compare_to_cases)
-						|| (wasAStatement && this.preferences.indent_switchstatements_compare_to_cases)) {
-						this.scribe.unIndent();
-					}
 					statement.traverse(this, scope);
-					wasACase = true;
-					wasAStatement = false;
-					if (this.preferences.indent_switchstatements_compare_to_cases) {
-						this.scribe.indent();
-					}
+					// Print following trailing (if any) comment at statement indentation
+					this.scribe.setIndentation(switchIndentationLevel, statementIndentation);
 					this.scribe.printComment(CodeFormatter.K_UNKNOWN, Scribe.COMPLEX_TRAILING_COMMENT);
+					wasACase = true;
+					wasABreak = false;
 				} else if (statement instanceof BreakStatement) {
-					if (this.preferences.indent_breaks_compare_to_cases) {
-						if (wasAStatement && !this.preferences.indent_switchstatements_compare_to_cases) {
-							this.scribe.indent();
-						}
-					} else {
-						if (wasAStatement) {
-							if (this.preferences.indent_switchstatements_compare_to_cases) {
-								this.scribe.unIndent();
-							}
-						}
-						if (wasACase && this.preferences.indent_switchstatements_compare_to_cases) {
-							this.scribe.unIndent();
-						}
-					}
+					this.scribe.setIndentation(switchIndentationLevel, breakIndentation);
 					if (wasACase) {
 						this.scribe.printNewLine();
 					}
+					this.scribe.printComment();
 					statement.traverse(this, scope);
-					if (this.preferences.indent_breaks_compare_to_cases) {
-						this.scribe.unIndent();
-					}
 					wasACase = false;
-					wasAStatement = false;
+					wasABreak = true;
 				} else if (statement instanceof Block) {
-					String bracePosition;
-					if (wasACase) {
-						if (this.preferences.indent_switchstatements_compare_to_cases) {
-							this.scribe.unIndent();
-						}
-						bracePosition =	this.preferences.brace_position_for_block_in_case;
-						formatBlock((Block) statement, scope, bracePosition, this.preferences.insert_space_after_colon_in_case);
-						if (this.preferences.indent_switchstatements_compare_to_cases) {
-							this.scribe.indent();
-						}
-					} else {
-						bracePosition =	this.preferences.brace_position_for_block;
-						formatBlock((Block) statement, scope, bracePosition, this.preferences.insert_space_before_opening_brace_in_block);
-					}
-					wasAStatement = true;
+					this.scribe.setIndentation(switchIndentationLevel, wasACase ? caseIndentation : statementIndentation);
+					this.scribe.printComment();
+					String bracePosition = wasACase ? this.preferences.brace_position_for_block_in_case : this.preferences.brace_position_for_block;
+					formatBlock((Block) statement, scope, bracePosition, this.preferences.insert_space_before_opening_brace_in_block);
 					wasACase = false;
+					wasABreak = false;
 				} else {
+					this.scribe.setIndentation(switchIndentationLevel, statementIndentation);
 					this.scribe.printNewLine();
+					this.scribe.printComment();
 					statement.traverse(this, scope);
-					wasAStatement = true;
 					wasACase = false;
+					wasABreak = false;
 				}
 				if (statement instanceof Expression) {
 					/*
@@ -132,17 +126,16 @@
 				} else if (!wasACase) {
 					this.scribe.printNewLine();
 				}
-				this.scribe.printComment();
 			}
 		}
-
-		if ((wasACase || wasAStatement) && this.preferences.indent_switchstatements_compare_to_cases) {
-			this.scribe.unIndent();
-		}
-		if (this.preferences.indent_switchstatements_compare_to_switch) {
-			this.scribe.unIndent();
-		}
 		this.scribe.printNewLine();
+		if (wasABreak) {
+			this.scribe.setIndentation(switchIndentationLevel, 0);
+			this.scribe.printComment();
+		} else {
+			this.scribe.printComment();
+			this.scribe.setIndentation(switchIndentationLevel, 0);
+		}
 		this.scribe.printNextToken(TerminalTokens.TokenNameRBRACE);
 		this.scribe.printComment(CodeFormatter.K_UNKNOWN, Scribe.BASIC_TRAILING_COMMENT);
 		if (switch_brace.equals(DefaultCodeFormatterConstants.NEXT_LINE_SHIFTED)) {
