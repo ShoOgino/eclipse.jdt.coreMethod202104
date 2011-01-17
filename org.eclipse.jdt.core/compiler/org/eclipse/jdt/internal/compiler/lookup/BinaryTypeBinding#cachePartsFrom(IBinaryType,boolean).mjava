@@ -29,7 +29,29 @@ void cachePartsFrom(IBinaryType binaryType, boolean needFieldsAndMethods) {
 		this.tagBits |= binaryType.getTagBits();
 		
 		char[][][] missingTypeNames = binaryType.getMissingTypeNames();
-		if (typeSignature == null) {
+		SignatureWrapper wrapper = null;
+		if (typeSignature != null) {
+			// ClassSignature = ParameterPart(optional) super_TypeSignature interface_signature
+			wrapper = new SignatureWrapper(typeSignature);
+			if (wrapper.signature[wrapper.start] == '<') {
+				// ParameterPart = '<' ParameterSignature(s) '>'
+				wrapper.start++; // skip '<'
+				this.typeVariables = createTypeVariables(wrapper, true, missingTypeNames);
+				wrapper.start++; // skip '>'
+				this.tagBits |=  TagBits.HasUnresolvedTypeVariables;
+				this.modifiers |= ExtraCompilerModifiers.AccGenericSignature;
+			}
+		}
+		TypeVariableBinding[] typeVars = Binding.NO_TYPE_VARIABLES;
+		char[] methodDescriptor = binaryType.getEnclosingMethod();
+		if (methodDescriptor != null) {
+			MethodBinding enclosingMethod = findMethod(methodDescriptor, missingTypeNames);
+			if (enclosingMethod != null) {
+				typeVars = enclosingMethod.typeVariables;
+				this.typeVariables = addMethodTypeVariables(typeVars);			
+			}
+		}
+		if (typeSignature == null)  {
 			char[] superclassName = binaryType.getSuperclassName();
 			if (superclassName != null) {
 				// attempt to find the superclass if it exists in the cache (otherwise - resolve it when requested)
@@ -50,25 +72,6 @@ void cachePartsFrom(IBinaryType binaryType, boolean needFieldsAndMethods) {
 				}
 			}
 		} else {
-			// ClassSignature = ParameterPart(optional) super_TypeSignature interface_signature
-			SignatureWrapper wrapper = new SignatureWrapper(typeSignature);
-			if (wrapper.signature[wrapper.start] == '<') {
-				// ParameterPart = '<' ParameterSignature(s) '>'
-				wrapper.start++; // skip '<'
-				this.typeVariables = createTypeVariables(wrapper, true, missingTypeNames);
-				wrapper.start++; // skip '>'
-				this.tagBits |=  TagBits.HasUnresolvedTypeVariables;
-				this.modifiers |= ExtraCompilerModifiers.AccGenericSignature;
-			}
-			TypeVariableBinding[] typeVars = Binding.NO_TYPE_VARIABLES;
-			char[] methodDescriptor = binaryType.getEnclosingMethod();
-			if (methodDescriptor != null) {
-				MethodBinding enclosingMethod = findMethod(methodDescriptor, missingTypeNames);
-				if (enclosingMethod != null) {
-					typeVars = enclosingMethod.typeVariables;
-				}
-			}
-
 			// attempt to find the superclass if it exists in the cache (otherwise - resolve it when requested)
 			this.superclass = (ReferenceBinding) this.environment.getTypeFromTypeSignature(wrapper, typeVars, this, missingTypeNames);
 			this.tagBits |= TagBits.HasUnresolvedSuperclass;
