@@ -1,0 +1,55 @@
+/**
+ * @see "https://bugs.eclipse.org/bugs/show_bug.cgi?id=334783"
+ */
+public void testParamAnnotations3() throws CoreException {
+	try {
+		createJavaProject("P", new String[] {"src"}, new String[] {"JCL15_LIB"}, "bin", "1.5");
+		String source = "package p;\n" +
+				"public class X<T> {\n" +
+				"	X<String> field;\n" +
+				"	@Inject\n" +
+				"	public void Test(int i, @Default @Marker(id=1) String processor, int k) {}\n" +
+				"}\n" +
+				"@interface Inject{\n" +
+				"}\n" +
+				"@interface Marker {\n" +
+				"	int id() default 0;\n" +
+				"}\n" +
+				"@interface Default{\n" +
+				"}";
+		createFolder("/P/src/p");
+		createFile(
+			"/P/src/p/X.java",
+			source
+		);
+		waitForAutoBuild();
+		
+		ICompilationUnit unit = getCompilationUnit("/P/src/p/X.java"); 
+		IJavaElement[] variable = ((ICodeAssist) unit).codeSelect(source.indexOf("processor"), "processor".length());
+
+		assertEquals(1, variable.length);
+		String annotationString1 = "@Default [in processor [in Test(int, String, int) [in X [in X.java [in p [in src [in P]]]]]]]";
+		String annotationString2 = "@Marker [in processor [in Test(int, String, int) [in X [in X.java [in p [in src [in P]]]]]]]";
+		assertEquals(annotationString1, ((LocalVariable)variable[0]).getAnnotations()[0].toString());
+		IType type = unit.getType("X");
+		
+		IMethod method = type.getMethods()[0];
+		IAnnotation[] parameterAnnotations = method.getParameters()[1].getAnnotations();
+		assertEquals("Wrong length", 2, parameterAnnotations.length);
+		assertEquals(annotationString1, parameterAnnotations[0].toString());
+		IAnnotation iAnnotation = parameterAnnotations[1];
+		assertEquals(annotationString2, iAnnotation.toString());
+		IMemberValuePair[] memberValuePairs = iAnnotation.getMemberValuePairs();
+		assertEquals("Wrong number of pairs", 1, memberValuePairs.length);
+		StringBuffer output = new StringBuffer();
+		output.append(memberValuePairs[0].getMemberName());
+		output.append(' ');
+		output.append(memberValuePairs[0].getValue());
+		assertEquals("Wrong value", "id 1", String.valueOf(output));
+		assertEquals("Wrong length", 0, method.getParameters()[0].getAnnotations().length);
+		assertEquals("Wrong length", 0, method.getParameters()[2].getAnnotations().length);
+	} finally {
+		deleteProject("P");
+	}
+}
+

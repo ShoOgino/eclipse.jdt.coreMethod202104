@@ -1,0 +1,76 @@
+/**
+ * @see "https://bugs.eclipse.org/bugs/show_bug.cgi?id=334783"
+ */
+public void testParamAnnotations4() throws CoreException, IOException {
+	try {
+		IJavaProject project = createJavaProject("P", new String[] {"src"}, new String[] {"JCL15_LIB"}, "bin", "1.5");
+		String sourceX =
+				"package p;\n" +
+				"public class X<T> {\n" +
+				"	X<String> field;\n" +
+				"	@Inject @Marker(id=3)\n" +
+				"	public void Test(final int i, @Default final @Marker(id=1) String processor, int k) {}\n" +
+				"}";
+		String[] pathAndContents = new String[]{"p/X.java",
+				sourceX,
+				"p/Inject.java",
+				"package p;\n"+
+				"public @interface Inject{\n" +
+				"}",
+				"p/Marker.java",
+				"package p;\n" +
+				"public @interface Marker {\n" +
+				"	int id() default 0;\n" +
+				"}",
+				"p/Default.java",
+				"package p;\n" +
+				"public @interface Default{\n" +
+				"}"};
+		addLibrary(project, "lib334783_2.jar", "lib334783_2src.zip", pathAndContents, JavaCore.VERSION_1_5);
+		
+		waitForAutoBuild();
+		IPackageFragmentRoot root = project.getPackageFragmentRoot(getFile("/P/lib334783_2.jar"));
+		IType type = root.getPackageFragment("p").getClassFile("X.class").getType();
+		String annotationString1 = "@p.Default [in processor [in Test(int, java.lang.String, int) [in X [in X.class [in p [in lib334783_2.jar [in P]]]]]]]";
+		String annotationString2 = "@p.Marker [in processor [in Test(int, java.lang.String, int) [in X [in X.class [in p [in lib334783_2.jar [in P]]]]]]]";
+		IMethod method = type.getMethods()[1];
+		IAnnotation[] annotations = method.getAnnotations();
+		assertEquals("Wrong length", 2, annotations.length);
+		assertEquals("@p.Inject [in Test(int, java.lang.String, int) [in X [in X.class [in p [in lib334783_2.jar [in P]]]]]]", annotations[0].toString());
+		IAnnotation annotation = annotations[1];
+		assertEquals("@p.Marker [in Test(int, java.lang.String, int) [in X [in X.class [in p [in lib334783_2.jar [in P]]]]]]", annotation.toString());
+		IMemberValuePair[] memberValuePairs = annotation.getMemberValuePairs();
+		assertEquals("Wrong number of pairs", 1, memberValuePairs.length);
+		StringBuffer output = new StringBuffer();
+		output.append(memberValuePairs[0].getMemberName());
+		output.append(' ');
+		output.append(memberValuePairs[0].getValue());
+		assertEquals("Wrong value", "id 3", String.valueOf(output));
+		ILocalVariable localVariable = method.getParameters()[1];
+		ISourceRange sourceRange = localVariable.getSourceRange();
+		String localSource = sourceX.substring(
+				sourceRange.getOffset(),
+				sourceRange.getOffset() + sourceRange.getLength());
+		assertEquals("Wrong source", "@Default final @Marker(id=1) String processor", localSource);
+		assertTrue("Wrong modifiers", Flags.isFinal(localVariable.getFlags()));
+		IAnnotation[] parameterAnnotations = localVariable.getAnnotations();
+		assertEquals("Wrong length", 2, parameterAnnotations.length);
+		assertEquals(annotationString1, parameterAnnotations[0].toString());
+		annotation = parameterAnnotations[1];
+		assertEquals(annotationString2, annotation.toString());
+		memberValuePairs = annotation.getMemberValuePairs();
+		assertEquals("Wrong number of pairs", 1, memberValuePairs.length);
+		output = new StringBuffer();
+		output.append(memberValuePairs[0].getMemberName());
+		output.append(' ');
+		output.append(memberValuePairs[0].getValue());
+		assertEquals("Wrong value", "id 1", String.valueOf(output));
+		localVariable = method.getParameters()[0];
+		assertEquals("Wrong length", 0, localVariable.getAnnotations().length);
+		assertTrue("Wrong modifiers", Flags.isFinal(localVariable.getFlags()));
+		assertEquals("Wrong length", 0, method.getParameters()[2].getAnnotations().length);
+	} finally {
+		deleteProject("P");
+	}
+}
+
