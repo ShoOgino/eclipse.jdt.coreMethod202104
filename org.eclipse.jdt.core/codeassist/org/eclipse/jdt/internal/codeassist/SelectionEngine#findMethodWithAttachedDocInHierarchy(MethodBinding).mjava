@@ -1,0 +1,41 @@
+	private Object findMethodWithAttachedDocInHierarchy(final MethodBinding method) throws JavaModelException {
+		ReferenceBinding type= method.declaringClass;
+		final SelectionRequestor requestor1 = (SelectionRequestor) this.requestor;
+		return new InheritDocVisitor() {
+			public Object visit(ReferenceBinding currType) throws JavaModelException {
+				MethodBinding overridden =  findOverriddenMethodInType(currType, method);
+				if (overridden == null)
+					return InheritDocVisitor.CONTINUE;
+				TypeBinding args[] = overridden.parameters;
+				String names[] = new String[args.length];
+				for (int i = 0; i < args.length; i++) {
+					names[i] = Signature.createTypeSignature(args[i].sourceName(), false);
+				}
+				IMember member = (IMember) requestor1.findMethodFromBinding(overridden, names, overridden.declaringClass);
+				if (member == null)
+					return InheritDocVisitor.CONTINUE;
+				if (member.getAttachedJavadoc(null) != null ) {  
+					// for binary methods with attached javadoc and no source attached
+					return overridden;
+				}
+				IOpenable openable = member.getOpenable();
+				if (openable == null)
+					return InheritDocVisitor.CONTINUE;
+				IBuffer buf= openable.getBuffer();
+				if (buf == null) {
+					// no source attachment found. This method maybe the one. Stop.
+					return InheritDocVisitor.STOP_BRANCH;
+				}
+
+				ISourceRange javadocRange= member.getJavadocRange();
+				if (javadocRange == null)
+					return InheritDocVisitor.CONTINUE;	// this method doesn't have javadoc, continue to look.
+				String rawJavadoc= buf.getText(javadocRange.getOffset(), javadocRange.getLength());
+				if (rawJavadoc != null) {
+					return overridden;
+				}
+				return InheritDocVisitor.CONTINUE;
+			}
+		}.visitInheritDoc(type);
+	}
+
