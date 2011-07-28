@@ -5,6 +5,7 @@
 		ParameterizedGenericMethodBinding methodSubstitute;
 		TypeVariableBinding[] typeVariables = originalMethod.typeVariables;
 		TypeBinding[] substitutes = invocationSite.genericTypeArguments();
+		InferenceContext inferenceContext = null;
 		TypeBinding[] uncheckedArguments = null;
 		computeSubstitutes: {
 			if (substitutes != null) {
@@ -19,7 +20,7 @@
 			// perform type argument inference (15.12.2.7)
 			// initializes the map of substitutes (var --> type[][]{ equal, extends, super}
 			TypeBinding[] parameters = originalMethod.parameters;
-			InferenceContext inferenceContext = new InferenceContext(originalMethod);
+			inferenceContext = new InferenceContext(originalMethod);
 			methodSubstitute = inferFromArgumentTypes(scope, originalMethod, arguments, parameters, inferenceContext);
 			if (methodSubstitute == null)
 				return null;
@@ -47,12 +48,26 @@
 			}
 		}
 
-		// bounds check
+		/* bounds check: https://bugs.eclipse.org/bugs/show_bug.cgi?id=242159, Inferred types may contain self reference
+		   in formal bounds. If "T extends I<T>" is a original type variable and T was inferred to be I<T> due possibly
+		   to under constraints and resultant glb application per 15.12.2.8, using this.typeArguments to drive the bounds
+		   check against itself is doomed to fail. For, the variable T would after substitution be I<I<T>> and would fail
+		   bounds check against I<T>. Use the inferred types from the context directly - see that there is one round of
+		   extra substitution that has taken place to properly substitute a remaining unresolved variable which also appears
+		   in a formal bound  (So we really have a bounds mismatch between I<I<T>> and I<I<I<T>>>, in the absence of a fix.)
+		*/
+		Substitution substitution = null;
+		if (inferenceContext != null) {
+			substitution = new LingeringTypeVariableEliminator(typeVariables, inferenceContext.substitutes, scope);
+		} else {
+			substitution = methodSubstitute;
+		}
 		for (int i = 0, length = typeVariables.length; i < length; i++) {
 		    TypeVariableBinding typeVariable = typeVariables[i];
-		    TypeBinding substitute = methodSubstitute.typeArguments[i];
+		    TypeBinding substitute = methodSubstitute.typeArguments[i]; // retain for diagnostics
+		    TypeBinding substituteForChecks = Scope.substitute(new LingeringTypeVariableEliminator(typeVariables, null, scope), substitute); // while using this for bounds check
 		    if (uncheckedArguments != null && uncheckedArguments[i] == null) continue; // only bound check if inferred through 15.12.2.6
-			switch (typeVariable.boundCheck(methodSubstitute, substitute)) {
+			switch (typeVariable.boundCheck(substitution, substituteForChecks)) {
 				case TypeConstants.MISMATCH :
 			        // incompatible due to bound check
 					int argLength = arguments.length;

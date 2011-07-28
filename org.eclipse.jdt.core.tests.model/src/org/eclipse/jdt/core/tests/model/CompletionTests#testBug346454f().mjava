@@ -1,0 +1,48 @@
+// https://bugs.eclipse.org/bugs/show_bug.cgi?id=346454
+// Qualified allocation case. Should get proposals for constructor completion
+// This tests changes in CompleteOnQualifiedAllocationExpression
+public void testBug346454f() throws JavaModelException {
+	Map options = COMPLETION_PROJECT.getOptions(true);
+	Object savedOptionCompliance = options.get(CompilerOptions.OPTION_Compliance);
+	Object savedOptionSource = options.get(CompilerOptions.OPTION_Source);
+	try {
+		options.put(CompilerOptions.OPTION_Compliance, CompilerOptions.VERSION_1_7);
+		options.put(CompilerOptions.OPTION_Source, CompilerOptions.VERSION_1_7);
+		COMPLETION_PROJECT.setOptions(options);
+		this.workingCopies = new ICompilationUnit[2];
+		this.workingCopies[0] = getWorkingCopy(
+			"/Completion/src/test/Test.java",
+			"package test;" +
+			"import pack.Test;\n"+
+			"public class X {\n" +
+			"	public void foo() {\n" +
+			"     Test<String>.T2<String> t = new Test<>().new T2<>()\n" +
+			"   }" +
+			"}\n");
+		
+		this.workingCopies[1] = getWorkingCopy(
+				"/Completion/src/pack/Test.java",
+				"package pack;"+
+				"public class Test<T> {\n" +
+				"	public class T2<Z> {\n" +
+				"		public T2(Z z){}\n" +
+				"   }" +
+				"}\n");
+
+		CompletionTestsRequestor2 requestor = new CompletionTestsRequestor2(true);
+		String str = this.workingCopies[0].getSource();
+		String completeBehind = "new Test<>().new T2<>(";
+		int cursorLocation = str.lastIndexOf(completeBehind) + completeBehind.length();
+		this.workingCopies[0].codeComplete(cursorLocation, requestor, this.wcOwner);
+		assertResults(
+			"T2[METHOD_REF<CONSTRUCTOR>]{, Lpack.Test<Ljava.lang.Object;>.T2;, (TZ;)V, T2, (z), " + (R_DEFAULT + R_RESOLVED + R_INTERESTING + R_NON_RESTRICTED) + "}\n" +
+			"Test<java.lang.Object>.T2[ANONYMOUS_CLASS_DECLARATION]{, Lpack.Test<Ljava.lang.Object;>.T2;, (TZ;)V, null, (z), " + (R_DEFAULT + R_RESOLVED + R_INTERESTING + R_NON_RESTRICTED) + "}",
+			requestor.getResults());
+	} finally {
+		// Restore compliance settings.
+		options.put(CompilerOptions.OPTION_Compliance, savedOptionCompliance);
+		options.put(CompilerOptions.OPTION_Source, savedOptionSource);
+		COMPLETION_PROJECT.setOptions(options);	
+	}
+}
+

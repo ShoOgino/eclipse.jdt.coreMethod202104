@@ -1,0 +1,73 @@
+	public void testDoStatement2() throws Exception {
+		createProject("P_17", JavaCore.VERSION_1_7);
+		IPackageFragmentRoot currentSourceFolder = getPackageFragmentRoot("P_17", "src");
+
+		try {
+			IPackageFragment pack1= currentSourceFolder.createPackageFragment("test1", false, null);
+			StringBuffer buf= new StringBuffer();
+			buf.append("package test1;\n");
+			buf.append("public class E {\n");
+			buf.append("    public void foo() {\n");
+			buf.append("        do {\n");
+			buf.append("            foo();\n");
+			buf.append("        } while (true);\n");
+			buf.append("    }\n");
+			buf.append("}\n");
+			ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+	
+			CompilationUnit astRoot= createAST(AST.JLS4, cu, true);
+			ASTRewrite rewrite= ASTRewrite.create(astRoot.getAST());
+			AST ast= astRoot.getAST();
+	
+			TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+			MethodDeclaration methodDecl= findMethodDeclaration(type, "foo");
+			Block block= methodDecl.getBody();
+			assertTrue("Parse errors", (block.getFlags() & ASTNode.MALFORMED) == 0);
+	
+			List statements= block.statements();
+			assertTrue("Number of statements not 1", statements.size() == 1);
+	
+			{ // replace body statement with body
+				DoStatement doStatement= (DoStatement) statements.get(0);
+	
+	
+				TryStatement newTry= ast.newTryStatement();
+				newTry.getBody().statements().add(ast.newReturnStatement());
+				CatchClause newCatchClause= ast.newCatchClause();
+				SingleVariableDeclaration varDecl= ast.newSingleVariableDeclaration();
+				varDecl.setType(ast.newSimpleType(ast.newSimpleName("Exception")));
+				varDecl.setName(ast.newSimpleName("e"));
+				newCatchClause.setException(varDecl);
+				newTry.catchClauses().add(newCatchClause);
+				VariableDeclarationFragment fragment = ast.newVariableDeclarationFragment();
+				fragment.setName(ast.newSimpleName("reader2"));
+				fragment.setInitializer(ast.newNullLiteral());
+				VariableDeclarationExpression resource = ast.newVariableDeclarationExpression(fragment);
+				resource.setType(ast.newSimpleType(ast.newSimpleName("Reader")));
+
+				rewrite.getListRewrite(newTry, TryStatement.RESOURCES_PROPERTY).insertLast(resource, null);
+	
+				rewrite.replace(doStatement.getBody(), newTry, null);
+			}
+	
+	
+			String preview= evaluateRewrite(cu, rewrite);
+	
+			buf= new StringBuffer();
+			buf.append("package test1;\n");
+			buf.append("public class E {\n");
+			buf.append("    public void foo() {\n");
+			buf.append("        do\n");
+			buf.append("            try (Reader reader2 = null) {\n");
+			buf.append("                return;\n");
+			buf.append("            } catch (Exception e) {\n");
+			buf.append("            }\n");
+			buf.append("        while (true);\n");
+			buf.append("    }\n");
+			buf.append("}\n");
+			assertEqualString(preview, buf.toString());
+		} finally {
+			deleteProject("P_17");
+		}
+	}
+

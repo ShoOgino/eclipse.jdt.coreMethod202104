@@ -1,0 +1,46 @@
+// https://bugs.eclipse.org/bugs/show_bug.cgi?id=350652
+// subclass exception type not allowed in multi-catch
+// Test relevance of sub-type from expected types when no prefix before caret (IZZAException is expected here because of the 
+// throw, yet is a less relevant proposal since a child, IZZException is present in the same multi-catch).
+// Also, sub-type should not be an expected type.
+// types in same CU
+public void testBug350652l() throws JavaModelException {
+	Map options = COMPLETION_PROJECT.getOptions(true);
+	Object savedOptionCompliance = options.get(CompilerOptions.OPTION_Compliance);
+	try {
+		options.put(CompilerOptions.OPTION_Compliance, CompilerOptions.VERSION_1_7);
+		COMPLETION_PROJECT.setOptions(options);
+		this.workingCopies = new ICompilationUnit[1];
+		this.workingCopies[0] = getWorkingCopy(
+			"/Completion/src/test/Test.java",
+			"package test;"+
+			"public class Test {\n" +
+			"	public void foo() {\n" +
+			"      try {\n" +
+			"			throw new IZZAException();\n" +
+			"      }\n" +
+			"      catch (IZZException | ) {\n" +
+			"      }\n" +
+			"   }" +
+			"}\n" +
+			"public class IZZException extends Exception {\n" +
+			"}\n" +
+			"public class IZZAException extends IZZException {\n" +
+			"}\n");
+
+		CompletionTestsRequestor2 requestor = new CompletionTestsRequestor2(true);
+		String str = this.workingCopies[0].getSource();
+		String completeBehind = "IZZException |";
+		int cursorLocation = str.lastIndexOf(completeBehind) + completeBehind.length();
+		this.workingCopies[0].codeComplete(cursorLocation, requestor, this.wcOwner);
+		
+		assertResults(
+			"IZZAException[TYPE_REF]{IZZAException, test, Ltest.IZZAException;, null, null, " + (R_DEFAULT + R_RESOLVED + R_CASE + R_UNQUALIFIED + R_EXCEPTION + R_NON_RESTRICTED) + "}",
+			requestor.getResults());
+	} finally {
+		// Restore compliance settings.
+		options.put(CompilerOptions.OPTION_Compliance, savedOptionCompliance);
+		COMPLETION_PROJECT.setOptions(options);	
+	}
+}
+

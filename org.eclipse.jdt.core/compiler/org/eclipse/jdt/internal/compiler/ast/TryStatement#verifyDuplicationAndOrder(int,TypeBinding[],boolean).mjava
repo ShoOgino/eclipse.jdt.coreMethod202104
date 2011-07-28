@@ -1,0 +1,67 @@
+protected void verifyDuplicationAndOrder(int length, TypeBinding[] argumentTypes, boolean containsUnionTypes) {
+	// Verify that the catch clause are ordered in the right way:
+	// more specialized first.
+	if (containsUnionTypes) {
+		int totalCount = 0;
+		ReferenceBinding[][] allExceptionTypes = new ReferenceBinding[length][];
+		for (int i = 0; i < length; i++) {
+			ReferenceBinding currentExceptionType = (ReferenceBinding) argumentTypes[i];
+			TypeReference catchArgumentType = this.catchArguments[i].type;
+			if ((catchArgumentType.bits & ASTNode.IsUnionType) != 0) {
+				TypeReference[] typeReferences = ((UnionTypeReference) catchArgumentType).typeReferences;
+				int typeReferencesLength = typeReferences.length;
+				ReferenceBinding[] unionExceptionTypes = new ReferenceBinding[typeReferencesLength];
+				for (int j = 0; j < typeReferencesLength; j++) {
+					unionExceptionTypes[j] = (ReferenceBinding) typeReferences[j].resolvedType;
+				}
+				totalCount += typeReferencesLength;
+				allExceptionTypes[i] = unionExceptionTypes;
+			} else {
+				allExceptionTypes[i] = new ReferenceBinding[] { currentExceptionType };
+				totalCount++;
+			}
+		}
+		this.caughtExceptionTypes = new ReferenceBinding[totalCount];
+		this.caughtExceptionsCatchBlocks  = new int[totalCount];
+		for (int i = 0, l = 0; i < length; i++) {
+			ReferenceBinding[] currentExceptions = allExceptionTypes[i];
+			loop: for (int j = 0, max = currentExceptions.length; j < max; j++) {
+				ReferenceBinding exception = currentExceptions[j];
+				this.caughtExceptionTypes[l] = exception;
+				this.caughtExceptionsCatchBlocks[l++] = i;
+				// now iterate over all previous exceptions
+				for (int k = 0; k < i; k++) {
+					ReferenceBinding[] exceptions = allExceptionTypes[k];
+					for (int n = 0, max2 = exceptions.length; n < max2; n++) {
+						ReferenceBinding currentException = exceptions[n];
+						if (exception.isCompatibleWith(currentException)) {
+							TypeReference catchArgumentType = this.catchArguments[i].type;
+							if ((catchArgumentType.bits & ASTNode.IsUnionType) != 0) {
+								catchArgumentType = ((UnionTypeReference) catchArgumentType).typeReferences[j];
+							}
+							this.scope.problemReporter().wrongSequenceOfExceptionTypesError(
+								catchArgumentType,
+								exception,
+								currentException);
+							break loop;
+						}
+					}
+				}
+			}
+		}
+	} else {
+		this.caughtExceptionTypes = new ReferenceBinding[length];
+		for (int i = 0; i < length; i++) {
+			this.caughtExceptionTypes[i] = (ReferenceBinding) argumentTypes[i];
+			for (int j = 0; j < i; j++) {
+				if (this.caughtExceptionTypes[i].isCompatibleWith(argumentTypes[j])) {
+					this.scope.problemReporter().wrongSequenceOfExceptionTypesError(
+						this.catchArguments[i].type,
+						this.caughtExceptionTypes[i],
+						argumentTypes[j]);
+				}
+			}
+		}
+	}
+}
+

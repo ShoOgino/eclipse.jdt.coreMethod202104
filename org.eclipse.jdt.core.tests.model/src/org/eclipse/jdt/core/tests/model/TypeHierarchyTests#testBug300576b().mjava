@@ -1,0 +1,45 @@
+// Bug 300576 - NPE Computing type hierarchy when compliance doesn't match libraries
+// test that a bogus java.lang.Enum (non-generic) doesn't cause NPE
+public void testBug300576b() throws CoreException {
+	IJavaProject prj = null;
+	try {
+		prj = createJavaProject("Bug300576", new String[] {"src"}, new String[] {"JCL_LIB"}, "bin", "1.5");
+		createFolder("/Bug300576/src/p");
+		createFolder("/Bug300576/src/java/lang");
+		createFile("/Bug300576/src/java/lang/Enum.java",
+				"package java.lang;\n" +
+				"public class Enum {}\n");
+		createFile("/Bug300576/src/p/Outer.java",
+				"package p;\n" + 
+				"class Outer {\n" + 
+				"    enum A {\n" + 
+				"        GREEN, DARK_GREEN, BLACK;\n" +
+				"        /** Javadoc of getNext() */\n" + 
+				"        A getNext() {\n" + 
+				"            switch (this) {\n" + 
+				"                case GREEN : return DARK_GREEN;\n" + 
+				"                case DARK_GREEN : return BLACK;\n" + 
+				"                case BLACK : return GREEN;\n" + 
+				"                default : return null;\n" + 
+				"            }\n" + 
+				"        }\n" + 
+				"    }\n" + 
+				"    {\n" + 
+				"        A a= A.GREEN.getNext();\n" + 
+				"    }\n" + 
+				"}\n");
+		IType a = getCompilationUnit("Bug300576", "src", "p", "Outer.java").getType("Outer").getType("A");
+		IRegion region = JavaCore.newRegion();
+		region.add(getPackageFragmentRoot("Bug300576", "src"));
+		ITypeHierarchy hierarchy = prj.newTypeHierarchy(a, region, new NullProgressMonitor());
+		assertHierarchyEquals(
+				"Focus: A [in Outer [in Outer.java [in p [in src [in Bug300576]]]]]\n" + 
+				"Super types:\n" + 
+				"Sub types:\n",
+				hierarchy);
+	} finally {
+		if (prj != null)
+			deleteProject(prj);
+	}	
+}
+

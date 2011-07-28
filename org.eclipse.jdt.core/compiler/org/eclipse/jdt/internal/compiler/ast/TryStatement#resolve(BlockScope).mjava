@@ -2,8 +2,39 @@ public void resolve(BlockScope upperScope) {
 	// special scope for secret locals optimization.
 	this.scope = new BlockScope(upperScope);
 
-	BlockScope tryScope = new BlockScope(this.scope);
 	BlockScope finallyScope = null;
+    BlockScope resourceManagementScope = null; // Single scope to hold all resources and additional secret variables.
+	int resourceCount = this.resources.length;
+	if (resourceCount > 0) {
+		resourceManagementScope = new BlockScope(this.scope);
+		this.primaryExceptionVariable =
+			new LocalVariableBinding(TryStatement.SECRET_PRIMARY_EXCEPTION_VARIABLE_NAME, this.scope.getJavaLangThrowable(), ClassFileConstants.AccDefault, false);
+		resourceManagementScope.addLocalVariable(this.primaryExceptionVariable);
+		this.primaryExceptionVariable.setConstant(Constant.NotAConstant); // not inlinable
+		this.caughtThrowableVariable =
+			new LocalVariableBinding(TryStatement.SECRET_CAUGHT_THROWABLE_VARIABLE_NAME, this.scope.getJavaLangThrowable(), ClassFileConstants.AccDefault, false);
+		resourceManagementScope.addLocalVariable(this.caughtThrowableVariable);
+		this.caughtThrowableVariable.setConstant(Constant.NotAConstant); // not inlinable
+	}
+	for (int i = 0; i < resourceCount; i++) {
+		this.resources[i].resolve(resourceManagementScope);
+		LocalVariableBinding localVariableBinding = this.resources[i].binding;
+		if (localVariableBinding != null && localVariableBinding.isValidBinding()) {
+			localVariableBinding.modifiers |= ClassFileConstants.AccFinal;
+			localVariableBinding.tagBits |= TagBits.IsResource;
+			TypeBinding resourceType = localVariableBinding.type;
+			if (resourceType instanceof ReferenceBinding) {
+				if (resourceType.findSuperTypeOriginatingFrom(TypeIds.T_JavaLangAutoCloseable, false /*AutoCloseable is not a class*/) == null && resourceType.isValidBinding()) {
+					upperScope.problemReporter().resourceHasToImplementAutoCloseable(resourceType, this.resources[i].type);
+					localVariableBinding.type = new ProblemReferenceBinding(CharOperation.splitOn('.', resourceType.shortReadableName()), null, ProblemReasons.InvalidTypeForAutoManagedResource);
+				}
+			} else if (resourceType != null) { // https://bugs.eclipse.org/bugs/show_bug.cgi?id=349862, avoid secondary error in problematic null case
+				upperScope.problemReporter().resourceHasToImplementAutoCloseable(resourceType, this.resources[i].type);
+				localVariableBinding.type = new ProblemReferenceBinding(CharOperation.splitOn('.', resourceType.shortReadableName()), null, ProblemReasons.InvalidTypeForAutoManagedResource);
+			}
+		}
+	}
+	BlockScope tryScope = new BlockScope(resourceManagementScope != null ? resourceManagementScope : this.scope);
 
 	if (this.finallyBlock != null) {
 		if (this.finallyBlock.isEmptyBlock()) {
@@ -49,7 +80,8 @@ public void resolve(BlockScope upperScope) {
 			}
 			this.finallyBlock.resolveUsing(finallyScope);
 			// force the finally scope to have variable positions shifted after its try scope and catch ones
-			finallyScope.shiftScopes = new BlockScope[this.catchArguments == null ? 1 : this.catchArguments.length+1];
+			int shiftScopesLength = this.catchArguments == null ? 1 : this.catchArguments.length + 1;
+			finallyScope.shiftScopes = new BlockScope[shiftScopesLength];
 			finallyScope.shiftScopes[0] = tryScope;
 		}
 	}
@@ -59,6 +91,7 @@ public void resolve(BlockScope upperScope) {
 	if (this.catchBlocks != null) {
 		int length = this.catchArguments.length;
 		TypeBinding[] argumentTypes = new TypeBinding[length];
+		boolean containsUnionTypes = false;
 		boolean catchHasError = false;
 		for (int i = 0; i < length; i++) {
 			BlockScope catchScope = new BlockScope(this.scope);
@@ -66,7 +99,9 @@ public void resolve(BlockScope upperScope) {
 				finallyScope.shiftScopes[i+1] = catchScope;
 			}
 			// side effect on catchScope in resolveForCatch(..)
-			if ((argumentTypes[i] = this.catchArguments[i].resolveForCatch(catchScope)) == null) {
+			Argument catchArgument = this.catchArguments[i];
+			containsUnionTypes |= (catchArgument.type.bits & ASTNode.IsUnionType) != 0;
+			if ((argumentTypes[i] = catchArgument.resolveForCatch(catchScope)) == null) {
 				catchHasError = true;
 			}
 			this.catchBlocks[i].resolveUsing(catchScope);
@@ -76,15 +111,7 @@ public void resolve(BlockScope upperScope) {
 		}
 		// Verify that the catch clause are ordered in the right way:
 		// more specialized first.
-		this.caughtExceptionTypes = new ReferenceBinding[length];
-		for (int i = 0; i < length; i++) {
-			this.caughtExceptionTypes[i] = (ReferenceBinding) argumentTypes[i];
-			for (int j = 0; j < i; j++) {
-				if (this.caughtExceptionTypes[i].isCompatibleWith(argumentTypes[j])) {
-					this.scope.problemReporter().wrongSequenceOfExceptionTypesError(this, this.caughtExceptionTypes[i], i, argumentTypes[j]);
-				}
-			}
-		}
+		verifyDuplicationAndOrder(length, argumentTypes, containsUnionTypes);
 	} else {
 		this.caughtExceptionTypes = new ReferenceBinding[0];
 	}

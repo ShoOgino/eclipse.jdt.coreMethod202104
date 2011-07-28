@@ -1,0 +1,59 @@
+	/*
+	 * https://bugs.eclipse.org/bugs/show_bug.cgi?id=193979
+	 */
+	public void test0678() throws JavaModelException {
+		ICompilationUnit workingCopy = null;
+		try {
+			String contents =
+				"public class X {\n" +
+				"	public String foo() {\n" +
+				"		return((true ? \"\" : (\"Hello\" + \" World\") + \"!\"));\n" +
+				"	}\n" +
+				"}";
+			workingCopy = getWorkingCopy("/Converter/src/X.java", true/*resolve*/);
+			workingCopy.getBuffer().setContents(contents.toCharArray());
+			ASTNode node = runConversion(AST.JLS4, workingCopy, true);			
+			assertEquals("Not a compilation unit", ASTNode.COMPILATION_UNIT, node.getNodeType());
+			CompilationUnit unit = (CompilationUnit) node;
+			String expectedOutput = "Dead code";
+			assertProblemsSize(unit, 1, expectedOutput);
+			node = getASTNode(unit, 0, 0, 0);
+			assertEquals("Not a return statement", ASTNode.RETURN_STATEMENT, node.getNodeType());
+			ReturnStatement returnStatement = (ReturnStatement) node;
+			Expression expression = returnStatement.getExpression();
+			assertNotNull("No expression", expression);
+			assertEquals("Not a parenthesized expression", ASTNode.PARENTHESIZED_EXPRESSION, expression.getNodeType());
+			expression = ((ParenthesizedExpression) expression).getExpression();
+			assertEquals("Not a parenthesized expression", ASTNode.PARENTHESIZED_EXPRESSION, expression.getNodeType());
+			expression = ((ParenthesizedExpression) expression).getExpression();
+			assertEquals("Not a conditional expression", ASTNode.CONDITIONAL_EXPRESSION, expression.getNodeType());
+			ConditionalExpression conditionalExpression = (ConditionalExpression) expression;
+			final Expression elseExpression = conditionalExpression.getElseExpression();
+			assertEquals("Not an infix expression", ASTNode.INFIX_EXPRESSION, elseExpression.getNodeType());
+			InfixExpression infixExpression = (InfixExpression) elseExpression;
+			List extendedOperands = infixExpression.extendedOperands();
+			assertEquals("wrong size", 0, extendedOperands.size());
+			Expression leftOperand = infixExpression.getLeftOperand();
+			assertEquals("Not a parenthesized expression", ASTNode.PARENTHESIZED_EXPRESSION, leftOperand.getNodeType());
+			ParenthesizedExpression parenthesizedExpression = (ParenthesizedExpression) leftOperand;
+			assertEquals("Not an infix expression", ASTNode.INFIX_EXPRESSION, parenthesizedExpression.getExpression().getNodeType());
+			Expression rightOperand = infixExpression.getRightOperand();
+			assertEquals("Not a string literal", ASTNode.STRING_LITERAL, rightOperand.getNodeType());
+			StringLiteral stringLiteral = (StringLiteral) rightOperand;
+			assertEquals("wrong value", "!", stringLiteral.getLiteralValue());
+			infixExpression = (InfixExpression) parenthesizedExpression.getExpression();
+			leftOperand = infixExpression.getLeftOperand();
+			assertEquals("Not a string literal", ASTNode.STRING_LITERAL, leftOperand.getNodeType());
+			stringLiteral = (StringLiteral) leftOperand;
+			assertEquals("wrong value", "Hello", stringLiteral.getLiteralValue());
+			rightOperand = infixExpression.getRightOperand();
+			assertEquals("Not a string literal", ASTNode.STRING_LITERAL, rightOperand.getNodeType());
+			stringLiteral = (StringLiteral) rightOperand;
+			assertEquals("wrong value", " World", stringLiteral.getLiteralValue());
+			assertEquals("Wrong size", 0, infixExpression.extendedOperands().size());
+		} finally {
+			if (workingCopy != null)
+				workingCopy.discardWorkingCopy();
+		}
+	}
+

@@ -13,6 +13,12 @@ public FlowInfo analyseCode(BlockScope currentScope, FlowContext flowContext, Fl
 	if (this.anyExceptionVariable != null) {
 		this.anyExceptionVariable.useFlag = LocalVariableBinding.USED;
 	}
+	if (this.primaryExceptionVariable != null) {
+		this.primaryExceptionVariable.useFlag = LocalVariableBinding.USED;
+	}
+	if (this.caughtThrowableVariable != null) {
+		this.caughtThrowableVariable.useFlag = LocalVariableBinding.USED;
+	}
 	if (this.returnAddressVariable != null) { // TODO (philippe) if subroutine is escaping, unused
 		this.returnAddressVariable.useFlag = LocalVariableBinding.USED;
 	}
@@ -24,6 +30,8 @@ public FlowInfo analyseCode(BlockScope currentScope, FlowContext flowContext, Fl
 				flowContext,
 				this,
 				this.caughtExceptionTypes,
+				this.caughtExceptionsCatchBlocks,
+				this.catchArguments,
 				null,
 				this.scope,
 				flowInfo.unconditionalInits());
@@ -32,6 +40,21 @@ public FlowInfo analyseCode(BlockScope currentScope, FlowContext flowContext, Fl
 		// only try blocks initialize that member - may consider creating a
 		// separate class if needed
 
+		for (int i = 0, max = this.resources.length; i < max; i++) {
+			flowInfo = this.resources[i].analyseCode(currentScope, handlingContext, flowInfo.copy());
+			this.resources[i].binding.useFlag = LocalVariableBinding.USED; // Is implicitly used anyways.
+			TypeBinding type = this.resources[i].binding.type;
+			if (type != null && type.isValidBinding()) {
+				ReferenceBinding binding = (ReferenceBinding) type;
+				MethodBinding closeMethod = binding.getExactMethod(ConstantPool.Close, new TypeBinding [0], this.scope.compilationUnitScope()); // scope needs to be tighter
+				if (closeMethod != null && closeMethod.returnType.id == TypeIds.T_void) {
+					ReferenceBinding[] thrownExceptions = closeMethod.thrownExceptions;
+					for (int j = 0, length = thrownExceptions.length; j < length; j++) {
+						handlingContext.checkExceptionHandlers(thrownExceptions[j], this.resources[i], flowInfo, currentScope, true);
+					}
+				}
+			}
+		}
 		FlowInfo tryInfo;
 		if (this.tryBlock.isEmptyBlock()) {
 			tryInfo = flowInfo;
@@ -52,18 +75,17 @@ public FlowInfo analyseCode(BlockScope currentScope, FlowContext flowContext, Fl
 			for (int i = 0; i < catchCount; i++) {
 				// keep track of the inits that could potentially have led to this exception handler (for final assignments diagnosis)
 				FlowInfo catchInfo;
-				if (this.caughtExceptionTypes[i].isUncheckedException(true)) {
+				if (isUncheckedCatchBlock(i)) {
 					catchInfo =
 						handlingContext.initsOnFinally.mitigateNullInfoOf(
 							flowInfo.unconditionalCopy().
 								addPotentialInitializationsFrom(
-									handlingContext.initsOnException(
-										this.caughtExceptionTypes[i])).
+									handlingContext.initsOnException(i)).
 								addPotentialInitializationsFrom(tryInfo).
 								addPotentialInitializationsFrom(
 									handlingContext.initsOnReturn));
 				} else {
-					FlowInfo initsOnException = handlingContext.initsOnException(this.caughtExceptionTypes[i]);
+					FlowInfo initsOnException = handlingContext.initsOnException(i);
 					catchInfo =
 						flowInfo.nullInfoLessUnconditionalCopy()
 							.addPotentialInitializationsFrom(initsOnException)
@@ -85,7 +107,7 @@ public FlowInfo analyseCode(BlockScope currentScope, FlowContext flowContext, Fl
 				"(uncheckedExceptionTypes notNil and: [uncheckedExceptionTypes at: index])
 				ifTrue: [catchInits addPotentialInitializationsFrom: tryInits]."
 				*/
-				if (this.tryBlock.statements == null) {
+				if (this.tryBlock.statements == null && this.resources == NO_RESOURCES) { // https://bugs.eclipse.org/bugs/show_bug.cgi?id=350579
 					catchInfo.setReachMode(FlowInfo.UNREACHABLE_OR_DEAD);
 				}
 				catchInfo =
@@ -133,6 +155,8 @@ public FlowInfo analyseCode(BlockScope currentScope, FlowContext flowContext, Fl
 				insideSubContext,
 				this,
 				this.caughtExceptionTypes,
+				this.caughtExceptionsCatchBlocks,
+				this.catchArguments,
 				null,
 				this.scope,
 				flowInfo.unconditionalInits());
@@ -141,6 +165,21 @@ public FlowInfo analyseCode(BlockScope currentScope, FlowContext flowContext, Fl
 		// only try blocks initialize that member - may consider creating a
 		// separate class if needed
 
+		for (int i = 0, max = this.resources.length; i < max; i++) {
+			flowInfo = this.resources[i].analyseCode(currentScope, handlingContext, flowInfo.copy());
+			this.resources[i].binding.useFlag = LocalVariableBinding.USED; // Is implicitly used anyways.
+			TypeBinding type = this.resources[i].binding.type;
+			if (type != null && type.isValidBinding()) {
+				ReferenceBinding binding = (ReferenceBinding) type;
+				MethodBinding closeMethod = binding.getExactMethod(ConstantPool.Close, new TypeBinding [0], this.scope.compilationUnitScope()); // scope needs to be tighter
+				if (closeMethod != null && closeMethod.returnType.id == TypeIds.T_void) {
+					ReferenceBinding[] thrownExceptions = closeMethod.thrownExceptions;
+					for (int j = 0, length = thrownExceptions.length; j < length; j++) {
+						handlingContext.checkExceptionHandlers(thrownExceptions[j], this.resources[j], flowInfo, currentScope);
+					}
+				}
+			}
+		}
 		FlowInfo tryInfo;
 		if (this.tryBlock.isEmptyBlock()) {
 			tryInfo = flowInfo;
@@ -161,18 +200,17 @@ public FlowInfo analyseCode(BlockScope currentScope, FlowContext flowContext, Fl
 			for (int i = 0; i < catchCount; i++) {
 				// keep track of the inits that could potentially have led to this exception handler (for final assignments diagnosis)
 				FlowInfo catchInfo;
-				if (this.caughtExceptionTypes[i].isUncheckedException(true)) {
+				if (isUncheckedCatchBlock(i)) {
 					catchInfo =
 						handlingContext.initsOnFinally.mitigateNullInfoOf(
 							flowInfo.unconditionalCopy().
 								addPotentialInitializationsFrom(
-									handlingContext.initsOnException(
-										this.caughtExceptionTypes[i])).
+									handlingContext.initsOnException(i)).
 								addPotentialInitializationsFrom(tryInfo).
 								addPotentialInitializationsFrom(
 									handlingContext.initsOnReturn));
 				}else {
-					FlowInfo initsOnException = handlingContext.initsOnException(this.caughtExceptionTypes[i]);
+					FlowInfo initsOnException = handlingContext.initsOnException(i);
 					catchInfo =
 						flowInfo.nullInfoLessUnconditionalCopy()
 							.addPotentialInitializationsFrom(initsOnException)
@@ -194,7 +232,7 @@ public FlowInfo analyseCode(BlockScope currentScope, FlowContext flowContext, Fl
 				"(uncheckedExceptionTypes notNil and: [uncheckedExceptionTypes at: index])
 				ifTrue: [catchInits addPotentialInitializationsFrom: tryInits]."
 				*/
-				if (this.tryBlock.statements == null) {
+				if (this.tryBlock.statements == null && this.resources == NO_RESOURCES) { // https://bugs.eclipse.org/bugs/show_bug.cgi?id=350579
 					catchInfo.setReachMode(FlowInfo.UNREACHABLE_OR_DEAD);
 				}
 				catchInfo =

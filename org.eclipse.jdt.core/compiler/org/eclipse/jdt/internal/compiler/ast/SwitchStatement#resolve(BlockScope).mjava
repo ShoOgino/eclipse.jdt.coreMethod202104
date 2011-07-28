@@ -1,6 +1,7 @@
 	public void resolve(BlockScope upperScope) {
 		try {
 			boolean isEnumSwitch = false;
+			boolean isStringSwitch = false;
 			TypeBinding expressionType = this.expression.resolveType(upperScope);
 			if (expressionType != null) {
 				this.expression.computeConversion(upperScope, expressionType, expressionType);
@@ -19,6 +20,9 @@
 					} else if (upperScope.isBoxingCompatibleWith(expressionType, TypeBinding.INT)) {
 						this.expression.computeConversion(upperScope, TypeBinding.INT, expressionType);
 						break checkType;
+					} else if (upperScope.compilerOptions().complianceLevel >= ClassFileConstants.JDK1_7 && expressionType.id == TypeIds.T_JavaLangString) {
+						isStringSwitch = true;
+						break checkType;
 					}
 					upperScope.problemReporter().incorrectSwitchType(this.expression, expressionType);
 					expressionType = null; // fault-tolerance: ignore type mismatch from constants from hereon
@@ -29,50 +33,54 @@
 				int length;
 				// collection of cases is too big but we will only iterate until caseCount
 				this.cases = new CaseStatement[length = this.statements.length];
-				this.constants = new int[length];
-				CaseStatement[] duplicateCaseStatements = null;
-				int duplicateCaseStatementsCounter = 0;
+				if (!isStringSwitch) {
+					this.constants = new int[length];
+				} else {
+					this.stringConstants = new String[length];
+				}
 				int counter = 0;
 				for (int i = 0; i < length; i++) {
 					Constant constant;
 					final Statement statement = this.statements[i];
 					if ((constant = statement.resolveCase(this.scope, expressionType, this)) != Constant.NotAConstant) {
-						int key = constant.intValue();
-						//----check for duplicate case statement------------
-						for (int j = 0; j < counter; j++) {
-							if (this.constants[j] == key) {
-								final CaseStatement currentCaseStatement = (CaseStatement) statement;
-								if (duplicateCaseStatements == null) {
-									this.scope.problemReporter().duplicateCase(this.cases[j]);
-									this.scope.problemReporter().duplicateCase(currentCaseStatement);
-									duplicateCaseStatements = new CaseStatement[length];
-									duplicateCaseStatements[duplicateCaseStatementsCounter++] = this.cases[j];
-									duplicateCaseStatements[duplicateCaseStatementsCounter++] = currentCaseStatement;
-								} else {
-									boolean found = false;
-									searchReportedDuplicate: for (int k = 2; k < duplicateCaseStatementsCounter; k++) {
-										if (duplicateCaseStatements[k] == statement) {
-											found = true;
-											break searchReportedDuplicate;
-										}
-									}
-									if (!found) {
-										this.scope.problemReporter().duplicateCase(currentCaseStatement);
-										duplicateCaseStatements[duplicateCaseStatementsCounter++] = currentCaseStatement;
-									}
+						if (!isStringSwitch) {
+							int key = constant.intValue();
+							//----check for duplicate case statement------------
+							for (int j = 0; j < counter; j++) {
+								if (this.constants[j] == key) {
+									reportDuplicateCase((CaseStatement) statement, this.cases[j], length);
 								}
 							}
+							this.constants[counter++] = key;
+						} else {
+							String key = constant.stringValue();
+							//----check for duplicate case statement------------
+							for (int j = 0; j < counter; j++) {
+								if (this.stringConstants[j].equals(key)) {
+									reportDuplicateCase((CaseStatement) statement, this.cases[j], length);
+								}
+							}
+							this.stringConstants[counter++] = key;			
 						}
-						this.constants[counter++] = key;
 					}
 				}
 				if (length != counter) { // resize constants array
-					System.arraycopy(this.constants, 0, this.constants = new int[counter], 0, counter);
+					if (!isStringSwitch) {
+						System.arraycopy(this.constants, 0, this.constants = new int[counter], 0, counter);
+					} else {
+						System.arraycopy(this.stringConstants, 0, this.stringConstants = new String[counter], 0, counter);
+					}
 				}
 			} else {
 				if ((this.bits & UndocumentedEmptyBlock) != 0) {
 					upperScope.problemReporter().undocumentedEmptyBlock(this.blockStart, this.sourceEnd);
 				}
+			}
+			if (isStringSwitch) {
+				this.dispatchStringCopy  = new LocalVariableBinding(SecretStringVariableName, upperScope.getJavaLangString(), ClassFileConstants.AccDefault, false);
+				upperScope.addLocalVariable(this.dispatchStringCopy);
+				this.dispatchStringCopy.setConstant(Constant.NotAConstant);
+				this.dispatchStringCopy.useFlag = LocalVariableBinding.USED;
 			}
 			// for enum switch, check if all constants are accounted for (if no default)
 			if (isEnumSwitch && this.defaultCase == null

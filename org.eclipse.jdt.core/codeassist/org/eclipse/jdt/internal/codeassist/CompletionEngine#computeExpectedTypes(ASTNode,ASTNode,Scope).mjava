@@ -169,28 +169,60 @@
 			addExpectedType(TypeBinding.LONG, scope);
 		} else if(parent instanceof ParameterizedSingleTypeReference) {
 			ParameterizedSingleTypeReference ref = (ParameterizedSingleTypeReference) parent;
-			TypeVariableBinding[] typeVariables = ((ReferenceBinding)ref.resolvedType).typeVariables();
-			int length = ref.typeArguments == null ? 0 : ref.typeArguments.length;
-			if(typeVariables != null && typeVariables.length >= length) {
-				int index = length - 1;
-				while(index > -1 && ref.typeArguments[index] != node) index--;
-
-				TypeBinding bound = typeVariables[index].firstBound;
-				addExpectedType(bound == null ? scope.getJavaLangObject() : bound, scope);
+			TypeBinding expected = null;
+			if (this.parser.enclosingNode instanceof AbstractVariableDeclaration ||
+					this.parser.enclosingNode instanceof ReturnStatement) {
+				// completing inside the diamond
+				if (this.parser.enclosingNode instanceof AbstractVariableDeclaration) {
+					AbstractVariableDeclaration abstractVariableDeclaration = (AbstractVariableDeclaration) this.parser.enclosingNode;
+					expected = abstractVariableDeclaration.initialization != null ? abstractVariableDeclaration.initialization.expectedType() : null;					
+				} else {
+					ReturnStatement returnStatement = (ReturnStatement) this.parser.enclosingNode;
+					if (returnStatement.expression != null) {
+						expected = returnStatement.expression.expectedType();
+					}
+				}	
+				addExpectedType(expected, scope);
+			} else {
+				TypeVariableBinding[] typeVariables = ((ReferenceBinding)ref.resolvedType).typeVariables();
+				int length = ref.typeArguments == null ? 0 : ref.typeArguments.length;
+				if(typeVariables != null && typeVariables.length >= length) {
+					int index = length - 1;
+					while(index > -1 && ref.typeArguments[index] != node) index--;
+	
+					TypeBinding bound = typeVariables[index].firstBound;
+					addExpectedType(bound == null ? scope.getJavaLangObject() : bound, scope);
+				}
 			}
 		} else if(parent instanceof ParameterizedQualifiedTypeReference) {
 			ParameterizedQualifiedTypeReference ref = (ParameterizedQualifiedTypeReference) parent;
-			TypeVariableBinding[] typeVariables = ((ReferenceBinding)ref.resolvedType).typeVariables();
 			TypeReference[][] arguments = ref.typeArguments;
-			if(typeVariables != null) {
-				int iLength = arguments == null ? 0 : arguments.length;
-				done: for (int i = 0; i < iLength; i++) {
-					int jLength = arguments[i] == null ? 0 : arguments[i].length;
-					for (int j = 0; j < jLength; j++) {
-						if(arguments[i][j] == node && typeVariables.length > j) {
-							TypeBinding bound = typeVariables[j].firstBound;
-							addExpectedType(bound == null ? scope.getJavaLangObject() : bound, scope);
-							break done;
+			TypeBinding expected = null;
+			if (this.parser.enclosingNode instanceof AbstractVariableDeclaration ||
+					this.parser.enclosingNode instanceof ReturnStatement) {
+				// completing inside the diamond
+				if (this.parser.enclosingNode instanceof AbstractVariableDeclaration) {
+					AbstractVariableDeclaration abstractVariableDeclaration = (AbstractVariableDeclaration) this.parser.enclosingNode;
+					expected = abstractVariableDeclaration.initialization != null ? abstractVariableDeclaration.initialization.expectedType() : null;
+				} else {
+					ReturnStatement returnStatement = (ReturnStatement) this.parser.enclosingNode;
+					if (returnStatement.expression != null) {
+						expected = returnStatement.expression.expectedType();
+					}
+				}
+				addExpectedType(expected, scope);
+			} else {
+				TypeVariableBinding[] typeVariables = ((ReferenceBinding)ref.resolvedType).typeVariables();
+				if(typeVariables != null) {
+					int iLength = arguments == null ? 0 : arguments.length;
+					done: for (int i = 0; i < iLength; i++) {
+						int jLength = arguments[i] == null ? 0 : arguments[i].length;
+						for (int j = 0; j < jLength; j++) {
+							if(arguments[i][j] == node && typeVariables.length > j) {
+								TypeBinding bound = typeVariables[j].firstBound;
+								addExpectedType(bound == null ? scope.getJavaLangObject() : bound, scope);
+								break done;
+							}
 						}
 					}
 				}
@@ -235,12 +267,28 @@
 			}
 			if (isException) {
 				ThrownExceptionFinder thrownExceptionFinder = new ThrownExceptionFinder();
-				ReferenceBinding[] bindings = thrownExceptionFinder.find((TryStatement) parent, (BlockScope)scope);
+				thrownExceptionFinder.processThrownExceptions((TryStatement) parent, (BlockScope)scope);
+				ReferenceBinding[] bindings = thrownExceptionFinder.getThrownUncaughtExceptions();
+				ReferenceBinding[] alreadyCaughtExceptions = thrownExceptionFinder.getAlreadyCaughtExceptions();
+				ReferenceBinding[] discouragedExceptions = thrownExceptionFinder.getDiscouragedExceptions();
 				if (bindings != null && bindings.length > 0) {
 					for (int i = 0; i < bindings.length; i++) {
 						addExpectedType(bindings[i], scope);
 					}
 					this.expectedTypesFilter = SUPERTYPE;
+				}
+				if (alreadyCaughtExceptions != null && alreadyCaughtExceptions.length > 0) {
+					for (int i = 0; i < alreadyCaughtExceptions.length; i++) {
+						addForbiddenBindings(alreadyCaughtExceptions[i]);
+						this.knownTypes.put(CharOperation.concat(alreadyCaughtExceptions[i].qualifiedPackageName(), alreadyCaughtExceptions[i].qualifiedSourceName(), '.'), KNOWN_TYPE_WITH_KNOWN_CONSTRUCTORS);
+					}
+				}
+				if (discouragedExceptions != null && discouragedExceptions.length > 0) {
+					for (int i = 0; i < discouragedExceptions.length; i++) {
+						addUninterestingBindings(discouragedExceptions[i]);
+						// do not insert into known types. We do need these types to come from
+						// searchAllTypes(..) albeit with lower relevance
+					}
 				}
 			}
 		} else if (parent instanceof SwitchStatement) {
@@ -248,6 +296,14 @@
 			this.assistNodeIsInsideCase = assistNodeIsInsideCase(node, parent);
 			if (switchStatement.expression != null &&
 					switchStatement.expression.resolvedType != null) {
+				if (this.assistNodeIsInsideCase &&
+						switchStatement.expression.resolvedType.id == TypeIds.T_JavaLangString &&
+						this.compilerOptions.complianceLevel >= ClassFileConstants.JDK1_7) {
+					// set the field to true even though the expected types array will contain String as
+					// expected type to avoid traversing the array in every case later on.
+					// https://bugs.eclipse.org/bugs/show_bug.cgi?id=343476
+					this.assistNodeIsString = true;
+				}
 				addExpectedType(switchStatement.expression.resolvedType, scope);
 			}
 		// https://bugs.eclipse.org/bugs/show_bug.cgi?id=253008, flag boolean as the expected

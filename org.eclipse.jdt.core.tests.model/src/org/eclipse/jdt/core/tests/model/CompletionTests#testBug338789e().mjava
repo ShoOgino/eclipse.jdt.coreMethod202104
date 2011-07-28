@@ -1,0 +1,59 @@
+// https://bugs.eclipse.org/bugs/show_bug.cgi?id=338789
+// To verify that we get proposals for exceptions inside a multi-catch
+// Also verify that actually thrown exceptions get higher priority
+public void testBug338789e() throws JavaModelException {
+	Map options = COMPLETION_PROJECT.getOptions(true);
+	Object savedOptionCompliance = options.get(CompilerOptions.OPTION_Compliance);
+	try {
+		options.put(CompilerOptions.OPTION_Compliance, CompilerOptions.VERSION_1_7);
+		COMPLETION_PROJECT.setOptions(options);
+		this.workingCopies = new ICompilationUnit[4];
+		this.workingCopies[0] = getWorkingCopy(
+			"/Completion/src/test/Test.java",
+			"package test;"+
+			"public class Test {\n" +
+			"	public void throwing() throws IZZBException, IZZException {}\n" +
+			"	public void foo() {\n" +
+			"      try {\n" +
+			"         throwing();\n" +
+			"      }\n" +
+			"      catch (IZZException | IZZBException ) {\n" +
+			"         bar();\n" +
+			"      }\n" +
+			"   }" +
+			"}\n");
+
+		this.workingCopies[1] = getWorkingCopy(
+				"/Completion/src/test/IZZAException.java",
+				"package test;"+
+				"public class IZZAException extends Exception {\n" +
+				"}\n");
+
+		this.workingCopies[2] = getWorkingCopy(
+				"/Completion/src/test/IZZBException.java",
+				"package test;"+
+				"public class IZZBException extends Exception {\n" +
+				"}\n");
+
+		this.workingCopies[3] = getWorkingCopy(
+				"/Completion/src/test/IZZException.java",
+				"package test;"+
+				"public class IZZException extends Exception {\n" +
+				"}\n");
+
+		CompletionTestsRequestor2 requestor = new CompletionTestsRequestor2(true);
+		String str = this.workingCopies[0].getSource();
+		String completeBehind = "IZZException | IZZBException ";
+		int cursorLocation = str.lastIndexOf(completeBehind) + completeBehind.length();
+		this.workingCopies[0].codeComplete(cursorLocation, requestor, this.wcOwner);
+
+		assertResults(
+			"exception[VARIABLE_DECLARATION]{exception, null, Ljava.lang.Exception;, exception, null, " + (R_DEFAULT + R_NAME_LESS_NEW_CHARACTERS + R_NON_RESTRICTED) + "}",
+			requestor.getResults());
+	} finally {
+		// Restore compliance settings.
+		options.put(CompilerOptions.OPTION_Compliance, savedOptionCompliance);
+		COMPLETION_PROJECT.setOptions(options);	
+	}
+}
+

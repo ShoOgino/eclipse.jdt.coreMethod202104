@@ -3,6 +3,36 @@ public boolean isTypeArgumentContainedBy(TypeBinding otherType) {
 	if (this == otherType)
 		return true;
 	switch (otherType.kind()) {
+		// handle captured wildcards.
+		case Binding.TYPE_PARAMETER: {
+			// https://bugs.eclipse.org/bugs/show_bug.cgi?id=347426
+			if (!isParameterizedType() || !otherType.isCapture()) {
+				return false;
+			}
+			CaptureBinding capture = (CaptureBinding) otherType;
+			WildcardBinding wildcard = capture.wildcard;
+			TypeBinding upperBound = null;
+			TypeBinding [] otherBounds = null;
+			switch (wildcard.boundKind) {
+				case Wildcard.SUPER:
+					return false; // T super syntax isn't allowed, impossible capture.
+				case Wildcard.UNBOUND:
+					TypeVariableBinding variable = wildcard.genericType.typeVariables()[wildcard.rank];
+					upperBound = variable.upperBound();
+					otherBounds = variable.boundsCount() > 1 ? variable.otherUpperBounds() : null;
+					break;
+				case Wildcard.EXTENDS:
+					upperBound = wildcard.bound;
+					otherBounds = wildcard.otherBounds;
+					break;
+			}
+			// Given class A<T extends B<?>>, A<?> cannot be the universe of all parameterizations of A
+			if (upperBound.id == TypeIds.T_JavaLangObject && otherBounds == null) {
+				return false; // but given class A<T>, A<?> stays an unbounded wildcard, see https://bugs.eclipse.org/bugs/show_bug.cgi?id=348956
+			}
+			otherType = capture.environment.createWildcard(null, 0, upperBound, otherBounds, Wildcard.EXTENDS);
+			return isTypeArgumentContainedBy(otherType);
+		}
 		// allow wildcard containment
 		case Binding.WILDCARD_TYPE:
 		case Binding.INTERSECTION_TYPE:
