@@ -58,7 +58,8 @@ public void generateCode(BlockScope currentScope, CodeStream codeStream) {
 			codeStream.store(this.caughtThrowableVariable, false /* value not required */);
 			codeStream.addVariable(this.caughtThrowableVariable);
 			for (int i = 0; i <= resourceCount; i++) {
-				this.resourceExceptionLabels[i] = new ExceptionLabel(codeStream, this.scope.getJavaLangThrowable());
+				// put null for the exception type to treat them as any exception handlers (equivalent to a try/finally)
+				this.resourceExceptionLabels[i] = new ExceptionLabel(codeStream, null);
 				this.resourceExceptionLabels[i].placeStart();
 				if (i < resourceCount) {
 					this.resources[i].generateCode(this.scope, codeStream); // Initialize resources ...
@@ -77,13 +78,20 @@ public void generateCode(BlockScope currentScope, CodeStream codeStream) {
 					if (i > 0) {
 						int invokeCloseStartPc = codeStream.position; // https://bugs.eclipse.org/bugs/show_bug.cgi?id=343785
 						codeStream.load(localVariable);
-				    	codeStream.ifnull(exitLabel);
-				    	codeStream.load(localVariable);
-				    	codeStream.invokeAutoCloseableClose(localVariable.type);
-				    	codeStream.recordPositionsFrom(invokeCloseStartPc, this.tryBlock.sourceEnd);	
-				    }
+						codeStream.ifnull(exitLabel);
+						codeStream.load(localVariable);
+						codeStream.invokeAutoCloseableClose(localVariable.type);
+						codeStream.recordPositionsFrom(invokeCloseStartPc, this.tryBlock.sourceEnd);
+					}
 					codeStream.goto_(exitLabel); // skip over the catch block.
 				}
+
+				if (i > 0) {
+					// i is off by one
+					codeStream.removeNotDefinitelyAssignedVariables(currentScope, this.postResourcesInitStateIndexes[i - 1]);
+					codeStream.addDefinitelyAssignedVariables(currentScope, this.postResourcesInitStateIndexes[i - 1]);
+				}
+
 				codeStream.pushExceptionOnStack(this.scope.getJavaLangThrowable());
 				this.resourceExceptionLabels[i].place();
 				if (i == resourceCount) { 
