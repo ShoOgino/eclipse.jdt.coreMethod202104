@@ -58,7 +58,7 @@
 
 				boolean doStarImport= pack.hasStarImport(threshold, onDemandConflicts);
 				if (doStarImport && (pack.find("*") == null)) { //$NON-NLS-1$
-					String[] imports = getNewImportStrings(pack, isStatic, lineDelim);
+					String[] imports = getNewImportStrings(buffer, pack, isStatic, lineDelim);
 					for (int j = 0, max = imports.length; j < max; j++) {
 						stringsToInsert.add(imports[j]);
 					}
@@ -89,7 +89,16 @@
 					} else if (doStarImport && !currDecl.isOnDemand()) {
 						String simpleName = currDecl.getTypeQualifiedName();
 						if (simpleName.indexOf('.') != -1) {
-							String str= getNewImportString(currDecl.getElementName(), isStatic, lineDelim);
+							IRegion rangeBefore = currDecl.getPrecedingCommentRange();
+							if (rangeBefore != null) {
+								stringsToInsert.add(buffer.getText(rangeBefore.getOffset(), rangeBefore.getLength()));
+							}
+							IRegion rangeAfter = currDecl.getTrailingCommentRange();
+							String trailingComment = null;
+							if (rangeAfter != null) {
+								trailingComment = buffer.getText(rangeAfter.getOffset(), rangeAfter.getLength());
+							}
+							String str= getNewImportString(currDecl.getElementName(), isStatic, trailingComment, lineDelim);
 							if (stringsToInsert.indexOf(str) == -1) {
 								stringsToInsert.add(str);
 							}
@@ -98,6 +107,30 @@
 				}
 			}
 
+			// insert back all existing imports comments since existing imports were not preserved
+			if (this.preserveExistingCommentsRanges != null) {
+				for (int i = 0, max = this.preserveExistingCommentsRanges.length; i < max; i++) {
+					IRegion region = this.preserveExistingCommentsRanges[i];
+					String text = buffer.getText(region.getOffset(), region.getLength());
+					// remove preceding whitespaces
+					int index = 0;
+					int length = text.length();
+					loop: while (index < length) {
+						if (Character.isWhitespace(text.charAt(index))) {
+							index++;
+						} else {
+							break loop;
+						}
+					}
+					if (index != 0) {
+						text = text.substring(index);
+					}
+					if (!text.endsWith(lineDelim)) {
+						text += lineDelim;
+					}
+					stringsToInsert.add(text);
+				}
+			}
 			int end= importsStart + importsLen;
 			removeAndInsertNew(buffer, currPos, end, stringsToInsert, resEdit);
 
