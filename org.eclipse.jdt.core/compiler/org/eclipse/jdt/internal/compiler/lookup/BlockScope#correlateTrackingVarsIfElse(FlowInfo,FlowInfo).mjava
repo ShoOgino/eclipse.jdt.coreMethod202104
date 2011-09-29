@@ -1,0 +1,39 @@
+/** 
+ * If one branch of an if-else closes any AutoCloseable resource, and if the same
+ * resource is known to be null on the other branch mark it as closed, too,
+ * so that merging both branches indicates that the resource is always closed.
+ * Example:
+ *	FileReader fr1 = null;
+ *	try {\n" +
+ *      fr1 = new FileReader(someFile);" + 
+ *		fr1.read(buf);\n" + 
+ *	} finally {\n" + 
+ *		if (fr1 != null)\n" +
+ *           try {\n" +
+ *               fr1.close();\n" +
+ *           } catch (IOException e) {
+ *              // do nothing 
+ *           }
+ *      // after this if statement fr1 is definitely not leaked 
+ *	}
+ */
+public void correlateTrackingVarsIfElse(FlowInfo thenFlowInfo, FlowInfo elseFlowInfo) {
+	if (this.trackingVariables != null) {
+		for (int i=0; i<this.trackingVariables.size(); i++) {
+			FakedTrackingVariable trackingVar = (FakedTrackingVariable) this.trackingVariables.get(i);
+			if (   thenFlowInfo.isDefinitelyNonNull(trackingVar.binding)			// closed in then branch
+				&& elseFlowInfo.isDefinitelyNull(trackingVar.originalBinding))		// null in else branch
+			{
+				elseFlowInfo.markAsDefinitelyNonNull(trackingVar.binding);			// -> always closed
+			}
+			else if (   elseFlowInfo.isDefinitelyNonNull(trackingVar.binding)		// closed in else branch
+					 && thenFlowInfo.isDefinitelyNull(trackingVar.originalBinding))	// null in then branch
+			{
+				thenFlowInfo.markAsDefinitelyNonNull(trackingVar.binding);			// -> always closed
+			}
+		}
+	}
+	if (this.parent instanceof BlockScope)
+		((BlockScope) this.parent).correlateTrackingVarsIfElse(thenFlowInfo, elseFlowInfo);
+}
+

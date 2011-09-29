@@ -1,0 +1,28 @@
+	/** 
+	 * Check if the rhs of an assignment or local declaration is an (Auto)Closeable.
+	 * If so create or re-use a tracking variable, and wire and initialize everything. 
+	 */
+	public static void handleResourceAssignment(FlowInfo flowInfo, Statement location, Expression rhs, LocalVariableBinding local,
+				LocalVariableBinding previousTrackerBinding) 
+	{
+		if (isAutoCloseable(rhs.resolvedType)) {
+			// new value is AutoCloseable, start tracking, possibly re-using existing tracker var:
+	
+			FakedTrackingVariable rhsTrackVar = getCloseTrackingVariable(rhs);
+			if (rhsTrackVar != null) {								// 1. share tracking variable with RHS?
+				local.closeTracker = rhsTrackVar;
+				// keep null-status unchanged across this assignment
+			} else if (previousTrackerBinding != null) {			// 2. re-use tracking variable from the LHS?
+				// re-assigning from a fresh, mark as not-closed again:
+				flowInfo.markAsDefinitelyNull(previousTrackerBinding);
+			} else {												// 3. no re-use, create a fresh tracking variable:
+				local.closeTracker = new FakedTrackingVariable(local, location);
+				// a fresh resource, mark as not-closed:
+				flowInfo.markAsDefinitelyNull(local.closeTracker.binding);
+// TODO(stephan): this might be useful, but I could not find a test case for it: 
+//				if (flowContext.initsOnFinally != null)
+//					flowContext.initsOnFinally.markAsDefinitelyNonNull(trackerBinding);
+			}
+		}
+	}
+
