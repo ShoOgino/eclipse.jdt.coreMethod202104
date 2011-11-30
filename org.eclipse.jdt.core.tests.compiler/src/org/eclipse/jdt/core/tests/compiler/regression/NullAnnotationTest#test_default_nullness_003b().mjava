@@ -1,0 +1,64 @@
+//same as test_default_nullness_003b, but default-induced annotations are combined with explicit ones (not null related)
+public void test_default_nullness_003b() {
+	Map customOptions = getCompilerOptions();
+	runConformTestWithLibs(
+		new String[] {
+	"p1/Annot.java",
+			"package p1;\n" +
+			"import static java.lang.annotation.ElementType.*;\n" +
+			"import java.lang.annotation.*;\n" +
+			"@Retention(RetentionPolicy.CLASS)\n" +
+			"@Target({METHOD,PARAMETER})\n" +
+			"public @interface Annot {}\n",
+	"p1/X.java",
+			"package p1;\n" +
+			"import org.eclipse.jdt.annotation.*;\n" +
+			"@NonNullByDefault\n" +
+			"public class X {\n" +
+			"    protected @Annot Object getObject(@Annot @Nullable Object o) {\n" +
+			"        return new Object();\n" +
+			"    }\n" +
+			"	 protected @Annot void bar(@Annot Object o2) { }\n" + // parameter is nonnull per type default
+			"}\n",
+	"p2/package-info.java",
+			"@org.eclipse.jdt.annotation.NonNullByDefault\n" +
+			"package p2;\n",
+			},
+			customOptions,
+			"");
+	// check if default is visible from package-info.class.
+	runNegativeTestWithLibs(
+		false, // don't flush
+		new String[] {
+	"p2/Y.java",
+			"package p2;\n" +
+			"import org.eclipse.jdt.annotation.*;\n" +
+			"public class Y extends p1.X {\n" +
+			"    @Override\n" +
+			"    protected @Nullable Object getObject(@Nullable Object o) {\n" + // can't override inherited default nonnull
+			"        bar(o);\n" + // parameter is nonnull in super class's .class file
+			"        accept(o);\n" +
+			"        return o;\n" +
+			"    }\n" +
+			"    void accept(@p1.Annot Object a) {}\n" + // governed by package level default
+			"}\n"
+		},
+		customOptions,
+		"----------\n" +
+		"1. ERROR in p2\\Y.java (at line 5)\n" +
+		"	protected @Nullable Object getObject(@Nullable Object o) {\n" +
+		"	          ^^^^^^^^^^^^^^^^\n" +
+		"The return type is incompatible with the @NonNull return from X.getObject(Object)\n" +
+		"----------\n" +
+		"2. ERROR in p2\\Y.java (at line 6)\n" +
+		"	bar(o);\n" +
+		"	    ^\n" +
+		"Type mismatch: required \'@NonNull Object\' but the provided value can be null\n" +
+		"----------\n" +
+		"3. ERROR in p2\\Y.java (at line 7)\n" +
+		"	accept(o);\n" +
+		"	       ^\n" +
+		"Type mismatch: required \'@NonNull Object\' but the provided value can be null\n" +
+		"----------\n");
+}
+

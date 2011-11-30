@@ -1,0 +1,42 @@
+	public void testBinaryType1() throws CoreException, InterruptedException, IOException {
+    	try {
+			// Resources creation
+			IJavaProject p = createJavaProject("P", new String[] {""},
+											   new String[] {"JCL15_LIB", this.ANNOTATION_LIB, testJarPath("example.jar")},
+											   "bin", "1.5");
+			p.setOption(JavaCore.COMPILER_ANNOTATION_NULL_ANALYSIS, JavaCore.ENABLED);
+			p.setOption(JavaCore.COMPILER_NONNULL_IS_DEFAULT, JavaCore.ENABLED);
+
+			// example.jar contains p1/C1.java just like testConvertedSourceType1()
+
+			this.createFolder("/P/p2");
+			String c2SourceString =
+				"package p2;\n" +
+				"public class C2 {\n" +
+				"	 String bar(p1.C1 c) {;\n" +
+				"        return c.foo(null);\n" + // don't complain despite default nonnull, foo has explicit @Nullable
+				"    }\n" +
+				"	 String foo(Object arg) {\n" +
+				"		return arg == null ? null : arg.toString();\n" +
+				"	 }\n" +
+				"}\n";
+			this.createFile(
+				"/P/p2/C2.java",
+	    			c2SourceString);
+
+			char[] c2SourceChars = c2SourceString.toCharArray();
+			this.problemRequestor.initialize(c2SourceChars);
+
+			getCompilationUnit("/P/p2/C2.java").getWorkingCopy(this.wcOwner, null);
+
+			assertProblems("Unexpected problems", "----------\n" +
+					"1. WARNING in /P/p2/C2.java (at line 7)\n" +
+					"	return arg == null ? null : arg.toString();\n" +
+					"	       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n" +
+					"Potential type mismatch: required \'@NonNull String\' but nullness of the provided value is unknown\n" +
+					"----------\n");
+    	} finally {
+    		deleteProject("P");
+    	}
+    }
+

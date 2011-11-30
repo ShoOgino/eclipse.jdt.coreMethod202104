@@ -1,0 +1,69 @@
+	// initialization of null annotations is
+	// - triggered from resolveTypesFor(MethodBinding)
+	// - default is defined in package-info.java:
+	// must detect missing non-null annotation and report against the project
+	public void testMissingAnnotation5() throws CoreException, InterruptedException {
+    	try {
+			// Resources creation
+			IJavaProject p = createJavaProject("P", new String[] {""}, new String[] {"JCL15_LIB", this.ANNOTATION_LIB}, "bin", "1.5");
+			p.setOption(JavaCore.COMPILER_ANNOTATION_NULL_ANALYSIS, JavaCore.ENABLED);
+			p.setOption(JavaCore.COMPILER_NONNULL_ANNOTATION_NAME, "pack.Missing");
+
+			this.createFolder("/P/p1");
+			String piSourceString =
+				"@org.eclipse.jdt.annotation.NonNullByDefault\n" +
+				"package p1;\n";
+			this.createFile("/P/p1/package-info.java", piSourceString);
+
+			String c1SourceString =
+				"package p1;\n" +
+				"public class C1 {\n" +
+				"    String foo(String arg) { return arg; }\n" +
+				"}\n";
+			this.createFile("/P/p1/C1.java", c1SourceString);
+
+			this.problemRequestor.initialize(piSourceString.toCharArray());
+
+			// Challenge CompilationUnitProblemFinder:
+			assertNoProblem(piSourceString.toCharArray(), getCompilationUnit("/P/p1/package-info.java"));
+
+			this.problemRequestor.initialize(c1SourceString.toCharArray());
+
+			// Challenge CompilationUnitProblemFinder:
+			ICompilationUnit unit = getCompilationUnit("/P/p1/C1.java").getWorkingCopy(this.wcOwner, null);
+			String expectedError = "----------\n" +
+								   "1. ERROR in /P/p1/C1.java (at line 1)\n" +
+								   "	package p1;\n" +
+								   "	^\n" +
+								   "Buildpath problem: the type pack.Missing, which is configured as a null annotation type, cannot be resolved\n" +
+								   "----------\n";
+			assertProblems("Unexpected problems", expectedError);
+
+			// Challenge JavaBuilder:
+			p.getProject().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			IMarker[] markers = p.getProject().findMarkers(IJavaModelMarker.JAVA_MODEL_PROBLEM_MARKER, true, IResource.DEPTH_INFINITE);
+			assertMarkers("Unexpected markers",
+					"Buildpath problem: the type pack.Missing, which is configured as a null annotation type, cannot be resolved",
+					markers);
+// toggle expectation depending on how CAT_BUILDPATH problems are reported (see AbstractImageBuilder.storeProblemsFor(..))
+//			assertEquals("Unexpected marker path", "/P", markers[0].getResource().getFullPath().toString());
+			assertEquals("Unexpected marker path", "/P/p1/C1.java", markers[0].getResource().getFullPath().toString());
+
+			// Challenge CompilationUnitResolver:
+			ASTParser parser = ASTParser.newParser(AST.JLS4);
+			parser.setProject(p);
+			parser.setResolveBindings(true);
+			parser.setSource(unit);
+			CompilationUnit ast = (CompilationUnit) parser.createAST(null);
+			assertNotNull("ast should not be null", ast);
+			this.problemRequestor.reset();
+			this.problemRequestor.beginReporting();
+			IProblem[] problems = ast.getProblems();
+			for (int i=0; i<problems.length; i++)
+				this.problemRequestor.acceptProblem(problems[i]);
+			assertProblems("Unexpected problems (2)", expectedError);
+    	} finally {
+    		deleteProject("P");
+    	}
+	}
+

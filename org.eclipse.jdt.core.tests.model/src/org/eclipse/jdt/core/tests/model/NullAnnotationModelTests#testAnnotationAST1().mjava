@@ -1,0 +1,60 @@
+	// A synthetic annotation from a default should not be converted to DOM AST
+	public void testAnnotationAST1() throws CoreException, InterruptedException {
+    	try {
+			// Resources creation
+			IJavaProject p = createJavaProject("P", new String[] {""}, new String[] {"JCL15_LIB", this.ANNOTATION_LIB}, "bin", "1.5");
+			p.setOption(JavaCore.COMPILER_ANNOTATION_NULL_ANALYSIS, JavaCore.ENABLED);
+
+			this.createFolder("/P/p1");
+			// bug could only be triggered if ASTConvert actually finds a '@'
+			// so in addition to the synthetic annotation there must also be a real one:
+			String annotSourceString =
+				"package p1;\n" +
+				"import java.lang.annotation.ElementType;\n" + 
+				"import java.lang.annotation.Target;\n" + 
+				"@Target({ElementType.PARAMETER,ElementType.METHOD})\n" +
+				"public @interface Annot {}\n";
+			this.createFile(
+				"/P/p1/Annot.java",
+	    			annotSourceString);
+			String c1SourceString =
+				"package p1;\n" +
+				"@org.eclipse.jdt.annotation.NonNullByDefault\n" +
+				"public class C1 {\n" +
+				"	 public @Annot Object foo(@Annot Object arg) {\n" +
+				"         return this;\n" +
+				"	 }\n" +
+				"}\n";
+			this.createFile(
+				"/P/p1/C1.java",
+	    			c1SourceString);
+
+			this.problemRequestor.initialize(c1SourceString.toCharArray());
+
+			final ICompilationUnit unit = getCompilationUnit("/P/p1/C1.java").getWorkingCopy(this.wcOwner, null);
+			assertNoProblem(c1SourceString.toCharArray(), unit);
+
+			ASTParser parser = ASTParser.newParser(AST.JLS4);
+			parser.setProject(p);
+			parser.setResolveBindings(true);
+			parser.setSource(unit);
+			CompilationUnit ast = (CompilationUnit) parser.createAST(null);
+			assertNotNull("ast should not be null", ast);
+			TypeDeclaration type = (TypeDeclaration) ast.types().get(0);
+			assertNotNull("type should not be null", type);
+			MethodDeclaration method = (MethodDeclaration) type.bodyDeclarations().get(0);
+			assertNotNull("method should not be null", method);
+			SingleVariableDeclaration arg = (SingleVariableDeclaration) method.parameters().get(0);
+			assertNotNull("argument should not be null", arg);
+			List modifiers = arg.modifiers();
+			assertEquals("Should have exactly one modifier", 1, modifiers.size());
+			assertEquals("Unexpected modifier", "@Annot", ((MarkerAnnotation)modifiers.get(0)).toString());
+			modifiers = method.modifiers();
+			assertEquals("Method should have exactly two modifiers", 2, modifiers.size());
+			assertEquals("Unexpected modifier #1 for method", "public", ((Modifier)modifiers.get(0)).toString());
+			assertEquals("Unexpected modifier #2 for method", "@Annot", ((MarkerAnnotation)modifiers.get(1)).toString());
+    	} finally {
+    		deleteProject("P");
+    	}
+	}
+

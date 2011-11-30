@@ -1,0 +1,42 @@
+void scanTypeForNullAnnotation(IBinaryType binaryType) {
+	if (!this.environment.globalOptions.isAnnotationBasedNullAnalysisEnabled)
+		return;
+	char[][] nonNullByDefaultAnnotationName = this.environment.getNonNullByDefaultAnnotationName();
+	if (nonNullByDefaultAnnotationName == null)
+		return; // not well-configured to use null annotations
+
+	IBinaryAnnotation[] annotations = binaryType.getAnnotations();
+	if (annotations != null) {
+		long annotationBit = 0L;
+		TypeBinding defaultNullness = null;
+		for (int i = 0; i < annotations.length; i++) {
+			char[] annotationTypeName = annotations[i].getTypeName();
+			if (annotationTypeName[0] != Util.C_RESOLVED)
+				continue;
+			char[][] typeName = CharOperation.splitOn('/', annotationTypeName, 1, annotationTypeName.length-1); // cut of leading 'L' and trailing ';'
+			if (CharOperation.equals(typeName, nonNullByDefaultAnnotationName)) {
+				IBinaryElementValuePair[] elementValuePairs = annotations[i].getElementValuePairs();
+				if (elementValuePairs != null && elementValuePairs.length == 1) {
+					Object value = elementValuePairs[0].getValue();
+					if (value instanceof BooleanConstant
+						&& !((BooleanConstant)value).booleanValue())
+					{
+						// parameter is 'false': this means we cancel defaults from outer scopes:
+						annotationBit = TagBits.AnnotationNullUnspecifiedByDefault;
+						defaultNullness = ReferenceBinding.NULL_UNSPECIFIED;
+						break;
+					}
+				}
+				annotationBit = TagBits.AnnotationNonNullByDefault;
+				defaultNullness = this.environment.getNullAnnotationBinding(TagBits.AnnotationNonNull, false/*resolve*/);
+				break;
+			}
+		}
+		if (annotationBit != 0L) {
+			this.tagBits |= annotationBit;
+			if (CharOperation.equals(this.sourceName(), TypeConstants.PACKAGE_INFO_NAME))
+				this.getPackage().nullnessDefaultAnnotation = defaultNullness;
+		}
+	}
+}
+
