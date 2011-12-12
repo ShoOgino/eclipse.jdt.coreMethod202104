@@ -1,6 +1,9 @@
 DiskIndex mergeWith(MemoryIndex memoryIndex) throws IOException {
  	// assume write lock is held
 	// compute & write out new docNames
+	if (this.indexLocation == null) {
+		throw new IOException("Pre-built index file not writeable");  //$NON-NLS-1$
+	}
 	String[] docNames = readAllDocumentNames();
 	int previousLength = docNames.length;
 	int[] positions = new int[previousLength]; // keeps track of the position of each document in the new sorted docNames
@@ -10,15 +13,16 @@ DiskIndex mergeWith(MemoryIndex memoryIndex) throws IOException {
 		if (previousLength == 0) return this; // nothing to do... memory index contained deleted documents that had never been saved
 
 		// index is now empty since all the saved documents were removed
-		DiskIndex newDiskIndex = new DiskIndex(this.indexFile.getPath());
+		DiskIndex newDiskIndex = new DiskIndex(this.indexLocation);
 		newDiskIndex.initialize(false);
 		return newDiskIndex;
 	}
-
-	DiskIndex newDiskIndex = new DiskIndex(this.indexFile.getPath() + ".tmp"); //$NON-NLS-1$
+	File oldIndexFile = this.indexLocation.getIndexFile();
+	DiskIndex newDiskIndex = new DiskIndex(new FileIndexLocation(new File(oldIndexFile.getPath() + ".tmp"))); //$NON-NLS-1$
+	File newIndexFile = newDiskIndex.indexLocation.getIndexFile();
 	try {
-		newDiskIndex.initializeFrom(this, newDiskIndex.indexFile);
-		FileOutputStream stream = new FileOutputStream(newDiskIndex.indexFile, false);
+		newDiskIndex.initializeFrom(this, newIndexFile);
+		FileOutputStream stream = new FileOutputStream(newIndexFile, false);
 		int offsetToHeader = -1;
 		try {
 			newDiskIndex.writeAllDocumentNames(docNames, stream);
@@ -50,24 +54,24 @@ DiskIndex mergeWith(MemoryIndex memoryIndex) throws IOException {
 		newDiskIndex.writeOffsetToHeader(offsetToHeader);
 
 		// rename file by deleting previous index file & renaming temp one
-		if (this.indexFile.exists() && !this.indexFile.delete()) {
+		if (oldIndexFile.exists() && !oldIndexFile.delete()) {
 			if (DEBUG)
-				System.out.println("mergeWith - Failed to delete " + this.indexFile); //$NON-NLS-1$
-			throw new IOException("Failed to delete index file " + this.indexFile); //$NON-NLS-1$
+				System.out.println("mergeWith - Failed to delete " + this.indexLocation); //$NON-NLS-1$
+			throw new IOException("Failed to delete index file " + this.indexLocation); //$NON-NLS-1$
 		}
-		if (!newDiskIndex.indexFile.renameTo(this.indexFile)) {
+		if (!newIndexFile.renameTo(oldIndexFile)) {
 			if (DEBUG)
-				System.out.println("mergeWith - Failed to rename " + this.indexFile); //$NON-NLS-1$
-			throw new IOException("Failed to rename index file " + this.indexFile); //$NON-NLS-1$
+				System.out.println("mergeWith - Failed to rename " + this.indexLocation); //$NON-NLS-1$
+			throw new IOException("Failed to rename index file " + this.indexLocation); //$NON-NLS-1$
 		}
 	} catch (IOException e) {
-		if (newDiskIndex.indexFile.exists() && !newDiskIndex.indexFile.delete())
+		if (newIndexFile.exists() && !newIndexFile.delete())
 			if (DEBUG)
-				System.out.println("mergeWith - Failed to delete temp index " + newDiskIndex.indexFile); //$NON-NLS-1$
+				System.out.println("mergeWith - Failed to delete temp index " + newDiskIndex.indexLocation); //$NON-NLS-1$
 		throw e;
 	}
 
-	newDiskIndex.indexFile = this.indexFile;
+	newDiskIndex.indexLocation = this.indexLocation;
 	return newDiskIndex;
 }
 

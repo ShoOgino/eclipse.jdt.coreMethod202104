@@ -1,0 +1,44 @@
+	// Test that it works if the index file is in the jar file
+	public void testIndexInJar() throws IOException, CoreException {
+		String indexFilePath = getExternalResourcePath("Test.index");
+		String jarFilePath = getExternalResourcePath("Test.jar");
+		String indexZipPath =  getExternalResourcePath("TestIndex.zip");
+		try {
+			createJar(new String[] {
+					"pkg/Test.java",
+					"package pkg;\n" +
+					"public class Test {\n" +
+					"  protected Test(int i) {}\n" +
+					"}"}, jarFilePath);
+			
+			JavaIndexer.generateIndexForJar(jarFilePath, indexFilePath);
+			Util.zipFiles(new File[]{new File(indexFilePath)}, indexZipPath);
+			
+			IJavaProject p = createJavaProject("P");
+			Path libPath = new Path(jarFilePath);
+			String url = "jar:file:/"+indexZipPath+"!/Test.index";
+			IClasspathAttribute attribute = JavaCore.newClasspathAttribute(IClasspathAttribute.INDEX_LOCATION_ATTRIBUTE_NAME, url);
+			IClasspathEntry entry = JavaCore.newLibraryEntry(libPath, null, null, null, new IClasspathAttribute[]{attribute}, false);
+			setClasspath(p, new IClasspathEntry[] {entry});
+			waitUntilIndexesReady();
+			
+			assertEquals(url,JavaModelManager.getIndexManager().getIndex(libPath, false, false).getIndexLocation().getUrl().toString());
+			
+			search("Test", TYPE, DECLARATIONS, EXACT_RULE, SearchEngine.createJavaSearchScope(new IJavaElement[]{p}));
+			assertSearchResults(getExternalPath() + "Test.jar pkg.Test");
+			
+			simulateExitRestart();
+			getJavaModel().refreshExternalArchives(null,null);
+			waitUntilIndexesReady();
+			
+			this.resultCollector = new JavaSearchResultCollector();
+			assertEquals(url,JavaModelManager.getIndexManager().getIndex(libPath, false, false).getIndexLocation().getUrl().toString());
+			search("Test", TYPE, DECLARATIONS, EXACT_RULE, SearchEngine.createJavaSearchScope(new IJavaElement[]{p}));
+			assertSearchResults(getExternalPath() + "Test.jar pkg.Test");
+		} finally {
+			deleteProject("P");
+			new File(indexZipPath).delete();
+			new File(jarFilePath).delete();
+		}
+	}
+

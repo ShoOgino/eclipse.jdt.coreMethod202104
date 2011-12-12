@@ -1,0 +1,41 @@
+	// Test that the same index file is used even after restarting
+	public void testUseIndexInternalJarAfterRestart() throws IOException, CoreException {
+		String indexFilePath = getExternalResourcePath("Test.index");
+		String jarFilePath = "/P/Test.jar";
+		try {
+			IJavaProject p = createJavaProject("P");
+			createJar(new String[] {
+					"pkg/Test.java",
+					"package pkg;\n" +
+					"public class Test {\n" +
+					"  protected Test(int i) {}\n" +
+					"}"}, jarFilePath);
+			JavaIndexer.generateIndexForJar(jarFilePath, indexFilePath);
+			long modified = new File(indexFilePath).lastModified();
+			IPath libPath = new Path(jarFilePath);
+			IClasspathAttribute attribute = JavaCore.newClasspathAttribute(IClasspathAttribute.INDEX_LOCATION_ATTRIBUTE_NAME, "file:///"+indexFilePath);
+			IClasspathEntry entry = JavaCore.newLibraryEntry(libPath, null, null, null, new IClasspathAttribute[]{attribute}, false);
+			setClasspath(p, new IClasspathEntry[] {entry});
+			waitUntilIndexesReady();
+			
+			search("Test", TYPE, DECLARATIONS, EXACT_RULE, SearchEngine.createJavaSearchScope(new IJavaElement[]{p}));
+			assertSearchResults("\\P\\Test.jar pkg.Test");
+			
+			simulateExitRestart();
+			getJavaModel().refreshExternalArchives(null, null);
+			waitUntilIndexesReady();
+			
+			this.resultCollector = new JavaSearchResultCollector();
+			search("Test", TYPE, DECLARATIONS, EXACT_RULE, SearchEngine.createJavaSearchScope(new IJavaElement[]{p}));
+			assertSearchResults("\\P\\Test.jar pkg.Test");
+			
+			java.io.File indexFile = JavaModelManager.getIndexManager().getIndex(libPath, false, false).getIndexFile();
+			assertEquals(indexFilePath,indexFile.toString());
+			// Ensure that the file is not modified
+			assertEquals(modified, new File(indexFilePath).lastModified());
+		} finally {
+			deleteProject("P");
+			new File(indexFilePath).delete();
+		}
+	}
+

@@ -1,0 +1,51 @@
+	public void testEditClasspath() throws CoreException, IOException {
+		String indexFilePath = getExternalResourcePath("Test.index");
+		String jarFilePath = getExternalResourcePath("Test.jar");
+		try {
+			createJar(new String[] {
+					"pkg/Test.java",
+					"package pkg;\n" +
+					"public class Test {\n" +
+					"  protected Test(int i) {}\n" +
+					"}"}, jarFilePath);
+			JavaIndexer.generateIndexForJar(jarFilePath, indexFilePath);
+			File f = new File(indexFilePath);
+			long modified = f.lastModified();
+			IJavaProject p = this.createJavaProject("P", new String[] {}, "bin");
+
+			String content = new String(
+					"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+					+ "<classpath>\n"
+					+ "<classpathentry kind=\"src\" path=\"src a\"/>\n"
+					+ "<classpathentry kind=\"src\" path=\"src x\"/>\n"
+					+ "<classpathentry kind=\"lib\" path=\""
+					+ getExternalJCLPath()
+					+ "\"/>\n"
+					+ "<classpathentry kind=\"lib\" path=\""
+					+ jarFilePath
+					+ "\">"
+					+ "<attributes>\n" 
+					+ "	<attribute name=\"index_location\" value=\"file:///"
+					+ indexFilePath
+					+"\"/>\n" 
+					+ "</attributes>\n"
+					+ "</classpathentry>\n"
+					+ "<classpathentry kind=\"output\" path=\"bin\"/>\n"
+					+ "</classpath>\n");
+
+			editFile("/P/.classpath", content);
+			p.open(null);
+			waitUntilIndexesReady();
+			search("Test", TYPE, DECLARATIONS, EXACT_RULE, SearchEngine.createJavaSearchScope(new IJavaElement[]{p}));
+			assertSearchResults(getExternalPath() + "Test.jar pkg.Test");
+			java.io.File indexFile = JavaModelManager.getIndexManager().getIndex(new Path(jarFilePath), false, false).getIndexFile();
+			assertEquals(indexFilePath,indexFile.toString());
+			f = new File(indexFilePath);
+			assertEquals(modified, f.lastModified());
+		} finally {
+			deleteProject("P");
+			new File(indexFilePath).delete();
+			new File(jarFilePath).delete();
+		}
+	}
+
