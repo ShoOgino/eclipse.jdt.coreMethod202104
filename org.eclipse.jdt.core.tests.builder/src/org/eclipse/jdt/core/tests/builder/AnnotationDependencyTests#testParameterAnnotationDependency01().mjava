@@ -1,0 +1,50 @@
+	// Bug 365992 - [builder] [null] Change of nullness for a parameter doesn't trigger a build for the files that call the method
+	public void testParameterAnnotationDependency01() throws JavaModelException, IOException {
+		// prepare the project:
+		setupProjectForNullAnnotations();
+
+		String test1Code = "package p1;\n"	+
+			"public class Test1 {\n" +
+			"    public void foo() {\n" +
+			"        new Test2().bar(null);\n" +
+			"    }\n" +
+			"}";
+		String test2Code = "package p1;\n" +
+			"public class Test2 {\n" +
+			"    public void bar(String str) {}\n" +
+			"}";
+
+		IPath test1Path = env.addClass( this.srcRoot, "p1", "Test1", test1Code );
+		env.addClass( this.srcRoot, "p1", "Test2", test2Code );
+
+		fullBuild( this.projectPath );
+		expectingNoProblems();
+
+		// edit Test2 to add @NonNull annotation (changes number of annotations)
+		String test2CodeB = "package p1;\n" +
+			"import org.eclipse.jdt.annotation.NonNull;\n" +
+			"public class Test2 {\n" +
+			"    public void bar(@NonNull String str) {}\n" +
+			"}";
+		env.addClass( this.srcRoot, "p1", "Test2", test2CodeB );
+		incrementalBuild( this.projectPath );
+		expectingProblemsFor(test1Path, 
+				"Problem : Type mismatch: required \'@NonNull String\' but the provided value is null [ resource : </Project/src/p1/Test1.java> range : <81,85> category : <90> severity : <2>]");
+
+		// verify that Test1 was recompiled
+		expectingUniqueCompiledClasses(new String[] { "p1.Test1", "p1.Test2" });
+
+		// fix error by changing to @Nullable (change is only in an annotation name)
+		String test2CodeC = "package p1;\n" +
+			"import org.eclipse.jdt.annotation.Nullable;\n" +
+			"public class Test2 {\n" +
+			"    public void bar(@Nullable String str) {}\n" +
+			"}";
+		env.addClass( this.srcRoot, "p1", "Test2", test2CodeC );
+		incrementalBuild( this.projectPath );
+		expectingNoProblems();
+
+		// verify that Test1 was recompiled
+		expectingUniqueCompiledClasses(new String[] { "p1.Test1", "p1.Test2" });
+	}
+
