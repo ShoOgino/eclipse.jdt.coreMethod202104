@@ -20,11 +20,11 @@ private MethodBinding createMethod(IBinaryMethod method, long sourceLevel, char[
 		int numOfParams = 0;
 		char nextChar;
 		int index = 0; // first character is always '(' so skip it
-		while ((nextChar = methodDescriptor[++index]) != ')') {
-			if (nextChar != '[') {
+		while ((nextChar = methodDescriptor[++index]) != Util.C_PARAM_END) {
+			if (nextChar != Util.C_ARRAY) {
 				numOfParams++;
-				if (nextChar == 'L')
-					while ((nextChar = methodDescriptor[++index]) != ';'){/*empty*/}
+				if (nextChar == Util.C_RESOLVED)
+					while ((nextChar = methodDescriptor[++index]) != Util.C_NAME_END){/*empty*/}
 			}
 		}
 
@@ -48,9 +48,9 @@ private MethodBinding createMethod(IBinaryMethod method, long sourceLevel, char[
 			index = 1;
 			int end = 0;   // first character is always '(' so skip it
 			for (int i = 0; i < numOfParams; i++) {
-				while ((nextChar = methodDescriptor[++end]) == '['){/*empty*/}
-				if (nextChar == 'L')
-					while ((nextChar = methodDescriptor[++end]) != ';'){/*empty*/}
+				while ((nextChar = methodDescriptor[++end]) == Util.C_ARRAY){/*empty*/}
+				if (nextChar == Util.C_RESOLVED)
+					while ((nextChar = methodDescriptor[++end]) != Util.C_NAME_END){/*empty*/}
 
 				if (i >= startIndex) {   // skip the synthetic arg if necessary
 					parameters[i - startIndex] = this.environment.getTypeFromSignature(methodDescriptor, index, end, false, this, missingTypeNames);
@@ -79,7 +79,7 @@ private MethodBinding createMethod(IBinaryMethod method, long sourceLevel, char[
 		methodModifiers |= ExtraCompilerModifiers.AccGenericSignature;
 		// MethodTypeSignature = ParameterPart(optional) '(' TypeSignatures ')' return_typeSignature ['^' TypeSignature (optional)]
 		SignatureWrapper wrapper = new SignatureWrapper(methodSignature, use15specifics);
-		if (wrapper.signature[wrapper.start] == '<') {
+		if (wrapper.signature[wrapper.start] == Util.C_GENERIC_START) {
 			// <A::Ljava/lang/annotation/Annotation;>(Ljava/lang/Class<TA;>;)TA;
 			// ParameterPart = '<' ParameterSignature(s) '>'
 			wrapper.start++; // skip '<'
@@ -87,13 +87,13 @@ private MethodBinding createMethod(IBinaryMethod method, long sourceLevel, char[
 			wrapper.start++; // skip '>'
 		}
 
-		if (wrapper.signature[wrapper.start] == '(') {
+		if (wrapper.signature[wrapper.start] == Util.C_PARAM_START) {
 			wrapper.start++; // skip '('
-			if (wrapper.signature[wrapper.start] == ')') {
+			if (wrapper.signature[wrapper.start] == Util.C_PARAM_END) {
 				wrapper.start++; // skip ')'
 			} else {
 				java.util.ArrayList types = new java.util.ArrayList(2);
-				while (wrapper.signature[wrapper.start] != ')')
+				while (wrapper.signature[wrapper.start] != Util.C_PARAM_END)
 					types.add(this.environment.getTypeFromTypeSignature(wrapper, typeVars, this, missingTypeNames));
 				wrapper.start++; // skip ')'
 				int numParam = types.size();
@@ -110,13 +110,13 @@ private MethodBinding createMethod(IBinaryMethod method, long sourceLevel, char[
 		// always retrieve return type (for constructors, its V for void - will be ignored)
 		returnType = this.environment.getTypeFromTypeSignature(wrapper, typeVars, this, missingTypeNames);
 
-		if (!wrapper.atEnd() && wrapper.signature[wrapper.start] == '^') {
+		if (!wrapper.atEnd() && wrapper.signature[wrapper.start] == Util.C_EXCEPTION_START) {
 			// attempt to find each exception if it exists in the cache (otherwise - resolve it when requested)
 			java.util.ArrayList types = new java.util.ArrayList(2);
 			do {
 				wrapper.start++; // skip '^'
 				types.add(this.environment.getTypeFromTypeSignature(wrapper, typeVars, this, missingTypeNames));
-			} while (!wrapper.atEnd() && wrapper.signature[wrapper.start] == '^');
+			} while (!wrapper.atEnd() && wrapper.signature[wrapper.start] == Util.C_EXCEPTION_START);
 			exceptions = new ReferenceBinding[types.size()];
 			types.toArray(exceptions);
 		} else { // get the exceptions the old way
