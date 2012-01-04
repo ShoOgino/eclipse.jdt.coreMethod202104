@@ -1,7 +1,8 @@
 	// Test that the same index file is used even after restarting
-	public void _testUseIndexInternalJarAfterRestart() throws IOException, CoreException {
+	public void testUseIndexInternalJarAfterRestart() throws IOException, CoreException {
 		String indexFilePath = getExternalResourcePath("Test.index");
 		String jarFilePath = "/P/Test.jar";
+		String fullJarPath = getWorkspacePath() + jarFilePath;
 		try {
 			IJavaProject p = createJavaProject("P");
 			createJar(new String[] {
@@ -9,8 +10,9 @@
 					"package pkg;\n" +
 					"public class Test {\n" +
 					"  protected Test(int i) {}\n" +
-					"}"}, jarFilePath);
-			JavaIndexer.generateIndexForJar(jarFilePath, indexFilePath);
+					"}"}, fullJarPath);
+			p.getProject().refreshLocal(1, null);
+			JavaIndexer.generateIndexForJar(fullJarPath, indexFilePath);
 			long modified = new File(indexFilePath).lastModified();
 			IPath libPath = new Path(jarFilePath);
 			IClasspathAttribute attribute = JavaCore.newClasspathAttribute(IClasspathAttribute.INDEX_LOCATION_ATTRIBUTE_NAME, "file:///"+indexFilePath);
@@ -19,17 +21,18 @@
 			waitUntilIndexesReady();
 			
 			search("Test", TYPE, DECLARATIONS, EXACT_RULE, SearchEngine.createJavaSearchScope(new IJavaElement[]{p}));
-			assertSearchResults("\\P\\Test.jar pkg.Test");
+			assertSearchResults("Test.jar pkg.Test [No source]");
+			java.io.File indexFile = JavaModelManager.getIndexManager().getIndex(libPath, false, false).getIndexFile();
+			assertEquals(indexFilePath,indexFile.toString());
 			
 			simulateExitRestart();
-			getJavaModel().refreshExternalArchives(null, null);
 			waitUntilIndexesReady();
 			
 			this.resultCollector = new JavaSearchResultCollector();
 			search("Test", TYPE, DECLARATIONS, EXACT_RULE, SearchEngine.createJavaSearchScope(new IJavaElement[]{p}));
-			assertSearchResults("\\P\\Test.jar pkg.Test");
+			assertSearchResults("Test.jar pkg.Test [No source]");
 			
-			java.io.File indexFile = JavaModelManager.getIndexManager().getIndex(libPath, false, false).getIndexFile();
+			indexFile = JavaModelManager.getIndexManager().getIndex(libPath, false, false).getIndexFile();
 			assertEquals(indexFilePath,indexFile.toString());
 			// Ensure that the file is not modified
 			assertEquals(modified, new File(indexFilePath).lastModified());
