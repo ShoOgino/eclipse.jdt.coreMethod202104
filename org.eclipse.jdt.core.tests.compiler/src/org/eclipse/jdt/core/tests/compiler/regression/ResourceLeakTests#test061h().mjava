@@ -1,0 +1,61 @@
+// Bug 358903 - Filter practically unimportant resource leak warnings
+// Bug 360908 - Avoid resource leak warning when the underlying/chained resource is closed explicitly
+// Different points in a resource chain are potentially closed
+public void test061h() {
+	Map options = getCompilerOptions();
+	options.put(CompilerOptions.OPTION_ReportUnclosedCloseable, CompilerOptions.ERROR);
+	options.put(CompilerOptions.OPTION_ReportPotentiallyUnclosedCloseable, CompilerOptions.ERROR);
+	this.runNegativeTest(
+		new String[] {
+			"X.java",
+			"import java.io.File;\n" +
+			"import java.io.BufferedInputStream;\n" +
+			"import java.io.FileInputStream;\n" +
+			"import java.io.IOException;\n" +
+			"public class X {\n" +
+			"    void closeMiddle(boolean b) throws IOException {\n" +
+			"        File file = new File(\"somefile\");\n" +
+			"        FileInputStream fileStream  = new FileInputStream(file);\n" +
+			"        BufferedInputStream bis = new BufferedInputStream(fileStream);\n" +
+			"        BufferedInputStream doubleWrap = new BufferedInputStream(bis);\n" +
+			"        System.out.println(bis.available());\n" +
+			"        if (b)\n" +
+			"            bis.close();\n" +
+			"    }\n" +
+			"    void closeOuter(boolean b) throws IOException {\n" +
+			"        File file2 = new File(\"somefile\");\n" +
+			"        FileInputStream fileStream2  = new FileInputStream(file2);\n" +
+			"        BufferedInputStream dummy;\n" +
+			"        BufferedInputStream bis2 = (dummy = new BufferedInputStream(fileStream2));\n" +
+			"        BufferedInputStream doubleWrap2 = new BufferedInputStream(bis2);\n" +
+			"        System.out.println(bis2.available());\n" +
+			"        if (b)\n" +
+			"            doubleWrap2.close();\n" +
+			"    }\n" +
+			"    void potAndDef(boolean b) throws IOException {\n" +
+			"        File file3 = new File(\"somefile\");\n" +
+			"        FileInputStream fileStream3  = new FileInputStream(file3);\n" +
+			"        BufferedInputStream bis3 = new BufferedInputStream(fileStream3);\n" +
+			"        BufferedInputStream doubleWrap3 = new BufferedInputStream(bis3);\n" +
+			"        System.out.println(doubleWrap3.available());\n" +
+			"        if (b) bis3.close();\n" +
+			"        fileStream3.close();\n" +
+			"    }\n" +
+			"}\n"
+		},
+		"----------\n" +
+		"1. ERROR in X.java (at line 10)\n" +
+		"	BufferedInputStream doubleWrap = new BufferedInputStream(bis);\n" +
+		"	                    ^^^^^^^^^^\n" +
+		"Potential resource leak: \'doubleWrap\' may not be closed\n" +
+		"----------\n" +
+		"2. ERROR in X.java (at line 20)\n" +
+		"	BufferedInputStream doubleWrap2 = new BufferedInputStream(bis2);\n" +
+		"	                    ^^^^^^^^^^^\n" +
+		"Potential resource leak: \'doubleWrap2\' may not be closed\n" +
+		"----------\n",
+		null,
+		true,
+		options);
+}
+

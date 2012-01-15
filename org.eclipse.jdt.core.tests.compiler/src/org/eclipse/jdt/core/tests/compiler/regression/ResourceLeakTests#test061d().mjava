@@ -1,0 +1,51 @@
+// Bug 358903 - Filter practically unimportant resource leak warnings
+// a resource wrapper is not closed neither is the underlying resource
+public void test061d() {
+	Map options = getCompilerOptions();
+	options.put(CompilerOptions.OPTION_ReportUnclosedCloseable, CompilerOptions.ERROR);
+	options.put(CompilerOptions.OPTION_ReportPotentiallyUnclosedCloseable, CompilerOptions.WARNING);
+	this.runNegativeTest(
+		new String[] {
+			"X.java",
+			"import java.io.File;\n" +
+			"import java.io.BufferedInputStream;\n" +
+			"import java.io.FileInputStream;\n" +
+			"import java.io.IOException;\n" +
+			"public class X {\n" +
+			"    void foo() throws IOException {\n" +
+			"        File file = new File(\"somefile\");\n" +
+			"        FileInputStream fileStream  = new FileInputStream(file);\n" +
+			"        BufferedInputStream bis = new BufferedInputStream(fileStream);\n" +
+			"        BufferedInputStream doubleWrap = new BufferedInputStream(bis);\n" +
+			"        System.out.println(bis.available());\n" +
+			"    }\n" +
+			"    void inline() throws IOException {\n" +
+			"        File file = new File(\"somefile\");\n" +
+			"        BufferedInputStream bis2 = new BufferedInputStream(new FileInputStream(file));\n" +
+			"        System.out.println(bis2.available());\n" +
+			"    }\n" +
+			"    public static void main(String[] args) throws IOException {\n" +
+			"        try {\n" +
+			"            new X().foo();\n" +
+			"        } catch (IOException ex) {" +
+			"            System.out.println(\"Got IO Exception\");\n" +
+			"        }\n" +
+			"    }\n" +
+			"}\n"
+		},
+		"----------\n" +
+		"1. ERROR in X.java (at line 10)\n" +
+		"	BufferedInputStream doubleWrap = new BufferedInputStream(bis);\n" +
+		"	                    ^^^^^^^^^^\n" +
+		"Resource leak: \'doubleWrap\' is never closed\n" +
+		"----------\n" +
+		"2. ERROR in X.java (at line 15)\n" +
+		"	BufferedInputStream bis2 = new BufferedInputStream(new FileInputStream(file));\n" +
+		"	                    ^^^^\n" +
+		"Resource leak: \'bis2\' is never closed\n" +
+		"----------\n",
+		null,
+		true,
+		options);
+}
+

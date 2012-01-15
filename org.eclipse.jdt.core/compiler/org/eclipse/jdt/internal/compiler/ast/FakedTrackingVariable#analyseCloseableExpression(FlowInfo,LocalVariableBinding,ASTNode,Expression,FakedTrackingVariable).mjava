@@ -1,0 +1,62 @@
+	/**
+	 * Analyze structure of a closeable expression, matching (chained) resources against our white lists.
+	 * @param flowInfo where to record close status
+	 * @param local local variable to which the closeable is being assigned
+	 * @param location where to flag errors/warnings against
+	 * @param expression expression to be analyzed
+	 * @param previousTracker when analyzing a re-assignment we may already have a tracking variable for local,
+	 *  		which we should then re-use
+	 * @return a tracking variable associated with local or null if no need to track
+	 */
+	private static FakedTrackingVariable analyseCloseableExpression(FlowInfo flowInfo, LocalVariableBinding local, 
+									ASTNode location, Expression expression, FakedTrackingVariable previousTracker) 
+	{
+		// unwrap uninteresting nodes:
+		while (true) {
+			if (expression instanceof Assignment)
+				expression = ((Assignment)expression).expression;
+			else if (expression instanceof CastExpression)
+				expression = ((CastExpression) expression).expression;
+			else
+				break;
+		}
+
+		// analyze by node type:
+		if (expression instanceof AllocationExpression) {
+			// allocation expressions already have their tracking variables analyzed by analyseCloseableAllocation(..)
+			FakedTrackingVariable tracker = ((AllocationExpression) expression).closeTracker;
+			if (tracker != null && tracker.originalBinding == null) {
+				// tracker without original binding (unassigned closeable) shouldn't reach here but let's play safe
+				return null;
+			}
+			return tracker;
+		} else if (expression instanceof MessageSend 
+				|| expression instanceof ArrayReference) 
+		{
+			// we *might* be responsible for the resource obtained
+			FakedTrackingVariable tracker = new FakedTrackingVariable(local, location);
+			tracker.globalClosingState |= SHARED_WITH_OUTSIDE;
+			flowInfo.markPotentiallyNullBit(tracker.binding); // shed some doubt
+			return tracker;			
+		} else if ((expression.bits & RestrictiveFlagMASK) == Binding.FIELD) 
+		{
+			// responsibility for this resource probably lies at a higher level
+			FakedTrackingVariable tracker = new FakedTrackingVariable(local, location);
+			tracker.globalClosingState |= OWNED_BY_OUTSIDE;
+			// leave state as UNKNOWN, the bit OWNED_BY_OUTSIDE will prevent spurious warnings
+			return tracker;			
+		}
+
+		if (expression.resolvedType instanceof ReferenceBinding) {
+			ReferenceBinding resourceType = (ReferenceBinding) expression.resolvedType;
+			if (resourceType.hasTypeBit(TypeIds.BitResourceFreeCloseable)) {
+				// (a) resource-free closeable: -> null
+				return null;
+			}
+		}
+		if (local.closeTracker != null)
+			// (c): inner has already been analyzed: -> re-use track var
+			return local.closeTracker;
+		return new FakedTrackingVariable(local, location);
+	}
+

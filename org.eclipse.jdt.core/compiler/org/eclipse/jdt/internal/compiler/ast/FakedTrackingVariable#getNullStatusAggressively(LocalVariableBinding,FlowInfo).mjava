@@ -1,0 +1,32 @@
+	/**
+	 * Get the null status looking even into unreachable flows
+	 * @param local
+	 * @param flowInfo
+	 * @return one of the constants FlowInfo.{NULL,POTENTIALLY_NULL,POTENTIALLY_NON_NULL,NON_NULL}.
+	 */
+	private int getNullStatusAggressively(LocalVariableBinding local, FlowInfo flowInfo) {
+		int reachMode = flowInfo.reachMode();
+		int status = 0;
+		try {
+			// unreachable flowInfo is too shy in reporting null-issues, temporarily forget reachability:
+			if (reachMode != FlowInfo.REACHABLE)
+				flowInfo.tagBits &= ~FlowInfo.UNREACHABLE;
+			status = flowInfo.nullStatus(local);
+		} finally {
+			// reset
+			flowInfo.tagBits |= reachMode;
+		}
+		// at this point some combinations are not useful so flatten to a single bit:
+		if ((status & FlowInfo.NULL) != 0) {
+			if ((status & (FlowInfo.NON_NULL | FlowInfo.POTENTIALLY_NON_NULL)) != 0)
+				return FlowInfo.POTENTIALLY_NULL; 	// null + doubt = pot null
+			return FlowInfo.NULL;
+		} else if ((status & FlowInfo.NON_NULL) != 0) {
+			if ((status & FlowInfo.POTENTIALLY_NULL) != 0)
+				return FlowInfo.POTENTIALLY_NULL;	// non-null + doubt = pot null
+			return FlowInfo.NON_NULL;
+		} else if ((status & FlowInfo.POTENTIALLY_NULL) != 0)
+			return FlowInfo.POTENTIALLY_NULL;
+		return status;
+	}
+

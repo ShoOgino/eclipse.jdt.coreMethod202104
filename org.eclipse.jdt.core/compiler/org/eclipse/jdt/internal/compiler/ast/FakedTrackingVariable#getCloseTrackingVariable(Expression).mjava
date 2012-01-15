@@ -1,24 +1,44 @@
 	/**
-	 * If expression resolves to a local variable binding of type AutoCloseable,
-	 * answer the variable that tracks closing of that local, creating it if needed.
+	 * If expression resolves to a value of type AutoCloseable answer the variable that tracks closing of that local.
+	 * Covers two cases:
+	 * <ul>
+	 * <li>value is a local variable reference, create tracking variable it if needed.
+	 * <li>value is an allocation expression, return a preliminary tracking variable if set.
+	 * </ul>
 	 * @param expression
 	 * @return a new {@link FakedTrackingVariable} or null.
 	 */
 	public static FakedTrackingVariable getCloseTrackingVariable(Expression expression) {
+		while (true) {
+			if (expression instanceof CastExpression)
+				expression = ((CastExpression) expression).expression;
+			else if (expression instanceof Assignment)
+				expression = ((Assignment) expression).expression;
+			else
+				break;
+		}
 		if (expression instanceof SingleNameReference) {
 			SingleNameReference name = (SingleNameReference) expression;
 			if (name.binding instanceof LocalVariableBinding) {
 				LocalVariableBinding local = (LocalVariableBinding)name.binding;
 				if (local.closeTracker != null)
 					return local.closeTracker;
-				if (local.isParameter() || !isAutoCloseable(expression.resolvedType))
+				if (!isAnyCloseable(expression.resolvedType))
 					return null;
 				// tracking var doesn't yet exist. This happens in finally block
 				// which is analyzed before the corresponding try block
 				Statement location = local.declaration;
-				return local.closeTracker = new FakedTrackingVariable(local, location);
+				local.closeTracker = new FakedTrackingVariable(local, location);
+				if (local.isParameter()) {
+					local.closeTracker.globalClosingState |= OWNED_BY_OUTSIDE;
+					// status of this tracker is now UNKNOWN
+				}
+				return local.closeTracker;
 			}
-		}
+		} else if (expression instanceof AllocationExpression) {
+			// return any preliminary tracking variable from analyseCloseableAllocation 
+			return ((AllocationExpression) expression).closeTracker;
+		}		
 		return null;
 	}
 

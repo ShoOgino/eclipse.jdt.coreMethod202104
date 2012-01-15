@@ -1,0 +1,52 @@
+// Bug 349326 - [1.7] new warning for missing try-with-resources
+// three AutoCloseables in different blocks of the same method
+public void test056i() {
+	Map options = getCompilerOptions();
+	options.put(JavaCore.COMPILER_PB_UNCLOSED_CLOSEABLE, CompilerOptions.ERROR);
+	options.put(JavaCore.COMPILER_PB_POTENTIALLY_UNCLOSED_CLOSEABLE, CompilerOptions.WARNING);
+	options.put(JavaCore.COMPILER_PB_EXPLICITLY_CLOSED_AUTOCLOSEABLE, CompilerOptions.IGNORE);
+	this.runNegativeTest(
+		new String[] {
+			"X.java",
+			"import java.io.File;\n" +
+			"import java.io.FileReader;\n" +
+			"import java.io.IOException;\n" +
+			"public class X {\n" +
+			"    void foo(boolean f1, boolean f2) throws IOException {\n" +
+			"        File file = new File(\"somefile\");\n" +
+			"        if (f1) {\n" +
+			"            FileReader fileReader = new FileReader(file); // err: not closed\n" +
+			"            char[] in = new char[50];\n" +
+			"            fileReader.read(in);\n" +
+			"            while (true) {\n" +
+			"                 FileReader loopReader = new FileReader(file); // don't warn, properly closed\n" +
+			"                 loopReader.close();" +
+			"                 break;\n" +
+			"            }\n" +
+			"        } else {\n" +
+			"            FileReader fileReader = new FileReader(file); // warn: not closed on all paths\n" +
+			"            if (f2)\n" +
+			"                fileReader.close();\n" +
+			"        }\n" +
+			"    }\n" +
+			"    public static void main(String[] args) throws IOException {\n" +
+			"        new X().foo(true, true);\n" +
+			"    }\n" +
+			"}\n"
+		},
+		"----------\n" +
+		"1. ERROR in X.java (at line 8)\n" +
+		"	FileReader fileReader = new FileReader(file); // err: not closed\n" +
+		"	           ^^^^^^^^^^\n" +
+		"Resource leak: 'fileReader' is never closed\n" +
+		"----------\n" +
+		"2. WARNING in X.java (at line 16)\n" +
+		"	FileReader fileReader = new FileReader(file); // warn: not closed on all paths\n" +
+		"	           ^^^^^^^^^^\n" +
+		"Potential resource leak: 'fileReader' may not be closed\n" +
+		"----------\n",
+		null,
+		true,
+		options);
+}
+

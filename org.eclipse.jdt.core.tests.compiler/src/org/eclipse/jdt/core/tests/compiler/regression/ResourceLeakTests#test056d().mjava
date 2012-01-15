@@ -1,0 +1,51 @@
+// Bug 349326 - [1.7] new warning for missing try-with-resources
+// a method uses two AutoCloseables (testing independent analysis)
+//- one closeable may be unclosed at a conditional return
+//- the other is only conditionally closed
+public void test056d() {
+	Map options = getCompilerOptions();
+	options.put(CompilerOptions.OPTION_ReportUnclosedCloseable, CompilerOptions.ERROR);
+	options.put(CompilerOptions.OPTION_ReportPotentiallyUnclosedCloseable, CompilerOptions.WARNING);
+	this.runNegativeTest(
+		new String[] {
+			"X.java",
+			"import java.io.File;\n" +
+			"import java.io.FileReader;\n" +
+			"import java.io.IOException;\n" +
+			"public class X {\n" +
+			"    void foo(boolean flag1, boolean flag2) throws IOException {\n" +
+			"        File file = new File(\"somefile\");\n" +
+			"        char[] in = new char[50];\n" +
+			"        FileReader fileReader1 = new FileReader(file);\n" +
+			"        fileReader1.read(in);\n" +
+			"        FileReader fileReader2 = new FileReader(file);\n" +
+			"        fileReader2.read(in);\n" +
+			"        if (flag1) {\n" +
+			"            fileReader2.close();\n" +
+			"            return;\n" +
+			"        } else if (flag2) {\n" +
+			"            fileReader2.close();\n" +
+			"        }\n" +
+			"        fileReader1.close();\n" +
+			"    }\n" +
+			"    public static void main(String[] args) throws IOException {\n" +
+			"        new X().foo(false, true);\n" +
+			"    }\n" +
+			"}\n"
+		},
+		"----------\n" +
+		"1. WARNING in X.java (at line 10)\n" +
+		"	FileReader fileReader2 = new FileReader(file);\n" +
+		"	           ^^^^^^^^^^^\n" +
+		"Potential resource leak: 'fileReader2' may not be closed\n" +
+		"----------\n" +
+		"2. ERROR in X.java (at line 14)\n" +
+		"	return;\n" +
+		"	^^^^^^^\n" +
+		"Resource leak: 'fileReader1' is not closed at this location\n" +
+		"----------\n",
+		null,
+		true,
+		options);
+}
+

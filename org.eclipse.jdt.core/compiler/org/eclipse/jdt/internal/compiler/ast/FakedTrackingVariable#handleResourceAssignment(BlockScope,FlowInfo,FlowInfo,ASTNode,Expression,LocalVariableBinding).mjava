@@ -1,0 +1,70 @@
+	/** 
+	 * Check if the rhs of an assignment or local declaration is an (Auto)Closeable.
+	 * If so create or re-use a tracking variable, and wire and initialize everything.
+	 * @param scope scope containing the assignment
+	 * @param upstreamInfo info without analysis of the rhs, use this to determine the status of a resource being disconnected
+	 * @param flowInfo info with analysis of the rhs, use this for recording resource status because this will be passed downstream
+	 * @param location where to report warnigs/errors against
+	 * @param rhs the right hand side of the assignment, this expression is to be analyzed.
+	 *			The caller has already checked that the rhs is either of a closeable type or null.
+	 * @param local the local variable into which the rhs is being assigned
+	 */
+	public static void handleResourceAssignment(BlockScope scope, FlowInfo upstreamInfo, FlowInfo flowInfo, ASTNode location, Expression rhs, LocalVariableBinding local)
+	{
+		// does the LHS (local) already have a tracker, indicating we may leak a resource by the assignment?
+		FakedTrackingVariable previousTracker = null;
+		FakedTrackingVariable disconnectedTracker = null;
+		if (local.closeTracker != null) {
+			// assigning to a variable already holding an AutoCloseable, has it been closed before?
+			previousTracker = local.closeTracker;
+			int nullStatus = upstreamInfo.nullStatus(local);
+			if (nullStatus != FlowInfo.NULL && nullStatus != FlowInfo.UNKNOWN) // only if previous value may be relevant
+				disconnectedTracker = previousTracker; // report error below, unless we have a self-wrap assignment
+		}
+
+		if (rhs.resolvedType != TypeBinding.NULL) {
+			// new value is AutoCloseable, start tracking, possibly re-using existing tracker var:
+			FakedTrackingVariable rhsTrackVar = getCloseTrackingVariable(rhs);
+			if (rhsTrackVar != null) {								// 1. if RHS has a tracking variable...
+				if (local.closeTracker == null) {
+					// null shouldn't occur but let's play safe
+					if (rhsTrackVar.originalBinding != null)
+						local.closeTracker = rhsTrackVar;			//		a.: let fresh LHS share it 
+				} else {
+					if (rhsTrackVar == disconnectedTracker && rhs instanceof AllocationExpression)
+						return; 									// 		b.: self wrapper: res = new Wrap(res); -> done!
+					local.closeTracker = rhsTrackVar;				//		c.: conflicting LHS and RHS, proceed with recordErrorLocation below
+				}
+				// keep close-status of RHS unchanged across this assignment
+			} else if (previousTracker != null) {					// 2. re-use tracking variable from the LHS?
+				// re-assigning from a fresh value, mark as not-closed again:
+				if ((previousTracker.globalClosingState & (SHARED_WITH_OUTSIDE|OWNED_BY_OUTSIDE)) == 0)
+					flowInfo.markAsDefinitelyNull(previousTracker.binding);
+				local.closeTracker = analyseCloseableExpression(flowInfo, local, location, rhs, previousTracker);
+			} else {												// 3. no re-use, create a fresh tracking variable:
+				rhsTrackVar = analyseCloseableExpression(flowInfo, local, location, rhs, null);
+				if (rhsTrackVar != null) {
+					local.closeTracker = rhsTrackVar;
+					// a fresh resource, mark as not-closed:
+					if ((rhsTrackVar.globalClosingState & (SHARED_WITH_OUTSIDE|OWNED_BY_OUTSIDE)) == 0)
+						flowInfo.markAsDefinitelyNull(rhsTrackVar.binding);
+// TODO(stephan): this might be useful, but I could not find a test case for it: 
+//					if (flowContext.initsOnFinally != null)
+//						flowContext.initsOnFinally.markAsDefinitelyNonNull(trackerBinding);
+				}
+			}
+		}
+
+		if (disconnectedTracker != null) {
+			if (disconnectedTracker.innerTracker != null && disconnectedTracker.innerTracker.binding.declaringScope == scope) {
+				// discard tracker for the wrapper but keep the inner:
+				disconnectedTracker.innerTracker.outerTracker = null;
+				scope.pruneWrapperTrackingVar(disconnectedTracker);
+			} else {
+				int upstreamStatus = upstreamInfo.nullStatus(disconnectedTracker.binding);
+				if (upstreamStatus != FlowInfo.NON_NULL)
+					disconnectedTracker.recordErrorLocation(location, upstreamStatus);
+			}
+		}
+	}
+

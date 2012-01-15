@@ -1,0 +1,29 @@
+	/** 
+	 * Mark that this resource is passed to some outside code
+	 * (as argument to a method/ctor call or as a return value from the current method), 
+	 * and thus should be considered as potentially closed.
+	 * @param owned should the resource be considered owned by some outside?
+	 */
+	public static FlowInfo markPassedToOutside(BlockScope scope, Expression expression, FlowInfo flowInfo, boolean owned) {	
+		
+		FakedTrackingVariable trackVar = getCloseTrackingVariable(expression);
+		if (trackVar != null) {
+			if (trackVar.originalBinding == null) {
+				// an allocation that never was assigned to a local variable -> drop it completely as we're not responsible
+				scope.removeTrackingVar(trackVar);
+				return flowInfo;
+			}
+			// insert info that the tracked resource *may* be closed (by the target method, i.e.)
+			FlowInfo infoResourceIsClosed = flowInfo.copy();
+			int flag = owned ? OWNED_BY_OUTSIDE : SHARED_WITH_OUTSIDE;
+			do {
+				trackVar.globalClosingState |= flag;
+				if (scope.methodScope() != trackVar.methodScope)
+					trackVar.globalClosingState |= CLOSED_IN_NESTED_METHOD;
+				infoResourceIsClosed.markAsDefinitelyNonNull(trackVar.binding);
+			} while ((trackVar = trackVar.innerTracker) != null); 
+			return FlowInfo.conditional(flowInfo, infoResourceIsClosed);
+		}
+		return flowInfo;
+	}
+

@@ -1,0 +1,68 @@
+	/** 
+	 * Compute/assign a tracking variable for a freshly allocated closeable value, using information from our white lists.
+	 * See  Bug 358903 - Filter practically unimportant resource leak warnings 
+	 */
+	public static void analyseCloseableAllocation(BlockScope scope, FlowInfo flowInfo, AllocationExpression allocation) {
+		// client has checked that the resolvedType is an AutoCloseable, hence the following cast is safe:
+		if (((ReferenceBinding)allocation.resolvedType).hasTypeBit(TypeIds.BitResourceFreeCloseable)) {
+			// remove unnecessary attempts (closeable is not relevant)
+			if (allocation.closeTracker != null) {
+				scope.removeTrackingVar(allocation.closeTracker);
+				allocation.closeTracker = null;
+			}
+		} else if (((ReferenceBinding)allocation.resolvedType).hasTypeBit(TypeIds.BitWrapperCloseable)) {
+			boolean isWrapper = true;
+			if (allocation.arguments != null &&  allocation.arguments.length > 0) {
+				// find the wrapped resource represented by its tracking var:
+				FakedTrackingVariable innerTracker = findCloseTracker(scope, flowInfo, allocation.arguments[0]);
+				if (innerTracker != null) {
+					if (innerTracker == allocation.closeTracker)
+						return; // self wrap (res = new Res(res)) -> neither change (here) nor remove (below)
+					int newStatus = FlowInfo.NULL;
+					if (allocation.closeTracker == null) {
+						allocation.closeTracker = new FakedTrackingVariable(scope, allocation); // no local available, closeable is unassigned
+					} else {
+						if (scope.finallyInfo != null) {
+							// inject results from analysing a finally block onto the newly connected wrapper
+							int finallyStatus = scope.finallyInfo.nullStatus(allocation.closeTracker.binding);
+							if (finallyStatus != FlowInfo.UNKNOWN)
+								newStatus = finallyStatus;
+						}
+					}
+					allocation.closeTracker.innerTracker = innerTracker;
+					innerTracker.outerTracker = allocation.closeTracker;
+					flowInfo.markNullStatus(allocation.closeTracker.binding, newStatus);
+					if (newStatus != FlowInfo.NULL) {
+						// propagate results from a finally block also into nested resources:
+						FakedTrackingVariable currentTracker = innerTracker;
+						while (currentTracker != null) {
+							flowInfo.markNullStatus(currentTracker.binding, newStatus);
+							currentTracker.globalClosingState |= allocation.closeTracker.globalClosingState;
+							currentTracker = currentTracker.innerTracker;
+						}
+					}
+					return; // keep chaining wrapper (by avoiding to fall through to removeTrackingVar below)
+				} else {
+					if (!isAnyCloseable(allocation.arguments[0].resolvedType)) {
+						isWrapper = false; // argument is not closeable
+					}
+				}
+			} else {
+				isWrapper = false; // no argument
+			}
+			// successful wrapper detection has exited above, let's see why that failed
+			if (isWrapper) {
+				// remove unnecessary attempts (wrapper has no relevant inner)
+				if (allocation.closeTracker != null) {
+					scope.removeTrackingVar(allocation.closeTracker);
+					allocation.closeTracker = null;
+				}
+			} else {
+				// allocation does not provide a resource as the first argument -> don't treat as a wrapper
+				handleRegularResource(scope, flowInfo, allocation);
+			}
+		} else { // regular resource
+			handleRegularResource(scope, flowInfo, allocation);
+		}
+	}
+
