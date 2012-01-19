@@ -83,8 +83,6 @@ public void resolve() {
 				}
 			} while ((current = current.enclosingType()) != null);
 		}
-		// this.maxFieldCount might already be set
-		int localMaxFieldCount = 0;
 		int lastVisibleFieldID = -1;
 		boolean hasEnumConstants = false;
 		FieldDeclaration[] enumConstantsWithoutBody = null;
@@ -94,6 +92,38 @@ public void resolve() {
 				this.typeParameters[i].resolve(this.scope);
 			}
 		}
+		// field count from enclosing and supertypes should be included in maxFieldCount,
+		// to make field-ids unique among all fields in scope.
+		// 1.: enclosing:
+		TypeBinding original = sourceType.original();
+		int fieldAnalysisOffset = 0;
+		if (original instanceof NestedTypeBinding) {
+			// note: local types have no enclosingType in the AST but only in the binding:
+			fieldAnalysisOffset = ((NestedTypeBinding)original).enclosingType.cumulativeFieldCount;
+		}
+		// 2.: supers:
+		ReferenceBinding superClassBinding = sourceType.superclass;
+		while (superClassBinding != null) {
+			FieldBinding[] unResolvedFields = superClassBinding.unResolvedFields();
+			if (unResolvedFields != null) {
+				for (int i=unResolvedFields.length-1; i>=0; i--) {
+ 					// if the field is an initializer we do not want to update the count 
+					switch (unResolvedFields[i].kind()) {
+						case AbstractVariableDeclaration.FIELD:
+						case AbstractVariableDeclaration.ENUM_CONSTANT:
+							fieldAnalysisOffset++;
+					}
+				}
+			}
+			fieldAnalysisOffset += findFieldCountFromSuperInterfaces(superClassBinding.superInterfaces());
+			superClassBinding = superClassBinding.superclass();
+		}
+		ReferenceBinding[] superInterfacesBinding = sourceType.superInterfaces;
+		fieldAnalysisOffset += findFieldCountFromSuperInterfaces(superInterfacesBinding);
+		sourceType.cumulativeFieldCount += fieldAnalysisOffset;
+		sourceType.fieldAnalysisOffset = fieldAnalysisOffset;
+		this.maxFieldCount = sourceType.cumulativeFieldCount;
+
 		if (this.memberTypes != null) {
 			for (int i = 0, count = this.memberTypes.length; i < count; i++) {
 				this.memberTypes[i].resolve(this.scope);
@@ -125,7 +155,6 @@ public void resolve() {
 								&& TypeBinding.LONG == fieldBinding.type) {
 							needSerialVersion = false;
 						}
-						localMaxFieldCount++;
 						lastVisibleFieldID = field.binding.id;
 						break;
 
@@ -135,9 +164,6 @@ public void resolve() {
 				}
 				field.resolve(field.isStatic() ? this.staticInitializerScope : this.initializerScope);
 			}
-		}
-		if (this.maxFieldCount < localMaxFieldCount) {
-			this.maxFieldCount = localMaxFieldCount;
 		}
 		if (needSerialVersion) {
 			//check that the current type doesn't extend javax.rmi.CORBA.Stub

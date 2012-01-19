@@ -1,0 +1,34 @@
+final public boolean isDefinitelyNull(VariableBinding local) {
+	boolean isField = local instanceof FieldBinding;
+	if (isField && (this.tagBits & NULL_FLAG_MASK) == 0) {
+		// no local yet in scope. Came here because of a field being queried for non null
+		// will only happen for final fields, since they are assigned in a constructor or static block
+		// and we may currently be in some other method
+		this.tagBits |= NULL_FLAG_MASK;
+	}
+	// do not want to complain in unreachable code
+	if ((this.tagBits & UNREACHABLE) != 0 ||
+			(this.tagBits & NULL_FLAG_MASK) == 0 ||
+			(local.type.tagBits & TagBits.IsBaseType) != 0) {
+		return false;
+	}
+	int position = local.getAnalysisId(this.maxFieldCount);
+	if (position < BitCacheSize) { // use bits
+		return ((this.nullBit1 & this.nullBit2
+			        & (~this.nullBit3 | ~this.nullBit4))
+			    & (1L << position)) != 0;
+	}
+	// use extra vector
+	if (this.extra == null) {
+		return false; // if vector not yet allocated, then not initialized
+	}
+	int vectorIndex;
+	if ((vectorIndex = (position / BitCacheSize) - 1) >=
+			this.extra[2].length) {
+		return false; // if not enough room in vector, then not initialized
+	}
+	return ((this.extra[2][vectorIndex] & this.extra[3][vectorIndex]
+		        & (~this.extra[4][vectorIndex] | ~this.extra[5][vectorIndex]))
+		    & (1L << (position % BitCacheSize))) != 0;
+}
+
