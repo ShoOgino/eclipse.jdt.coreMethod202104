@@ -17,7 +17,7 @@ public void complainOnDeferredNullChecks(BlockScope scope, FlowInfo callerFlowIn
 		// check only immutable null checks on innermost looping context
 		for (int i = 0; i < this.nullCount; i++) {
 			VariableBinding local = this.nullVariables[i];
-			Expression expression = this.nullReferences[i];
+			ASTNode location = this.nullReferences[i];
 			// final local variable
 			switch (this.nullCheckTypes[i]) {
 				case CAN_ONLY_NON_NULL | IN_COMPARISON_NULL:
@@ -26,11 +26,11 @@ public void complainOnDeferredNullChecks(BlockScope scope, FlowInfo callerFlowIn
 						this.nullReferences[i] = null;
 						if (this.nullCheckTypes[i] == (CAN_ONLY_NON_NULL | IN_COMPARISON_NON_NULL)) {
 							if ((this.tagBits & FlowContext.HIDE_NULL_COMPARISON_WARNING) == 0) {
-								scope.problemReporter().variableRedundantCheckOnNonNull(local, expression);
+								scope.problemReporter().variableRedundantCheckOnNonNull(local, location);
 							}
 						} else {
 							if ((this.tagBits & FlowContext.HIDE_NULL_COMPARISON_WARNING) == 0) {
-								scope.problemReporter().variableNonNullComparedToNull(local, expression);
+								scope.problemReporter().variableNonNullComparedToNull(local, location);
 							}
 						}
 						continue;
@@ -42,11 +42,11 @@ public void complainOnDeferredNullChecks(BlockScope scope, FlowInfo callerFlowIn
 						this.nullReferences[i] = null;
 						if (this.nullCheckTypes[i] == (CAN_ONLY_NULL_NON_NULL | IN_COMPARISON_NON_NULL)) {
 							if ((this.tagBits & FlowContext.HIDE_NULL_COMPARISON_WARNING) == 0) {
-								scope.problemReporter().variableRedundantCheckOnNonNull(local, expression);
+								scope.problemReporter().variableRedundantCheckOnNonNull(local, location);
 							}
 						} else {
 							if ((this.tagBits & FlowContext.HIDE_NULL_COMPARISON_WARNING) == 0) {
-								scope.problemReporter().variableNonNullComparedToNull(local, expression);
+								scope.problemReporter().variableNonNullComparedToNull(local, location);
 							}
 						}
 						continue;
@@ -55,11 +55,11 @@ public void complainOnDeferredNullChecks(BlockScope scope, FlowInfo callerFlowIn
 						this.nullReferences[i] = null;
 						if (this.nullCheckTypes[i] == (CAN_ONLY_NULL_NON_NULL | IN_COMPARISON_NULL)) {
 							if ((this.tagBits & FlowContext.HIDE_NULL_COMPARISON_WARNING) == 0) {
-								scope.problemReporter().variableRedundantCheckOnNull(local, expression);
+								scope.problemReporter().variableRedundantCheckOnNull(local, location);
 							}
 						} else {
 							if ((this.tagBits & FlowContext.HIDE_NULL_COMPARISON_WARNING) == 0) {
-								scope.problemReporter().variableNullComparedToNonNull(local, expression);
+								scope.problemReporter().variableNullComparedToNonNull(local, location);
 							}
 						}
 						continue;
@@ -69,6 +69,7 @@ public void complainOnDeferredNullChecks(BlockScope scope, FlowInfo callerFlowIn
 				case CAN_ONLY_NULL | IN_COMPARISON_NON_NULL:
 				case CAN_ONLY_NULL | IN_ASSIGNMENT:
 				case CAN_ONLY_NULL | IN_INSTANCEOF:
+					Expression expression = (Expression)location;
 					if (flowInfo.isDefinitelyNull(local)) {
 						this.nullReferences[i] = null;
 						switch(this.nullCheckTypes[i] & CONTEXT_MASK) {
@@ -119,24 +120,41 @@ public void complainOnDeferredNullChecks(BlockScope scope, FlowInfo callerFlowIn
 				case MAY_NULL:
 					if (flowInfo.isDefinitelyNull(local)) {
 						this.nullReferences[i] = null;
-						scope.problemReporter().variableNullReference(local, expression);
+						scope.problemReporter().variableNullReference(local, location);
 						continue;
 					}
 					break;
 				case ASSIGN_TO_NONNULL:
-					this.parent.recordNullityMismatch(scope, expression, flowInfo.nullStatus(local), this.expectedTypes[i]);
+					this.parent.recordNullityMismatch(scope, (Expression)location, flowInfo.nullStatus(local), this.expectedTypes[i]);
+					break;
+				case EXIT_RESOURCE:
+					if (local instanceof LocalVariableBinding) {
+						FakedTrackingVariable trackingVar = ((LocalVariableBinding) local).closeTracker;
+						if (trackingVar != null) {
+							if (trackingVar.hasDefinitelyNoResource(flowInfo)) {
+								continue; // no resource - no warning.
+							}
+							if (trackingVar.isClosedInFinallyOfEnclosing(scope)) {
+								continue;
+							}
+							if (this.parent.recordExitAgainstResource(scope, flowInfo, trackingVar, location)) {
+								this.nullReferences[i] = null;
+								continue;
+							}
+						}
+					}
 					break;
 				default:
 					// never happens
 			}
-			this.parent.recordUsingNullReference(scope, local, expression,
+			this.parent.recordUsingNullReference(scope, local, location,
 					this.nullCheckTypes[i], flowInfo);
 		}
 	}
 	else {
 		// check inconsistent null checks on outermost looping context
 		for (int i = 0; i < this.nullCount; i++) {
-			Expression expression = this.nullReferences[i];
+			ASTNode location = this.nullReferences[i];
 			// final local variable
 			VariableBinding local = this.nullVariables[i];
 			switch (this.nullCheckTypes[i]) {
@@ -146,11 +164,11 @@ public void complainOnDeferredNullChecks(BlockScope scope, FlowInfo callerFlowIn
 						this.nullReferences[i] = null;
 						if (this.nullCheckTypes[i] == (CAN_ONLY_NULL_NON_NULL | IN_COMPARISON_NON_NULL)) {
 							if ((this.tagBits & FlowContext.HIDE_NULL_COMPARISON_WARNING) == 0) {
-								scope.problemReporter().variableRedundantCheckOnNonNull(local, expression);
+								scope.problemReporter().variableRedundantCheckOnNonNull(local, location);
 							}
 						} else {
 							if ((this.tagBits & FlowContext.HIDE_NULL_COMPARISON_WARNING) == 0) {
-								scope.problemReporter().variableNonNullComparedToNull(local, expression);
+								scope.problemReporter().variableNonNullComparedToNull(local, location);
 							}
 						}
 						continue;
@@ -160,6 +178,7 @@ public void complainOnDeferredNullChecks(BlockScope scope, FlowInfo callerFlowIn
 				case CAN_ONLY_NULL | IN_COMPARISON_NON_NULL:
 				case CAN_ONLY_NULL | IN_ASSIGNMENT:
 				case CAN_ONLY_NULL | IN_INSTANCEOF:
+					Expression expression = (Expression) location;
 					if (flowInfo.isDefinitelyNull(local)) {
 						this.nullReferences[i] = null;
 						switch(this.nullCheckTypes[i] & CONTEXT_MASK) {
@@ -210,12 +229,12 @@ public void complainOnDeferredNullChecks(BlockScope scope, FlowInfo callerFlowIn
 				case MAY_NULL:
 					if (flowInfo.isDefinitelyNull(local)) {
 						this.nullReferences[i] = null;
-						scope.problemReporter().variableNullReference(local, expression);
+						scope.problemReporter().variableNullReference(local, location);
 						continue;
 					}
 					if (flowInfo.isPotentiallyNull(local)) {
 						this.nullReferences[i] = null;
-						scope.problemReporter().variablePotentialNullReference(local, expression);
+						scope.problemReporter().variablePotentialNullReference(local, location);
 						continue;
 					}
 					break;
@@ -223,7 +242,26 @@ public void complainOnDeferredNullChecks(BlockScope scope, FlowInfo callerFlowIn
 					int nullStatus = flowInfo.nullStatus(local);
 					if (nullStatus != FlowInfo.NON_NULL) {
 						char[][] annotationName = scope.environment().getNonNullAnnotationName();
-						scope.problemReporter().nullityMismatch(expression, this.expectedTypes[i], nullStatus, annotationName);
+						scope.problemReporter().nullityMismatch((Expression) location, this.expectedTypes[i], nullStatus, annotationName);
+					}
+					break;
+				case EXIT_RESOURCE:
+					nullStatus = flowInfo.nullStatus(local);
+					if (nullStatus != FlowInfo.NON_NULL && local instanceof LocalVariableBinding) {
+						FakedTrackingVariable closeTracker = ((LocalVariableBinding)local).closeTracker;
+						if (closeTracker != null) {
+							if (closeTracker.hasDefinitelyNoResource(flowInfo)) {
+								continue; // no resource - no warning.
+							}
+							if (closeTracker.isClosedInFinallyOfEnclosing(scope)) {
+								continue;
+							}
+							nullStatus = closeTracker.findMostSpecificStatus(flowInfo, scope, null);
+							closeTracker.recordErrorLocation(this.nullReferences[i], nullStatus);
+							closeTracker.reportRecordedErrors(scope, nullStatus);
+							this.nullReferences[i] = null;
+							continue;
+						}
 					}
 					break;
 				default:

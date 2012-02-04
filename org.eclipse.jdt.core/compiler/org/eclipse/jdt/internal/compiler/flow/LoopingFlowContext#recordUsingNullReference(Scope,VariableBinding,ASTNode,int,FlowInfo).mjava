@@ -1,26 +1,5 @@
-/**
- * Record a null reference for use by deferred checks. Only looping or
- * finally contexts really record that information. The context may
- * emit an error immediately depending on the status of local against
- * flowInfo and its nature (only looping of finally contexts defer part
- * of the checks; nonetheless, contexts that are nested into a looping or a
- * finally context get affected and delegate some checks to their enclosing
- * context).
- * @param scope the scope into which the check is performed
- * @param local the local variable involved in the check
- * @param reference the expression within which local lies
- * @param checkType the status against which the check must be performed; one
- * 		of {@link #CAN_ONLY_NULL CAN_ONLY_NULL}, {@link #CAN_ONLY_NULL_NON_NULL
- * 		CAN_ONLY_NULL_NON_NULL}, {@link #MAY_NULL MAY_NULL}, potentially
- *      combined with a context indicator (one of {@link #IN_COMPARISON_NULL},
- *      {@link #IN_COMPARISON_NON_NULL}, {@link #IN_ASSIGNMENT} or {@link #IN_INSTANCEOF})
- * @param flowInfo the flow info at the check point; deferring contexts will
- *  	perform supplementary checks against flow info instances that cannot
- *  	be known at the time of calling this method (they are influenced by
- * 		code that follows the current point)
- */
 public void recordUsingNullReference(Scope scope, VariableBinding local,
-		Expression reference, int checkType, FlowInfo flowInfo) {
+		ASTNode location, int checkType, FlowInfo flowInfo) {
 	if ((flowInfo.tagBits & FlowInfo.UNREACHABLE) != 0 ||
 			flowInfo.isDefinitelyUnknown(local)) {
 		return;
@@ -28,6 +7,7 @@ public void recordUsingNullReference(Scope scope, VariableBinding local,
 	switch (checkType) {
 		case CAN_ONLY_NULL_NON_NULL | IN_COMPARISON_NULL:
 		case CAN_ONLY_NULL_NON_NULL | IN_COMPARISON_NON_NULL:
+			Expression reference = (Expression)location;
 			if (flowInfo.isDefinitelyNonNull(local)) {
 				if (checkType == (CAN_ONLY_NULL_NON_NULL | IN_COMPARISON_NON_NULL)) {
 					if ((this.tagBits & FlowContext.HIDE_NULL_COMPARISON_WARNING) == 0) {
@@ -44,16 +24,57 @@ public void recordUsingNullReference(Scope scope, VariableBinding local,
 						flowInfo.initsWhenTrue().setReachMode(FlowInfo.UNREACHABLE_BY_NULLANALYSIS);
 					}
 				}
-				return;
+			} else if (flowInfo.isDefinitelyNull(local)) {
+				if (checkType == (CAN_ONLY_NULL_NON_NULL | IN_COMPARISON_NULL)) {
+					if ((this.tagBits & FlowContext.HIDE_NULL_COMPARISON_WARNING) == 0) {
+						scope.problemReporter().variableRedundantCheckOnNull(local, reference);
+					}
+					if (!flowInfo.isMarkedAsNullOrNonNullInAssertExpression(local)) {
+						flowInfo.initsWhenFalse().setReachMode(FlowInfo.UNREACHABLE_BY_NULLANALYSIS);
+					}
+				} else {
+					if ((this.tagBits & FlowContext.HIDE_NULL_COMPARISON_WARNING) == 0) {
+						scope.problemReporter().variableNullComparedToNonNull(local, reference);
+					}
+					if (!flowInfo.isMarkedAsNullOrNonNullInAssertExpression(local)) {
+						flowInfo.initsWhenTrue().setReachMode(FlowInfo.UNREACHABLE_BY_NULLANALYSIS);
+					}
+				}
+			} else if (this.upstreamNullFlowInfo.isDefinitelyNonNull(local) && !flowInfo.isPotentiallyNull(local) && !flowInfo.isPotentiallyUnknown(local)) {
+				// https://bugs.eclipse.org/bugs/show_bug.cgi?id=291418
+				flowInfo.markAsDefinitelyNonNull(local);
+				if ((this.tagBits & FlowContext.HIDE_NULL_COMPARISON_WARNING) == 0) {
+					recordNullReference(local, reference, checkType);
+				}
+			} else if (flowInfo.cannotBeDefinitelyNullOrNonNull(local)) {
+				return; // no reason to complain, since there is definitely some uncertainty making the comparison relevant.
+			} else {
+				if ((this.tagBits & FlowContext.HIDE_NULL_COMPARISON_WARNING) == 0) {
+					// note: pot non-null & pot null is already captured by cannotBeDefinitelyNullOrNonNull()
+					if (flowInfo.isPotentiallyNonNull(local)) {
+						// knowing 'local' can be non-null, we're only interested in seeing whether it can *only* be non-null 
+						recordNullReference(local, reference, CAN_ONLY_NON_NULL | checkType & CONTEXT_MASK);
+					} else if (flowInfo.isPotentiallyNull(local)) {
+						// knowing 'local' can be null, we're only interested in seeing whether it can *only* be null
+						recordNullReference(local, reference, CAN_ONLY_NULL | checkType & CONTEXT_MASK);
+					} else {
+						recordNullReference(local, reference, checkType);
+					}
+				}
 			}
-			else if (flowInfo.cannotBeDefinitelyNullOrNonNull(local)) {
-				return;
-			}
-			//$FALL-THROUGH$
+			return;
 		case CAN_ONLY_NULL | IN_COMPARISON_NULL:
 		case CAN_ONLY_NULL | IN_COMPARISON_NON_NULL:
 		case CAN_ONLY_NULL | IN_ASSIGNMENT:
 		case CAN_ONLY_NULL | IN_INSTANCEOF:
+			reference = (Expression)location;
+			if (flowInfo.isPotentiallyNonNull(local)
+					|| flowInfo.isPotentiallyUnknown(local)
+					|| flowInfo.isProtectedNonNull(local)) {
+				// if variable is not null, we are not interested in recording null reference for deferred checks.
+				// This is because CAN_ONLY_NULL means we're only interested in cases when variable can be null.
+				return;
+			}
 			if (flowInfo.isDefinitelyNull(local)) {
 				switch(checkType & CONTEXT_MASK) {
 					case FlowContext.IN_COMPARISON_NULL:
@@ -102,26 +123,31 @@ public void recordUsingNullReference(Scope scope, VariableBinding local,
 						}
 						break;
 				}
-			} else if (flowInfo.cannotBeDefinitelyNullOrNonNull(local)) {
+			}
+			// if the contention is inside assert statement, we want to avoid null warnings only in case of
+			// comparisons and not in case of assignment and instanceof
+			if ((this.tagBits & FlowContext.HIDE_NULL_COMPARISON_WARNING) == 0 
+					|| (checkType & CONTEXT_MASK) == FlowContext.IN_ASSIGNMENT
+					|| (checkType & CONTEXT_MASK) == FlowContext.IN_INSTANCEOF) {
+				recordNullReference(local, reference, checkType);
+			}
+			return;
+		case MAY_NULL :
+			if (flowInfo.isDefinitelyNonNull(local)) {
 				return;
 			}
-			break;
-		case MAY_NULL :
 			if (flowInfo.isDefinitelyNull(local)) {
-				scope.problemReporter().variableNullReference(local, reference);
+				scope.problemReporter().variableNullReference(local, location);
 				return;
 			}
 			if (flowInfo.isPotentiallyNull(local)) {
-				scope.problemReporter().variablePotentialNullReference(local, reference);
+				scope.problemReporter().variablePotentialNullReference(local, location);
 				return;
 			}
-			break;
+			recordNullReference(local, location, checkType);
+			return;
 		default:
 			// never happens
-	}
-	if (this.parent != null) {
-		this.parent.recordUsingNullReference(scope, local, reference, checkType,
-				flowInfo);
 	}
 }
 

@@ -22,18 +22,35 @@
 				disconnectedTracker = previousTracker; // report error below, unless we have a self-wrap assignment
 		}
 
+		rhsAnalyis:
 		if (rhs.resolvedType != TypeBinding.NULL) {
 			// new value is AutoCloseable, start tracking, possibly re-using existing tracker var:
 			FakedTrackingVariable rhsTrackVar = getCloseTrackingVariable(rhs);
 			if (rhsTrackVar != null) {								// 1. if RHS has a tracking variable...
 				if (local.closeTracker == null) {
-					// null shouldn't occur but let's play safe
+					// null shouldn't occur but let's play safe:
 					if (rhsTrackVar.originalBinding != null)
-						local.closeTracker = rhsTrackVar;			//		a.: let fresh LHS share it 
+						local.closeTracker = rhsTrackVar;			//		a.: let fresh LHS share it
+					if (rhsTrackVar.currentAssignment == location) {
+						// pre-set tracker from lhs - passed from outside?
+						// now it's a fresh resource
+						rhsTrackVar.globalClosingState &= ~(SHARED_WITH_OUTSIDE|OWNED_BY_OUTSIDE);
+					}
 				} else {
-					if (rhsTrackVar == disconnectedTracker && rhs instanceof AllocationExpression)
-						return; 									// 		b.: self wrapper: res = new Wrap(res); -> done!
-					local.closeTracker = rhsTrackVar;				//		c.: conflicting LHS and RHS, proceed with recordErrorLocation below
+					if (rhs instanceof AllocationExpression) {
+						if (rhsTrackVar == disconnectedTracker)
+							return;									// 		b.: self wrapper: res = new Wrap(res); -> done!
+						if (local.closeTracker == rhsTrackVar 
+								&& ((rhsTrackVar.globalClosingState & OWNED_BY_OUTSIDE) != 0)) {
+																	// 		c.: assigning a fresh resource (pre-connected alloc) 
+																	//			to a local previously holding an alien resource -> start over
+							local.closeTracker = new FakedTrackingVariable(local, location);
+							flowInfo.markAsDefinitelyNull(local.closeTracker.binding);
+							// still check disconnectedTracker below
+							break rhsAnalyis;
+						}
+					}
+					local.closeTracker = rhsTrackVar;				//		d.: conflicting LHS and RHS, proceed with recordErrorLocation below
 				}
 				// keep close-status of RHS unchanged across this assignment
 			} else if (previousTracker != null) {					// 2. re-use tracking variable from the LHS?
