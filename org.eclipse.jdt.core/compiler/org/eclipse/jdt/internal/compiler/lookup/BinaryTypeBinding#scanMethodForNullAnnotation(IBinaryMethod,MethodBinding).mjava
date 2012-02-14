@@ -3,54 +3,80 @@ void scanMethodForNullAnnotation(IBinaryMethod method, MethodBinding methodBindi
 		return;
 	char[][] nullableAnnotationName = this.environment.getNullableAnnotationName();
 	char[][] nonNullAnnotationName = this.environment.getNonNullAnnotationName();
-	if (nullableAnnotationName == null || nonNullAnnotationName == null)
+	char[][] nonNullByDefaultAnnotationName = this.environment.getNonNullByDefaultAnnotationName();
+	if (nullableAnnotationName == null || nonNullAnnotationName == null || nonNullByDefaultAnnotationName == null)
 		return; // not well-configured to use null annotations
+
+	int currentDefault = NO_NULL_DEFAULT;
+	if ((this.tagBits & TagBits.AnnotationNonNullByDefault) != 0) {
+		currentDefault = NONNULL_BY_DEFAULT;
+	} else if ((this.tagBits & TagBits.AnnotationNullUnspecifiedByDefault) != 0) {
+		currentDefault = NULL_UNSPECIFIED_BY_DEFAULT;
+	}
 
 	// return:
 	IBinaryAnnotation[] annotations = method.getAnnotations();
+	boolean explicitNullness = false;
 	if (annotations != null) {
 		for (int i = 0; i < annotations.length; i++) {
 			char[] annotationTypeName = annotations[i].getTypeName();
 			if (annotationTypeName[0] != Util.C_RESOLVED)
 				continue;
 			char[][] typeName = CharOperation.splitOn('/', annotationTypeName, 1, annotationTypeName.length-1); // cut of leading 'L' and trailing ';'
-			if (CharOperation.equals(typeName, nonNullAnnotationName)) {
-				methodBinding.tagBits |= TagBits.AnnotationNonNull;
-				break;
+			if (CharOperation.equals(typeName, nonNullByDefaultAnnotationName)) {
+				methodBinding.tagBits |= TagBits.AnnotationNonNullByDefault;
+				currentDefault = NONNULL_BY_DEFAULT;
 			}
-			if (CharOperation.equals(typeName, nullableAnnotationName)) {
+			if (!explicitNullness && CharOperation.equals(typeName, nonNullAnnotationName)) {
+				methodBinding.tagBits |= TagBits.AnnotationNonNull;
+				explicitNullness = true;
+			}
+			if (!explicitNullness && CharOperation.equals(typeName, nullableAnnotationName)) {
 				methodBinding.tagBits |= TagBits.AnnotationNullable;
-				break;
+				explicitNullness = true;
 			}
 		}
+	}
+	if (!explicitNullness && currentDefault == NONNULL_BY_DEFAULT) {
+		methodBinding.tagBits |= TagBits.AnnotationNonNull;
 	}
 
 	// parameters:
 	TypeBinding[] parameters = methodBinding.parameters;
 	int numVisibleParams = parameters.length;
 	int numParamAnnotations = method.getAnnotatedParametersCount();
-	if (numParamAnnotations > 0) {
-		int startIndex = numParamAnnotations - numVisibleParams;
+	if (numParamAnnotations > 0 || currentDefault == NONNULL_BY_DEFAULT) {
 		for (int j = 0; j < numVisibleParams; j++) {
-			IBinaryAnnotation[] paramAnnotations = method.getParameterAnnotations(j+startIndex);
-			if (paramAnnotations != null) {
-				for (int i = 0; i < paramAnnotations.length; i++) {
-					char[] annotationTypeName = paramAnnotations[i].getTypeName();
-					if (annotationTypeName[0] != Util.C_RESOLVED)
-						continue;
-					char[][] typeName = CharOperation.splitOn('/', annotationTypeName, 1, annotationTypeName.length-1); // cut of leading 'L' and trailing ';'
-					if (CharOperation.equals(typeName, nonNullAnnotationName)) {
-						if (methodBinding.parameterNonNullness == null)
-							methodBinding.parameterNonNullness = new Boolean[numVisibleParams];
-						methodBinding.parameterNonNullness[j] = Boolean.TRUE;
-						break;
-					} else if (CharOperation.equals(typeName, nullableAnnotationName)) {
-						if (methodBinding.parameterNonNullness == null)
-							methodBinding.parameterNonNullness = new Boolean[numVisibleParams];
-						methodBinding.parameterNonNullness[j] = Boolean.FALSE;
-						break;
+			explicitNullness = false;
+			if (numParamAnnotations > 0) {
+				int startIndex = numParamAnnotations - numVisibleParams;
+				IBinaryAnnotation[] paramAnnotations = method.getParameterAnnotations(j+startIndex);
+				if (paramAnnotations != null) {
+					for (int i = 0; i < paramAnnotations.length; i++) {
+						char[] annotationTypeName = paramAnnotations[i].getTypeName();
+						if (annotationTypeName[0] != Util.C_RESOLVED)
+							continue;
+						char[][] typeName = CharOperation.splitOn('/', annotationTypeName, 1, annotationTypeName.length-1); // cut of leading 'L' and trailing ';'
+						if (CharOperation.equals(typeName, nonNullAnnotationName)) {
+							if (methodBinding.parameterNonNullness == null)
+								methodBinding.parameterNonNullness = new Boolean[numVisibleParams];
+							methodBinding.parameterNonNullness[j] = Boolean.TRUE;
+							explicitNullness = true;
+							break;
+						} else if (CharOperation.equals(typeName, nullableAnnotationName)) {
+							if (methodBinding.parameterNonNullness == null)
+								methodBinding.parameterNonNullness = new Boolean[numVisibleParams];
+							methodBinding.parameterNonNullness[j] = Boolean.FALSE;
+							explicitNullness = true;
+							break;
+						}
 					}
 				}
+			}
+			if (!explicitNullness && currentDefault == NONNULL_BY_DEFAULT) {
+				if (methodBinding.parameterNonNullness == null)
+					methodBinding.parameterNonNullness = new Boolean[numVisibleParams];
+				methodBinding.parameterNonNullness[j] = Boolean.TRUE;
 			}
 		}
 	}
