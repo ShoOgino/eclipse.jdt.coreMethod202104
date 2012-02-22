@@ -1,0 +1,63 @@
+	// two different source folders ignore only from one
+	public void test002() throws CoreException {
+		ICompilationUnit x = null;
+		ICompilationUnit y = null;
+		try {
+			IJavaProject project = createJavaProject("P", new String[] {}, new String[] { "JCL_LIB" }, "bin");
+			project.setOption(JavaCore.COMPILER_PB_UNUSED_LOCAL, JavaCore.ERROR);
+
+			IClasspathEntry[] originalCP = project.getRawClasspath();
+			IClasspathEntry[] newCP = new IClasspathEntry[originalCP.length + 2];
+			System.arraycopy(originalCP, 0, newCP, 0, originalCP.length);
+			newCP[originalCP.length] = JavaCore.newSourceEntry(new Path("/P/src"), null, null, null,
+					new IClasspathAttribute[] { ATTR_IGNORE_OPTIONAL_PROBLEMS_TRUE });
+			newCP[originalCP.length + 1] = JavaCore.newSourceEntry(new Path("/P/src2"));
+			project.setRawClasspath(newCP, null);
+
+			createFolder("/P/src/p");
+			IFile fileX = createFile("/P/src/p/X.java",
+					"package p;\n" +
+					"public class X {\n" +
+					"	public void foo() {\n" +
+					"		int i;\n" +
+					"	}\n" +
+					"}");
+			x = (ICompilationUnit) JavaCore.create(fileX);
+			createFolder("/P/src2/q");
+			IFile fileY = createFile("/P/src2/q/Y.java",
+					"package q;\n" +
+					"public class Y {\n" +
+					"	public void foo() {\n" +
+					"		int i;\n" +
+					"	}\n" +
+					"}");
+			y = (ICompilationUnit) JavaCore.create(fileY);
+
+			ProblemRequestor problemRequestorX = new ProblemRequestor();
+			WorkingCopyOwner ownerX = newWorkingCopyOwner(problemRequestorX);
+			x.getWorkingCopy(ownerX, null);
+			assertProblems("Unexpected problems",
+					"----------\n" +
+					"----------\n",
+					problemRequestorX);
+
+			ProblemRequestor problemRequestorY = new ProblemRequestor();
+			WorkingCopyOwner ownerY = newWorkingCopyOwner(problemRequestorY);
+			y.getWorkingCopy(ownerY, null);
+			assertProblems("Unexpected problems value",
+					"----------\n" +
+					"1. ERROR in /P/src2/q/Y.java\n" +
+					"The value of the local variable i is not used\n" +
+					"----------\n",
+					problemRequestorY);
+		} finally {
+			if (x != null) {
+				x.discardWorkingCopy();
+			}
+			if (y != null) {
+				y.discardWorkingCopy();
+			}
+			deleteProject("P");
+		}
+	}
+

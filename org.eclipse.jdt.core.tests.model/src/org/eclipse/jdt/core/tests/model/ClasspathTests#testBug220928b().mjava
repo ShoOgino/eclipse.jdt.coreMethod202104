@@ -1,0 +1,51 @@
+/**
+ * @bug220928: [buildpath] Should be able to ignore warnings from certain source folders
+ * 
+ * Verify that value of the {@link IClasspathAttribute#IGNORE_OPTIONAL_PROBLEMS} attribute is
+ * correctly saved on workspace save.
+ * 
+ * @see "https://bugs.eclipse.org/bugs/show_bug.cgi?id=220928"
+ */
+public void testBug220928b() throws CoreException {
+	boolean autoBuild = getWorkspace().isAutoBuilding();
+	IWorkspaceDescription preferences = getWorkspace().getDescription();
+	try {
+		// ensure that the workspace auto-build is ON
+		preferences.setAutoBuilding(true);
+		getWorkspace().setDescription(preferences);
+
+		IJavaProject project = createJavaProject("P", new String[] {}, "bin");
+		createFolder("/P/src");
+		IClasspathEntry[] originalCP = project.getRawClasspath();
+		IClasspathEntry[] newCP = new IClasspathEntry[originalCP.length + 1];
+		State state;
+
+		System.arraycopy(originalCP, 0, newCP, 0, originalCP.length);
+		newCP[originalCP.length] = JavaCore.newSourceEntry(new Path("/P/src"));
+		getJavaProject("P").setRawClasspath(newCP, null);
+		simulateExitRestart();
+		state = (State) JavaModelManager.getJavaModelManager().getLastBuiltState(getJavaProject("P").getProject(), null);
+		assertFalse(state.sourceLocations[0].ignoreOptionalProblems);
+
+		System.arraycopy(originalCP, 0, newCP, 0, originalCP.length);
+		newCP[originalCP.length] = JavaCore.newSourceEntry(new Path("/P/src"), null, null, null,
+				new IClasspathAttribute[] { ATTR_IGNORE_OPTIONAL_PROBLEMS_TRUE });
+		getJavaProject("P").setRawClasspath(newCP, null);
+		simulateExitRestart();
+		state = (State) JavaModelManager.getJavaModelManager().getLastBuiltState(getJavaProject("P").getProject(), null);
+		assertTrue(state.sourceLocations[0].ignoreOptionalProblems);
+
+		System.arraycopy(originalCP, 0, newCP, 0, originalCP.length);
+		newCP[originalCP.length] = JavaCore.newSourceEntry(new Path("/P/src"), null, null, null,
+				new IClasspathAttribute[] { ATTR_IGNORE_OPTIONAL_PROBLEMS_FALSE });
+		getJavaProject("P").setRawClasspath(newCP, null);
+		simulateExitRestart();
+		state = (State) JavaModelManager.getJavaModelManager().getLastBuiltState(getJavaProject("P").getProject(), null);
+		assertFalse(state.sourceLocations[0].ignoreOptionalProblems);
+	} finally {
+		preferences.setAutoBuilding(autoBuild);
+		getWorkspace().setDescription(preferences);
+		deleteProject("P");
+	}
+}
+

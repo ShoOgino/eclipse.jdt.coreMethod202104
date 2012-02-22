@@ -1,0 +1,46 @@
+	// task tags cannot be ignored
+	public void test005() throws CoreException {
+		ICompilationUnit unit = null;
+		try {
+			IJavaProject project = createJavaProject("P", new String[] {}, new String[] { "JCL_LIB" }, "bin");
+			project.setOption(JavaCore.COMPILER_PB_UNUSED_LOCAL, JavaCore.ERROR);
+			project.setOption(JavaCore.COMPILER_TASK_TAGS, "TODO");
+			project.setOption(JavaCore.COMPILER_TASK_PRIORITIES, "NORMAL");
+
+			IClasspathEntry[] originalCP = project.getRawClasspath();
+			IClasspathEntry[] newCP = new IClasspathEntry[originalCP.length + 1];
+			System.arraycopy(originalCP, 0, newCP, 0, originalCP.length);
+			newCP[originalCP.length] = JavaCore.newSourceEntry(new Path("/P/src"), null, null, null,
+					new IClasspathAttribute[] { ATTR_IGNORE_OPTIONAL_PROBLEMS_TRUE });
+			project.setRawClasspath(newCP, null);
+
+			createFolder("/P/src/p");
+			IFile file = createFile("/P/src/p/X.java",
+					"package p;\n" +
+					"public class X {\n" +
+					"	public void foo() {\n" +
+					"		int i;\n" +
+					"	}\n" +
+					"	public void bar() {\n" +
+					"		// TODO nothing\n" +
+					"	}\n" +
+					"}");
+			unit = (ICompilationUnit) JavaCore.create(file);
+
+			ProblemRequestor problemRequestor = new ProblemRequestor();
+			WorkingCopyOwner owner = newWorkingCopyOwner(problemRequestor);
+			unit.getWorkingCopy(owner, null);
+			assertProblems("Unexpeted problems",
+					"----------\n" +
+					"1. WARNING in /P/src/p/X.java\n" +
+					"TODO nothing\n" +
+					"----------\n",
+					problemRequestor);
+		} finally {
+			if (unit != null) {
+				unit.discardWorkingCopy();
+			}
+			deleteProject("P");
+		}
+	}
+
