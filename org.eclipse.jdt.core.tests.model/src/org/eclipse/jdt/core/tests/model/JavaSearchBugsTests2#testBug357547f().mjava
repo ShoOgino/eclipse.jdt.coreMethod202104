@@ -1,0 +1,49 @@
+	// search for the method name should also not return matches if not-overriden because of package-visible
+	// even if they are in jars
+	public void testBug357547f() throws CoreException, IOException {
+		IJavaProject project = null;
+		try
+		{
+			project = createJavaProject("P", new String[] {""}, new String[] { "/P/lib357547.jar", "JCL15_LIB" }, "", "1.5");
+			org.eclipse.jdt.core.tests.util.Util.createJar(new String[] {
+					"p2/A.java",
+					"package p2;\n" + 
+					"public class A{}\n" }, 
+					project.getProject().getLocation().append("libStuff.jar").toOSString(), "1.5");
+			
+			org.eclipse.jdt.core.tests.util.Util.createJar(
+					new String[] {
+						"p2/B.java",
+						"package p2;\n" +
+						"import p2.*;\n" +
+						"public class B extends A {\n" +
+						"long k(){\n" +
+						"return 0;\n" +
+						"}\n" + 
+						"}\n"},
+					null,
+					project.getProject().getLocation().append("lib357547.jar").toOSString(),
+					new String[] { project.getProject().getLocation().append("libStuff.jar").toOSString() },
+					"1.5");
+			refresh(project);
+			createFolder("/P/p2");
+			createFile("/P/p2/A.java",
+					"package p2;\n" +
+					"public class A {\n" +
+					"long k(){\n" +
+					"return 0;\n" +
+			  		"}\n" +
+			  		"public long m(){\n"+
+			  		"return new A().k();\n" +
+			  		"}\n"+
+					"}\n");
+			waitUntilIndexesReady();
+			// search
+			SearchPattern pattern = SearchPattern.createPattern("B.k()", METHOD, REFERENCES, EXACT_RULE);
+			search(pattern, SearchEngine.createJavaSearchScope(new IJavaElement[] { project }, IJavaSearchScope.APPLICATION_LIBRARIES | IJavaSearchScope.SOURCES), this.resultCollector);
+			assertSearchResults("Wrong results", "p2/A.java long p2.A.m() [k()] EXACT_MATCH", this.resultCollector);
+		} finally {
+			deleteProject(project);
+		}
+	}
+
