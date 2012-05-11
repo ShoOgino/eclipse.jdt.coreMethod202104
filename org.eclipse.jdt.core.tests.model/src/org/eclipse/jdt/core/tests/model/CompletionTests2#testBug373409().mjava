@@ -1,0 +1,88 @@
+//https://bugs.eclipse.org/bugs/show_bug.cgi?id=373409
+// Test (1) a type does not get priority over a constructor and
+// (2) that a type coming from an on-demand import does not have the R_UNQUALIFIED relevance set
+public void testBug373409() throws Exception {
+	try {
+		// Create project and jar
+		IJavaProject p = createJavaProject("P", new String[] {"src"}, new String[]{"JCL_LIB"}, "bin");
+		refresh(p);
+		
+		createFolder("/P/src/java/llang");
+		
+		createFile(
+				"/P/src/java/llang/Thread.java",
+				"package java.llang;\n"+
+				"public class Thread {\n" +
+				"  public Thread() {\n" +
+				"  }\n" +
+				"  public Thread(String s) {\n" +
+				"  }\n" +
+				"  public Thread(String s, int i) {\n" +
+				"  }\n" +
+				"}");
+		
+		createFile(
+				"/P/src/java/llang/ThreadLocal.java",
+				"package java.llang;\n"+
+				"public class ThreadLocal {\n" +
+				"	 static class ThreadLocalMap {}\n" + // non private static member class necessary for ThreadLocal to be proposed as a type
+				"}");
+		
+		createFile(
+				"/P/src/java/llang/ThreadGroup.java",
+				"package java.llang;\n"+
+				"public class ThreadGroup {\n" +
+				"   public ThreadGroup() {\n" +
+				"  }\n" +
+				"   public ThreadGroup(String s) {\n" +
+				"  }\n" +
+				"}");
+		
+		refresh(p);
+		
+		waitUntilIndexesReady();
+
+		// Create working copy
+		this.workingCopies = new ICompilationUnit[1];
+		this.workingCopies[0] = getWorkingCopy(
+				"/P/src/test/Test.java",
+				"package test;\n" +
+				"import java.llang.*;\n"+
+				"public class Test {\n" +
+				"  void foo() {\n" +
+				"    new Threa\n" +
+				"  }\n" +
+				"}");
+		
+		
+
+		// do completion
+		CompletionTestsRequestor2 requestor = new CompletionTestsRequestor2(true, false, false, true, true);
+		requestor.allowAllRequiredProposals();
+		NullProgressMonitor monitor = new NullProgressMonitor();
+
+	    String str = this.workingCopies[0].getSource();
+	    String completeBehind = "Threa";
+	    int cursorLocation = str.lastIndexOf(completeBehind) + completeBehind.length();
+	    this.workingCopies[0].codeComplete(cursorLocation, requestor, this.wcOwner, monitor);
+	    
+	    assertResults(
+	    	"ThreadLocal[TYPE_REF]{java.llang.ThreadLocal, java.llang, Ljava.llang.ThreadLocal;, null, null, " + (R_DEFAULT + R_RESOLVED + R_INTERESTING + R_CASE + R_NON_RESTRICTED) + "}\n" +
+			"Thread[CONSTRUCTOR_INVOCATION]{(), Ljava.llang.Thread;, ()V, Thread, null, " + (R_DEFAULT + R_RESOLVED + R_INTERESTING + R_CASE + R_NON_RESTRICTED + R_CONSTRUCTOR) + "}\n" +
+			"   Thread[TYPE_REF]{java.llang.Thread, java.llang, Ljava.llang.Thread;, null, null, " + (R_DEFAULT + R_RESOLVED + R_INTERESTING + R_CASE + R_NON_RESTRICTED + R_CONSTRUCTOR) + "}\n" +
+			"Thread[CONSTRUCTOR_INVOCATION]{(), Ljava.llang.Thread;, (Ljava.lang.String;)V, Thread, (s), " + (R_DEFAULT + R_RESOLVED + R_INTERESTING + R_CASE + R_NON_RESTRICTED + R_CONSTRUCTOR) + "}\n" +
+			"   Thread[TYPE_REF]{java.llang.Thread, java.llang, Ljava.llang.Thread;, null, null, " + (R_DEFAULT + R_RESOLVED + R_INTERESTING + R_CASE + R_NON_RESTRICTED + R_CONSTRUCTOR) + "}\n" +
+			"Thread[CONSTRUCTOR_INVOCATION]{(), Ljava.llang.Thread;, (Ljava.lang.String;I)V, Thread, (s, i), " + (R_DEFAULT + R_RESOLVED + R_INTERESTING + R_CASE + R_NON_RESTRICTED + R_CONSTRUCTOR) + "}\n" +
+			"   Thread[TYPE_REF]{java.llang.Thread, java.llang, Ljava.llang.Thread;, null, null, " + (R_DEFAULT + R_RESOLVED + R_INTERESTING + R_CASE + R_NON_RESTRICTED + R_CONSTRUCTOR) + "}\n" +
+			"ThreadGroup[CONSTRUCTOR_INVOCATION]{(), Ljava.llang.ThreadGroup;, ()V, ThreadGroup, null, " + (R_DEFAULT + R_RESOLVED + R_INTERESTING + R_CASE + R_NON_RESTRICTED + R_CONSTRUCTOR) + "}\n" +
+			"   ThreadGroup[TYPE_REF]{java.llang.ThreadGroup, java.llang, Ljava.llang.ThreadGroup;, null, null, " + (R_DEFAULT + R_RESOLVED + R_INTERESTING + R_CASE + R_NON_RESTRICTED + R_CONSTRUCTOR) + "}\n" +
+			"ThreadGroup[CONSTRUCTOR_INVOCATION]{(), Ljava.llang.ThreadGroup;, (Ljava.lang.String;)V, ThreadGroup, (s), " + (R_DEFAULT + R_RESOLVED + R_INTERESTING + R_CASE + R_NON_RESTRICTED + R_CONSTRUCTOR) + "}\n" +
+			"   ThreadGroup[TYPE_REF]{java.llang.ThreadGroup, java.llang, Ljava.llang.ThreadGroup;, null, null, " + (R_DEFAULT + R_RESOLVED + R_INTERESTING + R_CASE + R_NON_RESTRICTED + R_CONSTRUCTOR) + "}\n" +
+			"ThreadLocal[CONSTRUCTOR_INVOCATION]{(), Ljava.llang.ThreadLocal;, ()V, ThreadLocal, null, " + (R_DEFAULT + R_RESOLVED + R_INTERESTING + R_CASE + R_NON_RESTRICTED + R_CONSTRUCTOR) + "}\n" +
+			"   ThreadLocal[TYPE_REF]{java.llang.ThreadLocal, java.llang, Ljava.llang.ThreadLocal;, null, null, " + (R_DEFAULT + R_RESOLVED + R_INTERESTING + R_CASE + R_NON_RESTRICTED + R_CONSTRUCTOR) + "}",
+			requestor.getResults());
+	} finally {
+		deleteProject("P");
+	}
+}
+
