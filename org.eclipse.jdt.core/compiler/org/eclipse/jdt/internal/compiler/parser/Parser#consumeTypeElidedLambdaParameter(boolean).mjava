@@ -1,0 +1,45 @@
+protected void consumeTypeElidedLambdaParameter(boolean parenthesized) {
+
+	// LambdaParameters ::= Identifier
+	// TypeElidedFormalParameter ::= Modifiersopt Identifier
+	
+	int modifier = ClassFileConstants.AccDefault;
+	int annotationLength = 0;
+	int modifiersStart = 0;
+	if (parenthesized) { // The grammar is permissive enough to allow optional modifiers for the parenthesized version, they should be rejected if present. 
+		modifiersStart = this.intStack[this.intPtr--];
+		modifier = this.intStack[this.intPtr--];
+		// pop annotations
+		annotationLength = this.expressionLengthStack[this.expressionLengthPtr--];
+		this.expressionPtr -= annotationLength;
+	}
+	
+	this.identifierLengthPtr--;
+	char[] identifierName = this.identifierStack[this.identifierPtr];
+	long namePositions = this.identifierPositionStack[this.identifierPtr--];
+
+	Argument arg =
+		new Argument(
+			identifierName,
+			namePositions,
+			null, // elided type
+			ClassFileConstants.AccDefault,
+			true);
+	if (modifier != ClassFileConstants.AccDefault || annotationLength != 0) {
+		arg.declarationSourceStart = modifiersStart;
+	} else {
+		arg.declarationSourceStart = (int) (namePositions >>> 32);	
+	}
+	pushOnAstStack(arg);
+	if (!parenthesized) { // in the absence of '(' and ')', record positions.
+		pushOnIntStack(arg.declarationSourceStart);
+		pushOnIntStack(arg.declarationSourceEnd);
+	}
+	/* if incomplete method header, this.listLength counter will not have been reset,
+		indicating that some arguments are available on the stack */
+	this.listLength++;
+	if (modifier != ClassFileConstants.AccDefault || annotationLength != 0) {
+		problemReporter().illegalModifiersForElidedType(arg);
+	}
+}
+
