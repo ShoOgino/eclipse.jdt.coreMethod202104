@@ -64,16 +64,19 @@
 					}
 				}
 			}
-			if (!foundValue &&
-					(method.modifiers & ClassFileConstants.AccAnnotationDefault) == 0 &&
-					(this.bits & IsRecovered) == 0) {
+			if (!foundValue
+					&& (method.modifiers & ClassFileConstants.AccAnnotationDefault) == 0
+					&& (this.bits & IsRecovered) == 0
+					&& annotationType.isValidBinding()) {
 				scope.problemReporter().missingValueForAnnotationMember(this, selector);
 			}
 		}
 		// check unused pairs
 		for (int i = 0; i < pairsLength; i++) {
 			if (pairs[i] != null) {
-				scope.problemReporter().undefinedAnnotationValue(annotationType, pairs[i]);
+				if (annotationType.isValidBinding()) {
+					scope.problemReporter().undefinedAnnotationValue(annotationType, pairs[i]);
+				}
 				pairs[i].resolveTypeExpecting(scope, null); // resilient
 			}
 		}
@@ -144,19 +147,32 @@
 			}
 			// check (meta)target compatibility
 			checkTargetCompatibility: {
-				long metaTagBits = annotationType.getAnnotationTagBits(); // could be forward reference
-				if ((metaTagBits & TagBits.AnnotationTargetMASK) == 0) // does not specify any target restriction
+				if (!annotationType.isValidBinding()) {
+					// no need to check annotation usage if missing
 					break checkTargetCompatibility;
+				}
+
+				long metaTagBits = annotationType.getAnnotationTagBits(); // could be forward reference
+				if ((metaTagBits & TagBits.AnnotationTargetMASK) == 0) {
+					// does not specify any target restriction - all locations are possible including type annotations
+					break checkTargetCompatibility;
+				}
 
 				switch (this.recipient.kind()) {
 					case Binding.PACKAGE :
 						if ((metaTagBits & TagBits.AnnotationForPackage) != 0)
 							break checkTargetCompatibility;
 						break;
+					case Binding.TYPE_USE :
+						if ((metaTagBits & TagBits.AnnotationForTypeUse) != 0) {
+							// jsr 308
+							break checkTargetCompatibility;
+						}
+						break;
 					case Binding.TYPE :
 					case Binding.GENERIC_TYPE :
 						if (((ReferenceBinding)this.recipient).isAnnotationType()) {
-							if ((metaTagBits & (TagBits.AnnotationForAnnotationType|TagBits.AnnotationForType)) != 0)
+							if ((metaTagBits & (TagBits.AnnotationForAnnotationType | TagBits.AnnotationForType)) != 0)
 							break checkTargetCompatibility;
 						} else if ((metaTagBits & TagBits.AnnotationForType) != 0) {
 							break checkTargetCompatibility;
@@ -166,24 +182,48 @@
 						}
 						break;
 					case Binding.METHOD :
-						if (((MethodBinding)this.recipient).isConstructor()) {
+						MethodBinding methodBinding = (MethodBinding) this.recipient;
+						if (methodBinding.isConstructor()) {
 							if ((metaTagBits & TagBits.AnnotationForConstructor) != 0)
 								break checkTargetCompatibility;
-						} else 	if ((metaTagBits & TagBits.AnnotationForMethod) != 0)
+						} else if ((metaTagBits & TagBits.AnnotationForMethod) != 0) {
 							break checkTargetCompatibility;
+						} else if ((metaTagBits & TagBits.AnnotationForTypeUse) != 0) {
+							// jsr 308 - annotation on method return type
+							if (methodBinding.returnType != null && methodBinding.returnType.id == T_void) {
+								scope.problemReporter().illegalUsageOfTypeAnnotations(this);
+							}
+							break checkTargetCompatibility;
+						}
 						break;
 					case Binding.FIELD :
-						if ((metaTagBits & TagBits.AnnotationForField) != 0)
+						if ((metaTagBits & TagBits.AnnotationForField) != 0) {
 							break checkTargetCompatibility;
+						} else if ((metaTagBits & TagBits.AnnotationForTypeUse) != 0) {
+							// jsr 308 - annotation on field type
+							break checkTargetCompatibility;
+						}
 						break;
 					case Binding.LOCAL :
 						if ((((LocalVariableBinding)this.recipient).tagBits & TagBits.IsArgument) != 0) {
-							if ((metaTagBits & TagBits.AnnotationForParameter) != 0)
+							if ((metaTagBits & TagBits.AnnotationForParameter) != 0) {
 								break checkTargetCompatibility;
-						} else 	if ((annotationType.tagBits & TagBits.AnnotationForLocalVariable) != 0)
+							} else if ((metaTagBits & TagBits.AnnotationForTypeUse) != 0) {
+								// jsr 308 - annotation on method parameter type
+								break checkTargetCompatibility;
+							}
+						} else if ((annotationType.tagBits & TagBits.AnnotationForLocalVariable) != 0) {
 							break checkTargetCompatibility;
+						} else if ((metaTagBits & TagBits.AnnotationForTypeUse) != 0) {
+							// jsr 308 - annotation on local type
+							break checkTargetCompatibility;
+						}
 						break;
-				}
+					case Binding.TYPE_PARAMETER : // jsr308
+						if ((metaTagBits & TagBits.AnnotationForTypeParameter) != 0) {
+							break checkTargetCompatibility;
+						}
+					}
 				scope.problemReporter().disallowedTargetForAnnotation(this);
 			}
 		}
