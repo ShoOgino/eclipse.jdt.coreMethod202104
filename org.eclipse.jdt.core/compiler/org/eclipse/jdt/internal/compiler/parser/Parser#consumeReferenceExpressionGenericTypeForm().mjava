@@ -1,6 +1,7 @@
 protected void consumeReferenceExpressionGenericTypeForm() {
-	
-	// ReferenceExpression ::= Name BeginTypeArguments ReferenceExpressionTypeArgumentsAndTrunk '::' NonWildTypeArgumentsopt IdentifierOrNew
+
+	// ReferenceExpression ::= Name PushModifiers BeginTypeArguments ReferenceExpressionTypeArgumentsAndTrunk '::' NonWildTypeArgumentsopt IdentifierOrNew
+	// ReferenceExpression ::= Modifiers Name PushRealModifiers BeginTypeArguments ReferenceExpressionTypeArgumentsAndTrunk '::' NonWildTypeArgumentsopt IdentifierOrNew
 	
 	ReferenceExpression rexp;
 	TypeReference type = null;
@@ -21,28 +22,47 @@ protected void consumeReferenceExpressionGenericTypeForm() {
 		System.arraycopy(this.genericsStack, this.genericsPtr + 1, typeArguments = new TypeReference[length], 0, length);
 		this.intPtr--;  // pop type arguments source start.
 	}
+	
+	int typeSourceEnd = this.intStack[this.intPtr--];
 	boolean qualified = this.intStack[this.intPtr--] != 0;
 	int dims = this.intStack[this.intPtr--];
-	// Code lifted from CastExpression consumption actions and pounded into shape ...
+
 	if (qualified) {
-		TypeReference rightSide = getTypeReference(0);
-		ParameterizedQualifiedTypeReference qualifiedParameterizedTypeReference = computeQualifiedGenericsFromRightSide(rightSide, dims);
-		this.intPtr--;
-		if (newForm) {
-			rexp = new ReferenceExpression(qualifiedParameterizedTypeReference, typeArguments, newEnd);
-		} else {
-			rexp = new ReferenceExpression(qualifiedParameterizedTypeReference, typeArguments, methodReference);
-		}
+		TypeReference rightSide = getUnannotatedTypeReference(0); // until we add support for X. @Inner Y, by design the type after '.' is unannotated.
+		type = computeQualifiedGenericsFromRightSide(rightSide, dims);
 	} else {		
 		pushOnGenericsIdentifiersLengthStack(this.identifierLengthStack[this.identifierLengthPtr]);
-		type = getTypeReference(dims);
-		if (newForm) {
-			rexp = new ReferenceExpression(type, typeArguments, newEnd);
-		} else {
-			rexp = new ReferenceExpression(type, typeArguments, methodReference);
-		}
-		this.intPtr --; // pop '<' position
+		type = getUnannotatedTypeReference(dims); // annotations attached below.
 	}
+	this.intPtr--; // pop '<' position
+	int illegalModifiersSourceStart = this.intStack[this.intPtr--];
+	if (illegalModifiersSourceStart >= 0 && illegalModifiersSourceStart < type.sourceStart) {
+		type.sourceStart = illegalModifiersSourceStart;
+	}
+	type.sourceEnd = typeSourceEnd;
+	
+	rexp = newForm ? new ReferenceExpression(type, typeArguments, newEnd) : new ReferenceExpression(type, typeArguments, methodReference);
+
+	// Prefix annotations if any are on the expression stack, attach them now.
+	if ((length = this.expressionLengthStack[this.expressionLengthPtr--]) != 0) {
+		System.arraycopy(
+				this.expressionStack,
+				(this.expressionPtr -= length) + 1,
+				type.annotations = new Annotation[length],
+				0,
+				length);
+		int annotStart = type.annotations[0].sourceStart;
+		if (annotStart < type.sourceStart) {
+			type.sourceStart = annotStart;
+		}
+		type.bits |= ASTNode.HasTypeAnnotations;
+	}
+
+	int illegalModifiers = this.intStack[this.intPtr--];
+	if (illegalModifiers != ClassFileConstants.AccDefault) {
+		problemReporter().invalidLocationForModifiers(type);
+	}
+	resetModifiers();
 	pushOnExpressionStack(rexp);
 	if (!this.parsingJava8Plus) {
 		problemReporter().referenceExpressionsNotBelow18(rexp);
