@@ -47,8 +47,13 @@
 					if (i == oneParamsLength - 1 && one.isVarargs() && two.isVarargs()) {
 						TypeBinding oType = ((ArrayBinding) oneParam).elementsType();
 						TypeBinding eType = ((ArrayBinding) twoParam).elementsType();
-						if (oType == eType || oType.isCompatibleWith(eType))
-							return true; // special case to choose between 2 varargs methods when the last arg is Object[]
+						if (CompilerOptions.tolerateIllegalAmbiguousVarargsInvocation && this.compilerOptions().complianceLevel < ClassFileConstants.JDK1_7) {
+							if (oneParam == eType || oneParam.isCompatibleWith(eType))
+								return true; // special case to choose between 2 varargs methods when the last arg is Object[]
+						} else {
+							if (oType == eType || oType.isCompatibleWith(eType))
+								return true; // special case to choose between 2 varargs methods when the last arg is Object[]
+						}
 					}
 					return false;
 				}
@@ -57,6 +62,12 @@
 		}
 
 		if (one.isVarargs() && two.isVarargs()) {
+			if (CompilerOptions.tolerateIllegalAmbiguousVarargsInvocation && this.compilerOptions().complianceLevel < ClassFileConstants.JDK1_7 && 
+					oneParamsLength > twoParamsLength) {
+				// special case when autoboxing makes (int, int...) better than (Object...) but not (int...) or (Integer, int...)
+				if (((ArrayBinding) twoParams[twoParamsLength - 1]).elementsType().id != TypeIds.T_JavaLangObject)
+					return false;
+			}
 			// check that each parameter before the vararg parameters are compatible (no autoboxing allowed here)
 			for (int i = (oneParamsLength > twoParamsLength ? twoParamsLength : oneParamsLength) - 2; i >= 0; i--)
 				if (oneParams[i] != twoParams[i] && !oneParams[i].isCompatibleWith(twoParams[i]))
