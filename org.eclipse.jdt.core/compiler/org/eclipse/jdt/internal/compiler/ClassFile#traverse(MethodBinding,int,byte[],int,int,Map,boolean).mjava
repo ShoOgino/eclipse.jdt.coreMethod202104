@@ -1,4 +1,6 @@
-	public void traverse(MethodBinding methodBinding, int maxLocals, byte[] bytecodes, int codeOffset, int codeLength, ArrayList frames, boolean isClinit) {
+	public List traverse(MethodBinding methodBinding, int maxLocals, byte[] bytecodes, int codeOffset, int codeLength, Map frames, boolean isClinit) {
+		Set realJumpTarget = new HashSet(); 
+
 		StackMapFrameCodeStream stackMapFrameCodeStream = (StackMapFrameCodeStream) this.codeStream;
 		int[] framePositions = stackMapFrameCodeStream.getFramePositions();
 		int pc = codeOffset;
@@ -46,7 +48,14 @@
 			initializeDefaultLocals(frame, methodBinding, maxLocals, codeLength);
 		}
 		frame.pc = -1;
-		frames.add(frame.duplicate());
+		add(frames, frame.duplicate());
+		addRealJumpTarget(realJumpTarget, -1);
+		for (int i = 0, max = this.codeStream.exceptionLabelsCounter; i < max; i++) {
+			ExceptionLabel exceptionLabel = this.codeStream.exceptionLabels[i];
+			if (exceptionLabel != null) {
+				addRealJumpTarget(realJumpTarget, exceptionLabel.position);
+			}
+		}
 		while (true) {
 			int currentPC = pc - codeOffset;
 			if (hasStackMarkers && stackMarker.pc == currentPC) {
@@ -99,8 +108,7 @@
 					if (indexInFramePositions < framePositionsLength) {
 						currentFramePosition = framePositions[indexInFramePositions];
 					} else {
-						// no more frame to generate
-						return;
+						currentFramePosition = Integer.MAX_VALUE;
 					}
 				} while (currentFramePosition < currentPC);
 			}
@@ -111,13 +119,12 @@
 				// initialize locals
 				initializeLocals(isClinit ? true : methodBinding.isStatic(), currentPC, currentFrame);
 				// insert a new frame
-				frames.add(currentFrame);
+				add(frames, currentFrame);
 				indexInFramePositions++;
 				if (indexInFramePositions < framePositionsLength) {
 					currentFramePosition = framePositions[indexInFramePositions];
 				} else {
-					// no more frame to generate
-					return;
+					currentFramePosition = Integer.MAX_VALUE;
 				}
 			}
 			byte opcode = (byte) u1At(bytecodes, 0, pc);
@@ -663,6 +670,7 @@
 				case Opcodes.OPC_ifgt:
 				case Opcodes.OPC_ifle:
 					frame.numberOfStackItems--;
+					addRealJumpTarget(realJumpTarget, currentPC + i2At(bytecodes, 1, pc));
 					pc += 3;
 					break;
 				case Opcodes.OPC_if_icmpeq:
@@ -674,23 +682,32 @@
 				case Opcodes.OPC_if_acmpeq:
 				case Opcodes.OPC_if_acmpne:
 					frame.numberOfStackItems -= 2;
+					addRealJumpTarget(realJumpTarget, currentPC + i2At(bytecodes, 1, pc));
 					pc += 3;
 					break;
 				case Opcodes.OPC_goto:
+					addRealJumpTarget(realJumpTarget, currentPC + i2At(bytecodes, 1, pc));
 					pc += 3;
+					addRealJumpTarget(realJumpTarget, pc - codeOffset);
 					break;
 				case Opcodes.OPC_tableswitch:
 					pc++;
 					while (((pc - codeOffset) & 0x03) != 0) {
 						pc++;
 					}
+					// default offset
+					addRealJumpTarget(realJumpTarget, currentPC + i4At(bytecodes, 0, pc));
 					pc += 4; // default
 					int low = i4At(bytecodes, 0, pc);
 					pc += 4;
 					int high = i4At(bytecodes, 0, pc);
 					pc += 4;
 					int length = high - low + 1;
-					pc += (length * 4);
+					for (int i = 0; i < length; i++) {
+						// pair offset
+						addRealJumpTarget(realJumpTarget, currentPC + i4At(bytecodes, 0, pc));
+						pc += 4;
+					}
 					frame.numberOfStackItems--;
 					break;
 				case Opcodes.OPC_lookupswitch:
@@ -698,9 +715,16 @@
 					while (((pc - codeOffset) & 0x03) != 0) {
 						pc++;
 					}
-					pc += 4; // default
+					addRealJumpTarget(realJumpTarget, currentPC + i4At(bytecodes, 0, pc));
+					pc += 4; // default offset
 					int npairs = (int) u4At(bytecodes, 0, pc);
-					pc += (4 + npairs * 8);
+					pc += 4; // npair value
+					for (int i = 0; i < npairs; i++) {
+						pc += 4; // case value
+						// pair offset
+						addRealJumpTarget(realJumpTarget, currentPC + i4At(bytecodes, 0, pc));
+						pc += 4;
+					}
 					frame.numberOfStackItems--;
 					break;
 				case Opcodes.OPC_ireturn:
@@ -710,9 +734,11 @@
 				case Opcodes.OPC_areturn:
 					frame.numberOfStackItems--;
 					pc++;
+					addRealJumpTarget(realJumpTarget, pc - codeOffset);
 					break;
 				case Opcodes.OPC_return:
 					pc++;
+					addRealJumpTarget(realJumpTarget, pc - codeOffset);
 					break;
 				case Opcodes.OPC_getstatic:
 					index = u2At(bytecodes, 1, pc);
@@ -1115,6 +1141,7 @@
 				case Opcodes.OPC_athrow:
 					frame.numberOfStackItems--;
 					pc++;
+					addRealJumpTarget(realJumpTarget, pc - codeOffset);
 					break;
 				case Opcodes.OPC_checkcast:
 					index = u2At(bytecodes, 1, pc);
@@ -1209,10 +1236,13 @@
 				case Opcodes.OPC_ifnull:
 				case Opcodes.OPC_ifnonnull:
 					frame.numberOfStackItems--;
+					addRealJumpTarget(realJumpTarget, currentPC + i2At(bytecodes, 1, pc));
 					pc += 3;
 					break;
 				case Opcodes.OPC_goto_w:
+					addRealJumpTarget(realJumpTarget, currentPC + i4At(bytecodes, 1, pc));
 					pc += 5;
+					addRealJumpTarget(realJumpTarget, pc - codeOffset); // handle infinite loop
 					break;
 				default: // should not occur
 					this.codeStream.methodDeclaration.scope.problemReporter().abortDueToInternalError(
@@ -1230,5 +1260,6 @@
 				break;
 			}
 		}
+		return filterFakeFrames(realJumpTarget, frames, codeLength);
 	}
 
