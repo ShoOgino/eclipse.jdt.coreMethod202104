@@ -1,0 +1,90 @@
+	/**
+	 * @return true if tests passed
+	 */
+    private boolean innerTestAsMemberOf(String method, DeclaredType declaredContainer,
+            TypeElement containerElement) {
+        DeclaredType longType = (DeclaredType)_elementUtils.getTypeElement("java.lang.Long").asType();
+        Map<String, Element> members = new HashMap<String, Element>();
+	    for (Element element : containerElement.getEnclosedElements()) {
+	        members.put(element.getSimpleName().toString(), element);
+	    }
+	    for (String m : new String[] {"f2", "m2"}) {
+	        if (members.get(m) != null) {
+	            reportError(method + ": Should not have found member named '" + m + "' in container " + declaredContainer);
+	            return false;
+	        }
+	    }
+	    for (String m : new String[] {"f", "m", "C", "D", "e"}) {
+	        Element memberElement = members.get(m);
+	        if (memberElement == null) {
+	            reportError(method + ": Couldn't find member named '" + m + "' in container " + declaredContainer);
+	            return false;
+	        }
+	        TypeMirror tm = _typeUtils.asMemberOf(declaredContainer, memberElement);
+	        
+            if ("f".equals(m)) {
+                // Long field
+                if (!_typeUtils.isSameType(tm, longType)) {
+                    reportError(method + ": member f should be of type Long, but was " + tm);
+                    return false;
+                }
+            } else if ("m".equals(m)) {
+                // void method returning Long
+                if (tm.getKind() != TypeKind.EXECUTABLE) {
+                    reportError(method + ": member m() should be executable but was " + tm.getKind());
+                    return false;
+                }
+                ExecutableType etm = (ExecutableType)tm;
+                if (!etm.getParameterTypes().isEmpty()) {
+                    reportError(method + ": member m() should be void, but it had parameters");
+                    return false;
+                }
+                if (!_typeUtils.isSameType(etm.getReturnType(), longType)) {
+                    reportError(method + ": member m() should have Long return type, but found " + etm.getReturnType());
+                    return false;
+                }
+            } else if ("C".equals(m)) {
+	            // Not clear what to expect in the case of a static nested class. Outer parameterization doesn't
+	            // apply to the nested class; and the method spec doesn't say what to do when the contained
+	            // member is incompletely parameterized. 
+	            TypeElement c = _elementUtils.getTypeElement("targets.model.pc.AsMemberOf.C");
+	            TypeMirror tmExpected = c.asType();
+	            
+	            // In javac, we get A.C<T> whether C is directly contained or accessed via a subclass.
+	            // In Eclipse, when accessing through a subclass, the binding to C is lazily created 
+	            // within ParameterizedTypeBinding.memberTypes(), so it gets created as a PTB itself,
+	            // with no type arguments. Thus it is A<Long>.C instead of A.C<T>. This is probably a
+	            // compiler bug, but given that asMemberOf() is documented to apply only to "directly
+	            // contained" members it's probably not worth worrying about. So, we accept that case.
+	            if (!_typeUtils.isSameType(tm, tmExpected) && 
+	                    !(tm instanceof DeclaredTypeImpl && 
+	                            "targets.model.pc.AsMemberOf<java.lang.Long>.C".equals(tm.toString()))) {
+	                reportError(method + ": member C: Expected type " + tmExpected + " but found " + tm);
+	                return false;
+	            }
+	        } else if ("D".equals(m)) {
+	            // Expected type of D is AsMemberOf2<Long>.D
+	            DeclaredType tmContainer = _typeUtils.getDeclaredType(containerElement, longType);
+	            TypeElement d = _elementUtils.getTypeElement("targets.model.pc.AsMemberOf.D");
+	            TypeMirror tmExpected = _typeUtils.getDeclaredType(tmContainer, d);
+	            if (!_typeUtils.isSameType(tm, tmExpected)) {
+	                reportError(method + ": member D: Expected type " + tmExpected +
+	                        " but found " + tm);
+	                return false;
+	            }
+    		} else if ("e".equals(m)) {
+    		    // Expected type of e is A<Long>.E<Integer>
+                DeclaredType tmContainer = _typeUtils.getDeclaredType(containerElement, longType);
+                TypeElement eTypeElem = _elementUtils.getTypeElement("targets.model.pc.AsMemberOf.E");
+                DeclaredType tmInt = (DeclaredType) _elementUtils.getTypeElement("java.lang.Integer").asType();
+                TypeMirror tmExpected = _typeUtils.getDeclaredType(tmContainer, eTypeElem, tmInt);
+                if (!_typeUtils.isSameType(tm, tmExpected)) {
+                    reportError(method + ": member e: Expected type " + tmExpected +
+                            " but found " + tm);
+                    return false;
+                }
+    		}
+	    }
+	    return true;
+    }
+
