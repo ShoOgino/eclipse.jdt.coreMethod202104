@@ -1,0 +1,112 @@
+public TypeReference getTypeReference(int dim) {
+	/* build a Reference on a variable that may be qualified or not
+	 * This variable is a type reference and dim will be its dimensions
+	 */
+	Annotation [][] annotationsOnDimensions = null;
+	TypeReference ref;
+	int length = this.identifierLengthStack[this.identifierLengthPtr--];
+	if (length < 0) { //flag for precompiled type reference on base types
+		annotationsOnDimensions = getAnnotationsOnDimensions(dim);
+		ref = TypeReference.baseTypeReference(-length, dim, annotationsOnDimensions);
+		ref.sourceStart = this.intStack[this.intPtr--];
+		if (dim == 0) {
+			ref.sourceEnd = this.intStack[this.intPtr--];
+		} else {
+			this.intPtr--; // no need to use this position as it is an array
+			ref.sourceEnd = this.endPosition;
+		}
+		if (this.reportReferenceInfo){
+				this.requestor.acceptTypeReference(ref.getParameterizedTypeName(), ref.sourceStart, ref.sourceEnd);
+		}
+	} else {
+		int numberOfIdentifiers = this.genericsIdentifiersLengthStack[this.genericsIdentifiersLengthPtr--];
+		if (length != numberOfIdentifiers || this.genericsLengthStack[this.genericsLengthPtr] != 0) {
+			// generic type
+			ref = getTypeReferenceForGenericType(dim, length, numberOfIdentifiers);
+			if (this.reportReferenceInfo) {
+				if (length == 1 && numberOfIdentifiers == 1) {
+					ParameterizedSingleTypeReference parameterizedSingleTypeReference = (ParameterizedSingleTypeReference) ref;
+					this.requestor.acceptTypeReference(parameterizedSingleTypeReference.token, parameterizedSingleTypeReference.sourceStart);
+				} else {
+					ParameterizedQualifiedTypeReference parameterizedQualifiedTypeReference = (ParameterizedQualifiedTypeReference) ref;
+					this.requestor.acceptTypeReference(parameterizedQualifiedTypeReference.tokens, parameterizedQualifiedTypeReference.sourceStart, parameterizedQualifiedTypeReference.sourceEnd);
+				}
+			}
+		} else if (length == 1) {
+			// single variable reference
+			this.genericsLengthPtr--; // pop the 0
+			if (dim == 0) {
+				ref =
+					new SingleTypeReference(
+						this.identifierStack[this.identifierPtr],
+						this.identifierPositionStack[this.identifierPtr--]);
+				if (this.reportReferenceInfo) {
+					this.requestor.acceptTypeReference(((SingleTypeReference)ref).token, ref.sourceStart);
+				}
+			} else {
+				annotationsOnDimensions = getAnnotationsOnDimensions(dim);
+				ref =
+					new ArrayTypeReference(
+						this.identifierStack[this.identifierPtr],
+						dim,
+						annotationsOnDimensions,
+						this.identifierPositionStack[this.identifierPtr--]);
+				ref.sourceEnd = this.endPosition;
+				if (annotationsOnDimensions != null) {
+					ref.bits |= ASTNode.HasTypeAnnotations;
+				}
+				if (this.reportReferenceInfo) {
+					this.requestor.acceptTypeReference(((ArrayTypeReference)ref).token, ref.sourceStart);
+				}
+			}
+		} else { // Qualified type reference
+			this.genericsLengthPtr--;
+			char[][] tokens = new char[length][];
+			this.identifierPtr -= length;
+			long[] positions = new long[length];
+			System.arraycopy(this.identifierStack, this.identifierPtr + 1, tokens, 0, length);
+			System.arraycopy(
+				this.identifierPositionStack,
+				this.identifierPtr + 1,
+				positions,
+				0,
+				length);
+			if (dim == 0) {
+				ref = new QualifiedTypeReference(tokens, positions);
+				if (this.reportReferenceInfo) {
+					this.requestor.acceptTypeReference(((QualifiedTypeReference)ref).tokens, ref.sourceStart, ref.sourceEnd);
+				}
+			} else {
+				annotationsOnDimensions = getAnnotationsOnDimensions(dim);
+				ref =
+					new ArrayQualifiedTypeReference(tokens, dim, annotationsOnDimensions, positions);
+				ref.sourceEnd = this.endPosition;
+				if (annotationsOnDimensions != null) {
+					ref.bits |= ASTNode.HasTypeAnnotations;
+				}
+				if (this.reportReferenceInfo) {
+					this.requestor.acceptTypeReference(((ArrayQualifiedTypeReference)ref).tokens, ref.sourceStart, ref.sourceEnd);
+				}
+			}
+		}
+	}
+	int levels = ref.getAnnotatableLevels();
+	for (int i = levels - 1; i >= 0; i--) {
+		if ((length = this.typeAnnotationLengthStack[this.typeAnnotationLengthPtr--]) != 0) {
+			if (ref.annotations == null)
+				ref.annotations = new Annotation[levels][];
+			System.arraycopy(
+					this.typeAnnotationStack,
+					(this.typeAnnotationPtr -= length) + 1,
+					ref.annotations[i] = new Annotation[length],
+					0,
+					length);
+			if (i == 0) {
+				ref.sourceStart = ref.annotations[0][0].sourceStart;
+			}
+			ref.bits |= ASTNode.HasTypeAnnotations;
+		}
+	}
+	return ref;
+}
+
