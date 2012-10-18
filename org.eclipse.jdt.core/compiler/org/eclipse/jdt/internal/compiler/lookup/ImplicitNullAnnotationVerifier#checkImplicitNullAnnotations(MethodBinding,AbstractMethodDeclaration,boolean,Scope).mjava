@@ -1,0 +1,68 @@
+	/**
+	 * Check and fill in implicit annotations from overridden methods and from default.
+	 * Precondition: caller has checked whether annotation-based null analysis is enabled.
+	 */
+	public void checkImplicitNullAnnotations(MethodBinding currentMethod, AbstractMethodDeclaration srcMethod, boolean complain, Scope scope) {
+		// check inherited nullness from superclass and superInterfaces
+		try {
+			ReferenceBinding currentType = currentMethod.declaringClass;
+			if (currentType.id == TypeIds.T_JavaLangObject) {
+				return;
+			}
+			boolean needToApplyNonNullDefault = currentMethod.hasNonNullDefault();
+			// compatibility & inheritance do not consider constructors / static methods:
+			boolean isInstanceMethod = !currentMethod.isConstructor() && !currentMethod.isStatic();
+			complain &= isInstanceMethod;
+			if (!needToApplyNonNullDefault 
+					&& !complain 
+					&& !(this.inheritNullAnnotations && isInstanceMethod)) {
+				return; // short cut, no work to be done
+			}
+
+			if (isInstanceMethod) {
+				List superMethodList = new ArrayList();
+				
+				int paramLen = currentMethod.parameters.length;
+				findAllOverriddenMethods(currentMethod.original(), currentMethod.selector, paramLen,
+								currentType, new HashSet(), superMethodList);
+				
+				// prepare interim storage for nullness info so we don't pollute currentMethod before we know its conflict-free: 
+				InheritedNonNullnessInfo[] inheritedNonNullnessInfos = new InheritedNonNullnessInfo[paramLen+1]; // index 0 is for the return type
+				for (int i=0; i<paramLen+1; i++) inheritedNonNullnessInfos[i] = new InheritedNonNullnessInfo();
+
+				int length = superMethodList.size();
+				for (int i = length; --i >= 0;) {
+					MethodBinding currentSuper = (MethodBinding) superMethodList.get(i);
+					if ((currentSuper.tagBits & TagBits.IsNullnessKnown) == 0) {
+						// recurse to prepare currentSuper
+						checkImplicitNullAnnotations(currentSuper, null, false, scope); // TODO (stephan) complain=true if currentSuper is source method??
+					}
+					checkNullSpecInheritance(currentMethod, srcMethod, needToApplyNonNullDefault, complain, currentSuper, scope, inheritedNonNullnessInfos);
+					needToApplyNonNullDefault = false;
+				}
+				
+				// transfer collected information into currentMethod:
+				InheritedNonNullnessInfo info = inheritedNonNullnessInfos[0];
+				if (info.inheritedNonNullness == Boolean.TRUE) {
+					currentMethod.tagBits |= TagBits.AnnotationNonNull;
+				} else if (info.inheritedNonNullness == Boolean.FALSE) {
+					currentMethod.tagBits |= TagBits.AnnotationNullable;
+				}
+				for (int i=0; i<paramLen; i++) {
+					info = inheritedNonNullnessInfos[i+1];
+					if (info.inheritedNonNullness != null) {
+						if (currentMethod.parameterNonNullness == null)
+							currentMethod.parameterNonNullness = new Boolean[paramLen];
+						currentMethod.parameterNonNullness[i] = info.inheritedNonNullness;
+					}
+				}
+
+			}
+			if (needToApplyNonNullDefault) {
+				currentMethod.fillInDefaultNonNullness(srcMethod);
+			}
+		} finally {			
+			currentMethod.tagBits |= TagBits.IsNullnessKnown;
+		}
+	}
+
