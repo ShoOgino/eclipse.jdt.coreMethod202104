@@ -1,0 +1,32 @@
+	// https://bugs.eclipse.org/bugs/show_bug.cgi?id=270367
+	public void test0324() throws JavaModelException {
+		String contents = "package test0324;\n"
+			+ "public class X {\n"
+			+ "  public void someMethod() {\n"
+			+ "     int i = /*start*/(new Integer(getId())).intValue()/*end*/;\n"
+			+ "  }\n"
+			+ "  public String getId() {\n"
+			+ "     return null;\n"
+			+ "  }\n"
+			+ "}";
+		this.workingCopy = getWorkingCopy("/Converter15/src/test0324/X.java", contents, true/*resolve*/
+		);
+		MethodInvocation methodCall = (MethodInvocation) buildAST(contents, this.workingCopy, false, true, true);
+		ParenthesizedExpression intValueReceiver = (ParenthesizedExpression) methodCall.getExpression();
+		ParenthesizedExpression newParenthesizedExpression = (ParenthesizedExpression) ASTNode.copySubtree(
+				intValueReceiver.getAST(), intValueReceiver);
+		replaceNodeInParent(methodCall, newParenthesizedExpression);
+		
+		// copied node
+		ClassInstanceCreation constructorCall = (ClassInstanceCreation) newParenthesizedExpression.getExpression();
+		constructorCall.resolveTypeBinding();
+		IMethodBinding constructorBinding = constructorCall.resolveConstructorBinding();
+		assertNull("Not null constructor binding", constructorBinding);
+
+		// original node
+		constructorCall = (ClassInstanceCreation) intValueReceiver.getExpression();
+		constructorCall.resolveTypeBinding(); // This should not throw a NPE
+		constructorBinding = constructorCall.resolveConstructorBinding();
+		assertNotNull("Null constructor binding", constructorBinding);
+	}
+
