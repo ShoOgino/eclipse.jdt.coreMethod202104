@@ -1,0 +1,174 @@
+	/**
+	 * The main algorithm in this class.
+	 * @param currentMethod focus method
+	 * @param srcMethod AST of 'currentMethod' if present
+	 * @param hasNonNullDefault is a @NonNull default applicable at the site of currentMethod?
+	 * @param shouldComplain should we report any errors found? 
+	 *   (see also comment about flows into this method, below).
+	 * @param inheritedMethod one overridden method from a super type
+	 * @param scope provides context for error reporting etc.
+	 * @param inheritedNonNullnessInfos if non-null, this array of non-null elements is used for
+	 * 	 interim recording of nullness information from inheritedMethod rather than prematurely updating currentMethod.
+	 *   Index position 0 is used for the return type, positions i+1 for argument i.
+	 */
+	void checkNullSpecInheritance(MethodBinding currentMethod, AbstractMethodDeclaration srcMethod, 
+			boolean hasNonNullDefault, boolean shouldComplain,
+			MethodBinding inheritedMethod, Scope scope, InheritedNonNullnessInfo[] inheritedNonNullnessInfos) 
+	{
+		// Note that basically two different flows lead into this method:
+		// (1) during MethodVerifyer15.checkMethods() we want to report errors (against srcMethod or against the current type)
+		//     In this case this method is directly called from MethodVerifier15 (checkAgainstInheritedMethod / checkConcreteInheritedMethod)
+		// (2) during on-demand invocation we are mainly interested in the side effects of copying inherited null annotations
+		//     In this case this method is called via checkImplicitNullAnnotations from
+		//     - MessageSend.resolveType(..)
+		//     - SourceTypeBinding.createArgumentBindings(..)
+		//     - recursive calls within this class
+		//     Still we *might* want to complain about problems found (controlled by 'complain')
+
+		if ((inheritedMethod.tagBits & TagBits.IsNullnessKnown) == 0) {
+			// TODO (stephan): even here we may need to report problems? How to discriminate?
+			this.buddyImplicitNullAnnotationsVerifier.checkImplicitNullAnnotations(inheritedMethod, null, false, scope);
+		}
+		long inheritedBits = inheritedMethod.tagBits;
+		long inheritedNullnessBits = inheritedBits & (TagBits.AnnotationNonNull|TagBits.AnnotationNullable);
+		long currentBits = currentMethod.tagBits;
+		long currentNullnessBits = currentBits & (TagBits.AnnotationNonNull|TagBits.AnnotationNullable);
+		
+		LookupEnvironment environment = scope.environment();
+		boolean shouldInherit = this.inheritNullAnnotations;
+
+		// return type:
+		returnType: {
+			if (currentMethod.returnType == null || currentMethod.returnType.isBaseType())
+				break returnType; // no nullness for primitive types
+			if (currentNullnessBits == 0) {
+				// unspecified, may fill in either from super or from default
+				if (shouldInherit) {
+					if (inheritedNullnessBits != 0) {
+						if (hasNonNullDefault) {
+							// both inheritance and default: check for conflict?
+							if (shouldComplain && inheritedNullnessBits == TagBits.AnnotationNullable)
+								scope.problemReporter().conflictingNullAnnotations(currentMethod, ((MethodDeclaration) srcMethod).returnType, inheritedMethod);
+							// 	still use the inherited bits to avoid incompatibility
+						}
+						if (inheritedNonNullnessInfos != null && srcMethod != null) {
+							recordDeferredInheritedNullness(scope, ((MethodDeclaration) srcMethod).returnType, 
+									inheritedMethod, Boolean.valueOf(inheritedNullnessBits == TagBits.AnnotationNonNull), inheritedNonNullnessInfos[0]);
+						} else {
+							// no need to defer, record this info now:
+							currentMethod.tagBits |= inheritedNullnessBits;
+						}	
+						break returnType; // compatible by construction, skip complain phase below
+					}
+				}
+				if (hasNonNullDefault) { // conflict with inheritance already checked
+					currentMethod.tagBits |= (currentNullnessBits = TagBits.AnnotationNonNull); 
+				}
+			}
+			if (shouldComplain) {
+				if ((inheritedNullnessBits & TagBits.AnnotationNonNull) != 0
+						&& currentNullnessBits != TagBits.AnnotationNonNull)
+				{
+					if (srcMethod != null) {
+						scope.problemReporter().illegalReturnRedefinition(srcMethod, inheritedMethod,
+																	environment.getNonNullAnnotationName());
+					} else {
+						scope.problemReporter().cannotImplementIncompatibleNullness(currentMethod, inheritedMethod);
+						return;
+					}
+				}
+			}
+		}
+
+		// parameters:
+		Argument[] currentArguments = srcMethod == null ? null : srcMethod.arguments;
+
+		int length = 0;
+		if (currentArguments != null)
+			length = currentArguments.length;
+		else if (inheritedMethod.parameterNonNullness != null)
+			length = inheritedMethod.parameterNonNullness.length;
+		else if (currentMethod.parameterNonNullness != null)
+			length = currentMethod.parameterNonNullness.length;
+
+		for (int i = 0; i < length; i++) {
+			if (currentMethod.parameters[i].isBaseType()) continue;
+
+			Argument currentArgument = currentArguments == null 
+										? null : currentArguments[i];
+			Boolean inheritedNonNullNess = (inheritedMethod.parameterNonNullness == null)
+										? null : inheritedMethod.parameterNonNullness[i];
+			Boolean currentNonNullNess = (currentMethod.parameterNonNullness == null)
+										? null : currentMethod.parameterNonNullness[i];
+
+			if (currentNonNullNess == null) {
+				// unspecified, may fill in either from super or from default
+				if (inheritedNonNullNess != null) {
+					if (shouldInherit) {
+						if (hasNonNullDefault) {
+							// both inheritance and default: check for conflict?
+							if (shouldComplain
+									&& inheritedNonNullNess == Boolean.FALSE
+									&& currentArgument != null)
+							{
+								scope.problemReporter().conflictingNullAnnotations(currentMethod, currentArgument, inheritedMethod);
+							}
+							// 	still use the inherited info to avoid incompatibility
+						}
+						if (inheritedNonNullnessInfos != null && srcMethod != null) {
+							recordDeferredInheritedNullness(scope, srcMethod.arguments[i].type,
+									inheritedMethod, inheritedNonNullNess, inheritedNonNullnessInfos[i+1]);
+						} else {
+							// no need to defer, record this info now:
+							if (currentMethod.parameterNonNullness == null)
+								currentMethod.parameterNonNullness = new Boolean[length];
+							currentMethod.parameterNonNullness[i] = inheritedNonNullNess;
+						}
+						continue; // compatible by construction, skip complain phase below
+					}
+				}
+				if (hasNonNullDefault) { // conflict with inheritance already checked
+					if (currentMethod.parameterNonNullness == null)
+						currentMethod.parameterNonNullness = new Boolean[length];
+					currentMethod.parameterNonNullness[i] = (currentNonNullNess = Boolean.TRUE);
+				}
+			}
+			if (shouldComplain) {
+				boolean needNonNull = false;
+				char[][] annotationName;
+				if (inheritedNonNullNess == Boolean.TRUE) {
+					needNonNull = true;
+					annotationName = environment.getNonNullAnnotationName();
+				} else {
+					annotationName = environment.getNullableAnnotationName();
+				}
+				if (inheritedNonNullNess != Boolean.TRUE		// super parameter is not restricted to @NonNull
+						&& currentNonNullNess == Boolean.TRUE)	// current parameter is restricted to @NonNull 
+				{
+					// incompatible
+					if (currentArgument != null) {
+						scope.problemReporter().illegalRedefinitionToNonNullParameter(
+								currentArgument,
+								inheritedMethod.declaringClass,
+								(inheritedNonNullNess == null) ? null : environment.getNullableAnnotationName());
+					} else {
+						scope.problemReporter().cannotImplementIncompatibleNullness(currentMethod, inheritedMethod);
+					}
+				} else if (inheritedNonNullNess != null
+							&& currentNonNullNess == null) 
+				{
+					// weak conflict (TODO reconsider this case)
+					if (currentArgument != null) {
+						scope.problemReporter().parameterLackingNullAnnotation(
+								currentArgument,
+								inheritedMethod.declaringClass,
+								needNonNull,
+								annotationName);
+					} else {
+						scope.problemReporter().cannotImplementIncompatibleNullness(currentMethod, inheritedMethod);
+					}
+				}
+			}
+		}
+	}
+
