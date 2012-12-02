@@ -1,0 +1,48 @@
+// Bug 381445 - [compiler][resource] Can the resource leak check be made aware of Closeables.closeQuietly?
+// A resource is closed in different places of the flow
+public void testBug381445_2() {
+	Map options = getCompilerOptions();
+	options.put(CompilerOptions.OPTION_ReportPotentiallyUnclosedCloseable, CompilerOptions.ERROR);
+	options.put(CompilerOptions.OPTION_ReportUnclosedCloseable, CompilerOptions.ERROR);
+	runNegativeTest(
+		new String[] {
+			GUAVA_CLOSEABLES_JAVA,
+			GUAVA_CLOSEABLES_CONTENT,
+			"Bug381445.java",
+			"import java.io.File;\n" +
+			"import java.io.FileInputStream;\n" +
+			"import java.io.InputStream;\n" +
+			"import com.google.common.io.Closeables;\n" +
+			"\n" +
+			"public class Bug381445 {\n" +
+			"	public void readFile(String path) throws Exception {\n" +
+			"		File file = new File(path);\n" +
+			"		InputStream stream1 = new FileInputStream(path);\n" +
+			"		InputStream stream2 = new FileInputStream(path);\n" +
+			"		InputStream stream3 = new FileInputStream(path);\n" +
+			"		try {\n" +
+			"			// Use the opened streams here\n" +
+			"			stream1.read();\n" +
+			"			Closeables.closeQuietly(stream1);\n" +
+			"			stream2.read();\n" +
+			"			if (path.length() > 2)\n" +
+			"				Closeables.closeQuietly(stream2);\n" + // close inside if is too weak
+			"			stream3.read();\n" +
+			"		} finally {\n" +
+			"		}\n" +
+			"		Closeables.closeQuietly(stream3);\n" +
+			"	}\n" +
+			"}\n"
+		},
+		"----------\n" + 
+		"1. ERROR in Bug381445.java (at line 10)\n" + 
+		"	InputStream stream2 = new FileInputStream(path);\n" + 
+		"	            ^^^^^^^\n" + 
+		"Potential resource leak: \'stream2\' may not be closed\n" + 
+		"----------\n",
+		null,
+		true,
+		options,
+		null);	
+}
+

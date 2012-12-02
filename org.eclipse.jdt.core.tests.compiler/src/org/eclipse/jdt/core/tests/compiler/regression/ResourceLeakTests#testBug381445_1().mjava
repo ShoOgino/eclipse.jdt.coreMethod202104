@@ -1,0 +1,57 @@
+// Bug 381445 - [compiler][resource] Can the resource leak check be made aware of Closeables.closeQuietly?
+// A resource is closed using various known close helpers
+public void testBug381445_1() {
+	Map options = getCompilerOptions();
+	options.put(CompilerOptions.OPTION_ReportPotentiallyUnclosedCloseable, CompilerOptions.ERROR);
+	options.put(CompilerOptions.OPTION_ReportUnclosedCloseable, CompilerOptions.ERROR);
+	runNegativeTest(
+		new String[] {
+			GUAVA_CLOSEABLES_JAVA,
+			GUAVA_CLOSEABLES_CONTENT,
+			"org/apache/commons/io/IOUtils.java",
+			"package org.apache.commons.io;\n" +
+			"public class IOUtils {\n" +
+			"    public static void closeQuietly(java.io.Closeable closeable) {}\n" +
+			"}\n",
+			"Bug381445.java",
+			"import java.io.File;\n" +
+			"import java.io.FileInputStream;\n" +
+			"import java.io.InputStream;\n" +
+			"\n" +
+			"public class Bug381445 {\n" +
+			"	public void readFile(String path) throws Exception {\n" +
+			"		File file = new File(path);\n" +
+			"		InputStream stream1 = new FileInputStream(path);\n" +
+			"		InputStream stream2 = new FileInputStream(path);\n" +
+			"		InputStream stream3 = new FileInputStream(path);\n" +
+			"		InputStream stream4 = new FileInputStream(path);\n" +
+			"		try {\n" +
+			"			// Use the opened streams here\n" +
+			"			stream1.read();\n" +
+			"			stream2.read();\n" +
+			"			stream3.read();\n" +
+			"			stream4.read();\n" +
+			"		} finally {\n" +
+			"			com.google.common.io.Closeables.closeQuietly(stream1);\n" +
+			"			com.google.common.io.Closeables.close(stream2, false);\n" +
+			"			org.apache.commons.io.IOUtils.closeQuietly(stream3);\n" +
+			"			Closeables.closeQuietly(stream4);\n" +
+			"		}\n" +
+			"	}\n" +
+			"}\n" +
+			"class Closeables {\n" + // fake, should not be recognized
+			"	public static void closeQuietly(java.io.Closeable closeable) {}\n" +
+			"}\n"
+		},
+		"----------\n" + 
+		"1. ERROR in Bug381445.java (at line 11)\n" + 
+		"	InputStream stream4 = new FileInputStream(path);\n" + 
+		"	            ^^^^^^^\n" + 
+		"Potential resource leak: \'stream4\' may not be closed\n" + 
+		"----------\n",
+		null,
+		true,
+		options,
+		null);	
+}
+
