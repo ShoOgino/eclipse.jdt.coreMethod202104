@@ -19,7 +19,8 @@
  */
 public void correlateTrackingVarsIfElse(FlowInfo thenFlowInfo, FlowInfo elseFlowInfo) {
 	if (this.trackingVariables != null) {
-		for (int i=0; i<this.trackingVariables.size(); i++) {
+		int trackVarCount = this.trackingVariables.size();
+		for (int i=0; i<trackVarCount; i++) {
 			FakedTrackingVariable trackingVar = (FakedTrackingVariable) this.trackingVariables.get(i);
 			if (trackingVar.originalBinding == null)
 				continue;
@@ -32,6 +33,34 @@ public void correlateTrackingVarsIfElse(FlowInfo thenFlowInfo, FlowInfo elseFlow
 					 && thenFlowInfo.isDefinitelyNull(trackingVar.originalBinding))	// null in then branch
 			{
 				thenFlowInfo.markAsDefinitelyNonNull(trackingVar.binding);			// -> always closed
+			}
+			else {
+				if (thenFlowInfo == FlowInfo.DEAD_END || elseFlowInfo == FlowInfo.DEAD_END)
+					continue; // short cut
+
+				for (int j=i+1; j<trackVarCount; j++) {
+					FakedTrackingVariable var2 = ((FakedTrackingVariable) this.trackingVariables.get(j));
+					if (trackingVar.originalBinding == var2.originalBinding) {
+						// two tracking variables for the same original, merge info from both branches now:
+						boolean var1SeenInThen = thenFlowInfo.hasNullInfoFor(trackingVar.binding);
+						boolean var1SeenInElse = elseFlowInfo.hasNullInfoFor(trackingVar.binding);
+						boolean var2SeenInThen = thenFlowInfo.hasNullInfoFor(var2.binding);
+						boolean var2SeenInElse = elseFlowInfo.hasNullInfoFor(var2.binding);
+						int newStatus;
+						if (!var1SeenInThen && var1SeenInElse && var2SeenInThen && !var2SeenInElse) {
+							newStatus = FlowInfo.mergeNullStatus(thenFlowInfo.nullStatus(var2.binding), elseFlowInfo.nullStatus(trackingVar.binding));
+						} else if (var1SeenInThen && !var1SeenInElse && !var2SeenInThen && var2SeenInElse) {
+							newStatus = FlowInfo.mergeNullStatus(thenFlowInfo.nullStatus(trackingVar.binding), elseFlowInfo.nullStatus(var2.binding)); 
+						} else {
+							continue;
+						}
+						thenFlowInfo.markNullStatus(trackingVar.binding, newStatus);
+						elseFlowInfo.markNullStatus(trackingVar.binding, newStatus);
+						trackingVar.originalBinding.closeTracker = trackingVar; // avoid further use of var2
+						thenFlowInfo.markNullStatus(var2.binding, FlowInfo.NON_NULL);
+						elseFlowInfo.markNullStatus(var2.binding, FlowInfo.NON_NULL);
+					}
+				}
 			}
 		}
 	}
