@@ -8,6 +8,8 @@ void checkMethods() {
 
 		MethodBinding[] current = (MethodBinding[]) this.currentMethods.get(methodSelectors[s]);
 		MethodBinding[] inherited = (MethodBinding[]) this.inheritedMethods.valueTable[s];
+		// ensure that if we have a concrete method this shows up at position [0]:
+		inherited = Sorting.concreteFirst(inherited, inherited.length);
 		
 		// https://bugs.eclipse.org/bugs/show_bug.cgi?id=296660, if current type is exposed,
 		// inherited methods of super classes are too. current != null case handled below.
@@ -45,6 +47,7 @@ void checkMethods() {
 		// 		either because they match the same currentMethod or match each other
 		// - methods that are overridden by a current method
 		boolean[] skip = new boolean[inheritedLength];
+		boolean[] isOverridden = new boolean[inheritedLength];
 		if (current != null) {
 			for (int i = 0, length1 = current.length; i < length1; i++) {
 				MethodBinding currentMethod = current[i];
@@ -54,7 +57,7 @@ void checkMethods() {
 					if (inheritedMethod != null) {
 						if (foundMatch[j] == null && isSubstituteParameterSubsignature(currentMethod, inheritedMethod)) {
 							// already checked compatibility, do visibility etc. also indicate overriding? If so ignore inheritedMethod further downstream
-							skip[j] = couldMethodOverride(currentMethod, inheritedMethod);
+							isOverridden[j] = skip[j] = couldMethodOverride(currentMethod, inheritedMethod);
 							matchingInherited[++index] = inheritedMethod;
 							foundMatch[j] = currentMethod;
 						} else {
@@ -77,7 +80,8 @@ void checkMethods() {
 				}
 			}
 		}
-
+		// first round: collect information into skip and isOverridden by comparing all pairs:
+		// (and perform some side effects : bridge methods & use flags)
 		for (int i = 0; i < inheritedLength; i++) {
 			MethodBinding matchMethod = foundMatch[i];
 			if (matchMethod == null && current != null && this.type.isPublic()) { // current == null case handled already.
@@ -91,10 +95,7 @@ void checkMethods() {
 			if (!isOrEnclosedByPrivateType && matchMethod == null && current != null) {
 				inherited[i].original().modifiers |= ExtraCompilerModifiers.AccLocallyUsed;	
 			}
-			if (skip[i]) continue;
 			MethodBinding inheritedMethod = inherited[i];
-			if (matchMethod == null)
-				matchingInherited[++index] = inheritedMethod;
 			for (int j = i + 1; j < inheritedLength; j++) {
 				MethodBinding otherInheritedMethod = inherited[j];
 				if (matchMethod == foundMatch[j] && matchMethod != null)
@@ -105,29 +106,38 @@ void checkMethods() {
 				// This elimination used to happen rather eagerly in computeInheritedMethods step
 				// itself earlier. (https://bugs.eclipse.org/bugs/show_bug.cgi?id=302358)
 				if (inheritedMethod.declaringClass != otherInheritedMethod.declaringClass) {
-					if (otherInheritedMethod.declaringClass.isInterface() && !inheritedMethod.declaringClass.isInterface()) {
-						if (isInterfaceMethodImplemented(otherInheritedMethod, inheritedMethod, otherInheritedMethod.declaringClass)) {
-							skip[j] = true;
-							continue;
-						}
-					} else if (areMethodsCompatible(inheritedMethod, otherInheritedMethod, true)) {
-						skip[j] = true;
+					// these method calls produce their effect as side-effects into skip and isOverridden:
+					if (isSkippableOrOverridden(inheritedMethod, otherInheritedMethod, skip, isOverridden, j))
 						continue;
-					}
+					if (isSkippableOrOverridden(otherInheritedMethod, inheritedMethod, skip, isOverridden, i))
+						continue;
 				}
-				otherInheritedMethod = computeSubstituteMethod(otherInheritedMethod, inheritedMethod);
-				if (otherInheritedMethod != null) {
-					if (((!inheritedMethod.isAbstract() || otherInheritedMethod.isAbstract()) 		// if (abstract(inherited) => abstract(other)) check if inherited overrides other 
-								&& isSubstituteParameterSubsignature(inheritedMethod, otherInheritedMethod))
-						|| ((!otherInheritedMethod.isAbstract() || inheritedMethod.isAbstract())	// if (abstract(other) => abstract(inherited)) check if other overrides inherited 
-								&& isSubstituteParameterSubsignature(otherInheritedMethod, inheritedMethod))) 
-					{
-						if (index == -1)
-							matchingInherited[++index] = inheritedMethod;
-						if (foundMatch[j] == null)
-							matchingInherited[++index] = otherInheritedMethod;
+			}
+		}
+		// second round: collect and check matchingInherited, directly check methods with no replacing etc.
+		for (int i = 0; i < inheritedLength; i++) {
+			MethodBinding matchMethod = foundMatch[i];
+			if (skip[i]) continue;
+			MethodBinding inheritedMethod = inherited[i];
+			if (matchMethod == null)
+				matchingInherited[++index] = inheritedMethod;
+			for (int j = i + 1; j < inheritedLength; j++) {
+				if (foundMatch[j] == null) {
+					MethodBinding otherInheritedMethod = inherited[j];
+					if (matchMethod == foundMatch[j] && matchMethod != null)
+						continue; // both inherited methods matched the same currentMethod
+					if (canSkipInheritedMethods(inheritedMethod, otherInheritedMethod))
+						continue;
+
+					MethodBinding replaceMatch;
+					if ((replaceMatch = findReplacedMethod(inheritedMethod, otherInheritedMethod)) != null) {
+						matchingInherited[++index] = replaceMatch;
 						skip[j] = true;
-					} else if (matchMethod == null && foundMatch[j] == null) {
+					} else if ((replaceMatch = findReplacedMethod(otherInheritedMethod, inheritedMethod)) != null) {
+						matchingInherited[++index] = replaceMatch;
+						skip[j] = true;						
+					} else if (matchMethod == null) {
+						// none replaced by the other, check these methods against each other now:
 						checkInheritedMethods(inheritedMethod, otherInheritedMethod);
 					}
 				}
@@ -135,7 +145,7 @@ void checkMethods() {
 			if (index == -1) continue;
 
 			if (index > 0)
-				checkInheritedMethods(matchingInherited, index + 1); // pass in the length of matching
+				checkInheritedMethods(matchingInherited, index + 1, isOverridden); // pass in the length of matching
 			else if (mustImplementAbstractMethods && matchingInherited[0].isAbstract() && matchMethod == null)
 				checkAbstractMethod(matchingInherited[0]);
 			while (index >= 0) matchingInherited[index--] = null; // clear the previous contents of the matching methods
