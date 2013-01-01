@@ -1,0 +1,61 @@
+//https://bugs.eclipse.org/bugs/show_bug.cgi?id=397070
+public void testBug397070() throws JavaModelException {
+	this.workingCopies = new ICompilationUnit[1];
+	this.workingCopies[0] = getWorkingCopy(
+		"/Completion/src/test/Completion.java",
+		"package test;\n" +
+		"public class Completion implements {}\n" +
+		"public interface Completion2 extends {}\n" +
+		"public class Completion3 extends {}\n" +
+		"}\n");
+
+	class CompletionRequestor2 extends CompletionRequestor {
+		SourceType type = null;
+		public void acceptContext(CompletionContext con) {
+			this.type = null;
+			if (con instanceof InternalCompletionContext) {
+				InternalCompletionContext context = (InternalCompletionContext) con;
+				IJavaElement element = context.getEnclosingElement();
+				if (element instanceof org.eclipse.jdt.internal.core.SourceType) {
+					this.type = (SourceType) element;
+				}
+			}
+		}
+		public boolean isExtendedContextRequired() {
+			return true;
+		}
+		public SourceType getType() {
+			return this.type;
+		}
+		public void accept(CompletionProposal proposal) {
+			// Do nothing
+		}
+	}
+
+	CompletionRequestor2 requestor = new CompletionRequestor2();
+	String str = this.workingCopies[0].getSource();
+	String completeBehind = "Completion implements ";
+	int cursorLocation = str.lastIndexOf(completeBehind) + completeBehind.length();
+	try {
+		this.workingCopies[0].codeComplete(cursorLocation, requestor, this.wcOwner);
+		SourceType type = requestor.getType();
+		String[] names = type.getSuperInterfaceTypeSignatures();
+		assertEquals("Incorrect syper interface signature", 0, names.length);
+
+		completeBehind = "Completion2 extends ";
+		cursorLocation = str.lastIndexOf(completeBehind) + completeBehind.length();
+		this.workingCopies[0].codeComplete(cursorLocation, requestor, this.wcOwner);
+		type = requestor.getType();
+		names = type.getSuperInterfaceTypeSignatures();
+		assertEquals("Incorrect syper interface signature", 0, names.length);
+
+		completeBehind = "Completion3 extends ";
+		cursorLocation = str.lastIndexOf(completeBehind) + completeBehind.length();
+		this.workingCopies[0].codeComplete(cursorLocation, requestor, this.wcOwner);
+		type = requestor.getType();
+		assertNull("Incorrect syper class signature", type.getSuperclassTypeSignature());
+	} catch (IllegalArgumentException iae) {
+		fail("Invalid completion context");
+	}
+}
+
