@@ -49,6 +49,9 @@
 								stringsToInsert.add(lineDelim);
 							}
 						}
+					} else if (lastPackage != null && lastPackage.isComment() && pack.isSameGroup(lastPackage)) {
+						// the last pack may be a dummy for a comment which doesn't belong to any extended range
+						stringsToInsert.add(lineDelim);
 					}
 				}
 				lastPackage= pack;
@@ -57,11 +60,13 @@
 				int threshold= isStatic ? this.staticImportOnDemandThreshold : this.importOnDemandThreshold;
 
 				boolean doStarImport= pack.hasStarImport(threshold, onDemandConflicts);
+				boolean allImportsAddedToStar = false;
 				if (doStarImport && (pack.find("*") == null)) { //$NON-NLS-1$
 					String[] imports = getNewImportStrings(buffer, pack, isStatic, lineDelim);
 					for (int j = 0, max = imports.length; j < max; j++) {
 						stringsToInsert.add(imports[j]);
 					}
+					allImportsAddedToStar = true;
 				}
 
 				for (int k= 0; k < nImports; k++) {
@@ -70,9 +75,19 @@
 
 					if (region == null) { // new entry
 						if (!doStarImport || currDecl.isOnDemand() || (onDemandConflicts != null && onDemandConflicts.contains(currDecl.getSimpleName()))) {
-							String str= getNewImportString(currDecl.getElementName(), isStatic, lineDelim);
+							IRegion rangeBefore = currDecl.getPrecedingCommentRange();
+							IRegion rangeAfter = currDecl.getTrailingCommentRange();
+							if (rangeBefore != null) {
+								stringsToInsert.add(buffer.getText(rangeBefore.getOffset(), rangeBefore.getLength()));
+							}
+							
+							String trailingComment = null;
+							if (rangeAfter != null) {
+								trailingComment = buffer.getText(rangeAfter.getOffset(), rangeAfter.getLength());
+							}
+							String str= getNewImportString(currDecl.getElementName(), isStatic, trailingComment, lineDelim);
 							stringsToInsert.add(str);
-						} else if (doStarImport && !currDecl.isOnDemand()) {
+						} else if (doStarImport && !currDecl.isOnDemand() && !allImportsAddedToStar) {
 							String simpleName = currDecl.getTypeQualifiedName();
 							if (simpleName.indexOf('.') != -1) {
 								String str= getNewImportString(currDecl.getElementName(), isStatic, lineDelim);
@@ -121,7 +136,7 @@
 
 			// insert back all existing imports comments since existing imports were not preserved
 			if (this.preserveExistingCommentsRanges != null) {
-				for (int i = 0, max = this.preserveExistingCommentsRanges.length; i < max; i++) {
+				for (int i = 0, max = this.preserveExistingCommentsRanges.length; (i < max && this.preserveExistingCommentsRanges[i] != null); i++) {
 					IRegion region = this.preserveExistingCommentsRanges[i];
 					String text = buffer.getText(region.getOffset(), region.getLength());
 					// remove preceding whitespaces
