@@ -39,17 +39,13 @@
 					continue;
 				}
 
-				if (spacesBetweenGroups > 0) {
+				if (spacesBetweenGroups > 0 && lastPackage != null) {
 					// add a space between two different groups by looking at the two adjacent imports
-					if (lastPackage != null && !pack.isComment() && !pack.isSameGroup(lastPackage)) {
-						ImportDeclEntry last= lastPackage.getImportAt(lastPackage.getNumberOfImports() - 1);
-						ImportDeclEntry first= pack.getImportAt(0);
-						if (!lastPackage.isComment() && (last.isNew() || first.isNew())) {
-							for (int k= spacesBetweenGroups; k > 0; k--) {
-								stringsToInsert.add(lineDelim);
-							}
+					if (!lastPackage.isComment() && !pack.isComment() && !pack.isSameGroup(lastPackage)) {
+						for (int k= spacesBetweenGroups; k > 0; k--) {
+							stringsToInsert.add(lineDelim);
 						}
-					} else if (lastPackage != null && lastPackage.isComment() && pack.isSameGroup(lastPackage)) {
+					} else if (lastPackage.isComment() && pack.isSameGroup(lastPackage)) {
 						// the last pack may be a dummy for a comment which doesn't belong to any extended range
 						stringsToInsert.add(lineDelim);
 					}
@@ -66,15 +62,17 @@
 					for (int j = 0, max = imports.length; j < max; j++) {
 						stringsToInsert.add(imports[j]);
 					}
-					allImportsAddedToStar = true;
+					allImportsAddedToStar = true; // may still need to handle onDemandConflicts below
 				}
 
 				for (int k= 0; k < nImports; k++) {
 					ImportDeclEntry currDecl= pack.getImportAt(k);
 					IRegion region= currDecl.getSourceRange();
-
+					boolean isConflict = !currDecl.isComment() && onDemandConflicts != null && onDemandConflicts.contains(currDecl.getSimpleName());
+					boolean addRegularToStar = doStarImport && !currDecl.isOnDemand();
+					
 					if (region == null) { // new entry
-						if (!doStarImport || currDecl.isOnDemand() || (onDemandConflicts != null && onDemandConflicts.contains(currDecl.getSimpleName()))) {
+						if (!addRegularToStar || isConflict) {
 							IRegion rangeBefore = currDecl.getPrecedingCommentRange();
 							IRegion rangeAfter = currDecl.getTrailingCommentRange();
 							if (rangeBefore != null) {
@@ -87,7 +85,7 @@
 							}
 							String str= getNewImportString(currDecl.getElementName(), isStatic, trailingComment, lineDelim);
 							stringsToInsert.add(str);
-						} else if (doStarImport && !currDecl.isOnDemand() && !allImportsAddedToStar) {
+						} else if (addRegularToStar && !allImportsAddedToStar) {
 							String simpleName = currDecl.getTypeQualifiedName();
 							if (simpleName.indexOf('.') != -1) {
 								String str= getNewImportString(currDecl.getElementName(), isStatic, lineDelim);
@@ -96,7 +94,7 @@
 								}
 							}
 						}
-					} else if (!doStarImport || currDecl.isOnDemand() || onDemandConflicts == null || onDemandConflicts.contains(currDecl.getSimpleName())) {
+					} else if (!addRegularToStar || isConflict) {
 						int offset= region.getOffset();
 						IRegion rangeBefore = currDecl.getPrecedingCommentRange();
 						if (rangeBefore != null && currPos > rangeBefore.getOffset()) {
@@ -109,7 +107,7 @@
 						removeAndInsertNew(buffer, currPos, offset, stringsToInsert, resEdit);
 						stringsToInsert.clear();
 						currPos= offset + region.getLength();
-					} else if (doStarImport && !currDecl.isOnDemand()) {
+					} else if (addRegularToStar && !allImportsAddedToStar && !currDecl.isComment()) {
 						String simpleName = currDecl.getTypeQualifiedName();
 						if (simpleName.indexOf('.') != -1) {
 							IRegion rangeBefore = currDecl.getPrecedingCommentRange();
