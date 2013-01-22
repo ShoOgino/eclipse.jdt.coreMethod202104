@@ -8,9 +8,10 @@ public FlowInfo analyseCode(BlockScope currentScope, FlowContext flowContext, Fl
 	}
 	
 	FlowInfo preInitInfo = null;
+	CompilerOptions compilerOptions = currentScope.compilerOptions();
 	boolean shouldAnalyseResource = local != null
 			&& flowInfo.reachMode() == FlowInfo.REACHABLE
-			&& currentScope.compilerOptions().analyseResourceLeaks
+			&& compilerOptions.analyseResourceLeaks
 			&& (FakedTrackingVariable.isAnyCloseable(this.expression.resolvedType)
 					|| this.expression.resolvedType == TypeBinding.NULL);
 	if (shouldAnalyseResource) {
@@ -28,14 +29,29 @@ public FlowInfo analyseCode(BlockScope currentScope, FlowContext flowContext, Fl
 	else
 		FakedTrackingVariable.cleanUpAfterAssignment(currentScope, this.lhs.bits, this.expression);
 
-	int nullStatus = this.expression.nullStatus(flowInfo);
+	int nullStatus = this.expression.nullStatus(flowInfo, flowContext);
 	if (local != null && (local.type.tagBits & TagBits.IsBaseType) == 0) {
 		if (nullStatus == FlowInfo.NULL) {
 			flowContext.recordUsingNullReference(currentScope, local, this.lhs,
 				FlowContext.CAN_ONLY_NULL | FlowContext.IN_ASSIGNMENT, flowInfo);
 		}
 	}
-	nullStatus = checkAssignmentAgainstNullAnnotation(currentScope, flowContext, local, nullStatus, this.expression, this.expression.resolvedType);
+	if (compilerOptions.isAnnotationBasedNullAnalysisEnabled) {
+		VariableBinding var = this.lhs.nullAnnotatedVariableBinding();
+		if (var != null) {
+			nullStatus = checkAssignmentAgainstNullAnnotation(currentScope, flowContext, var, nullStatus, this.expression, this.expression.resolvedType);
+			if (nullStatus == FlowInfo.NON_NULL
+					&& var instanceof FieldBinding
+					&& this.lhs instanceof Reference
+					&& compilerOptions.enableSyntacticNullAnalysisForFields)
+			{
+				int timeToLive = (this.bits & InsideExpressionStatement) != 0
+									? 2  // assignment is statement: make info survives the end of this statement
+									: 1; // assignment is expression: expire on next event.
+				flowContext.recordNullCheckedFieldReference((Reference) this.lhs, timeToLive);
+			}
+		}
+	}
 	if (local != null && (local.type.tagBits & TagBits.IsBaseType) == 0) {
 		flowInfo.markNullStatus(local, nullStatus);
 		if (flowContext.initsOnFinally != null)

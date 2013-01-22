@@ -1,0 +1,31 @@
+/* check if any dot in this QNR may trigger an NPE. */
+private void checkInternalNPE(BlockScope scope, FlowContext flowContext, FlowInfo flowInfo, boolean checkString) {
+	if ((this.bits & ASTNode.RestrictiveFlagMASK) == Binding.LOCAL) {
+		LocalVariableBinding local = (LocalVariableBinding) this.binding;
+		if (local != null &&
+			(local.type.tagBits & TagBits.IsBaseType) == 0 &&
+			(checkString || local.type.id != TypeIds.T_JavaLangString)) {
+			if ((this.bits & ASTNode.IsNonNull) == 0) {
+				flowContext.recordUsingNullReference(scope, local, this,
+					FlowContext.MAY_NULL, flowInfo);
+			}
+			flowInfo.markAsComparedEqualToNonNull(local);
+			// from thereon it is set
+			if (flowContext.initsOnFinally != null) {
+				flowContext.markFinallyNullStatus(local, FlowInfo.NON_NULL);
+			}
+		}
+	}
+	if (this.otherBindings != null) {
+		if ((this.bits & ASTNode.RestrictiveFlagMASK) == Binding.FIELD) {
+			// is the first field dereferenced annotated Nullable? If so, report immediately
+			checkNullableFieldDereference(scope, (FieldBinding) this.binding, this.sourcePositions[0]);
+		}
+		// look for annotated fields, they do not depend on flow context -> check immediately:
+		int length = this.otherBindings.length - 1; // don't check the last binding
+		for (int i = 0; i < length; i++) {
+			checkNullableFieldDereference(scope, this.otherBindings[i], this.sourcePositions[i+1]);
+		}
+	}
+}
+
