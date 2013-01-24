@@ -1,0 +1,102 @@
+	/**
+	 * https://bugs.eclipse.org/bugs/show_bug.cgi?id=395886 tests annotations on
+	 * QTR in multiple scenarios of occurrence.
+	 * 
+	 * @throws JavaModelException
+	 */
+	public void test0002() throws JavaModelException {
+		this.workingCopy = getWorkingCopy("/Converter18/src/test0002/X.java",
+				true/* resolve */);
+		String contents = "package test0002;\n"
+				+ "import java.lang.annotation.Target;\n"
+				+ "public class X {\n"
+				+ "	public static void main(String[] args) {\n"
+				+ "		Outer outer = new Outer();\n"
+				+ "		Object myObject = new Object();\n"
+				+ "		String myString;\n"
+				+ "		myString = (java.lang.@Marker String) myObject;\n"
+				+ "		Outer.Inner first = outer.new Inner();\n"
+				+ "		Outer. @Marker2 Inner second = outer.new Inner() ;\n"
+				+ "		Outer.Inner. @Marker1 Deeper deeper = second.new Deeper();\n"
+				+ "		Outer.@Marker1 Inner.@Marker2 Deeper deeper2 =  second.new Deeper();\n"
+				+ "	}\n" + "}\n" + "class Outer {\n"
+				+ "	public class Inner {\n" + "		public class Deeper {\n"
+				+ "		}\n" + "	}\n" + "}\n"
+				+ "@Target (java.lang.annotation.ElementType.TYPE_USE)\n"
+				+ "@interface Marker {}\n"
+				+ "@Target (java.lang.annotation.ElementType.TYPE_USE)\n"
+				+ "@interface Marker1 {}\n"
+				+ "@Target (java.lang.annotation.ElementType.TYPE_USE)\n"
+				+ "@interface Marker2 {}\n";
+		CompilationUnit cu = (CompilationUnit) buildAST(contents,
+				this.workingCopy);
+		MethodDeclaration methodDeclaration = (MethodDeclaration) getASTNode(cu, 0, 0);
+		List statements = methodDeclaration.getBody().statements();
+		int sCount = 3;
+
+		// case 1 - annotation just before the last field
+		ExpressionStatement expressionStatement = (ExpressionStatement) statements.get(sCount++);
+		Assignment assignment = (Assignment) expressionStatement.getExpression();
+		assertNotNull(assignment);
+		CastExpression castExpression = (CastExpression) assignment.getRightHandSide();
+		assertNotNull(castExpression);
+		SimpleType simpleType = (SimpleType) castExpression.getType();
+		assertNotNull(simpleType);
+		assertEquals("java.lang.@Marker String", simpleType.toString());
+		List annotations = simpleType.annotations();
+		assertTrue(annotations.size() == 1);
+		assertEquals("@Marker", annotations.get(0).toString());
+
+		// case 2 - QualifiedType without annotations.
+		VariableDeclarationStatement variableDeclarationStatement = (VariableDeclarationStatement) statements.get(sCount++);
+		Type type = variableDeclarationStatement.getType();
+		assertTrue(type.isSimpleType());
+		simpleType = (SimpleType) type;
+		assertEquals("Outer.Inner", simpleType.toString());
+		annotations = simpleType.annotations();
+		assertTrue(annotations.size() == 0);
+
+		// case 3 - Qaulified Type with outer without annotations and inner with
+		// annotations.
+		variableDeclarationStatement = (VariableDeclarationStatement) statements.get(sCount++);
+		type = variableDeclarationStatement.getType();
+		assertTrue(type.isSimpleType());
+		simpleType = (SimpleType) type;
+		assertNotNull(simpleType);
+		assertEquals("Outer.@Marker2 Inner", simpleType.toString());
+		annotations = simpleType.annotations();
+		assertTrue(annotations.size() == 1);
+		assertEquals("@Marker2", annotations.get(0).toString());
+
+		// case 4 - Multiple levels with annotations at the last only.
+		variableDeclarationStatement = (VariableDeclarationStatement) statements.get(sCount++);
+		type = variableDeclarationStatement.getType();
+		assertTrue(type.isSimpleType());
+		simpleType = (SimpleType) type;
+		assertNotNull(simpleType);
+		assertEquals("Outer.Inner.@Marker1 Deeper", simpleType.toString());
+		annotations = simpleType.annotations();
+		assertTrue(annotations.size() == 1);
+		assertEquals("@Marker1", annotations.get(0).toString());
+
+		// case 5 - Multiple annotations
+		variableDeclarationStatement = (VariableDeclarationStatement) statements.get(sCount++);
+		type = variableDeclarationStatement.getType();
+		assertTrue(type.isQualifiedType());
+		QualifiedType qualifiedType = (QualifiedType) type;
+		assertNotNull(qualifiedType);
+		assertEquals("Outer.@Marker1 Inner.@Marker2 Deeper", qualifiedType.toString());
+		annotations = qualifiedType.annotations();
+		assertTrue(annotations.size() == 1);
+		assertEquals("@Marker2", annotations.get(0).toString());
+		SimpleName simpleName = qualifiedType.getName();
+		assertEquals("Deeper", simpleName.toString());
+		Type qualifierType = qualifiedType.getQualifier();
+		assertTrue(qualifierType.isSimpleType());
+		simpleType = (SimpleType) qualifierType;
+		assertEquals("Outer.@Marker1 Inner", simpleType.toString());
+		annotations = simpleType.annotations();
+		assertTrue(annotations.size() == 1);
+		assertEquals("@Marker1", annotations.get(0).toString());
+	}
+
