@@ -1,0 +1,103 @@
+public MethodBinding getSingleAbstractMethod(Scope scope) {
+	
+	if (this.singleAbstractMethod != null) {
+		return this.singleAbstractMethod;
+	}
+
+	MethodBinding[] methods = null;
+	try {
+		methods = getInterfaceAbstractContracts(scope);
+	} catch (InvalidInputException e) {
+		return this.singleAbstractMethod = new ProblemMethodBinding(TypeConstants.ANONYMOUS_METHOD, null, ProblemReasons.NoSuchSingleAbstractMethod);
+	}
+	if (methods != null && methods.length == 1)
+		return this.singleAbstractMethod = methods[0];
+	
+	final LookupEnvironment environment = scope.environment();
+	boolean genericMethodSeen = false;
+	next:for (int i = 0, length = methods.length; i < length; i++) {
+		MethodBinding method = methods[i], otherMethod = null;
+		if (method.typeVariables != Binding.NO_TYPE_VARIABLES)
+			genericMethodSeen = true;
+		for (int j = 0; j < length; j++) {
+			if (i == j) continue;
+			otherMethod = methods[j];
+			if (otherMethod.typeVariables != Binding.NO_TYPE_VARIABLES)
+				genericMethodSeen = true;
+			if (!MethodVerifier.isParameterSubsignature(method, otherMethod, environment) || !MethodVerifier.areReturnTypesCompatible(method, otherMethod, environment)) 
+				continue next; 
+		}
+		// If we reach here, we found a method that is override equivalent with every other method and is also return type substitutable. Compute kosher exceptions now ...
+		ReferenceBinding [] exceptions = new ReferenceBinding[0];
+		int exceptionsCount = 0, exceptionsLength = 0;
+		final MethodBinding theAbstractMethod = method;
+		boolean shouldEraseThrows = theAbstractMethod.typeVariables == Binding.NO_TYPE_VARIABLES && genericMethodSeen;
+		boolean shouldAdaptThrows = theAbstractMethod.typeVariables != Binding.NO_TYPE_VARIABLES;
+		final int typeVariableLength = theAbstractMethod.typeVariables.length;
+		
+		none:for (i = 0; i < length; i++) {
+			method = methods[i];
+			ReferenceBinding[] methodThrownExceptions = method.thrownExceptions;
+			int methodExceptionsLength = methodThrownExceptions == null ? 0: methodThrownExceptions.length;
+			if (methodExceptionsLength == 0) break none;
+			if (shouldAdaptThrows && method != theAbstractMethod) {
+				System.arraycopy(methodThrownExceptions, 0, methodThrownExceptions = new ReferenceBinding[methodExceptionsLength], 0, methodExceptionsLength);
+				for (int tv = 0; tv < typeVariableLength; tv++) {
+					if (methodThrownExceptions[tv] instanceof TypeVariableBinding) {
+						methodThrownExceptions[tv] = theAbstractMethod.typeVariables[tv];
+					}
+				}
+			}
+			nextException: for (int j = 0; j < methodExceptionsLength; j++) {
+				ReferenceBinding methodException = methodThrownExceptions[j];
+				if (shouldEraseThrows)
+					methodException = (ReferenceBinding) methodException.erasure();
+				nextMethod: for (int k = 0; k < length; k++) {
+					if (i == k) continue;
+					otherMethod = methods[k];
+					ReferenceBinding[] otherMethodThrownExceptions = otherMethod.thrownExceptions;
+					int otherMethodExceptionsLength =  otherMethodThrownExceptions == null ? 0 : otherMethodThrownExceptions.length;
+					if (otherMethodExceptionsLength == 0) break none;
+					if (shouldAdaptThrows && otherMethod != theAbstractMethod) {
+						System.arraycopy(otherMethodThrownExceptions, 
+								0, 
+								otherMethodThrownExceptions = new ReferenceBinding[otherMethodExceptionsLength], 
+								0, 
+								otherMethodExceptionsLength);
+						for (int tv = 0; tv < typeVariableLength; tv++) {
+							if (otherMethodThrownExceptions[tv] instanceof TypeVariableBinding) {
+								otherMethodThrownExceptions[tv] = theAbstractMethod.typeVariables[tv];
+							}
+						}
+					}
+					for (int l = 0; l < otherMethodExceptionsLength; l++) {
+						ReferenceBinding otherException = otherMethodThrownExceptions[l];
+						if (shouldEraseThrows)
+							otherException = (ReferenceBinding) otherException.erasure();
+						if (methodException.isCompatibleWith(otherException))
+							continue nextMethod;
+					}
+					continue nextException;
+				}
+				// If we reach here, method exception or its super type is covered by every throws clause.
+				if (exceptionsCount == exceptionsLength) {
+					System.arraycopy(exceptions, 0, exceptions = new ReferenceBinding[exceptionsLength += 16], 0, exceptionsCount);
+				}
+				exceptions[exceptionsCount++] = methodException;
+			}
+		}
+		if (exceptionsCount != exceptionsLength) {
+			System.arraycopy(exceptions, 0, exceptions = new ReferenceBinding[exceptionsCount], 0, exceptionsCount);
+		}
+		this.singleAbstractMethod = new MethodBinding(theAbstractMethod.modifiers, 
+				theAbstractMethod.selector, 
+				theAbstractMethod.returnType, 
+				theAbstractMethod.parameters, 
+				exceptions, 
+				theAbstractMethod.declaringClass);
+	    this.singleAbstractMethod.typeVariables = theAbstractMethod.typeVariables;
+		return this.singleAbstractMethod;
+	}
+	return this.singleAbstractMethod = new ProblemMethodBinding(TypeConstants.ANONYMOUS_METHOD, null, ProblemReasons.NoSuchSingleAbstractMethod);
+}
+
