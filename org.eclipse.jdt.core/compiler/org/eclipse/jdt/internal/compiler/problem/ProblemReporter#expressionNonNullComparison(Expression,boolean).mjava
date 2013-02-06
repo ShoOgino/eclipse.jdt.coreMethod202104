@@ -1,0 +1,86 @@
+/**
+ * @param expr expression being compared for null or nonnull
+ * @param checkForNull true if checking for null, false if checking for nonnull 
+ */
+public boolean expressionNonNullComparison(Expression expr, boolean checkForNull) {
+	int problemId = 0;
+	Binding binding = null;
+	String[] arguments = null;
+	int start = 0, end = 0;
+
+	Expression location = expr;
+	// unwrap uninteresting nodes:
+	while (true) {
+		if (expr instanceof Assignment)
+			return false; // don't report against the assignment, but the variable
+		else if (expr instanceof CastExpression)
+			expr = ((CastExpression) expr).expression;
+		else
+			break;
+	}
+	// check all those kinds of expressions that can possible answer NON_NULL from nullStatus():
+	if (expr instanceof MessageSend) {
+		problemId = checkForNull 
+				? IProblem.NonNullMessageSendComparisonYieldsFalse
+				: IProblem.RedundantNullCheckOnNonNullMessageSend;
+		MethodBinding method = ((MessageSend)expr).binding;
+		binding = method;
+		arguments = new String[] { new String(method.shortReadableName()) };
+		start = location.sourceStart;
+		end = location.sourceEnd;
+	} else if (expr instanceof Reference && !(expr instanceof ThisReference) && !(expr instanceof ArrayReference)) {
+		FieldBinding field = ((Reference)expr).lastFieldBinding();
+		if (field == null) {
+			return false;
+		}
+		if (field.isNonNull()) {
+			problemId = checkForNull
+					? IProblem.NonNullSpecdFieldComparisonYieldsFalse
+					: IProblem.RedundantNullCheckOnNonNullSpecdField;
+			char[][] nonNullName = this.options.nonNullAnnotationName;
+			arguments = new String[] { new String(field.name), 
+									   new String(nonNullName[nonNullName.length-1]) };
+		}
+		binding = field;
+		start = nodeSourceStart(binding, location);
+		end = nodeSourceEnd(binding, location);
+	} else if (expr instanceof AllocationExpression 
+			|| expr instanceof ArrayAllocationExpression 
+			|| expr instanceof ArrayInitializer
+			|| expr instanceof ClassLiteralAccess
+			|| expr instanceof ThisReference) {
+		// fall through to bottom
+	} else if (expr instanceof Literal
+				|| expr instanceof ConditionalExpression) {
+		if (expr instanceof NullLiteral) {
+			needImplementation(location); // reported as nonnull??
+			return false;
+		}
+		if (expr.resolvedType != null && expr.resolvedType.isBaseType()) {
+			// false alarm, auto(un)boxing is involved
+			return false;
+		}
+		// fall through to bottom
+	} else if (expr instanceof BinaryExpression) {
+		if ((expr.bits & ASTNode.ReturnTypeIDMASK) != TypeIds.T_JavaLangString) {
+			// false alarm, primitive types involved, must be auto(un)boxing?
+			return false;
+		}
+		// fall through to bottom
+	} else {
+		needImplementation(expr); // want to see if we get here
+		return false;
+	}
+	if (problemId == 0) {
+		// standard case, fill in details now
+		problemId = checkForNull 
+				? IProblem.NonNullExpressionComparisonYieldsFalse
+				: IProblem.RedundantNullCheckOnNonNullExpression;
+		start = location.sourceStart;
+		end = location.sourceEnd;
+		arguments = NoArgument;
+	}
+	this.handle(problemId, arguments, arguments, start, end);
+	return true;
+}
+
