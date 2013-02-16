@@ -1,19 +1,25 @@
 	public TypeBinding resolveType(BlockScope blockScope) {
 		super.resolveType(blockScope);
-		if (this.primary != null) {
-			this.primary.resolveType(blockScope);
-		} else if (this.name != null) {
-			this.name.resolveType(blockScope);
-		} else if (this.type != null) {
-			this.type.resolveType(blockScope);
+
+		this.receiverType = this.lhs.resolveType(blockScope);
+		this.haveReceiver = true;
+		if (this.lhs instanceof NameReference) {
+			if ((this.lhs.bits & ASTNode.RestrictiveFlagMASK) == Binding.TYPE) {
+				this.haveReceiver = false;
+				if (this.receiverType.isRawType())
+					blockScope.problemReporter().rawTypeReference(this.lhs, this.receiverType);
+			}
+		} else if (this.lhs instanceof TypeReference) {
+			this.haveReceiver = false;
 		}
+
 		if (this.typeArguments != null) {
 			int length = this.typeArguments.length;
 			boolean argHasError = blockScope.compilerOptions().sourceLevel < ClassFileConstants.JDK1_5;
-			this.genericTypeArguments = new TypeBinding[length];
+			this.resolvedTypeArguments = new TypeBinding[length];
 			for (int i = 0; i < length; i++) {
 				TypeReference typeReference = this.typeArguments[i];
-				if ((this.genericTypeArguments[i] = typeReference.resolveType(blockScope, true /* check bounds*/)) == null) {
+				if ((this.resolvedTypeArguments[i] = typeReference.resolveType(blockScope, true /* check bounds*/)) == null) {
 					argHasError = true;
 				}
 				if (argHasError && typeReference instanceof Wildcard) {
@@ -21,6 +27,20 @@
 				}
 			}
 		}
+		
+		if (this.receiverType == null || !this.receiverType.isValidBinding()) 
+			return this.resolvedType;
+		
+		if (this.receiverType.isBaseType()) {
+			blockScope.problemReporter().errorNoMethodFor(this.lhs, this.receiverType, this.method.token, this.descriptor != null ? this.descriptor.parameters : Binding.NO_TYPES);
+			return null;
+		}
+		
+		if (isConstructorReference() && !this.receiverType.canBeInstantiated()) {
+			blockScope.problemReporter().cannotInstantiate(this.lhs, this.receiverType);
+			return this.resolvedType;
+		}
+
 
 		return this.resolvedType;
 	}
