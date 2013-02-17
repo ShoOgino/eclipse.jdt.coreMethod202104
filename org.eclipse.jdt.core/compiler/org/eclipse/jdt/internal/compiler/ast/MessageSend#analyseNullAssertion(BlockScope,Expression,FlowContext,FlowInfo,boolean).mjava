@@ -1,0 +1,28 @@
+private FlowInfo analyseNullAssertion(BlockScope currentScope, Expression argument,
+		FlowContext flowContext, FlowInfo flowInfo, boolean expectingNull)
+{
+	int nullStatus = argument.nullStatus(flowInfo, flowContext);
+	boolean willFail = (nullStatus == (expectingNull ? FlowInfo.NON_NULL : FlowInfo.NULL));
+	flowInfo = argument.analyseCode(currentScope, flowContext, flowInfo).unconditionalInits();
+	LocalVariableBinding local = argument.localVariableBinding();
+	if (local != null) {// beyond this point the argument can only be null/nonnull
+		if (expectingNull) 
+			flowInfo.markAsDefinitelyNull(local);
+		else 
+			flowInfo.markAsDefinitelyNonNull(local);
+	} else {
+		if (!expectingNull
+			&& argument instanceof Reference 
+			&& currentScope.compilerOptions().enableSyntacticNullAnalysisForFields) 
+		{
+			FieldBinding field = ((Reference)argument).lastFieldBinding();
+			if (field != null && (field.type.tagBits & TagBits.IsBaseType) == 0) {
+				flowContext.recordNullCheckedFieldReference((Reference) argument, 3); // survive this assert as a MessageSend and as a Statement
+			}
+		}
+	}
+	if (willFail)
+		flowInfo.setReachMode(FlowInfo.UNREACHABLE_BY_NULLANALYSIS);
+	return flowInfo;
+}
+
