@@ -1,0 +1,75 @@
+	// https://bugs.eclipse.org/bugs/show_bug.cgi?id=396576
+	public void testSingleVariableDeclarationWithAnnotations_since_8() throws Exception {
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("import java.lang.annotation.ElementType;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo(int i, final int[] j @Annot1 @Annot2 [], int[] k @Annot1 @Annot3 [] @Annot2 @Annot3 [], int l []) {\n");
+		buf.append("    }\n");
+		buf.append("}\n");
+		buf.append("@java.lang.annotation.Target(value= {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot1 {}\n");
+		buf.append("@java.lang.annotation.Target(value= {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot2 {}\n");
+		buf.append("@java.lang.annotation.Target(value= {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot2 {}\n");
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+		System.out.println(buf.toString());
+		CompilationUnit astRoot= createAST(cu);
+		ASTRewrite rewrite= ASTRewrite.create(astRoot.getAST());
+		AST ast= astRoot.getAST();
+
+		assertTrue("Parse errors", (astRoot.getFlags() & ASTNode.MALFORMED)== 0);
+		TypeDeclaration type= findTypeDeclaration(astRoot, "E");
+		MethodDeclaration methodDecl= findMethodDeclaration(type, "foo");
+		List arguments= methodDecl.parameters();
+
+		{ // add modifier, move extra dimensions from one variable to another
+			SingleVariableDeclaration decl= (SingleVariableDeclaration) arguments.get(0);
+			SingleVariableDeclaration decl2= (SingleVariableDeclaration) arguments.get(1);
+			ExtraDimension dim= (ExtraDimension) decl2.extraDimensionInfos().get(0);
+			ListRewrite listRewrite= rewrite.getListRewrite(decl, SingleVariableDeclaration.MODIFIERS2_PROPERTY);
+			listRewrite.insertFirst(ast.newModifier(Modifier.ModifierKeyword.FINAL_KEYWORD), null);
+
+			listRewrite= rewrite.getListRewrite(decl2, SingleVariableDeclaration.EXTRA_DIMENSION_INFOS_PROPERTY);
+			listRewrite.remove(dim, null);
+			listRewrite= rewrite.getListRewrite(decl, SingleVariableDeclaration.EXTRA_DIMENSION_INFOS_PROPERTY);
+			listRewrite.insertAt(dim, 0, null);
+		}
+		{ // move annotations from one dim to another
+			SingleVariableDeclaration decl= (SingleVariableDeclaration) arguments.get(2);
+			ExtraDimension dim1= (ExtraDimension) decl.extraDimensionInfos().get(0);
+			ExtraDimension dim2= (ExtraDimension) decl.extraDimensionInfos().get(1);
+			Annotation annot1= (Annotation) dim1.annotations().get(0);
+			Annotation annot2= (Annotation) dim2.annotations().get(0);
+
+			ListRewrite listRewrite= rewrite.getListRewrite(dim1, ExtraDimension.ANNOTATIONS_PROPERTY);
+			listRewrite.replace(annot1, annot2, null);
+
+			listRewrite= rewrite.getListRewrite(dim2, ExtraDimension.ANNOTATIONS_PROPERTY);
+			listRewrite.replace(annot2, annot1, null);
+		}
+		{ // remove extra dim
+			SingleVariableDeclaration decl= (SingleVariableDeclaration) arguments.get(3);
+			ListRewrite listRewrite= rewrite.getListRewrite(decl, SingleVariableDeclaration.EXTRA_DIMENSION_INFOS_PROPERTY);
+			listRewrite.remove((ExtraDimension) decl.extraDimensionInfos().get(0), null);
+		}
+
+		String preview= evaluateRewrite(cu, rewrite);
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("import java.lang.annotation.ElementType;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo(final int i @Annot1 @Annot2 [], final int[] j, int[] k @Annot2 @Annot3 [] @Annot1 @Annot3 [], int l) {\n");
+		buf.append("    }\n");
+		buf.append("}\n");
+		buf.append("@java.lang.annotation.Target(value= {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot1 {}\n");
+		buf.append("@java.lang.annotation.Target(value= {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot2 {}\n");
+		buf.append("@java.lang.annotation.Target(value= {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot2 {}\n");
+		assertEqualString(preview, buf.toString());
+	}
+
