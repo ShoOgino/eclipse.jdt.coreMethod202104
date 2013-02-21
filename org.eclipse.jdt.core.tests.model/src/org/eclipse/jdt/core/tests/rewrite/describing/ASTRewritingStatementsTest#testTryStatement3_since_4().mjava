@@ -1,4 +1,4 @@
-	public void testTryStatement2() throws Exception {
+	public void testTryStatement3_since_4() throws Exception {
 		createProject("P_17", JavaCore.VERSION_1_7);
 		IPackageFragmentRoot currentSourceFolder = getPackageFragmentRoot("P_17", "src");
 
@@ -10,16 +10,16 @@
 			buf.append("    public void foo(int i) {\n");
 			buf.append("        try {\n");
 			buf.append("            throw new IOException();\n");
-			buf.append("        } catch (IOException e) {\n");
+			buf.append("        } catch (IOException | Exception e) {\n");
 			buf.append("        }\n");
 			buf.append("    }\n");
 			buf.append("}\n");
 			ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
 	
-			CompilationUnit astRoot= createAST(AST.JLS4, cu, false);
+			CompilationUnit astRoot= createAST(cu);
 			AST ast= astRoot.getAST();
 			ASTRewrite rewrite= ASTRewrite.create(ast);
-
+	
 			assertTrue("Parse errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
 			TypeDeclaration type= findTypeDeclaration(astRoot, "E");
 			MethodDeclaration methodDecl= findMethodDeclaration(type, "foo");
@@ -33,10 +33,14 @@
 	
 				CatchClause catchClause= (CatchClause) catchClauses.get(0);
 				SingleVariableDeclaration exception = catchClause.getException();
-				UnionType unionType = ast.newUnionType();
-				unionType.types().add(ast.newSimpleType(ast.newSimpleName("IOException")));
-				unionType.types().add(ast.newSimpleType(ast.newSimpleName("Exception")));
-				rewrite.set(exception, SingleVariableDeclaration.TYPE_PROPERTY, unionType, null);
+				UnionType unionType = (UnionType) exception.getType();
+				
+				SimpleType exceptionType = (SimpleType) unionType.types().get(0);
+				rewrite.getListRewrite(unionType, UnionType.TYPES_PROPERTY)
+					.replace(
+							exceptionType,
+							ast.newSimpleType(ast.newSimpleName("FileNotFoundException")),
+							null);
 			}	
 	
 			String preview= evaluateRewrite(cu, rewrite);
@@ -47,7 +51,7 @@
 			buf.append("    public void foo(int i) {\n");
 			buf.append("        try {\n");
 			buf.append("            throw new IOException();\n");
-			buf.append("        } catch (IOException | Exception e) {\n");
+			buf.append("        } catch (FileNotFoundException | Exception e) {\n");
 			buf.append("        }\n");
 			buf.append("    }\n");
 			buf.append("}\n");
