@@ -6,6 +6,36 @@
 	 */
 	public TypeBinding resolveType(BlockScope blockScope) {
 		
+		this.parentScope = blockScope;
+		if (this.expectedType == null && this.expressionContext == INVOCATION_CONTEXT) {
+			if (this.body instanceof Block) {
+				// Gather shape information for potential applicability analysis.
+				ASTVisitor visitor = new ASTVisitor() {
+					boolean valueReturnSeen = false;
+					boolean voidReturnSeen = false;
+					public boolean visit(ReturnStatement returnStatement, BlockScope dontCare) {
+						if (returnStatement.expression != null) {
+							this.valueReturnSeen = true;
+							LambdaExpression.this.voidCompatible = false;
+							LambdaExpression.this.valueCompatible = !this.voidReturnSeen;
+						} else {
+							this.voidReturnSeen = true;
+							LambdaExpression.this.valueCompatible = false;
+							LambdaExpression.this.voidCompatible = !this.valueReturnSeen;
+						}
+						return false;
+					}
+				};
+				this.traverse(visitor, blockScope);
+			} else {
+				Expression expression = (Expression) this.body;
+				this.voidCompatible = expression.statementExpression();
+				this.valueCompatible = true;
+			}	
+			if (devNullCompilationResult == null)
+				devNullCompilationResult = new CompilationResult(this.compilationResult.getCompilationUnit(), 0, 0, blockScope.compilerOptions().maxProblemsPerUnit);
+			return new PolyTypeBinding(this);
+		}
 		super.resolveType(blockScope); // compute & capture interface function descriptor in singleAbstractMethod.
 		
 		final boolean argumentsTypeElided = argumentsTypeElided();

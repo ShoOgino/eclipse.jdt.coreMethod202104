@@ -1,0 +1,53 @@
+	public boolean isCompatibleWith(TypeBinding left, Scope someScope) {
+		
+		final MethodBinding sam = left.getSingleAbstractMethod(this.parentScope);
+		
+		if (sam == null || !sam.isValidBinding())
+			return false;
+		if (sam.parameters.length != this.arguments.length)
+			return false;
+		
+		if (sam.returnType.id == TypeIds.T_void) {
+			if (!this.voidCompatible)
+				return false;
+		} else {
+			if (!this.valueCompatible)
+				return false;
+		}
+		
+		LambdaExpression copy = copy();
+		copy.setExpressionContext(this.expressionContext);
+		copy.setExpectedType(left);
+		copy.resolveType(this.parentScope);
+		
+		if (!argumentsTypeElided()) {
+			for (int i = 0, length = sam.parameters.length; i < length; i++) {
+				TypeBinding argumentType = copy.arguments[i].binding.type;
+				if (sam.parameters[i] != argumentType)
+					return false;
+			}
+		}
+
+		try {
+			final TypeBinding returnType = sam.returnType;
+			if (this.body instanceof Block) {
+				ASTVisitor visitor = new ASTVisitor() {
+					public boolean visit(ReturnStatement returnStatement, BlockScope blockScope) {
+						Expression expression = returnStatement.expression;
+						if (expression != null && !expression.isAssignmentCompatible(returnType, blockScope))
+							throw new NoncongruentLambdaException();
+						return false;
+					}
+				};
+				copy.body.traverse(visitor, copy.scope);
+			} else {
+				Expression expression = (Expression) copy.body;
+				if (!expression.isAssignmentCompatible(returnType, copy.scope))
+					throw new NoncongruentLambdaException();
+			}
+		} catch (NoncongruentLambdaException e) {
+			return false;
+		}
+		return true;
+	}
+
