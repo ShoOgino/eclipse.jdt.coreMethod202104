@@ -1,30 +1,42 @@
 	public TypeBinding resolveType(BlockScope scope) {
 		
+		final CompilerOptions compilerOptions = scope.compilerOptions();
+		TypeBinding lhsType;
+    	if (this.constant != Constant.NotAConstant) {
+    		this.constant = Constant.NotAConstant;
+    		this.enclosingScope = scope;
+    		if (isConstructorReference())
+    			this.lhs.bits |= ASTNode.IgnoreRawTypeCheck; // raw types in constructor references are to be treated as though <> were specified.
+
+    		lhsType = this.lhs.resolveType(scope);
+    		if (this.typeArguments != null) {
+    			int length = this.typeArguments.length;
+    			this.typeArgumentsHaveErrors = compilerOptions.sourceLevel < ClassFileConstants.JDK1_5;
+    			this.resolvedTypeArguments = new TypeBinding[length];
+    			for (int i = 0; i < length; i++) {
+    				TypeReference typeReference = this.typeArguments[i];
+    				if ((this.resolvedTypeArguments[i] = typeReference.resolveType(scope, true /* check bounds*/)) == null) {
+    					this.typeArgumentsHaveErrors = true;
+    				}
+    				if (this.typeArgumentsHaveErrors && typeReference instanceof Wildcard) { // resolveType on wildcard always return null above, resolveTypeArgument is the real workhorse.
+    					scope.problemReporter().illegalUsageOfWildcard(typeReference);
+    				}
+    			}
+    			if (this.typeArgumentsHaveErrors)
+    				return this.resolvedType;
+    		}
+    	} else {
+    		if (this.typeArgumentsHaveErrors)
+				return this.resolvedType;
+    		lhsType = this.lhs.resolvedType;
+    	}
+
+    	if (this.expectedType == null && this.expressionContext == INVOCATION_CONTEXT) {
+			return new PolyTypeBinding(this);
+		}
 		super.resolveType(scope);
 		
-		final CompilerOptions compilerOptions = scope.compilerOptions();
-    	if (isConstructorReference())
-			this.lhs.bits |= ASTNode.IgnoreRawTypeCheck; // raw types in constructor references are to be treated as though <> were specified.
-		
-		TypeBinding lhsType = this.lhs.resolveType(scope);
-		if (this.typeArguments != null) {
-			int length = this.typeArguments.length;
-			boolean argHasError = compilerOptions.sourceLevel < ClassFileConstants.JDK1_5;
-			this.resolvedTypeArguments = new TypeBinding[length];
-			for (int i = 0; i < length; i++) {
-				TypeReference typeReference = this.typeArguments[i];
-				if ((this.resolvedTypeArguments[i] = typeReference.resolveType(scope, true /* check bounds*/)) == null) {
-					argHasError = true;
-				}
-				if (argHasError && typeReference instanceof Wildcard) { // resolveType on wildcard always return null above, resolveTypeArgument is the real workhorse.
-					scope.problemReporter().illegalUsageOfWildcard(typeReference);
-				}
-			}
-			if (argHasError)
-				return this.resolvedType;
-		}
-		
-		if (lhsType == null || !lhsType.isValidBinding()) 
+    	if (lhsType == null || !lhsType.isValidBinding()) 
 			return null;
 		
 		final TypeBinding[] descriptorParameters = this.descriptor != null ? this.descriptor.parameters : Binding.NO_PARAMETERS;
@@ -138,8 +150,9 @@
         	return null;
         }
 
-        this.binding = someMethod != null && someMethod.isValidBinding() ? someMethod : anotherMethod != null && anotherMethod.isValidBinding() ? anotherMethod : null;
-        this.method.binding = this.binding;
+        this.method.binding = this.binding = someMethod != null && someMethod.isValidBinding() ? someMethod : 
+        											anotherMethod != null && anotherMethod.isValidBinding() ? anotherMethod : null;
+
         if (this.binding == null) {
         	char [] visibleName = isConstructorReference() ? this.receiverType.sourceName() : selector;
         	scope.problemReporter().danglingReference(this, this.receiverType, visibleName, descriptorParameters);
@@ -196,8 +209,10 @@
     				}
     			}
     		}
-    		if (!returnType.isCompatibleWith(this.descriptor.returnType, scope))
+    		if (!returnType.isCompatibleWith(this.descriptor.returnType, scope) && !isBoxingCompatible(returnType, this.descriptor.returnType, this, scope)) {
     			scope.problemReporter().incompatibleReturnType(this, this.binding, this.descriptor.returnType);
+    			this.method.binding = this.binding = null;
+    		}
     	}
 
     	return this.resolvedType; // Phew !
