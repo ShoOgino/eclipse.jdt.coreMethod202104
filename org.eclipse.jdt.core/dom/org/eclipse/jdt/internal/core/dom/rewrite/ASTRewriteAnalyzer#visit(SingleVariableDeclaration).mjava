@@ -15,15 +15,34 @@
 		pos= rewriteRequiredNode(node, SingleVariableDeclaration.TYPE_PROPERTY);
 		if (apiLevel >= JLS3_INTERNAL) {
 			if (isChanged(node, SingleVariableDeclaration.VARARGS_PROPERTY)) {
+				TextEditGroup editGroup = getEditGroup(node, SingleVariableDeclaration.VARARGS_PROPERTY);
 				if (getNewValue(node, SingleVariableDeclaration.VARARGS_PROPERTY).equals(Boolean.TRUE)) {
-					doTextInsert(pos, "...", getEditGroup(node, SingleVariableDeclaration.VARARGS_PROPERTY)); //$NON-NLS-1$
+					if (apiLevel >= AST.JLS8) {
+						pos= rewriteVarargsAnnotations(node, SingleVariableDeclaration.VARARGS_ANNOTATIONS_PROPERTY, pos);
+					}
+					int indent= getIndent(node.getStartPosition());
+					String prefix= this.formatter.VARARGS.getPrefix(indent);
+					doTextInsert(pos, prefix, editGroup);
+					doTextInsert(pos, "...", editGroup); //$NON-NLS-1$
 				} else {
 					try {
-						int ellipsisEnd= getScanner().getNextEndOffset(pos, true);
-						doTextRemove(pos, ellipsisEnd - pos, getEditGroup(node, SingleVariableDeclaration.VARARGS_PROPERTY));
+						int ellipsisEnd;
+						int noOfAnnotations = apiLevel >= AST.JLS8 ? node.varargsAnnotations().size() : 0;
+						if (noOfAnnotations > 0) {
+							Annotation annotation= (Annotation) node.varargsAnnotations().get(noOfAnnotations - 1);
+							int annotationEndPosition= annotation.getStartPosition() + annotation.getLength();
+							ellipsisEnd= getScanner().getNextEndOffset(annotationEndPosition, true);
+						} else {
+							ellipsisEnd= getScanner().getNextEndOffset(pos, true);
+						}
+						doTextRemove(pos, ellipsisEnd - pos, editGroup);
 					} catch (CoreException e) {
 						handleException(e);
 					}
+				}
+			} else {
+				if (apiLevel >= AST.JLS8 && node.isVarargs()) {
+					pos = rewriteVarargsAnnotations(node, SingleVariableDeclaration.VARARGS_ANNOTATIONS_PROPERTY, pos);
 				}
 			}
 			if (!node.isVarargs()) {
