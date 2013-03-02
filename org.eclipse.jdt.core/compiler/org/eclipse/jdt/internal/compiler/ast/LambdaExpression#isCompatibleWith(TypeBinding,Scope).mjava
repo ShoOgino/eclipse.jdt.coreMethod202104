@@ -15,38 +15,43 @@
 				return false;
 		}
 		
-		LambdaExpression copy = copy();
-		copy.setExpressionContext(this.expressionContext);
-		copy.setExpectedType(left);
-		copy.resolveType(this.enclosingScope);
-		
-		if (!argumentsTypeElided()) {
-			for (int i = 0, length = sam.parameters.length; i < length; i++) {
-				TypeBinding argumentType = copy.arguments[i].binding.type;
-				if (sam.parameters[i] != argumentType)
-					return false;
-			}
-		}
-
+		IErrorHandlingPolicy oldPolicy = this.scope.problemReporter().switchErrorHandlingPolicy(silentErrorHandlingPolicy);
 		try {
-			final TypeBinding returnType = sam.returnType;
-			if (this.body instanceof Block) {
-				ASTVisitor visitor = new ASTVisitor() {
-					public boolean visit(ReturnStatement returnStatement, BlockScope blockScope) {
-						Expression expression = returnStatement.expression;
-						if (expression != null && !expression.isAssignmentCompatible(returnType, blockScope))
-							throw new NoncongruentLambdaException();
+			LambdaExpression copy = copy();
+			copy.setExpressionContext(this.expressionContext);
+			copy.setExpectedType(left);
+			copy.resolveType(this.enclosingScope);
+
+			if (!argumentsTypeElided()) {
+				for (int i = 0, length = sam.parameters.length; i < length; i++) {
+					TypeBinding argumentType = copy.arguments[i].binding.type;
+					if (sam.parameters[i] != argumentType)
 						return false;
-					}
-				};
-				copy.body.traverse(visitor, copy.scope);
-			} else {
-				Expression expression = (Expression) copy.body;
-				if (!expression.isAssignmentCompatible(returnType, copy.scope))
-					throw new NoncongruentLambdaException();
+				}
 			}
-		} catch (NoncongruentLambdaException e) {
-			return false;
+
+			try {
+				final TypeBinding returnType = sam.returnType;
+				if (this.body instanceof Block) {
+					ASTVisitor visitor = new ASTVisitor() {
+						public boolean visit(ReturnStatement returnStatement, BlockScope blockScope) {
+							Expression expression = returnStatement.expression;
+							if (expression != null && !expression.isAssignmentCompatible(returnType, blockScope))
+								throw new NoncongruentLambdaException();
+							return false;
+						}
+					};
+					copy.body.traverse(visitor, copy.scope);
+				} else {
+					Expression expression = (Expression) copy.body;
+					if (!expression.isAssignmentCompatible(returnType, copy.scope))
+						throw new NoncongruentLambdaException();
+				}
+			} catch (NoncongruentLambdaException e) {
+				return false;
+			}
+		} finally {
+			this.scope.problemReporter().switchErrorHandlingPolicy(oldPolicy);
 		}
 		return true;
 	}
