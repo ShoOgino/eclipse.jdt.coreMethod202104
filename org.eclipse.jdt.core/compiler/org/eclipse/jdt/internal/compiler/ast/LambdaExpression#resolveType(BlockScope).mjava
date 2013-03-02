@@ -14,8 +14,9 @@
 			if (this.body instanceof Block) {
 				// Gather shape information for potential applicability analysis.
 				ASTVisitor visitor = new ASTVisitor() {
-					boolean valueReturnSeen = false;
-					boolean voidReturnSeen = false;
+					private boolean valueReturnSeen = false;
+					private boolean voidReturnSeen = false;
+					private boolean throwSeen = false;
 					public boolean visit(ReturnStatement returnStatement, BlockScope dontCare) {
 						if (returnStatement.expression != null) {
 							this.valueReturnSeen = true;
@@ -28,13 +29,18 @@
 						}
 						return false;
 					}
+					public boolean visit(ThrowStatement throwStatement, BlockScope dontCare) {
+						this.throwSeen  = true;
+						return false;
+					}
 					public void endVisit(LambdaExpression expression, BlockScope dontCare) {
-						if (!this.voidReturnSeen && !this.valueReturnSeen) {  // () -> { throw new Exception(); } is value compatible.
+						if (!this.voidReturnSeen && !this.valueReturnSeen && this.throwSeen) {  // () -> { throw new Exception(); } is value compatible.
 							Block block = (Block) LambdaExpression.this.body;
 							final Statement[] statements = block.statements;
 							final int statementsLength = statements == null ? 0 : statements.length;
 							Statement ultimateStatement = statementsLength == 0 ? null : statements[statementsLength - 1];
-							LambdaExpression.this.valueCompatible = ultimateStatement instanceof ThrowStatement; // for now, we will settle for a simplistic analysis.
+							LambdaExpression.this.valueCompatible = ultimateStatement instanceof ThrowStatement;
+							LambdaExpression.this.shapeAnalysisComplete = LambdaExpression.this.valueCompatible;
 						}
 					}
 				};
