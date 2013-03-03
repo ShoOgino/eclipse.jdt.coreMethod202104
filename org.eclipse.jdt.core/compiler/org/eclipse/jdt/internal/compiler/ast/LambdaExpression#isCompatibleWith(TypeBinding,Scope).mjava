@@ -7,21 +7,28 @@
 		if (sam.parameters.length != this.arguments.length)
 			return false;
 		
-		if (this.shapeAnalysisComplete && squarePegInRoundHole(sam))
-			return false;
-		
 		IErrorHandlingPolicy oldPolicy = this.scope.problemReporter().switchErrorHandlingPolicy(silentErrorHandlingPolicy);
+
 		try {
+			if (this.shapeAnalysisComplete) {
+				if (squarePegInRoundHole(sam))
+					return false;
+			} else {
+				LambdaExpression copy = copy();
+				copy.setExpressionContext(this.expressionContext);
+				copy.setExpectedType(left);
+				copy.resolveType(this.enclosingScope);
+				this.valueCompatible = copy.valueCompatible = copy.doesNotCompleteNormally();
+				this.shapeAnalysisComplete = copy.shapeAnalysisComplete = true;
+				if (squarePegInRoundHole(sam))
+					return false;
+			}
+		
 			LambdaExpression copy = copy();
 			copy.setExpressionContext(this.expressionContext);
 			copy.setExpectedType(left);
 			copy.resolveType(this.enclosingScope);
-			if (!this.shapeAnalysisComplete) {
-				this.valueCompatible = copy.doesNotCompleteNormally();
-				this.shapeAnalysisComplete = true;
-				if (squarePegInRoundHole(sam))
-					return false;
-			}
+			
 			if (!argumentsTypeElided()) {
 				for (int i = 0, length = sam.parameters.length; i < length; i++) {
 					TypeBinding argumentType = copy.arguments[i].binding.type;
@@ -30,26 +37,25 @@
 				}
 			}
 
-			try {
-				final TypeBinding returnType = sam.returnType;
-				if (this.body instanceof Block) {
-					ASTVisitor visitor = new ASTVisitor() {
-						public boolean visit(ReturnStatement returnStatement, BlockScope blockScope) {
-							Expression expression = returnStatement.expression;
-							if (expression != null && !expression.isAssignmentCompatible(returnType, blockScope))
-								throw new NoncongruentLambdaException();
-							return false;
-						}
-					};
-					copy.body.traverse(visitor, copy.scope);
-				} else {
-					Expression expression = (Expression) copy.body;
-					if (!expression.isAssignmentCompatible(returnType, copy.scope))
-						throw new NoncongruentLambdaException();
-				}
-			} catch (NoncongruentLambdaException e) {
-				return false;
+			final TypeBinding returnType = sam.returnType;
+			if (this.body instanceof Block) {
+				ASTVisitor visitor = new ASTVisitor() {
+					public boolean visit(ReturnStatement returnStatement, BlockScope blockScope) {
+						Expression expression = returnStatement.expression;
+						if (expression != null && !expression.isAssignmentCompatible(returnType, blockScope))
+							throw new IncongruentLambdaException();
+						return false;
+					}
+				};
+				copy.body.traverse(visitor, copy.scope);
+			} else {
+				Expression expression = (Expression) copy.body;
+				if (!expression.isAssignmentCompatible(returnType, copy.scope))
+					throw new IncongruentLambdaException();
 			}
+			 
+		} catch (IncongruentLambdaException e) {
+			return false;
 		} finally {
 			this.scope.problemReporter().switchErrorHandlingPolicy(oldPolicy);
 		}
