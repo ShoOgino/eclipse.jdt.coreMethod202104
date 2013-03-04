@@ -1,0 +1,86 @@
+	public void testBug400568_a_since_8() throws Exception {
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("import java.lang.annotation.ElementType;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("    	int [] i [][] = new int @Annot1 @Annot2  [2] @Annot2 @Annot3 [size(new int[][]{})] [];\n");
+		buf.append("    	int [] j [][] = new int @Annot1 @Annot2 [2] @Annot2 @Annot3 [size(new int[]{})] @Annot1 @Annot3 [], k [][] = new int @Annot1 @Annot2 [2] @Annot2 @Annot3 [10] @Annot1 @Annot3 [size(new int[][]{})];\n");
+		buf.append("    }\n");
+		buf.append("    public int size(Object obj) { return 2; }\n");
+		buf.append("}\n");
+		buf.append("@java.lang.annotation.Target(value= {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot1 {}\n");
+		buf.append("@java.lang.annotation.Target(value= {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot2 {}\n");
+		buf.append("@java.lang.annotation.Target(value= {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot3 {}\n");
+		ICompilationUnit cu= pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+
+		CompilationUnit astRoot= createAST(cu);
+		ASTRewrite rewrite= ASTRewrite.create(astRoot.getAST());
+
+		TypeDeclaration typeDecl = (TypeDeclaration) astRoot.types().get(0);
+		MethodDeclaration methodDecl= typeDecl.getMethods()[0];
+		Block block= methodDecl.getBody();
+		List statements= block.statements();
+
+		VariableDeclarationStatement statement = (VariableDeclarationStatement) statements.get(0);
+		List fragments = statement.fragments();
+		VariableDeclarationFragment fragment = (VariableDeclarationFragment) fragments.get(0);
+		Type type = statement.getType();
+
+		{
+			assertEquals("Incorrect type", ASTNode.ARRAY_TYPE, type.getNodeType());
+			ArrayCreation creation = (ArrayCreation) fragment.getInitializer();
+
+			ArrayType arrayType = creation.getType();
+			arrayType = (ArrayType) arrayType.getComponentType();
+			ListRewrite listRewrite= rewrite.getListRewrite(arrayType, ArrayType.ANNOTATIONS_PROPERTY);
+			listRewrite.remove((ASTNode)arrayType.annotations().get(0), null);
+			listRewrite.remove((ASTNode)arrayType.annotations().get(1), null);
+			rewrite.set(creation, ArrayCreation.TYPE_PROPERTY, arrayType, null);
+		}
+		{
+			statement = (VariableDeclarationStatement) statements.get(1);
+			fragments = statement.fragments();
+			assertEquals("Incorrect no of fragments", 2, fragments.size());
+			fragment = (VariableDeclarationFragment) fragments.get(0);
+
+			assertEquals("Incorrect type", ASTNode.ARRAY_TYPE, type.getNodeType());
+			ArrayCreation creation = (ArrayCreation) fragment.getInitializer();
+			ArrayType creationType = creation.getType();
+
+			ArrayType newArrayType = (ArrayType) creationType.getComponentType();
+			rewrite.set(creation, ArrayCreation.TYPE_PROPERTY, newArrayType, null);
+
+			fragment = (VariableDeclarationFragment) fragments.get(1);
+			creation = (ArrayCreation) fragment.getInitializer();
+			creationType = creation.getType();
+
+			newArrayType = (ArrayType) creationType.getComponentType();
+			rewrite.set(creation, ArrayCreation.TYPE_PROPERTY, newArrayType, null);
+		}
+		// Get new code
+		String preview= evaluateRewrite(cu, rewrite);
+
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("import java.lang.annotation.ElementType;\n");
+		buf.append("public class E {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("    	int [] i [][] = new int @Annot1 @Annot2  [2][size(new int[][]{})];\n");
+		buf.append("    	int [] j [][] = new int @Annot1 @Annot2 [2] @Annot2 @Annot3 [size(new int[]{})], k [][] = new int @Annot1 @Annot2 [2] @Annot2 @Annot3 [10];\n");
+		buf.append("    }\n");
+		buf.append("    public int size(Object obj) { return 2; }\n");
+		buf.append("}\n");
+		buf.append("@java.lang.annotation.Target(value= {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot1 {}\n");
+		buf.append("@java.lang.annotation.Target(value= {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot2 {}\n");
+		buf.append("@java.lang.annotation.Target(value= {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot3 {}\n");
+		assertEqualString(preview, buf.toString());
+	}
+
