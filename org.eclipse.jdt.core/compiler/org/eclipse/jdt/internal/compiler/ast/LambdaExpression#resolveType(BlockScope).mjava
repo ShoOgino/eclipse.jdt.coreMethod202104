@@ -8,63 +8,13 @@
 		
 		this.constant = Constant.NotAConstant;
 		this.enclosingScope = blockScope;
-		this.scope = new MethodScope(blockScope, this, blockScope.methodScope().isStatic);
 		
 		if (this.expectedType == null && this.expressionContext == INVOCATION_CONTEXT) {
-			if (this.body instanceof Block) {
-				// Gather shape information for potential applicability analysis.
-				ASTVisitor visitor = new ASTVisitor() {
-					private boolean valueReturnSeen = false;
-					private boolean voidReturnSeen = false;
-					private boolean throwSeen = false;
-					public boolean visit(ReturnStatement returnStatement, BlockScope dontCare) {
-						if (returnStatement.expression != null) {
-							LambdaExpression.this.returnExpressionsTally++;
-							this.valueReturnSeen = true;
-							LambdaExpression.this.voidCompatible = false;
-							LambdaExpression.this.valueCompatible = !this.voidReturnSeen;
-						} else {
-							this.voidReturnSeen = true;
-							LambdaExpression.this.valueCompatible = false;
-							LambdaExpression.this.voidCompatible = !this.valueReturnSeen;
-						}
-						return false; // should not analyze any nested lambda returns.
-					}
-					public boolean visit(TypeDeclaration declaration, BlockScope dontCare) {
-						return false;  // do not analyze inner local types so as not to confuse returns from there.
-					}
-					public boolean visit(LambdaExpression lambda, BlockScope dontCare) {
-						return LambdaExpression.this == lambda;  // do not analyze any inner lambdas so as not to confuse returns from there.
-					}
-					public boolean visit(ThrowStatement throwStatement, BlockScope dontCare) {
-						this.throwSeen  = true;
-						return false;
-					}
-					public void endVisit(LambdaExpression expression, BlockScope dontCare) {
-						if (LambdaExpression.this == expression) {
-							if (!this.voidReturnSeen && !this.valueReturnSeen && this.throwSeen) {  // () -> { throw new Exception(); } is value compatible.
-								Block block = (Block) LambdaExpression.this.body;
-								final Statement[] statements = block.statements;
-								final int statementsLength = statements == null ? 0 : statements.length;
-								Statement ultimateStatement = statementsLength == 0 ? null : statements[statementsLength - 1];
-								LambdaExpression.this.valueCompatible = ultimateStatement instanceof ThrowStatement;
-								LambdaExpression.this.shapeAnalysisComplete = LambdaExpression.this.valueCompatible;
-							} else {
-								LambdaExpression.this.shapeAnalysisComplete = true;
-							}
-						}
-					}
-				};
-				this.traverse(visitor, blockScope);
-			} else {
-				Expression expression = (Expression) this.body;
-				this.voidCompatible = expression.statementExpression();
-				this.valueCompatible = true;
-				this.returnExpressionsTally = 1;
-				this.shapeAnalysisComplete = true;
-			}	
+			this.resultExpressions = new SimpleLookupTable();
 			return new PolyTypeBinding(this);
-		}
+		} 
+		
+		this.scope = new MethodScope(blockScope, this, blockScope.methodScope().isStatic);
 		super.resolveType(blockScope); // compute & capture interface function descriptor in singleAbstractMethod.
 		
 		final boolean argumentsTypeElided = argumentsTypeElided();
