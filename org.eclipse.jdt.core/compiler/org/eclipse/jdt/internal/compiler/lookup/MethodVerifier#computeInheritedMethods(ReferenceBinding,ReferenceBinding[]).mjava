@@ -15,36 +15,11 @@ void computeInheritedMethods(ReferenceBinding superclass, ReferenceBinding[] sup
 	// if an inheritedMethod has been 'replaced' by a supertype's method then skip it, however
     // see usage of canOverridingMethodDifferInErasure below.
 	this.inheritedMethods = new HashtableOfObject(51); // maps method selectors to an array of methods... must search to match paramaters & return type
-	ReferenceBinding[] interfacesToVisit = null;
-	int nextPosition = 0;
-	ReferenceBinding[] itsInterfaces = superInterfaces;
-	if (itsInterfaces != Binding.NO_SUPERINTERFACES) {
-		nextPosition = itsInterfaces.length;
-		interfacesToVisit = itsInterfaces;
-	}
 
 	ReferenceBinding superType = superclass;
 	HashtableOfObject nonVisibleDefaultMethods = new HashtableOfObject(3); // maps method selectors to an array of methods
 
 	while (superType != null && superType.isValidBinding()) {
-		// We used to only include superinterfaces if immediate superclasses are abstract
-		// but that is problematic. See https://bugs.eclipse.org/bugs/show_bug.cgi?id=302358
-		if ((itsInterfaces = superType.superInterfaces()) != Binding.NO_SUPERINTERFACES) {
-			if (interfacesToVisit == null) {
-				interfacesToVisit = itsInterfaces;
-				nextPosition = interfacesToVisit.length;
-			} else {
-				int itsLength = itsInterfaces.length;
-				if (nextPosition + itsLength >= interfacesToVisit.length)
-					System.arraycopy(interfacesToVisit, 0, interfacesToVisit = new ReferenceBinding[nextPosition + itsLength + 5], 0, nextPosition);
-				nextInterface : for (int a = 0; a < itsLength; a++) {
-					ReferenceBinding next = itsInterfaces[a];
-					for (int b = 0; b < nextPosition; b++)
-						if (next == interfacesToVisit[b]) continue nextInterface;
-					interfacesToVisit[nextPosition++] = next;
-				}
-			}
-		}
 
 		MethodBinding[] methods = superType.unResolvedMethods();
 		nextMethod : for (int m = methods.length; --m >= 0;) {
@@ -111,24 +86,27 @@ void computeInheritedMethods(ReferenceBinding superclass, ReferenceBinding[] sup
 		}
 		superType = superType.superclass();
 	}
-	if (nextPosition == 0) return;
 
+	List superIfcList = new ArrayList();
+	HashSet seenTypes = new HashSet();
+	collectAllDistinctSuperInterfaces(superInterfaces, seenTypes, superIfcList);
+	if (superclass != null)
+		collectAllDistinctSuperInterfaces(superclass.superInterfaces(), seenTypes, superIfcList);
+	if (superIfcList.size() == 0) return;
+	
+	if (superIfcList.size() == 1) {
+		superInterfaces = new ReferenceBinding[] { (ReferenceBinding) superIfcList.get(0) };
+	} else {
+		superInterfaces = (ReferenceBinding[]) superIfcList.toArray(new ReferenceBinding[superIfcList.size()]);
+		superInterfaces = Sorting.sortTypes(superInterfaces);
+	}
+	
 	SimpleSet skip = findSuperinterfaceCollisions(superclass, superInterfaces);
-	for (int i = 0; i < nextPosition; i++) {
-		superType = interfacesToVisit[i];
+	int len = superInterfaces.length;
+	for (int i = len-1; i >= 0; i--) {
+		superType = superInterfaces[i];
 		if (superType.isValidBinding()) {
 			if (skip != null && skip.includes(superType)) continue;
-			if ((itsInterfaces = superType.superInterfaces()) != Binding.NO_SUPERINTERFACES) {
-				int itsLength = itsInterfaces.length;
-				if (nextPosition + itsLength >= interfacesToVisit.length)
-					System.arraycopy(interfacesToVisit, 0, interfacesToVisit = new ReferenceBinding[nextPosition + itsLength + 5], 0, nextPosition);
-				nextInterface : for (int a = 0; a < itsLength; a++) {
-					ReferenceBinding next = itsInterfaces[a];
-					for (int b = 0; b < nextPosition; b++)
-						if (next == interfacesToVisit[b]) continue nextInterface;
-					interfacesToVisit[nextPosition++] = next;
-				}
-			}
 
 			MethodBinding[] methods = superType.unResolvedMethods();
 			nextMethod : for (int m = methods.length; --m >= 0;) { // Interface methods are all abstract public
