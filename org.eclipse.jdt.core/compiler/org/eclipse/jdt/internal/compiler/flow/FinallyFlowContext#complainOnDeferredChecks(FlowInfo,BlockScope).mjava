@@ -42,15 +42,21 @@ public void complainOnDeferredChecks(FlowInfo flowInfo, BlockScope scope) {
 	// check inconsistent null checks
 	if ((this.tagBits & FlowContext.DEFER_NULL_DIAGNOSTIC) != 0) { // within an enclosing loop, be conservative
 		for (int i = 0; i < this.nullCount; i++) {
-			if ((this.nullCheckTypes[i] & ~HIDE_NULL_COMPARISON_WARNING_MASK) == ASSIGN_TO_NONNULL) {
-				int nullStatus = flowInfo.nullStatus(this.nullLocals[i]);
-				if (nullStatus != FlowInfo.NON_NULL) {
-					this.parent.recordNullityMismatch(scope, (Expression)this.nullReferences[i],
-							this.providedExpectedTypes[i][0], this.providedExpectedTypes[i][1], nullStatus);
-				}
-			} else {
-				this.parent.recordUsingNullReference(scope, this.nullLocals[i],
-						this.nullReferences[i],	this.nullCheckTypes[i], flowInfo);
+			ASTNode location = this.nullReferences[i];
+			switch (this.nullCheckTypes[i] & ~HIDE_NULL_COMPARISON_WARNING_MASK) {
+				case ASSIGN_TO_NONNULL:
+					int nullStatus = flowInfo.nullStatus(this.nullLocals[i]);
+					if (nullStatus != FlowInfo.NON_NULL) {
+						this.parent.recordNullityMismatch(scope, (Expression) location,
+								this.providedExpectedTypes[i][0], this.providedExpectedTypes[i][1], nullStatus);
+					}
+					break;
+				case IN_UNBOXING:
+					checkUnboxing(scope, (Expression) location, flowInfo);
+					break;
+				default:
+					this.parent.recordUsingNullReference(scope, this.nullLocals[i],
+							this.nullReferences[i],	this.nullCheckTypes[i], flowInfo);
 			}
 
 		}
@@ -138,6 +144,9 @@ public void complainOnDeferredChecks(FlowInfo flowInfo, BlockScope scope) {
 						char[][] annotationName = scope.environment().getNonNullAnnotationName();
 						scope.problemReporter().nullityMismatch((Expression) location, this.providedExpectedTypes[i][0], this.providedExpectedTypes[i][1], nullStatus, annotationName);
 					}
+					break;
+				case IN_UNBOXING:
+					checkUnboxing(scope, (Expression) location, flowInfo);	
 					break;
 				default:
 					// should not happen
