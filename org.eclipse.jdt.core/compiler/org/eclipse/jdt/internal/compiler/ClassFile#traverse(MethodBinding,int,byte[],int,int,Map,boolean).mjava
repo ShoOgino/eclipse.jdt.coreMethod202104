@@ -894,6 +894,55 @@
 					}
 					pc += 3;
 					break;
+				case Opcodes.OPC_invokedynamic:
+					index = u2At(bytecodes, 1, pc);
+					nameAndTypeIndex = u2At(poolContents, 3,
+							constantPoolOffsets[index]);
+					utf8index = u2At(poolContents, 3,
+							constantPoolOffsets[nameAndTypeIndex]);
+					descriptor = utf8At(poolContents,
+							constantPoolOffsets[utf8index] + 3, u2At(
+									poolContents, 1,
+									constantPoolOffsets[utf8index]));
+					frame.numberOfStackItems -= getParametersCount(descriptor);
+					returnType = getReturnType(descriptor);
+					if (returnType.length == 1) {
+						// base type
+						switch(returnType[0]) {
+							case 'Z':
+								frame.addStackItem(TypeBinding.BOOLEAN);
+								break;
+							case 'B':
+								frame.addStackItem(TypeBinding.BYTE);
+								break;
+							case 'C':
+								frame.addStackItem(TypeBinding.CHAR);
+								break;
+							case 'D':
+								frame.addStackItem(TypeBinding.DOUBLE);
+								break;
+							case 'F':
+								frame.addStackItem(TypeBinding.FLOAT);
+								break;
+							case 'I':
+								frame.addStackItem(TypeBinding.INT);
+								break;
+							case 'J':
+								frame.addStackItem(TypeBinding.LONG);
+								break;
+							case 'S':
+								frame.addStackItem(TypeBinding.SHORT);
+								break;
+						}
+					} else {
+						if (returnType[0] == '[') {
+							frame.addStackItem(new VerificationTypeInfo(0, returnType));
+						} else {
+							frame.addStackItem(new VerificationTypeInfo(0, CharOperation.subarray(returnType, 1, returnType.length - 1)));
+						}
+					}
+					pc += 5;
+					break;
 				case Opcodes.OPC_invokespecial:
 					index = u2At(bytecodes, 1, pc);
 					nameAndTypeIndex = u2At(poolContents, 3,
@@ -1245,15 +1294,27 @@
 					addRealJumpTarget(realJumpTarget, pc - codeOffset); // handle infinite loop
 					break;
 				default: // should not occur
-					this.codeStream.methodDeclaration.scope.problemReporter().abortDueToInternalError(
-							Messages.bind(
-									Messages.abort_invalidOpcode,
-									new Object[] {
-										new Byte(opcode),
-										new Integer(pc),
-										new String(methodBinding.shortReadableName()),
-									}),
-							this.codeStream.methodDeclaration);
+					if (this.codeStream.methodDeclaration != null) {
+						this.codeStream.methodDeclaration.scope.problemReporter().abortDueToInternalError(
+								Messages.bind(
+										Messages.abort_invalidOpcode,
+										new Object[] {
+												new Byte(opcode),
+												new Integer(pc),
+												new String(methodBinding.shortReadableName()),
+										}),
+										this.codeStream.methodDeclaration);
+					} else {
+						this.codeStream.lambdaExpression.scope.problemReporter().abortDueToInternalError(
+								Messages.bind(
+										Messages.abort_invalidOpcode,
+										new Object[] {
+												new Byte(opcode),
+												new Integer(pc),
+												new String(methodBinding.shortReadableName()),
+										}),
+										this.codeStream.lambdaExpression);
+					}
 				break;
 			}
 			if (pc >= (codeLength + codeOffset)) {
