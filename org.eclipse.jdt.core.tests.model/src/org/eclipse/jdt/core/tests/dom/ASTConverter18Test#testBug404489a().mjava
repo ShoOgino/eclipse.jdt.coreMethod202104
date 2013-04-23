@@ -1,0 +1,61 @@
+	// https://bugs.eclipse.org/bugs/show_bug.cgi?id=404489
+	public void testBug404489a() throws JavaModelException {
+		String contents =
+		"package test404489.bug;\n" +
+		"public class X { \n" +
+		"	class Y { \n" +
+		"		class Z {\n" +
+		"			public Z(@A X.@B Y Y.this){}\n" +
+		"			}\n" +
+		"  		}\n" +
+		"  		Object o=(@A X.@B Y.@Marker  Z)null;\n" +
+		"	}\n" +
+		"@java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface Marker {} \n" +
+		"@java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface A {} \n" +
+		"@java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface B {} \n";
+		this.workingCopy = getWorkingCopy("/Converter18/src/test404489/bug/X.java", true/* resolve */);
+		ASTNode node = buildAST(contents, this.workingCopy);
+		assertEquals("Not a compilation unit", ASTNode.COMPILATION_UNIT, node.getNodeType());
+		CompilationUnit unit = (CompilationUnit) node;
+		TypeDeclaration type =  (TypeDeclaration) unit.types().get(0);
+		node = (ASTNode) type.bodyDeclarations().get(0);
+		assertEquals("Not a Type Declaration", ASTNode.TYPE_DECLARATION, node.getNodeType());
+		node = (ASTNode) ((TypeDeclaration)node).bodyDeclarations().get(0);
+		assertEquals("Not a Type Declaration", ASTNode.TYPE_DECLARATION, node.getNodeType());
+		node = (ASTNode) ((TypeDeclaration)node).bodyDeclarations().get(0);		
+		assertEquals("Not a method Declaration", ASTNode.METHOD_DECLARATION, node.getNodeType());
+		MethodDeclaration method = (MethodDeclaration) node;
+		assertEquals("Method should not be malformed", 0, (method.getFlags() & ASTNode.MALFORMED));
+		AnnotatableType annotatableType = method.getReceiverType();
+		assertTrue(annotatableType.isQualifiedType());
+		QualifiedType qualifiedType = (QualifiedType) annotatableType;
+		assertEquals("wrong qualified type", "@A X.@B Y", qualifiedType.toString());
+		ITypeBinding binding = qualifiedType.resolveBinding();
+		assertNotNull("No binding", binding);
+		assertEquals("Wrong qualified name", "test404489.bug.X.Y", binding.getQualifiedName());
+		List annotations = qualifiedType.annotations();
+		assertTrue(annotations.size() == 1);
+		MarkerAnnotation marker	= (MarkerAnnotation) annotations.get(0);
+		assertEquals("wrong annotation name", "@B", marker.toString());
+		binding = marker.resolveTypeBinding();
+		assertNotNull("No binding", binding);
+		assertEquals("Wrong qualified name", "test404489.bug.B", binding.getQualifiedName());
+		IAnnotationBinding annotationBinding = marker.resolveAnnotationBinding();
+		assertNotNull(annotationBinding);
+		assertEquals("wrong annotation binding", "B", annotationBinding.getName());
+		Name name = marker.getTypeName();
+		assertTrue(name.isSimpleName());
+		SimpleName simpleName = (SimpleName) name;
+		assertEquals("wrong type name", "B", simpleName.toString());
+		assertEquals("wrong simple name", "B",simpleName.getIdentifier());
+		binding = simpleName.resolveTypeBinding();
+		assertNotNull("No binding", binding);
+		assertEquals("Wrong qualified name", "test404489.bug.B", binding.getQualifiedName());
+		assertTrue(qualifiedType.getQualifier().isSimpleType());
+		SimpleType simpleType = (SimpleType) qualifiedType.getQualifier();
+		assertEquals("incorrect type", "@A X", simpleType.toString());
+		binding = simpleType.resolveBinding();
+		assertNotNull("No binding", binding);
+		assertEquals("Wrong qualified name", "test404489.bug.X.Y", binding.getQualifiedName());
+	}
+
