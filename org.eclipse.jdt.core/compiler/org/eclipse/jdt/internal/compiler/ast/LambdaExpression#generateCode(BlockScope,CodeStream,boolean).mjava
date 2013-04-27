@@ -1,18 +1,32 @@
 	public void generateCode(BlockScope currentScope, CodeStream codeStream, boolean valueRequired) {
-		this.binding = currentScope.enclosingSourceType().addSyntheticMethod(this);
+		if (this.shouldCaptureInstance) {
+			this.binding.modifiers &= ~ClassFileConstants.AccStatic;
+		} else {
+			this.binding.modifiers |= ClassFileConstants.AccStatic;
+		}
+		SourceTypeBinding sourceType = currentScope.enclosingSourceType();
+		this.binding = sourceType.addSyntheticMethod(this);
 		int pc = codeStream.position;
 		int invokeDynamicNumber = codeStream.classFile.recordBootstrapMethod(this);
 		StringBuffer signature = new StringBuffer();
 		signature.append('(');
+		if (this.shouldCaptureInstance) {
+			codeStream.aload_0();
+			signature.append(sourceType.signature());
+		}
 		for (int i = 0, length = this.outerLocalVariables == null ? 0 : this.outerLocalVariables.length; i < length; i++) {
-			signature.append(this.outerLocalVariables[i].type.signature());
-			LocalVariableBinding capturedOuterLocal = this.outerLocalVariables[i].actualOuterLocalVariable;
+			SyntheticArgumentBinding syntheticArgument = this.outerLocalVariables[i];
+			if (this.shouldCaptureInstance) {
+				syntheticArgument.resolvedPosition++;
+			}
+			signature.append(syntheticArgument.type.signature());
+			LocalVariableBinding capturedOuterLocal = syntheticArgument.actualOuterLocalVariable;
 			VariableBinding[] path = currentScope.getEmulationPath(capturedOuterLocal);
 			codeStream.generateOuterAccess(path, this, capturedOuterLocal, currentScope);
 		}
 		signature.append(')');
 		signature.append(this.expectedType.signature());
-		codeStream.invokeDynamic(invokeDynamicNumber, this.outerLocalVariablesSlotSize, 1, TypeConstants.ANONYMOUS_METHOD, signature.toString().toCharArray());
+		codeStream.invokeDynamic(invokeDynamicNumber, (this.shouldCaptureInstance ? 1 : 0) + this.outerLocalVariablesSlotSize, 1, TypeConstants.ANONYMOUS_METHOD, signature.toString().toCharArray());
 		codeStream.recordPositionsFrom(pc, this.sourceStart);		
 	}
 
