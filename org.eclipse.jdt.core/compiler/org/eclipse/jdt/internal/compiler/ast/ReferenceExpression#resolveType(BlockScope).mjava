@@ -101,10 +101,11 @@
         
         // 15.28.1
         final boolean isMethodReference = isMethodReference();
+        this.depth = 0;
         MethodBinding someMethod = isMethodReference ? scope.getMethod(this.receiverType, this.selector, descriptorParameters, this) :
         											       scope.getConstructor((ReferenceBinding) this.receiverType, descriptorParameters, this);
-        
-        if (someMethod != null && someMethod.isValidBinding()) {
+        int someMethodDepth = this.depth, anotherMethodDepth = 0;
+    	if (someMethod != null && someMethod.isValidBinding()) {
         	final boolean isStatic = someMethod.isStatic();
         	if (isStatic && (this.haveReceiver || this.receiverType.isParameterizedType())) {
     			scope.problemReporter().methodMustBeAccessedStatically(this, someMethod);
@@ -142,7 +143,10 @@
         			parameters = new TypeBinding[parametersLength - 1];
         			System.arraycopy(descriptorParameters, 1, parameters, 0, parametersLength - 1);
         		}
+        		this.depth = 0;
         		anotherMethod = scope.getMethod(typeToSearch, this.selector, parameters, this);
+        		anotherMethodDepth = this.depth;
+        		this.depth = 0;
         	}
         	if (anotherMethod != null && anotherMethod.isValidBinding() && anotherMethod.isStatic()) {
         		scope.problemReporter().methodMustBeAccessedStatically(this, anotherMethod);
@@ -154,9 +158,23 @@
         	scope.problemReporter().methodReferenceSwingsBothWays(this, anotherMethod, someMethod);
         	return this.resolvedType = null;
         }
-
-        this.binding = someMethod != null && someMethod.isValidBinding() ? someMethod : 
-        											anotherMethod != null && anotherMethod.isValidBinding() ? anotherMethod : null;
+        
+        if (someMethod != null && someMethod.isValidBinding()) {
+        	this.binding = someMethod;
+        	this.bits &= ~ASTNode.DepthMASK;
+        	if (someMethodDepth > 0) {
+        		this.bits |= (someMethodDepth & 0xFF) << ASTNode.DepthSHIFT;
+        	}
+        } else if (anotherMethod != null && anotherMethod.isValidBinding()) {
+        	this.binding = anotherMethod;
+        	this.bits &= ~ASTNode.DepthMASK;
+        	if (anotherMethodDepth > 0) {
+        		this.bits |= (anotherMethodDepth & 0xFF) << ASTNode.DepthSHIFT;
+        	}
+        } else {
+        	this.binding = null;
+        	this.bits &= ~ASTNode.DepthMASK;
+        }
 
         if (this.binding == null) {
         	char [] visibleName = isConstructorReference() ? this.receiverType.sourceName() : this.selector;
