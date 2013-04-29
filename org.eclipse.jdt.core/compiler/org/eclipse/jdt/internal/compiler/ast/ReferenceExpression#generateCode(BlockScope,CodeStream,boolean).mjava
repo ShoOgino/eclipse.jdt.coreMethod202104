@@ -11,7 +11,6 @@
 		}
 		
 		int pc = codeStream.position;
-		int invokeDynamicNumber = codeStream.classFile.recordBootstrapMethod(this);
 		StringBuffer buffer = new StringBuffer();
 		int argumentsSize = 0;
 		buffer.append('(');
@@ -20,21 +19,31 @@
 			buffer.append(this.lhs.isSuper() ? sourceType.signature() : this.receiverType.signature());
 			argumentsSize = 1;
 		} else {
-			if (this.isConstructorReference() && this.receiverType.isNestedType()) {
-				NestedTypeBinding nestedType = (NestedTypeBinding) this.receiverType;
-				ReferenceBinding[] syntheticArgumentTypes;
-				if ((syntheticArgumentTypes = nestedType.syntheticEnclosingInstanceTypes()) != null) {
-					int length = syntheticArgumentTypes.length;
-					argumentsSize = length;
-					for (int i = 0 ; i < length; i++) {
-						ReferenceBinding syntheticArgumentType = syntheticArgumentTypes[i];
-						buffer.append(syntheticArgumentType.signature());
-						Object[] emulationPath = currentScope.getEmulationPath(
-								syntheticArgumentType,
-								false /* allow compatible match */,
-								true /* disallow instance reference in explicit constructor call */);
-						codeStream.generateOuterAccess(emulationPath, this, syntheticArgumentType, currentScope);
+			if (this.isConstructorReference()) {
+				ReferenceBinding[] enclosingInstances = Binding.UNINITIALIZED_REFERENCE_TYPES;
+				if (this.receiverType.isNestedType()) {
+					NestedTypeBinding nestedType = (NestedTypeBinding) this.receiverType;
+					if ((enclosingInstances = nestedType.syntheticEnclosingInstanceTypes()) != null) {
+						int length = enclosingInstances.length;
+						argumentsSize = length;
+						for (int i = 0 ; i < length; i++) {
+							ReferenceBinding syntheticArgumentType = enclosingInstances[i];
+							buffer.append(syntheticArgumentType.signature());
+							Object[] emulationPath = currentScope.getEmulationPath(
+									syntheticArgumentType,
+									false /* allow compatible match */,
+									true /* disallow instance reference in explicit constructor call */);
+							codeStream.generateOuterAccess(emulationPath, this, syntheticArgumentType, currentScope);
+						}
 					}
+					// Reject types that capture outer local arguments, these cannot be manufactured by the metafactory.
+					if (nestedType.syntheticOuterLocalVariables() != null) {
+						currentScope.problemReporter().noSuchEnclosingInstance(nestedType.enclosingType, this, false);
+						return;
+					}
+				}
+				if (this.syntheticAccessor != null) {
+					this.binding = sourceType.addSyntheticFactoryMethod(this.binding, this.syntheticAccessor, enclosingInstances);
 				}
 			}
 		}
@@ -42,6 +51,7 @@
 		buffer.append('L');
 		buffer.append(this.resolvedType.constantPoolName());
 		buffer.append(';');
+		int invokeDynamicNumber = codeStream.classFile.recordBootstrapMethod(this);
 		codeStream.invokeDynamic(invokeDynamicNumber, argumentsSize, 1, LAMBDA, buffer.toString().toCharArray());
 		codeStream.recordPositionsFrom(pc, this.sourceStart);
 	}
