@@ -9,6 +9,99 @@
 			MethodBinding binding,
 			int methodAttributeOffset,
 			int attributesNumber) {
+
+		if ((this.produceAttributes & ClassFileConstants.ATTR_TYPE_ANNOTATION) != 0) {
+			List allTypeAnnotationContexts = ((TypeAnnotationCodeStream) this.codeStream).allTypeAnnotationContexts;
+			int invisibleTypeAnnotationsCounter = 0;
+			int visibleTypeAnnotationsCounter = 0;
+			for (int i = 0, max = this.codeStream.allLocalsCounter; i < max; i++) {
+				LocalVariableBinding localVariable = this.codeStream.locals[i];
+				LocalDeclaration declaration = localVariable.declaration;
+				if (declaration == null
+						|| (declaration.isArgument() && ((declaration.bits & ASTNode.IsUnionType) == 0))
+						|| (localVariable.initializationCount == 0)
+						|| ((declaration.bits & ASTNode.HasTypeAnnotations) == 0)) {
+					continue;
+				}
+				declaration.getAllAnnotationContexts(AnnotationTargetTypeConstants.LOCAL_VARIABLE, localVariable, allTypeAnnotationContexts);
+			}
+			AbstractMethodDeclaration methodDeclaration = binding.sourceMethod();
+			if (methodDeclaration != null) {
+				if ((methodDeclaration.bits & ASTNode.HasTypeAnnotations) != 0) {
+					Argument[] arguments = methodDeclaration.arguments;
+					if (arguments != null) {
+						for (int i = 0, max = arguments.length; i < max; i++) {
+							Argument argument = arguments[i];
+							if ((argument.bits & ASTNode.HasTypeAnnotations) != 0) {
+								argument.getAllAnnotationContexts(AnnotationTargetTypeConstants.METHOD_PARAMETER, i, allTypeAnnotationContexts);
+							}
+						}
+					}
+					Annotation[] annotations = (methodDeclaration.receiver==null?null:methodDeclaration.receiver.annotations);
+					if (annotations != null) {
+						for (int i = 0, max = annotations.length; i < max; i++) {
+							Annotation annotation = annotations[i];
+							AnnotationContext annotationContext = null;
+							if (annotation.isRuntimeTypeInvisible()) {
+								annotationContext = new AnnotationContext(annotation, null, AnnotationTargetTypeConstants.METHOD_RECEIVER, null, AnnotationContext.INVISIBLE, null);
+								invisibleTypeAnnotationsCounter++;
+							} else if (annotation.isRuntimeTypeVisible()) {
+								annotationContext = new AnnotationContext(annotation, null, AnnotationTargetTypeConstants.METHOD_RECEIVER, null, AnnotationContext.VISIBLE, null);
+								visibleTypeAnnotationsCounter++;
+							}
+							if (annotationContext != null) {
+								allTypeAnnotationContexts.add(annotationContext);
+							}
+						}
+					}
+				}
+				Annotation[] annotations = methodDeclaration.annotations;
+				if (annotations != null && binding.returnType.id != T_void) {
+					methodDeclaration.getAllAnnotationContexts(AnnotationTargetTypeConstants.METHOD_RETURN_TYPE, allTypeAnnotationContexts);
+				}
+				if (!methodDeclaration.isConstructor() && !methodDeclaration.isClinit() && binding.returnType.id != T_void) {
+					MethodDeclaration declaration = (MethodDeclaration) methodDeclaration;
+					TypeReference typeReference = declaration.returnType;
+					if ((typeReference.bits & ASTNode.HasTypeAnnotations) != 0) {
+						typeReference.getAllAnnotationContexts(AnnotationTargetTypeConstants.METHOD_RETURN_TYPE, allTypeAnnotationContexts);
+					}
+				}
+				TypeReference[] thrownExceptions = methodDeclaration.thrownExceptions;
+				if (thrownExceptions != null) {
+					for (int i = 0, max = thrownExceptions.length; i < max; i++) {
+						TypeReference thrownException = thrownExceptions[i];
+						thrownException.getAllAnnotationContexts(AnnotationTargetTypeConstants.THROWS, i, allTypeAnnotationContexts);
+					}
+				}
+				TypeParameter[] typeParameters = methodDeclaration.typeParameters();
+				if (typeParameters != null) {
+					for (int i = 0, max = typeParameters.length; i < max; i++) {
+						TypeParameter typeParameter = typeParameters[i];
+						if ((typeParameter.bits & ASTNode.HasTypeAnnotations) != 0) {
+							typeParameter.getAllAnnotationContexts(AnnotationTargetTypeConstants.METHOD_TYPE_PARAMETER, i, allTypeAnnotationContexts);
+						}
+					}
+				}
+			}
+			int size = allTypeAnnotationContexts.size();
+			if (size != 0) {
+				AnnotationContext[] allTypeAnnotationContextsArray = new AnnotationContext[size];
+				allTypeAnnotationContexts.toArray(allTypeAnnotationContextsArray);
+				for (int j = 0, max2 = allTypeAnnotationContextsArray.length; j < max2; j++) {
+					AnnotationContext annotationContext = allTypeAnnotationContextsArray[j];
+					if ((annotationContext.visibility & AnnotationContext.INVISIBLE) != 0) {
+						invisibleTypeAnnotationsCounter++;
+					} else {
+						visibleTypeAnnotationsCounter++;
+					}
+				}
+				attributesNumber += generateRuntimeTypeAnnotations(
+						allTypeAnnotationContextsArray,
+						visibleTypeAnnotationsCounter,
+						invisibleTypeAnnotationsCounter);
+			}
+		}
+
 		// update the number of attributes
 		this.contents[methodAttributeOffset++] = (byte) (attributesNumber >> 8);
 		this.contents[methodAttributeOffset] = (byte) attributesNumber;
