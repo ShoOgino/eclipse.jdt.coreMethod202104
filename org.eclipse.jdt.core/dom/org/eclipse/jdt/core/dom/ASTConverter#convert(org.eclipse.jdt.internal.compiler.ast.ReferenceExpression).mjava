@@ -1,0 +1,66 @@
+	public Expression convert(org.eclipse.jdt.internal.compiler.ast.ReferenceExpression reference) {
+		if (this.ast.apiLevel < AST.JLS8) {
+			return createFakeNullLiteral(reference);
+		}
+		Expression result = null;
+		org.eclipse.jdt.internal.compiler.ast.Expression lhs = reference.lhs;
+		org.eclipse.jdt.internal.compiler.ast.TypeReference[] arguments = reference.typeArguments;
+		int start = arguments != null && arguments.length > 0 ? arguments[arguments.length - 1].sourceEnd + 1 : reference.lhs.sourceEnd + 1;
+		final SimpleName name = new SimpleName(this.ast);
+		retrieveIdentifierAndSetPositions(start, reference.sourceEnd, name);
+		name.internalSetIdentifier(new String(reference.selector));
+		if (this.resolveBindings) {
+			recordNodes(name, reference);
+		}
+		List typeArguments = null;
+		if (name.getStartPosition() < start) {// check for new 
+			retrieveInitAndSetPositions(start, reference.sourceEnd, name);
+			if (!name.getIdentifier().equals("<init>")) { //$NON-NLS-1$
+				NullLiteral nullLiteral = new NullLiteral(this.ast);
+				nullLiteral.setFlags(nullLiteral.getFlags() | ASTNode.MALFORMED);
+				result = nullLiteral;
+			} else {
+				CreationReference creationReference = new CreationReference(this.ast);
+				creationReference.setExpression(convert(lhs));
+				typeArguments = creationReference.typeArguments();
+				result = creationReference;
+			}
+		} else if (lhs instanceof TypeReference) {
+			TypeMethodReference typeMethodReference = new TypeMethodReference(this.ast);
+			typeMethodReference.setType(convertType((TypeReference) lhs));
+			typeMethodReference.setName(name);
+			typeArguments = typeMethodReference.typeArguments();
+			result = typeMethodReference;
+		} else if (lhs instanceof SuperReference) {
+			SuperMethodReference superMethodReference = new SuperMethodReference(this.ast);
+			superMethodReference.setName(name);
+			typeArguments = superMethodReference.typeArguments();
+			result = superMethodReference;
+		} else if (lhs instanceof QualifiedSuperReference) {
+			SuperMethodReference superMethodReference = new SuperMethodReference(this.ast);
+			superMethodReference.setQualifier(convert((QualifiedSuperReference)lhs));
+			superMethodReference.setName(name);
+			typeArguments = superMethodReference.typeArguments();
+			result = superMethodReference;
+		} else {
+			ExpressionMethodReference expressionMethodReference = new ExpressionMethodReference(this.ast);
+			expressionMethodReference.setExpression(convert(lhs));
+			typeArguments = expressionMethodReference.typeArguments();
+			expressionMethodReference.setName(name);
+			result = expressionMethodReference;
+		}
+		if (typeArguments != null && arguments != null) {
+			int argumentsLength = arguments.length;
+			for (int i = 0; i < argumentsLength; i++) {
+				org.eclipse.jdt.internal.compiler.ast.TypeReference argument = arguments[i];
+				typeArguments.add(convertType(argument));
+			}
+		}
+		if (this.resolveBindings) {
+			recordNodes(result, reference);
+		}
+		int sourceStart = reference.sourceStart; 
+		result.setSourceRange(sourceStart, reference.sourceEnd - sourceStart + 1);
+		return result;
+	}
+
