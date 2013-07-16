@@ -1,0 +1,91 @@
+	/**
+	 * tests various aspects of {@link TypeMethodReference}
+	 * @throws Exception
+	 */
+	public void testReferenceExpressions_test004_since_8() throws Exception {
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test407131", false, null);
+		String contents = "package test407131;\n" +
+				"package test407131;\n" +
+				"\n" +
+				"interface J {\n" +
+				"	void foo(int x);\n" +
+				"}\n" +
+				"class Y {\n" +
+				"	static class Z {\n" +
+				"		public Z(int x) {}\n" +
+				"		public static void foo(int x) {}\n" +
+				"	}\n" +
+				"}\n" +
+				"class W<T> {\n" +
+				"	public static void bar(int x) {}\n" +
+				"}\n" +
+				"\n" +
+				"public class X {\n" +
+				"	@SuppressWarnings(\"unused\")\n" +
+				"	public static void main (String [] args) {\n" +
+				"		J j1 = Y.@Marker Z :: foo;\n" +
+				"		J j2 = @Marker W :: <Integer> bar;\n" +
+				"	}\n" +
+				"@Target (ElementType.TYPE_USE)\n" +
+				"@interface @Marker {}\n" +
+				"}\n" ;
+		StringBuffer buf= new StringBuffer(contents);
+		ICompilationUnit cu= pack1.createCompilationUnit("X.java", buf.toString(), false, null);
+		CompilationUnit astRoot= createAST(cu);
+		ASTRewrite rewrite= ASTRewrite.create(astRoot.getAST());
+		AST ast= astRoot.getAST();
+
+		TypeDeclaration typedeclaration= findTypeDeclaration(astRoot, "X");
+
+		MethodDeclaration methodDecl= findMethodDeclaration(typedeclaration, "main");
+		{
+			// replace the lhs and the rhs.
+			VariableDeclarationStatement variableDeclarationStatement = (VariableDeclarationStatement) methodDecl.getBody().statements().get(0);
+			VariableDeclarationFragment variableDeclarationFragment = (VariableDeclarationFragment) variableDeclarationStatement.fragments().get(0);
+			TypeMethodReference typeMethodReference = (TypeMethodReference) variableDeclarationFragment.getInitializer();
+			TypeParameter typeParameter= ast.newTypeParameter();
+			typeParameter.setName(ast.newSimpleName("Integer"));
+			Type newType = ast.newSimpleType(ast.newSimpleName("W"));
+			rewrite.replace(typeMethodReference.getType(), newType, null);
+			rewrite.getListRewrite(typeMethodReference, TypeMethodReference.TYPE_ARGUMENTS_PROPERTY).insertFirst(typeParameter, null);
+			rewrite.replace(typeMethodReference.getName(), ast.newSimpleName("bar"), null);
+			
+			variableDeclarationStatement = (VariableDeclarationStatement) methodDecl.getBody().statements().get(1);
+			variableDeclarationFragment = (VariableDeclarationFragment) variableDeclarationStatement.fragments().get(0);
+			typeMethodReference = (TypeMethodReference) variableDeclarationFragment.getInitializer();
+			newType = ast.newSimpleType(ast.newQualifiedName(ast.newSimpleName("Y"),ast.newSimpleName("Z")));
+			rewrite.replace(typeMethodReference.getType(), newType, null);
+			ASTNode typeArgument = (ASTNode) typeMethodReference.typeArguments().get(0);
+			rewrite.getListRewrite(typeMethodReference, TypeMethodReference.TYPE_ARGUMENTS_PROPERTY).remove(typeArgument, null);
+			rewrite.replace(typeMethodReference.getName(), ast.newSimpleName("foo"), null);			
+		}
+		String preview= evaluateRewrite(cu, rewrite);
+		contents = "package test407131;\n" +
+				"package test407131;\n" +
+				"\n" +
+				"interface J {\n" +
+				"	void foo(int x);\n" +
+				"}\n" +
+				"class Y {\n" +
+				"	static class Z {\n" +
+				"		public Z(int x) {}\n" +
+				"		public static void foo(int x) {}\n" +
+				"	}\n" +
+				"}\n" +
+				"class W<T> {\n" +
+				"	public static void bar(int x) {}\n" +
+				"}\n" +
+				"\n" +
+				"public class X {\n" +
+				"	@SuppressWarnings(\"unused\")\n" +
+				"	public static void main (String [] args) {\n" +
+				"		J j1 = W ::<Integer> bar;\n" +
+				"		J j2 = Y.Z :: foo;\n" +
+				"	}\n" +
+				"@Target (ElementType.TYPE_USE)\n" +
+				"@interface @Marker {}\n" +
+				"}\n" ;
+		buf= new StringBuffer(contents);
+		assertEqualString(preview, buf.toString());
+	}
+

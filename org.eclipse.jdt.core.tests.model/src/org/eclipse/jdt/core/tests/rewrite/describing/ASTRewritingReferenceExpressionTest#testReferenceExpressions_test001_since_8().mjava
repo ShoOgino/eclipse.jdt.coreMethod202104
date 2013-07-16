@@ -1,0 +1,141 @@
+	/**
+	 * tests various aspects of CreationReference (Constructor Method Reference) with ClassType as lhs
+	 * @throws Exception
+	 */
+	public void testReferenceExpressions_test001_since_8() throws Exception {
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test407131", false, null);
+		String contents = "package test407131;\n" +
+				"\n" +
+				"interface J {\n" +
+				"	void foo(int x);\n" +
+				"}\n" +
+				"class Y {\n" +
+				"	static class Z {\n" +
+				"		public Z(int x) {\n" +
+				"			System.out.print(x);\n" +
+				"		}\n" +
+				"		public void foo(int x) {\n" +
+				"			System.out.print(x);\n" +
+				"		}\n" +
+				"	}\n" +
+				"}\n" +
+				"class W<T> {\n" +
+				"	public W(int x) {}\n" +
+				"}\n" +
+				"\n" +
+				"public class X {\n" +
+				"	@SuppressWarnings(\"unused\")\n" +
+				"	public static void main (String [] args) {\n" +
+				"		J j1 = W <Integer> :: <String> new;\n" +
+				"		J j2 = W <Integer> :: <String> new ;\n" +
+				"		J j3 = W <Integer> :: <String, Integer> new ;\n" +
+				"		J j4 = W <Integer> :: <String> new ;\n" +
+				"		J j5 = W <Integer> :: <String> new ;\n" +
+				"		J j6 = W <Integer> :: new;\n" +
+				"		J j7 = W <Integer> :: new;\n" +
+				"		J j8 = W <Integer> :: new;\n" +
+				"	}\n" +
+				"}\n" +
+				"\n" ;
+		StringBuffer buf= new StringBuffer(contents);
+		ICompilationUnit cu= pack1.createCompilationUnit("X.java", buf.toString(), false, null);
+		CompilationUnit astRoot= createAST(cu);
+		ASTRewrite rewrite= ASTRewrite.create(astRoot.getAST());
+		AST ast= astRoot.getAST();
+
+		TypeDeclaration typedeclaration= findTypeDeclaration(astRoot, "X");
+
+		MethodDeclaration methodDecl= findMethodDeclaration(typedeclaration, "main");
+		{
+			// case 1: replace the type argument.
+			VariableDeclarationStatement variableDeclarationStatement = (VariableDeclarationStatement) methodDecl.getBody().statements().get(0);
+			VariableDeclarationFragment variableDeclarationFragment = (VariableDeclarationFragment) variableDeclarationStatement.fragments().get(0);
+			CreationReference creationReference = (CreationReference) variableDeclarationFragment.getInitializer();
+			TypeParameter typeParameter= ast.newTypeParameter();
+			typeParameter.setName(ast.newSimpleName("Integer"));			
+			ListRewrite listRewrite = rewrite.getListRewrite(creationReference, CreationReference.TYPE_ARGUMENTS_PROPERTY);
+			listRewrite.replace((ASTNode)(creationReference.typeArguments().get(0)), typeParameter, null);
+			
+			// case 2: add a type argument.
+			variableDeclarationStatement = (VariableDeclarationStatement) methodDecl.getBody().statements().get(1);
+			variableDeclarationFragment = (VariableDeclarationFragment) variableDeclarationStatement.fragments().get(0);
+			creationReference = (CreationReference) variableDeclarationFragment.getInitializer();
+			typeParameter= ast.newTypeParameter();
+			typeParameter.setName(ast.newSimpleName("Integer"));			
+			listRewrite = rewrite.getListRewrite(creationReference, CreationReference.TYPE_ARGUMENTS_PROPERTY);
+			listRewrite.insertLast(typeParameter, null);
+			
+			// case 3: delete a type argument.
+			variableDeclarationStatement = (VariableDeclarationStatement) methodDecl.getBody().statements().get(2);
+			variableDeclarationFragment = (VariableDeclarationFragment) variableDeclarationStatement.fragments().get(0);
+			creationReference = (CreationReference) variableDeclarationFragment.getInitializer();
+			listRewrite = rewrite.getListRewrite(creationReference, CreationReference.TYPE_ARGUMENTS_PROPERTY);
+			listRewrite.remove((ASTNode)(creationReference.typeArguments().get(1)), null);
+
+			// case 4: do not change existing type arg - implicit test case.
+			// case 5: delete the only type argument.
+			variableDeclarationStatement = (VariableDeclarationStatement) methodDecl.getBody().statements().get(4);
+			variableDeclarationFragment = (VariableDeclarationFragment) variableDeclarationStatement.fragments().get(0);
+			creationReference = (CreationReference) variableDeclarationFragment.getInitializer();
+			listRewrite = rewrite.getListRewrite(creationReference, CreationReference.TYPE_ARGUMENTS_PROPERTY);
+			for (Iterator iter= listRewrite.getOriginalList().iterator(); iter.hasNext(); ) {//loop added for general case - iterates once here.
+				ASTNode typeArgument= (ASTNode) iter.next();
+				listRewrite.remove(typeArgument, null);
+			}
+
+			// case 6: do not change a CreationReference originally having no type arguments - implicit test case.
+			// case 7: Insert a type argument for a CreationReference originally having no type arguments.
+			variableDeclarationStatement = (VariableDeclarationStatement) methodDecl.getBody().statements().get(6);
+			variableDeclarationFragment = (VariableDeclarationFragment) variableDeclarationStatement.fragments().get(0);
+			creationReference = (CreationReference) variableDeclarationFragment.getInitializer();
+			listRewrite = rewrite.getListRewrite(creationReference, CreationReference.TYPE_ARGUMENTS_PROPERTY);
+			typeParameter= ast.newTypeParameter();
+			typeParameter.setName(ast.newSimpleName("String"));			
+			listRewrite.insertFirst(typeParameter, null);
+
+			// case 8: change a CreationReference to a TypeMethodReference.
+			variableDeclarationStatement = (VariableDeclarationStatement) methodDecl.getBody().statements().get(7);
+			variableDeclarationFragment = (VariableDeclarationFragment) variableDeclarationStatement.fragments().get(0);
+			creationReference = (CreationReference) variableDeclarationFragment.getInitializer();
+			SimpleType simpleType = ast.newSimpleType(ast.newQualifiedName(ast.newSimpleName("Y"), ast.newSimpleName("Z")));
+			rewrite.replace(creationReference.getType(), simpleType, null);
+		}
+		
+		String preview= evaluateRewrite(cu, rewrite);
+		contents = "package test407131;\n" +
+				"\n" +
+				"interface J {\n" +
+				"	void foo(int x);\n" +
+				"}\n" +
+				"class Y {\n" +
+				"	static class Z {\n" +
+				"		public Z(int x) {\n" +
+				"			System.out.print(x);\n" +
+				"		}\n" +
+				"		public void foo(int x) {\n" +
+				"			System.out.print(x);\n" +
+				"		}\n" +
+				"	}\n" +
+				"}\n" +
+				"class W<T> {\n" +
+				"	public W(int x) {}\n" +
+				"}\n" +
+				"\n" +
+				"public class X {\n" +
+				"	@SuppressWarnings(\"unused\")\n" +
+				"	public static void main (String [] args) {\n" +
+				"		J j1 = W <Integer> :: <Integer> new;\n" +
+				"		J j2 = W <Integer> :: <String, Integer> new ;\n" +
+				"		J j3 = W <Integer> :: <String> new ;\n" +
+				"		J j4 = W <Integer> :: <String> new ;\n" +
+				"		J j5 = W <Integer> :: new ;\n" +
+				"		J j6 = W <Integer> :: new;\n" +
+				"		J j7 = W <Integer> ::<String> new;\n" +
+				"		J j8 = Y.Z :: new;\n" +
+				"	}\n" +
+				"}\n" +
+				"\n" ;
+		buf= new StringBuffer(contents);
+		assertEqualString(preview, buf.toString());
+	}
+

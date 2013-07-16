@@ -1,0 +1,78 @@
+	/**
+	 * tests various aspects of SuperMethodReference
+	 * @throws Exception
+	 */
+	public void testReferenceExpressions_test005_since_8() throws Exception {
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test407131", false, null);
+		String contents = "package test407131;\n" +
+				"interface J {\n" +
+				"	void foo(int x);\n" +
+				"}\n" +
+				"\n" +
+				"class XX {\n" +
+				"	public void foo(int x) {}\n" +
+				"	public void bar(int x) {}\n" +
+				"}\n" +
+				"\n" +
+				"public class X extends XX {\n" +
+				"       @SuppressWarnings(\"unused\")\n" +
+				"       public  void bar(int i) {\n" +
+				"           J jx = super :: <Integer> foo;\n" +
+				"           J jz = X.super :: bar;\n" +
+				"       }\n" +
+				"       public static void main (String [] args) {}\n" +
+				"}\n" +
+				"\n" ;
+		StringBuffer buf= new StringBuffer(contents);
+		ICompilationUnit cu= pack1.createCompilationUnit("X.java", buf.toString(), false, null);
+		CompilationUnit astRoot= createAST(cu);
+		ASTRewrite rewrite= ASTRewrite.create(astRoot.getAST());
+		AST ast= astRoot.getAST();
+
+		TypeDeclaration typedeclaration= findTypeDeclaration(astRoot, "X");
+
+		MethodDeclaration methodDecl= findMethodDeclaration(typedeclaration, "bar");
+		{
+			// replace the lhs and the rhs, add/delete type arguments.
+			VariableDeclarationStatement variableDeclarationStatement = (VariableDeclarationStatement) methodDecl.getBody().statements().get(0);
+			VariableDeclarationFragment variableDeclarationFragment = (VariableDeclarationFragment) variableDeclarationStatement.fragments().get(0);
+			SuperMethodReference superMethodReference = (SuperMethodReference) variableDeclarationFragment.getInitializer();
+			rewrite.set(superMethodReference, SuperMethodReference.QUALIFIER_PROPERTY, ast.newSimpleName("X"), null);
+			ASTNode typeArgument = (ASTNode) superMethodReference.typeArguments().get(0);
+			rewrite.getListRewrite(superMethodReference, SuperMethodReference.TYPE_ARGUMENTS_PROPERTY).remove(typeArgument, null);
+			rewrite.replace(superMethodReference.getName(), ast.newSimpleName("bar"), null);
+			
+			variableDeclarationStatement = (VariableDeclarationStatement) methodDecl.getBody().statements().get(1);
+			variableDeclarationFragment = (VariableDeclarationFragment) variableDeclarationStatement.fragments().get(0);
+			superMethodReference = (SuperMethodReference) variableDeclarationFragment.getInitializer();
+			rewrite.remove(superMethodReference.getQualifier(), null);
+			TypeParameter typeParameter= ast.newTypeParameter();
+			typeParameter.setName(ast.newSimpleName("String"));
+			rewrite.getListRewrite(superMethodReference, SuperMethodReference.TYPE_ARGUMENTS_PROPERTY).insertFirst(typeParameter, null);
+			rewrite.replace(superMethodReference.getName(), ast.newSimpleName("foo"), null);
+			
+		}
+		String preview = evaluateRewrite(cu, rewrite);
+		contents = "package test407131;\n" +
+				"interface J {\n" +
+				"	void foo(int x);\n" +
+				"}\n" +
+				"\n" +
+				"class XX {\n" +
+				"	public void foo(int x) {}\n" +
+				"	public void bar(int x) {}\n" +
+				"}\n" +
+				"\n" +
+				"public class X extends XX {\n" +
+				"       @SuppressWarnings(\"unused\")\n" +
+				"       public  void bar(int i) {\n" +
+				"           J jx = X.super :: bar;\n" +
+				"           J jz = super ::<String> foo;\n" +
+				"       }\n" +
+				"       public static void main (String [] args) {}\n" +
+				"}\n" +
+				"\n" ;
+		buf = new StringBuffer(contents);
+		assertEqualString(preview, buf.toString());
+	}
+

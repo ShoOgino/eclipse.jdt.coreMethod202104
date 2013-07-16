@@ -1,0 +1,82 @@
+	/**
+	 * tests various aspects of {@link ExpressionMethodReference}
+	 * @throws Exception
+	 */
+	public void testReferenceExpressions_test003_since_8() throws Exception {
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test407131", false, null);
+		String contents = "package test407131;\n" +
+				"interface J {\n" +
+				"	void foo(int x);\n" +
+				"}\n" +
+				"class Y {\n" +
+				"	public void foo(int x) {}\n" +
+				"}\n" +
+				"class Z {\n" +
+				"	public void bar(int x) {}\n" +
+				"}\n" +
+				"\n" +
+				"public class X {\n" +
+				"	@SuppressWarnings(\"unused\")\n" +
+				"	public static void main (String [] args) {\n" +
+				"		Y y = new Y();\n" +
+				"		Z z = new Z();\n" +
+				"		J j1 = y :: foo;\n" +
+				"		J j2 = z :: <String> bar;\n" +
+				"	}\n" +
+				"}\n" +
+				"\n" ;
+		StringBuffer buf= new StringBuffer(contents);
+		ICompilationUnit cu= pack1.createCompilationUnit("X.java", buf.toString(), false, null);
+		CompilationUnit astRoot= createAST(cu);
+		ASTRewrite rewrite= ASTRewrite.create(astRoot.getAST());
+		AST ast= astRoot.getAST();
+
+		TypeDeclaration typedeclaration= findTypeDeclaration(astRoot, "X");
+
+		MethodDeclaration methodDecl= findMethodDeclaration(typedeclaration, "main");
+		{
+			// replace the lhs and the rhs.
+			VariableDeclarationStatement variableDeclarationStatement = (VariableDeclarationStatement) methodDecl.getBody().statements().get(2);
+			VariableDeclarationFragment variableDeclarationFragment = (VariableDeclarationFragment) variableDeclarationStatement.fragments().get(0);
+			ExpressionMethodReference expressionMethodReference = (ExpressionMethodReference) variableDeclarationFragment.getInitializer();
+			TypeParameter typeParameter= ast.newTypeParameter();
+			typeParameter.setName(ast.newSimpleName("String"));			
+			rewrite.replace(expressionMethodReference.getExpression(), ast.newSimpleName("z"), null);
+			rewrite.getListRewrite(expressionMethodReference, ExpressionMethodReference.TYPE_ARGUMENTS_PROPERTY).insertFirst(typeParameter, null);
+			rewrite.replace(expressionMethodReference.getName(), ast.newSimpleName("bar"), null);
+			
+			variableDeclarationStatement = (VariableDeclarationStatement) methodDecl.getBody().statements().get(3);
+			variableDeclarationFragment = (VariableDeclarationFragment) variableDeclarationStatement.fragments().get(0);
+			expressionMethodReference = (ExpressionMethodReference) variableDeclarationFragment.getInitializer();
+			rewrite.replace(expressionMethodReference.getExpression(), ast.newSimpleName("y"), null);
+			ASTNode typeArgument = (ASTNode) expressionMethodReference.typeArguments().get(0);
+			rewrite.getListRewrite(expressionMethodReference, ExpressionMethodReference.TYPE_ARGUMENTS_PROPERTY).remove(typeArgument, null);
+			rewrite.replace(expressionMethodReference.getName(), ast.newSimpleName("foo"), null);
+			
+		}
+		String preview= evaluateRewrite(cu, rewrite);
+		contents = "package test407131;\n" +
+				"interface J {\n" +
+				"	void foo(int x);\n" +
+				"}\n" +
+				"class Y {\n" +
+				"	public void foo(int x) {}\n" +
+				"}\n" +
+				"class Z {\n" +
+				"	public void bar(int x) {}\n" +
+				"}\n" +
+				"\n" +
+				"public class X {\n" +
+				"	@SuppressWarnings(\"unused\")\n" +
+				"	public static void main (String [] args) {\n" +
+				"		Y y = new Y();\n" +
+				"		Z z = new Z();\n" +
+				"		J j1 = z ::<String> bar;\n" +
+				"		J j2 = y :: foo;\n" +
+				"	}\n" +
+				"}\n" +
+				"\n" ;
+		buf= new StringBuffer(contents);
+		assertEqualString(preview, buf.toString());
+	}
+

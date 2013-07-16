@@ -1,0 +1,143 @@
+	/**
+	 * tests cross rewriting - changing from one member of reference expressions to another type.
+	 * @throws Exception
+	 */
+	public void testReferenceExpressions_test006_since_8() throws Exception {
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test407131", false, null);
+		String contents = "package test407131;\n" +
+				"import java.lang.annotation.*;\n" +
+				"interface J {\n" +
+				"	void foo(int x);\n" +
+				"}\n" +
+				"class Y {\n" +
+				"	static class Z {\n" +
+				"		public Z(int x) {}\n" +
+				"		public static void foo(int x) {}\n" +
+				"	}\n" +
+				"}\n" +
+				"class W<T> {\n" +
+				"	public W(int x) {}\n" +
+				"	public static void bar(int x) {}\n" +
+				"}\n" +
+				"\n" +
+				"class XX {\n" +
+				"	public void foo(int x) {}\n" +
+				"	public void bar(int x) {}\n" +
+				"}\n" +
+				"\n" +
+				"public class X extends XX {\n" +
+				"	public static void main (String [] args) {}\n" +
+				"	@SuppressWarnings(\"unused\")\n" +
+				"	public void bar () {\n" +
+				"		J j1 = W <Integer> :: <String> new;\n" +
+				"		J j2 = Y.Z :: new;\n" +
+				"		J j3 = Y.@Marker Z :: foo;\n" +
+				"		J jx = super :: foo;\n" +
+				"		J jz = X.super :: bar;\n" +
+				"	}\n" +
+				"}\n" +
+				"@Target (ElementType.TYPE_USE)\n" +
+				"@interface Marker {}\n" +
+				"}\n";
+		StringBuffer buf= new StringBuffer(contents);
+		ICompilationUnit cu= pack1.createCompilationUnit("X.java", buf.toString(), false, null);
+		CompilationUnit astRoot= createAST(cu);
+		ASTRewrite rewrite= ASTRewrite.create(astRoot.getAST());
+		AST ast= astRoot.getAST();
+
+		TypeDeclaration typedeclaration= findTypeDeclaration(astRoot, "X");
+
+		MethodDeclaration methodDecl= findMethodDeclaration(typedeclaration, "bar");
+		{
+			// case 1: creationReference to TypeMethodReference
+			VariableDeclarationStatement variableDeclarationStatement = (VariableDeclarationStatement) methodDecl.getBody().statements().get(0);
+			VariableDeclarationFragment variableDeclarationFragment = (VariableDeclarationFragment) variableDeclarationStatement.fragments().get(0);
+			CreationReference creationReference = (CreationReference) variableDeclarationFragment.getInitializer();
+			TypeMethodReference typeMethodReference = ast.newTypeMethodReference();
+			QualifiedType qualifiedType = ast.newQualifiedType(ast.newSimpleType(ast.newSimpleName("Y")), ast.newSimpleName("Z"));
+			MarkerAnnotation markerAnnotation = ast.newMarkerAnnotation();
+			markerAnnotation.setTypeName(ast.newSimpleName("Marker"));
+			qualifiedType.annotations().add(markerAnnotation);
+			typeMethodReference.setType(qualifiedType);
+			typeMethodReference.setName(ast.newSimpleName("foo"));
+			rewrite.replace(creationReference, typeMethodReference, null);
+			
+			// case 2: CreationReference to SuperMethodReference
+			variableDeclarationStatement = (VariableDeclarationStatement) methodDecl.getBody().statements().get(1);
+			variableDeclarationFragment = (VariableDeclarationFragment) variableDeclarationStatement.fragments().get(0);
+			creationReference = (CreationReference) variableDeclarationFragment.getInitializer();
+			SuperMethodReference superMethodReference = ast.newSuperMethodReference();
+			superMethodReference.setName(ast.newSimpleName("foo"));
+			rewrite.replace(creationReference, superMethodReference, null);
+			
+			// case 3: TypeMethodReference to SuperMethodReference
+			variableDeclarationStatement = (VariableDeclarationStatement) methodDecl.getBody().statements().get(2);
+			variableDeclarationFragment = (VariableDeclarationFragment) variableDeclarationStatement.fragments().get(0);
+			typeMethodReference = (TypeMethodReference) variableDeclarationFragment.getInitializer();
+			superMethodReference = ast.newSuperMethodReference();
+			superMethodReference.setName(ast.newSimpleName("bar"));
+			superMethodReference.setQualifier(ast.newSimpleName("X"));
+			rewrite.replace(typeMethodReference, superMethodReference, null);			
+			
+			// case 4: SuperMethodReference to CreationMethodReference
+			variableDeclarationStatement = (VariableDeclarationStatement) methodDecl.getBody().statements().get(3);
+			variableDeclarationFragment = (VariableDeclarationFragment) variableDeclarationStatement.fragments().get(0);
+			superMethodReference = (SuperMethodReference) variableDeclarationFragment.getInitializer();
+			ParameterizedType parameterizedType = ast.newParameterizedType(ast.newSimpleType(ast.newSimpleName("W")));
+			parameterizedType.typeArguments().add(ast.newSimpleType(ast.newSimpleName("Integer")));
+			creationReference = ast.newCreationReference();
+			creationReference.setType(parameterizedType);
+			creationReference.typeArguments().add(ast.newSimpleType(ast.newSimpleName("String")));
+			rewrite.replace(superMethodReference, creationReference, null);			
+			
+			// case 5: SuperMethodReference to ExpressionMethodReference
+			variableDeclarationStatement = (VariableDeclarationStatement) methodDecl.getBody().statements().get(4);
+			variableDeclarationFragment = (VariableDeclarationFragment) variableDeclarationStatement.fragments().get(0);
+			superMethodReference = (SuperMethodReference) variableDeclarationFragment.getInitializer();
+			ExpressionMethodReference expressionMethodReference = ast.newExpressionMethodReference();
+			expressionMethodReference.setExpression(ast.newQualifiedName(ast.newSimpleName("Y"), ast.newSimpleName("Z")));
+			expressionMethodReference.setName(ast.newSimpleName("foo"));
+			rewrite.replace(superMethodReference, expressionMethodReference, null);			
+			
+		}
+		
+		String preview= evaluateRewrite(cu, rewrite);
+		contents = "package test407131;\n" +
+				"import java.lang.annotation.*;\n" +
+				"interface J {\n" +
+				"	void foo(int x);\n" +
+				"}\n" +
+				"class Y {\n" +
+				"	static class Z {\n" +
+				"		public Z(int x) {}\n" +
+				"		public static void foo(int x) {}\n" +
+				"	}\n" +
+				"}\n" +
+				"class W<T> {\n" +
+				"	public W(int x) {}\n" +
+				"	public static void bar(int x) {}\n" +
+				"}\n" +
+				"\n" +
+				"class XX {\n" +
+				"	public void foo(int x) {}\n" +
+				"	public void bar(int x) {}\n" +
+				"}\n" +
+				"\n" +
+				"public class X extends XX {\n" +
+				"	public static void main (String [] args) {}\n" +
+				"	@SuppressWarnings(\"unused\")\n" +
+				"	public void bar () {\n" +
+				"		J j1 = Y.@Marker Z::foo;\n" +
+				"		J j2 = super::foo;\n" +
+				"		J j3 = X.super::bar;\n" +
+				"		J jx = W<Integer>::<String> new;\n" +
+				"		J jz = Y.Z::foo;\n" +
+				"	}\n" +
+				"}\n" +
+				"@Target (ElementType.TYPE_USE)\n" +
+				"@interface Marker {}\n" +
+				"}\n";
+		buf= new StringBuffer(contents);
+		assertEqualString(preview, buf.toString());
+	}	
+
