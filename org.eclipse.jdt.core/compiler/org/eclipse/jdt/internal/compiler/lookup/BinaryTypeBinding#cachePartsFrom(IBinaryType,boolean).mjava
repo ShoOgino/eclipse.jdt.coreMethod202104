@@ -20,12 +20,15 @@ void cachePartsFrom(IBinaryType binaryType, boolean needFieldsAndMethods) {
 			}
 		}
 
-		long sourceLevel = this.environment.globalOptions.originalSourceLevel;
+		CompilerOptions globalOptions = this.environment.globalOptions;
+		long sourceLevel = globalOptions.originalSourceLevel;
 		/* https://bugs.eclipse.org/bugs/show_bug.cgi?id=324850, even in a 1.4 project, we
 		   must internalize type variables and observe any parameterization of super class
 		   and/or super interfaces in order to be able to detect overriding in the presence
 		   of generics.
 		 */
+		TypeAnnotationWalker walker = (sourceLevel >= ClassFileConstants.JDK1_8 && globalOptions.isAnnotationBasedNullAnalysisEnabled) ?
+				TypeAnnotationWalker.create(binaryType.getTypeAnnotations()) : TypeAnnotationWalker.EMPTY_ANNOTATION_WALKER;
 		char[] typeSignature = binaryType.getGenericSignature(); // use generic signature even in 1.4
 		this.tagBits |= binaryType.getTagBits();
 		
@@ -37,7 +40,7 @@ void cachePartsFrom(IBinaryType binaryType, boolean needFieldsAndMethods) {
 			if (wrapper.signature[wrapper.start] == Util.C_GENERIC_START) {
 				// ParameterPart = '<' ParameterSignature(s) '>'
 				wrapper.start++; // skip '<'
-				this.typeVariables = createTypeVariables(wrapper, true, missingTypeNames);
+				this.typeVariables = createTypeVariables(wrapper, true, missingTypeNames, walker, true/*class*/);
 				wrapper.start++; // skip '>'
 				this.tagBits |=  TagBits.HasUnresolvedTypeVariables;
 				this.modifiers |= ExtraCompilerModifiers.AccGenericSignature;
@@ -74,15 +77,17 @@ void cachePartsFrom(IBinaryType binaryType, boolean needFieldsAndMethods) {
 			}
 		} else {
 			// attempt to find the superclass if it exists in the cache (otherwise - resolve it when requested)
-			this.superclass = (ReferenceBinding) this.environment.getTypeFromTypeSignature(wrapper, typeVars, this, missingTypeNames);
+			this.superclass = (ReferenceBinding) this.environment.getTypeFromTypeSignature(wrapper, typeVars, this, missingTypeNames, 
+																		walker.toSupertype((short) -1));
 			this.tagBits |= TagBits.HasUnresolvedSuperclass;
 
 			this.superInterfaces = Binding.NO_SUPERINTERFACES;
 			if (!wrapper.atEnd()) {
 				// attempt to find each superinterface if it exists in the cache (otherwise - resolve it when requested)
 				java.util.ArrayList types = new java.util.ArrayList(2);
+				short rank = 0;
 				do {
-					types.add(this.environment.getTypeFromTypeSignature(wrapper, typeVars, this, missingTypeNames));
+					types.add(this.environment.getTypeFromTypeSignature(wrapper, typeVars, this, missingTypeNames, walker.toSupertype(rank++)));
 				} while (!wrapper.atEnd());
 				this.superInterfaces = new ReferenceBinding[types.size()];
 				types.toArray(this.superInterfaces);

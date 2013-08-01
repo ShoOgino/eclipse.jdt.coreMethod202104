@@ -21,6 +21,8 @@ private MethodBinding createMethod(IBinaryMethod method, long sourceLevel, char[
 	   variables properly in order to be able to apply substitutions and thus be able to detect
 	   overriding in the presence of generics. Seeing the erased form is not good enough.
 	 */
+	TypeAnnotationWalker walker = (sourceLevel >= ClassFileConstants.JDK1_8 && this.environment.globalOptions.isAnnotationBasedNullAnalysisEnabled) ?
+			TypeAnnotationWalker.create(method) : TypeAnnotationWalker.EMPTY_ANNOTATION_WALKER;
 	char[] methodSignature = method.getGenericSignature(); // always use generic signature, even in 1.4
 	if (methodSignature == null) { // no generics
 		char[] methodDescriptor = method.getMethodDescriptor();   // of the form (I[Ljava/jang/String;)V
@@ -60,7 +62,7 @@ private MethodBinding createMethod(IBinaryMethod method, long sourceLevel, char[
 					while ((nextChar = methodDescriptor[++end]) != Util.C_NAME_END){/*empty*/}
 
 				if (i >= startIndex) {   // skip the synthetic arg if necessary
-					parameters[i - startIndex] = this.environment.getTypeFromSignature(methodDescriptor, index, end, false, this, missingTypeNames);
+					parameters[i - startIndex] = this.environment.getTypeFromSignature(methodDescriptor, index, end, false, this, missingTypeNames, walker.toMethodParameter((short)i));
 					// 'paramAnnotations' line up with 'parameters'
 					// int parameter to method.getParameterAnnotations() include the synthetic arg
 					if (paramAnnotations != null)
@@ -81,7 +83,7 @@ private MethodBinding createMethod(IBinaryMethod method, long sourceLevel, char[
 		}
 
 		if (!method.isConstructor())
-			returnType = this.environment.getTypeFromSignature(methodDescriptor, index + 1, -1, false, this, missingTypeNames);   // index is currently pointing at the ')'
+			returnType = this.environment.getTypeFromSignature(methodDescriptor, index + 1, -1, false, this, missingTypeNames, walker.toMethodReturn());   // index is currently pointing at the ')'
 	} else {
 		methodModifiers |= ExtraCompilerModifiers.AccGenericSignature;
 		// MethodTypeSignature = ParameterPart(optional) '(' TypeSignatures ')' return_typeSignature ['^' TypeSignature (optional)]
@@ -90,18 +92,22 @@ private MethodBinding createMethod(IBinaryMethod method, long sourceLevel, char[
 			// <A::Ljava/lang/annotation/Annotation;>(Ljava/lang/Class<TA;>;)TA;
 			// ParameterPart = '<' ParameterSignature(s) '>'
 			wrapper.start++; // skip '<'
-			typeVars = createTypeVariables(wrapper, false, missingTypeNames);
+			typeVars = createTypeVariables(wrapper, false, missingTypeNames, walker, false/*class*/);
 			wrapper.start++; // skip '>'
 		}
 
+// 		Note(stephan): currently the compiler is not interested in retrieving receiver annotations, here is how we would do it:
+//		IBinaryAnnotation[] receiverAnnotations = walker.toReceiver().getAnnotationsAtCursor();
+		
 		if (wrapper.signature[wrapper.start] == Util.C_PARAM_START) {
 			wrapper.start++; // skip '('
 			if (wrapper.signature[wrapper.start] == Util.C_PARAM_END) {
 				wrapper.start++; // skip ')'
 			} else {
 				java.util.ArrayList types = new java.util.ArrayList(2);
+				short rank = 0;
 				while (wrapper.signature[wrapper.start] != Util.C_PARAM_END)
-					types.add(this.environment.getTypeFromTypeSignature(wrapper, typeVars, this, missingTypeNames));
+					types.add(this.environment.getTypeFromTypeSignature(wrapper, typeVars, this, missingTypeNames, walker.toMethodParameter(rank++)));
 				wrapper.start++; // skip ')'
 				int numParam = types.size();
 				parameters = new TypeBinding[numParam];
@@ -115,14 +121,16 @@ private MethodBinding createMethod(IBinaryMethod method, long sourceLevel, char[
 		}
 
 		// always retrieve return type (for constructors, its V for void - will be ignored)
-		returnType = this.environment.getTypeFromTypeSignature(wrapper, typeVars, this, missingTypeNames);
+		returnType = this.environment.getTypeFromTypeSignature(wrapper, typeVars, this, missingTypeNames, walker.toMethodReturn());
 
 		if (!wrapper.atEnd() && wrapper.signature[wrapper.start] == Util.C_EXCEPTION_START) {
 			// attempt to find each exception if it exists in the cache (otherwise - resolve it when requested)
 			java.util.ArrayList types = new java.util.ArrayList(2);
+			int excRank = 0;
 			do {
 				wrapper.start++; // skip '^'
-				types.add(this.environment.getTypeFromTypeSignature(wrapper, typeVars, this, missingTypeNames));
+				types.add(this.environment.getTypeFromTypeSignature(wrapper, typeVars, this, missingTypeNames,
+					walker.toThrows(excRank++)));
 			} while (!wrapper.atEnd() && wrapper.signature[wrapper.start] == Util.C_EXCEPTION_START);
 			exceptions = new ReferenceBinding[types.size()];
 			types.toArray(exceptions);
