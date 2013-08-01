@@ -1,0 +1,69 @@
+	// 5.1.10
+	public static TypeBinding[] greaterLowerBound(TypeBinding[] types, /*@Nullable*/ Scope scope, LookupEnvironment environment) {
+		if (types == null) return null;
+		int length = types.length;
+		if (length == 0) return null;
+		TypeBinding[] result = types;
+		int removed = 0;
+		for (int i = 0; i < length; i++) {
+			TypeBinding iType = result[i];
+			if (iType == null) continue;
+			for (int j = 0; j < length; j++) {
+				if (i == j) continue;
+				TypeBinding jType = result[j];
+				if (jType == null) continue;
+				if (iType.isCompatibleWith(jType, scope)) { // if Vi <: Vj, Vj is removed
+					if (result == types) { // defensive copy
+						System.arraycopy(result, 0, result = new TypeBinding[length], 0, length);
+					}
+					result[j] = null;
+					removed ++;
+				} else if (!jType.isCompatibleWith(iType, scope)) {
+					// avoid creating unsatisfiable intersection types (see https://bugs.eclipse.org/405706):
+					if (iType.isParameterizedType() && jType.isParameterizedType()) {
+						// if the wider of the two types (judged by originals) has type variables
+						// substitute those with their upper bounds and re-check (see https://bugs.eclipse.org/413958):
+						ParameterizedTypeBinding wideType, narrowType;
+						if (iType.original().isCompatibleWith(jType.original(), scope)) {
+							wideType = (ParameterizedTypeBinding) jType;
+							narrowType = (ParameterizedTypeBinding) iType;
+						} else if (jType.original().isCompatibleWith(iType.original(), scope)) {
+							wideType = (ParameterizedTypeBinding) iType;
+							narrowType = (ParameterizedTypeBinding) jType;
+						} else {
+							continue;
+						}
+						if (wideType.arguments == null)
+							continue; // assume we already have an error here
+						int numTypeArgs = wideType.arguments.length;
+						TypeBinding[] bounds = new TypeBinding[numTypeArgs];
+						for (int k = 0; k < numTypeArgs; k++) {
+							TypeBinding argument = wideType.arguments[k];
+							bounds[k] = argument.isTypeVariable() ? ((TypeVariableBinding)argument).upperBound() : argument;
+						}
+						ReferenceBinding wideOriginal = (ReferenceBinding) wideType.original();
+						TypeBinding substitutedWideType =
+								environment.createParameterizedType(wideOriginal, bounds, wideOriginal.enclosingType());
+						// if the narrow type is compatible with the substituted wide type, we keep silent, 
+						// substituting type variables with proper types can still satisfy all constraints,
+						// otherwise ... 
+						if (!narrowType.isCompatibleWith(substitutedWideType, scope)) {
+							// ... parameterized types are incompatible due to incompatible type arguments => unsatisfiable
+							return null;
+						}
+					}
+				}
+			}
+		}
+		if (removed == 0) return result;
+		if (length == removed) return null; // how is this possible ???
+		TypeBinding[] trimmedResult = new TypeBinding[length - removed];
+		for (int i = 0, index = 0; i < length; i++) {
+			TypeBinding iType = result[i];
+			if (iType != null) {
+				trimmedResult[index++] = iType;
+			}
+		}
+		return trimmedResult;
+	}
+
