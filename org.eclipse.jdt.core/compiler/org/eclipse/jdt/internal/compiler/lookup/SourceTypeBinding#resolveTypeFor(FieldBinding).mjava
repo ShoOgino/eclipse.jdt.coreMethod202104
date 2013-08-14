@@ -2,7 +2,8 @@ public FieldBinding resolveTypeFor(FieldBinding field) {
 	if ((field.modifiers & ExtraCompilerModifiers.AccUnresolved) == 0)
 		return field;
 
-	if (this.scope.compilerOptions().sourceLevel >= ClassFileConstants.JDK1_5) {
+	long sourceLevel = this.scope.compilerOptions().sourceLevel;
+	if (sourceLevel >= ClassFileConstants.JDK1_5) {
 		if ((field.getAnnotationTagBits() & TagBits.AnnotationDeprecated) != 0)
 			field.modifiers |= ClassFileConstants.AccDeprecated;
 	}
@@ -54,6 +55,7 @@ public FieldBinding resolveTypeFor(FieldBinding field) {
 			// apply null default:
 			LookupEnvironment environment = this.scope.environment();
 			if (environment.globalOptions.isAnnotationBasedNullAnalysisEnabled) {
+				// TODO(SH): different strategy for 1.8, or is "repair" below enough?
 				if (fieldDecl.getKind() == AbstractVariableDeclaration.ENUM_CONSTANT) {
 					// enum constants neither have a type declaration nor can they be null
 					field.tagBits |= TagBits.AnnotationNonNull;
@@ -64,6 +66,12 @@ public FieldBinding resolveTypeFor(FieldBinding field) {
 					}
 					// validate null annotation:
 					this.scope.validateNullAnnotation(field.tagBits, fieldDecl.type, fieldDecl.annotations);
+				}
+				if (sourceLevel >= ClassFileConstants.JDK1_8 && field.type instanceof ReferenceBinding) {
+					long nullTagBits = field.tagBits & TagBits.AnnotationNullMASK;
+					if (nullTagBits != 0 && nullTagBits != (field.type.tagBits & TagBits.AnnotationNullMASK))
+						field.type = environment.pushAnnotationIntoType(fieldType, fieldDecl.type, nullTagBits);
+					// do not reset field.tagBits, since more fields may need to share this information ("@NonNull Object o1, o2;")
 				}
 			}
 		} finally {

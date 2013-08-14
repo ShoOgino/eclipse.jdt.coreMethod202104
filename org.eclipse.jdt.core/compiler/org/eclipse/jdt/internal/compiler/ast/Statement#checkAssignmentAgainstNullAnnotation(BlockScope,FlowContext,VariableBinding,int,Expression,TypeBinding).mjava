@@ -2,15 +2,26 @@
 protected int checkAssignmentAgainstNullAnnotation(BlockScope currentScope, FlowContext flowContext,
 												   VariableBinding var, int nullStatus, Expression expression, TypeBinding providedType)
 {
-	int severity = 0;
-	if ((var.tagBits & TagBits.AnnotationNonNull) != 0
-			&& nullStatus != FlowInfo.NON_NULL) {
-		flowContext.recordNullityMismatch(currentScope, expression, providedType, var.type, nullStatus);
+	long lhsTagBits = 0L;
+	boolean hasReported = false;
+	if (currentScope.compilerOptions().sourceLevel < ClassFileConstants.JDK1_8) {
+		lhsTagBits = var.tagBits & TagBits.AnnotationNullMASK;
+	} else {
+		lhsTagBits = var.type.tagBits & TagBits.AnnotationNullMASK;
+		int severity = findNullTypeAnnotationMismatch(var.type, providedType, nullStatus);
+		if (severity == 3) {
+			currentScope.problemReporter().nullityMismatchingTypeAnnotation(expression, providedType, var.type, severity);
+			hasReported = true;
+		} else if (severity == 2) {
+			flowContext.recordNullityMismatch(currentScope, expression, providedType, var.type, nullStatus);
+			hasReported = true;
+		}
+	}
+	if (lhsTagBits == TagBits.AnnotationNonNull && nullStatus != FlowInfo.NON_NULL) {
+		if (!hasReported)
+			flowContext.recordNullityMismatch(currentScope, expression, providedType, var.type, nullStatus);
 		return FlowInfo.NON_NULL;
-	} else if ((severity = findNullTypeAnnotationMismatch(var.type, providedType)) > 0) {
-		currentScope.problemReporter().nullityMismatchingTypeAnnotation(expression, providedType, var.type, severity==1, currentScope.environment());
-	} else if ((var.tagBits & TagBits.AnnotationNullable) != 0
-			&& nullStatus == FlowInfo.UNKNOWN) {	// provided a legacy type?
+	} else if (lhsTagBits == TagBits.AnnotationNullable && nullStatus == FlowInfo.UNKNOWN) {	// provided a legacy type?
 		return FlowInfo.POTENTIALLY_NULL;			// -> use more specific info from the annotation
 	}
 	return nullStatus;

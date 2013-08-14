@@ -40,27 +40,44 @@
 					checkNullSpecInheritance(currentMethod, srcMethod, needToApplyNonNullDefault, complain, currentSuper, scope, inheritedNonNullnessInfos);
 					needToApplyNonNullDefault = false;
 				}
+				long sourceLevel = scope.compilerOptions().sourceLevel;
 				
 				// transfer collected information into currentMethod:
 				InheritedNonNullnessInfo info = inheritedNonNullnessInfos[0];
 				if (!info.complained) {
+					long tagBits = 0;
 					if (info.inheritedNonNullness == Boolean.TRUE) {
-						currentMethod.tagBits |= TagBits.AnnotationNonNull;
+						tagBits = TagBits.AnnotationNonNull;
 					} else if (info.inheritedNonNullness == Boolean.FALSE) {
-						currentMethod.tagBits |= TagBits.AnnotationNullable;
+						tagBits = TagBits.AnnotationNullable;
+					}
+					if (tagBits != 0) {
+						if (sourceLevel < ClassFileConstants.JDK1_8) {
+							currentMethod.tagBits |= tagBits;
+						} else {
+							if (!currentMethod.returnType.isBaseType())
+								currentMethod.returnType = scope.environment()
+										.createAnnotatedType(currentMethod.returnType, tagBits);
+						}
 					}
 				}
 				for (int i=0; i<paramLen; i++) {
 					info = inheritedNonNullnessInfos[i+1];
 					if (!info.complained && info.inheritedNonNullness != null) {
 						Argument currentArg = srcMethod == null ? null : srcMethod.arguments[i];
-						recordArgNonNullness(currentMethod, paramLen, i, currentArg, info.inheritedNonNullness);
+						if (sourceLevel < ClassFileConstants.JDK1_8)
+							recordArgNonNullness(currentMethod, paramLen, i, currentArg, info.inheritedNonNullness);
+						else
+							recordArgNonNullness18(currentMethod, i, currentArg, info.inheritedNonNullness, scope.environment());
 					}
 				}
 
 			}
 			if (needToApplyNonNullDefault) {
-				currentMethod.fillInDefaultNonNullness(srcMethod);
+				if (scope.compilerOptions().sourceLevel < ClassFileConstants.JDK1_8)
+					currentMethod.fillInDefaultNonNullness(srcMethod);
+				else
+					currentMethod.fillInDefaultNonNullness18(srcMethod, scope.environment());
 			}
 		} finally {			
 			currentMethod.tagBits |= TagBits.IsNullnessKnown;

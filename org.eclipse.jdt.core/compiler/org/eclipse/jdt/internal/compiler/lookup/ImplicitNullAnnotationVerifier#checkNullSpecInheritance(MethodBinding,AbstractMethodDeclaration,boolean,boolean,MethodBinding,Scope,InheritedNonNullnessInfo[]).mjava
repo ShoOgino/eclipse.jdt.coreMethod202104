@@ -29,12 +29,11 @@
 			// TODO (stephan): even here we may need to report problems? How to discriminate?
 			this.buddyImplicitNullAnnotationsVerifier.checkImplicitNullAnnotations(inheritedMethod, null, false, scope);
 		}
-		long inheritedBits = inheritedMethod.tagBits;
-		long inheritedNullnessBits = inheritedBits & (TagBits.AnnotationNonNull|TagBits.AnnotationNullable);
-		long currentBits = currentMethod.tagBits;
-		long currentNullnessBits = currentBits & (TagBits.AnnotationNonNull|TagBits.AnnotationNullable);
-		
 		LookupEnvironment environment = scope.environment();
+		boolean useTypeAnnotations = environment.globalOptions.sourceLevel >= ClassFileConstants.JDK1_8;
+		long inheritedNullnessBits = getReturnTypeNullnessTagBits(inheritedMethod, useTypeAnnotations);
+		long currentNullnessBits = getReturnTypeNullnessTagBits(currentMethod, useTypeAnnotations);
+		
 		boolean shouldInherit = this.inheritNullAnnotations;
 
 		// return type:
@@ -56,13 +55,14 @@
 									inheritedMethod, Boolean.valueOf(inheritedNullnessBits == TagBits.AnnotationNonNull), inheritedNonNullnessInfos[0]);
 						} else {
 							// no need to defer, record this info now:
-							currentMethod.tagBits |= inheritedNullnessBits;
+							applyReturnNullBits(currentMethod, inheritedNullnessBits, environment);
 						}	
 						break returnType; // compatible by construction, skip complain phase below
 					}
 				}
 				if (hasNonNullDefault) { // conflict with inheritance already checked
-					currentMethod.tagBits |= (currentNullnessBits = TagBits.AnnotationNonNull); 
+					currentNullnessBits = TagBits.AnnotationNonNull;
+					applyReturnNullBits(currentMethod, currentNullnessBits, environment);
 				}
 			}
 			if (shouldComplain) {
@@ -86,6 +86,8 @@
 		int length = 0;
 		if (currentArguments != null)
 			length = currentArguments.length;
+		if (useTypeAnnotations) // need to look for type annotations on all parameters:
+			length = currentMethod.parameters.length;
 		else if (inheritedMethod.parameterNonNullness != null)
 			length = inheritedMethod.parameterNonNullness.length;
 		else if (currentMethod.parameterNonNullness != null)
@@ -96,10 +98,8 @@
 
 			Argument currentArgument = currentArguments == null 
 										? null : currentArguments[i];
-			Boolean inheritedNonNullNess = (inheritedMethod.parameterNonNullness == null)
-										? null : inheritedMethod.parameterNonNullness[i];
-			Boolean currentNonNullNess = (currentMethod.parameterNonNullness == null)
-										? null : currentMethod.parameterNonNullness[i];
+			Boolean inheritedNonNullNess = getParameterNonNullness(inheritedMethod, i, useTypeAnnotations);
+			Boolean currentNonNullNess = getParameterNonNullness(currentMethod, i, useTypeAnnotations);
 
 			if (currentNonNullNess == null) {
 				// unspecified, may fill in either from super or from default
@@ -120,14 +120,20 @@
 									inheritedMethod, inheritedNonNullNess, inheritedNonNullnessInfos[i+1]);
 						} else {
 							// no need to defer, record this info now:
-							recordArgNonNullness(currentMethod, length, i, currentArgument, inheritedNonNullNess);
+							if (!useTypeAnnotations)
+								recordArgNonNullness(currentMethod, length, i, currentArgument, inheritedNonNullNess);
+							else
+								recordArgNonNullness18(currentMethod, i, currentArgument, inheritedNonNullNess, environment);
 						}
 						continue; // compatible by construction, skip complain phase below
 					}
 				}
 				if (hasNonNullDefault) { // conflict with inheritance already checked
 					currentNonNullNess = Boolean.TRUE;
-					recordArgNonNullness(currentMethod, length, i, currentArgument, Boolean.TRUE);
+					if (!useTypeAnnotations)
+						recordArgNonNullness(currentMethod, length, i, currentArgument, Boolean.TRUE);
+					else
+						recordArgNonNullness18(currentMethod, i, currentArgument, Boolean.TRUE, environment);
 				}
 			}
 			if (shouldComplain) {

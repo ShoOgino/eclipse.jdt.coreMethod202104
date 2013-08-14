@@ -1,0 +1,38 @@
+// return: severity: 0 = no problem; 1 = flow related problem; 2 = unchecked wrt type detail; 3 = conflicting annotations
+protected int findNullTypeAnnotationMismatch(TypeBinding requiredType, TypeBinding providedType, int nullStatus) {
+	int severity = 0;
+	if (requiredType instanceof ArrayBinding) {
+		long[] requiredDimsTagBits = ((ArrayBinding)requiredType).nullTagBitsPerDimension;
+		if (requiredDimsTagBits != null) {
+			int dims = requiredType.dimensions();
+			if (requiredType.dimensions() == providedType.dimensions()) {
+				long[] providedDimsTagBits = ((ArrayBinding)providedType).nullTagBitsPerDimension;
+				if (providedDimsTagBits == null) {
+					severity = 1; // required is annotated, provided not, need unchecked conversion
+				} else {
+					for (int i=0; i<dims; i++) {
+						long requiredBits = requiredDimsTagBits[i] & TagBits.AnnotationNullMASK;
+						long providedBits = providedDimsTagBits[i] & TagBits.AnnotationNullMASK;
+						if (i > 0)
+							nullStatus = 0; // don't use beyond the outermost dimension
+						severity = Math.max(severity, computeNullProblemSeverity(requiredBits, providedBits, nullStatus));
+						if (severity == 3)
+							return severity;
+					}
+				}
+			} else if (providedType.id == TypeIds.T_null) {
+				if (dims > 0 && requiredDimsTagBits[0] == TagBits.AnnotationNonNull)
+					return 1;
+			}
+		}
+	} else if (requiredType instanceof ParameterizedTypeBinding) {
+		long requiredBits = requiredType.tagBits & TagBits.AnnotationNullMASK;
+		if (requiredBits == TagBits.AnnotationNullable)
+			return 0; // accepting anything
+		long providedBits = providedType.tagBits & TagBits.AnnotationNullMASK;
+		severity = computeNullProblemSeverity(requiredBits, providedBits, nullStatus);
+		// TODO(stephan): descend into type parameters
+	}
+	return severity;
+}
+
