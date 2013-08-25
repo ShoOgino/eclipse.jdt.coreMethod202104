@@ -1,10 +1,24 @@
-	public void validateNullAnnotation(long tagBits, TypeReference typeRef, Annotation[] annotations) {
+	public boolean validateNullAnnotation(long tagBits, TypeReference typeRef, Annotation[] annotations) {
 		long nullAnnotationTagBit = tagBits & (TagBits.AnnotationNullMASK);
 		if (nullAnnotationTagBit != 0) {
 			TypeBinding type = typeRef.resolvedType;
 			if (type != null && type.isBaseType()) {
-				problemReporter().illegalAnnotationForBaseType(typeRef, annotations, nullAnnotationTagBit);
+				// type annotations are *always* illegal for 'void' (already reported)
+				if (!(typeRef.resolvedType.id == TypeIds.T_void && compilerOptions().sourceLevel >= ClassFileConstants.JDK1_8))
+					problemReporter().illegalAnnotationForBaseType(typeRef, annotations, nullAnnotationTagBit);
+				return false;
+			}
+			if (annotations != null && typeRef instanceof QualifiedTypeReference) {
+				// illegal @NonNull Outer.Inner:
+				for (int i = 0; i < annotations.length; i++) {
+					int id = annotations[i].resolvedType.id;
+					if (id == TypeIds.T_ConfiguredAnnotationNonNull || id == TypeIds.T_ConfiguredAnnotationNullable) {
+						problemReporter().nullAnnotationUnsupportedLocation(annotations[i]);
+						return false;
+					}
+				}
 			}
 		}
+		return true;
 	}
 
