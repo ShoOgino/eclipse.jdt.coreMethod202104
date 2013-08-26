@@ -1,0 +1,80 @@
+	/**
+	 * @param binding the given method binding
+	 * @return the number of attributes created while dumping he method's parameters in the .class file (0 or 1)
+	 */
+	private int generateMethodParameters(final MethodBinding binding) {
+		
+		int initialContentsOffset = this.contentsOffset;
+		int length = 0; // count of actual parameters
+		
+		AbstractMethodDeclaration methodDeclaration = binding.sourceMethod();
+		
+		boolean isConstructor = binding.isConstructor();
+		TypeBinding[] targetParameters = binding.parameters;
+		if (isConstructor && binding.declaringClass.isEnum()) { // insert String name,int ordinal
+			writeArgumentName(ConstantPool.EnumName, ClassFileConstants.AccSynthetic, 0);
+			writeArgumentName(ConstantPool.EnumOrdinal, ClassFileConstants.AccSynthetic, 1);
+			length = 2;
+		}
+
+		boolean needSynthetics = isConstructor && binding.declaringClass.isNestedType();
+		if (needSynthetics) {
+			// take into account the synthetic argument names
+			ReferenceBinding[] syntheticArgumentTypes = binding.declaringClass.syntheticEnclosingInstanceTypes();
+			if (syntheticArgumentTypes != null) {
+				for (int i = 0, count = syntheticArgumentTypes.length; i < count; i++) {
+					char[] name = CharOperation.concat(
+							TypeConstants.SYNTHETIC_ENCLOSING_INSTANCE_PREFIX,
+							String.valueOf(i).toCharArray()); // cannot use depth, can be identical
+					length = writeArgumentName(name, ClassFileConstants.AccMandated | ClassFileConstants.AccFinal, length);
+				}
+			}
+			if (binding instanceof SyntheticMethodBinding) {
+				targetParameters = ((SyntheticMethodBinding)binding).targetMethod.parameters;
+				methodDeclaration = ((SyntheticMethodBinding)binding).targetMethod.sourceMethod();
+			}
+		}
+		if (targetParameters != Binding.NO_PARAMETERS) {
+			for (int i = 0, max = targetParameters.length; i < max; i++) {
+				if (methodDeclaration != null && methodDeclaration.arguments != null && methodDeclaration.arguments.length > i && methodDeclaration.arguments[i] != null) {
+					Argument argument = methodDeclaration.arguments[i];
+					length = writeArgumentName(argument.name, argument.binding.modifiers, length);
+				} else {
+					length = writeArgumentName(null, ClassFileConstants.AccSynthetic, length);
+				}
+			}
+		}
+		if (needSynthetics) {
+			SyntheticArgumentBinding[] syntheticOuterArguments = binding.declaringClass.syntheticOuterLocalVariables();
+			int count = syntheticOuterArguments == null ? 0 : syntheticOuterArguments.length;
+			for (int i = 0; i < count; i++) {
+				length = writeArgumentName(syntheticOuterArguments[i].name, syntheticOuterArguments[i].modifiers  | ClassFileConstants.AccSynthetic, length);
+			}
+			// move the extra padding arguments of the synthetic constructor invocation to the end
+			for (int i = targetParameters.length, extraLength = binding.parameters.length; i < extraLength; i++) {
+				TypeBinding parameter = binding.parameters[i];
+				length = writeArgumentName(parameter.constantPoolName(), ClassFileConstants.AccSynthetic, length);
+			}
+		}
+
+		if (length > 0) {
+			// so we actually output the parameter
+	 		int attributeLength = 1 + 4 * length; // u1 for count, u2+u2 per parameter
+			if (this.contentsOffset + 6 + attributeLength >= this.contents.length) {
+				resizeContents(6 + attributeLength);
+			}
+			int methodParametersNameIndex = this.constantPool.literalIndex(AttributeNamesConstants.MethodParametersName);
+			this.contents[initialContentsOffset++] = (byte) (methodParametersNameIndex >> 8);
+			this.contents[initialContentsOffset++] = (byte) methodParametersNameIndex;
+			this.contents[initialContentsOffset++] = (byte) (attributeLength >> 24);
+			this.contents[initialContentsOffset++] = (byte) (attributeLength >> 16);
+			this.contents[initialContentsOffset++] = (byte) (attributeLength >> 8);
+			this.contents[initialContentsOffset++] = (byte) attributeLength;
+			this.contents[initialContentsOffset++] = (byte) length;
+			return 1;
+		}
+		else {
+			return 0;
+		}
+	}
+
