@@ -1,0 +1,48 @@
+public WildcardBinding createWildcard(ReferenceBinding genericType, int rank, TypeBinding bound, TypeBinding[] otherBounds, int boundKind, long annotationTagBits) {
+	// cached info is array of already created wildcard  types for this type
+	if (genericType == null) // pseudo wildcard denoting composite bounds for lub computation
+		genericType = ReferenceBinding.LUB_GENERIC;
+	WildcardBinding[] cachedInfo = (WildcardBinding[])this.uniqueWildcardBindings.get(genericType);
+	boolean needToGrow = false;
+	int index = 0;
+	if (cachedInfo != null){
+		nextCachedType :
+			// iterate existing wildcards for reusing one with same information if any
+			for (int max = cachedInfo.length; index < max; index++){
+			    WildcardBinding cachedType = cachedInfo[index];
+			    if (cachedType == null) break nextCachedType;
+			    if (cachedType.genericType != genericType) continue nextCachedType; // remain of unresolved type
+			    if (cachedType.rank != rank) continue nextCachedType;
+			    if ((cachedType.tagBits & TagBits.AnnotationNullMASK) != annotationTagBits) continue nextCachedType;
+			    if (cachedType.boundKind != boundKind) continue nextCachedType;
+			    if (cachedType.bound != bound) continue nextCachedType;
+			    if (cachedType.otherBounds != otherBounds) {
+			    	int cachedLength = cachedType.otherBounds == null ? 0 : cachedType.otherBounds.length;
+			    	int length = otherBounds == null ? 0 : otherBounds.length;
+			    	if (cachedLength != length) continue nextCachedType;
+			    	for (int j = 0; j < length; j++) {
+			    		if (cachedType.otherBounds[j] != otherBounds[j]) continue nextCachedType;
+			    	}
+			    }
+				// all match, reuse current
+				return cachedType;
+		}
+		needToGrow = true;
+	} else {
+		cachedInfo = new WildcardBinding[10];
+		this.uniqueWildcardBindings.put(genericType, cachedInfo);
+	}
+	// grow cache ?
+	int length = cachedInfo.length;
+	if (needToGrow && index == length){
+		System.arraycopy(cachedInfo, 0, cachedInfo = new WildcardBinding[length*2], 0, length);
+		this.uniqueWildcardBindings.put(genericType, cachedInfo);
+	}
+	// add new binding
+	WildcardBinding wildcard = new WildcardBinding(genericType, rank, bound, otherBounds, boundKind, this);
+	if (annotationTagBits != 0)
+		wildcard.tagBits |= annotationTagBits | TagBits.HasNullTypeAnnotation;
+	cachedInfo[index] = wildcard;
+	return wildcard;
+}
+
