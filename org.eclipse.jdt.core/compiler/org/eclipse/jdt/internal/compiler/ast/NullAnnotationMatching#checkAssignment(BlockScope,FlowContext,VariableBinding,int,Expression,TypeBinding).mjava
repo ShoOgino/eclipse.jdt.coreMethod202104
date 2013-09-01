@@ -1,0 +1,29 @@
+	/** Check null-ness of 'var' against a possible null annotation */
+	public static int checkAssignment(BlockScope currentScope, FlowContext flowContext,
+									   VariableBinding var, int nullStatus, Expression expression, TypeBinding providedType)
+	{
+		long lhsTagBits = 0L;
+		boolean hasReported = false;
+		if (currentScope.compilerOptions().sourceLevel < ClassFileConstants.JDK1_8) {
+			lhsTagBits = var.tagBits & TagBits.AnnotationNullMASK;
+		} else {
+			lhsTagBits = var.type.tagBits & TagBits.AnnotationNullMASK;
+			NullAnnotationMatching annotationStatus = analyse(var.type, providedType, nullStatus);
+			if (annotationStatus.isDefiniteMismatch()) {
+				currentScope.problemReporter().nullityMismatchingTypeAnnotation(expression, providedType, var.type, annotationStatus);
+				hasReported = true;
+			} else if (annotationStatus.isUnchecked()) {
+				flowContext.recordNullityMismatch(currentScope, expression, providedType, var.type, nullStatus);
+				hasReported = true;
+			}
+		}
+		if (lhsTagBits == TagBits.AnnotationNonNull && nullStatus != FlowInfo.NON_NULL) {
+			if (!hasReported)
+				flowContext.recordNullityMismatch(currentScope, expression, providedType, var.type, nullStatus);
+			return FlowInfo.NON_NULL;
+		} else if (lhsTagBits == TagBits.AnnotationNullable && nullStatus == FlowInfo.UNKNOWN) {	// provided a legacy type?
+			return FlowInfo.POTENTIALLY_NULL;			// -> use more specific info from the annotation
+		}
+		return nullStatus;
+	}
+
