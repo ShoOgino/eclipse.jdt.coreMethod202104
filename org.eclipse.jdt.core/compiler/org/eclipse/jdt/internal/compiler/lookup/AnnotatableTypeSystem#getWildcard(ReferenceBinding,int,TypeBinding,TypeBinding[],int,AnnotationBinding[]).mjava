@@ -1,0 +1,39 @@
+	public WildcardBinding getWildcard(ReferenceBinding genericType, int rank, TypeBinding bound, TypeBinding[] otherBounds, int boundKind, AnnotationBinding [] annotations) {
+		
+		if (!haveTypeAnnotations(genericType, bound, otherBounds, annotations))
+			return this.unannotatedTypeSystem.getWildcard(genericType, rank, bound, otherBounds, boundKind);
+		
+		if (genericType == null) // pseudo wildcard denoting composite bounds for lub computation
+			genericType = ReferenceBinding.LUB_GENERIC;
+
+		TypeBinding[] cachedInfo = (TypeBinding[]) this.annotatedTypes.get(genericType);
+		int index = 0;
+		if (cachedInfo != null) {
+			for (int max = cachedInfo.length; index < max; index++) {
+				TypeBinding cachedType = cachedInfo[index];
+				if (cachedType == null) 
+					break;
+				if (!cachedType.isWildcard())
+					continue;
+				if (cachedType.rank() != rank || cachedType.boundKind() != boundKind || cachedType.bound() != bound)
+					continue;
+				if (Util.effectivelyEqual(cachedType.additionalBounds(), otherBounds) && Util.effectivelyEqual(cachedType.getTypeAnnotations(), annotations))
+					return (WildcardBinding) cachedType;
+			}
+		} else {
+			this.annotatedTypes.put(genericType, cachedInfo = new TypeBinding[4]);
+		}
+
+		int length = cachedInfo.length;
+		if (index == length) {
+			System.arraycopy(cachedInfo, 0, cachedInfo = new TypeBinding[length * 2], 0, length);
+			this.annotatedTypes.put(genericType, cachedInfo);
+		}
+		// Add the new comer, retaining the same type binding id as the naked type.
+		TypeBinding unannotatedWildcard = this.unannotatedTypeSystem.getWildcard(genericType, rank, bound, otherBounds, boundKind);
+		TypeBinding wildcard = new WildcardBinding(genericType, rank, bound, otherBounds, boundKind, this.environment);
+		wildcard.id = unannotatedWildcard.id;
+		wildcard.setTypeAnnotations(annotations, this.environment.globalOptions.isAnnotationBasedNullAnalysisEnabled);
+		return (WildcardBinding) (cachedInfo[index] = wildcard);
+	}
+

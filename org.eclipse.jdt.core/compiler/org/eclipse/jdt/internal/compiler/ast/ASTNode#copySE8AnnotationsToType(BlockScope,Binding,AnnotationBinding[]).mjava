@@ -1,0 +1,67 @@
+	/** When SE8 annotations feature in SE7 locations, they get attributed to the declared entity. Copy these to the type of the declared entity (field, local, argument etc.)
+	    We leave in the annotation in the declared entity's binding as of now, i.e we do a copy not a transfer.
+	*/
+	public static void copySE8AnnotationsToType(BlockScope scope, Binding recipient, AnnotationBinding[] annotations) {
+		if (annotations != null && recipient.kind() != Binding.TYPE_USE) {
+			AnnotationBinding [] se8Annotations = null;
+			int se8count = 0;
+			for (int i = 0, length = annotations.length; i < length; i++) {
+				final ReferenceBinding annotationType = annotations[i].getAnnotationType();
+				long metaTagBits = annotationType.getAnnotationTagBits();
+				if ((metaTagBits & TagBits.AnnotationForTypeUse) != 0) {
+					if (se8Annotations == null) {
+						se8Annotations = new AnnotationBinding[] { annotations[i] };
+						se8count = 1;
+					} else {
+						System.arraycopy(se8Annotations, 0, se8Annotations = new AnnotationBinding[se8count + 1], 0, se8count);
+						se8Annotations[se8count++] = annotations[i];
+					}
+				}
+			}
+			if (se8Annotations != null) {
+				switch (recipient.kind()) {
+					case Binding.LOCAL:
+						LocalVariableBinding local = (LocalVariableBinding) recipient;
+						if (Annotation.isTypeUseCompatible(local.declaration.type, scope)) { // discard hybrid annotations on package qualified types.
+							local.declaration.bits |= HasTypeAnnotations;
+							final TypeBinding localType = local.type;
+							TypeBinding oldLeafType = localType.leafComponentType();
+							AnnotationBinding [][] goodies = new AnnotationBinding[local.declaration.type.getAnnotatableLevels()][];
+							goodies[0] = se8Annotations;  // @T X.Y.Z local; ==> @T should annotate X
+							TypeBinding newLeafType = scope.environment().createAnnotatedType(oldLeafType, goodies);
+							local.type = localType.isArrayType() ? scope.environment().createArrayType(newLeafType, localType.dimensions(), localType.getTypeAnnotations()) : newLeafType;
+						}
+						break;
+					case Binding.FIELD:
+						FieldBinding field = (FieldBinding) recipient;
+						SourceTypeBinding sourceType = (SourceTypeBinding) field.declaringClass;
+						FieldDeclaration fieldDeclaration = sourceType.scope.referenceContext.declarationOf(field);
+						if (Annotation.isTypeUseCompatible(fieldDeclaration.type, scope)) { // discard hybrid annotations on package qualified types.
+							TypeBinding fieldType = field.type;
+							TypeBinding oldLeafType = fieldType.leafComponentType();
+							AnnotationBinding [][] goodies = new AnnotationBinding[fieldDeclaration.type.getAnnotatableLevels()][];
+							goodies[0] = se8Annotations; // @T X.Y.Z field; ==> @T should annotate X
+							TypeBinding newLeafType = scope.environment().createAnnotatedType(oldLeafType, goodies);
+							field.type = fieldType.isArrayType() ? scope.environment().createArrayType(newLeafType, fieldType.dimensions(), fieldType.getTypeAnnotations()) : newLeafType;
+						}
+						break;
+					case Binding.METHOD:
+						MethodBinding method = (MethodBinding) recipient;
+						if (!method.isConstructor()) {
+							sourceType = (SourceTypeBinding) method.declaringClass;
+							MethodDeclaration methodDecl = (MethodDeclaration) sourceType.scope.referenceContext.declarationOf(method);
+							if (Annotation.isTypeUseCompatible(methodDecl.returnType, scope)) {
+								final TypeBinding returnType = method.returnType;
+								TypeBinding oldLeafType = returnType.leafComponentType();
+								AnnotationBinding [][] goodies = new AnnotationBinding[methodDecl.returnType.getAnnotatableLevels()][];
+								goodies[0] = se8Annotations;
+								TypeBinding newLeafType = scope.environment().createAnnotatedType(oldLeafType, goodies);
+								method.returnType = returnType.isArrayType() ? scope.environment().createArrayType(newLeafType, returnType.dimensions(), returnType.getTypeAnnotations()) : newLeafType;
+							}
+						}
+						break;
+				}
+			}
+		}
+	}
+

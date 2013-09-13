@@ -1,8 +1,13 @@
 public MethodBinding resolveTypesFor(MethodBinding method) {
+	
+	if (this != this.prototype)
+		return this.prototype.resolveTypesFor(method);
+	
 	if ((method.modifiers & ExtraCompilerModifiers.AccUnresolved) == 0)
 		return method;
 
-	if (this.scope.compilerOptions().sourceLevel >= ClassFileConstants.JDK1_5) {
+	final long sourceLevel = this.scope.compilerOptions().sourceLevel;
+	if (sourceLevel >= ClassFileConstants.JDK1_5) {
 		if ((method.getAnnotationTagBits() & TagBits.AnnotationDeprecated) != 0)
 			method.modifiers |= ClassFileConstants.AccDeprecated;
 	}
@@ -104,7 +109,7 @@ public MethodBinding resolveTypesFor(MethodBinding method) {
 	}
 
 	// https://bugs.eclipse.org/bugs/show_bug.cgi?id=337799
-	if (this.scope.compilerOptions().sourceLevel >= ClassFileConstants.JDK1_7) {
+	if (sourceLevel >= ClassFileConstants.JDK1_7) {
 		if ((method.tagBits & TagBits.AnnotationSafeVarargs) != 0) {
 			if (!method.isVarargs()) {
 				methodDecl.scope.problemReporter().safeVarargsOnFixedArityMethod(method);
@@ -148,6 +153,12 @@ public MethodBinding resolveTypesFor(MethodBinding method) {
 					method.tagBits |= TagBits.HasMissingType;
 				}
 				method.returnType = methodType;
+				if (sourceLevel >= ClassFileConstants.JDK1_8) {
+					AnnotationBinding [] annotations = method.getAnnotations();
+					if (annotations != null && annotations != Binding.NO_ANNOTATIONS) {
+						ASTNode.copySE8AnnotationsToType(methodDecl.scope, method, annotations);
+					}
+				}
 				TypeBinding leafType = methodType.leafComponentType();
 				if (leafType instanceof ReferenceBinding && (((ReferenceBinding) leafType).modifiers & ExtraCompilerModifiers.AccGenericSignature) != 0)
 					method.modifiers |= ExtraCompilerModifiers.AccGenericSignature;
@@ -178,10 +189,7 @@ public MethodBinding resolveTypesFor(MethodBinding method) {
 				} else {
 					if (nullTagBits != (method.returnType.tagBits & TagBits.AnnotationNullMASK)) {
 						if (!this.scope.validateNullAnnotation(nullTagBits, returnTypeRef, methodDecl.annotations)) {
-							method.returnType = method.returnType.unannotated();
-						} else {
-							// annotation was mistakenly associated to the method, create the annotated type now:
-							method.returnType = this.scope.environment().createAnnotatedType(method.returnType, nullTagBits);
+							method.returnType.tagBits &= ~TagBits.AnnotationNullMASK;
 						}
 						method.tagBits &= ~TagBits.AnnotationNullMASK;
 					}

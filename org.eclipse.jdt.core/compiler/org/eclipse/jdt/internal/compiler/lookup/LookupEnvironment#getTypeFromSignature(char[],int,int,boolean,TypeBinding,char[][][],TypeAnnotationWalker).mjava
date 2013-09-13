@@ -13,11 +13,19 @@ TypeBinding getTypeFromSignature(char[] signature, int start, int end, boolean i
 		dimension++;
 	}
 	// null annotations on dimensions?
-	long[] annotationTagBitsOnDimensions = null;
+	AnnotationBinding [][] annotationsOnDimensions = null;
 	if (dimension > 0 && walker != TypeAnnotationWalker.EMPTY_ANNOTATION_WALKER) {
-		annotationTagBitsOnDimensions = getAnnotationTagBitsOnDimensions(dimension, walker);
+		for (int i = 0; i < dimension; i++) {
+			AnnotationBinding [] annotations = BinaryTypeBinding.createAnnotations(walker.getAnnotationsAtCursor(), this, missingTypeNames);
+			if (annotations != Binding.NO_ANNOTATIONS) { 
+				if (annotationsOnDimensions == null)
+					annotationsOnDimensions = new AnnotationBinding[dimension][];
+					annotationsOnDimensions[i] = annotations;
+			}
+			walker = walker.toNextArrayDimension();
+		}
 	}
-
+	
 	if (end == -1)
 		end = signature.length - 1;
 
@@ -57,26 +65,23 @@ TypeBinding getTypeFromSignature(char[] signature, int start, int end, boolean i
 				// will never reach here, since error will cause abort
 		}
 	} else {
-		ReferenceBinding refType = getTypeFromConstantPoolName(signature, start + 1, end, isParameterized, missingTypeNames); // skip leading 'L' or 'T'
-		int depth = refType.depth();
-		while (depth > 0 && walker != TypeAnnotationWalker.EMPTY_ANNOTATION_WALKER) {
-			walker = walker.toNextNestedType();
-			depth--;
-		}
-		long tagBits = typeAnnotationsToTagBits(walker.getAnnotationsAtCursor());
-		if (tagBits != 0 && annotationTagBitsOnDimensions == null) {
-			binding = createAnnotatedType(refType, tagBits);
-		} else {
-			if (annotationTagBitsOnDimensions != null)
-				annotationTagBitsOnDimensions[dimension] = tagBits; // insert leaf type into array
-			binding = refType;
-		}
+		binding = getTypeFromConstantPoolName(signature, start + 1, end, isParameterized, missingTypeNames); // skip leading 'L' or 'T'
 	}
-
-	if (dimension == 0)
-		return binding;
-	if (annotationTagBitsOnDimensions != null)
-		return createArrayType(binding, dimension, annotationTagBitsOnDimensions);
-	return createArrayType(binding, dimension);
+	
+	int depth = binding.depth();
+	while (depth > 0 && walker != TypeAnnotationWalker.EMPTY_ANNOTATION_WALKER) { // we are dropping annotations on enclosing types.
+		walker = walker.toNextNestedType();
+		depth--;
+	}
+	AnnotationBinding [][] annotations = new AnnotationBinding[depth + 1][];
+	annotations[depth] = BinaryTypeBinding.createAnnotations(walker.getAnnotationsAtCursor(), this, missingTypeNames);
+	
+	if (annotations[depth] != null && annotations[depth] != Binding.NO_ANNOTATIONS)
+		binding = createAnnotatedType(binding, annotations);
+	
+	if (dimension != 0)
+		binding =  this.typeSystem.getArrayType(binding, dimension, AnnotatableTypeSystem.flattenedAnnotations(annotationsOnDimensions));
+	
+	return binding;
 }
 

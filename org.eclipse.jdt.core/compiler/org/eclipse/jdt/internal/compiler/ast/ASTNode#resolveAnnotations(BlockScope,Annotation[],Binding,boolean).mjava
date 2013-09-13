@@ -1,0 +1,158 @@
+	/**
+	 * Resolve annotations, and check duplicates, answers combined tagBits
+	 * for recognized standard annotations. Return null if nothing new is
+	 * resolved.
+	 */
+	public static AnnotationBinding [] resolveAnnotations(BlockScope scope, Annotation[] sourceAnnotations, Binding recipient, boolean copySE8AnnotationsToType) {
+		AnnotationBinding[] annotations = null;
+		int length = sourceAnnotations == null ? 0 : sourceAnnotations.length;
+		if (recipient != null) {
+			switch (recipient.kind()) {
+				case Binding.PACKAGE :
+					PackageBinding packageBinding = (PackageBinding) recipient;
+					if ((packageBinding.tagBits & TagBits.AnnotationResolved) != 0) return annotations;
+					packageBinding.tagBits |= (TagBits.AnnotationResolved | TagBits.DeprecatedAnnotationResolved);
+					break;
+				case Binding.TYPE :
+				case Binding.GENERIC_TYPE :
+					ReferenceBinding type = (ReferenceBinding) recipient;
+					if ((type.tagBits & TagBits.AnnotationResolved) != 0) return annotations;
+					type.tagBits |= (TagBits.AnnotationResolved | TagBits.DeprecatedAnnotationResolved);
+					if (length > 0) {
+						annotations = new AnnotationBinding[length];
+						type.setAnnotations(annotations);
+					}
+					break;
+				case Binding.METHOD :
+					MethodBinding method = (MethodBinding) recipient;
+					if ((method.tagBits & TagBits.AnnotationResolved) != 0) return annotations;
+					method.tagBits |= (TagBits.AnnotationResolved | TagBits.DeprecatedAnnotationResolved);
+					if (length > 0) {
+						annotations = new AnnotationBinding[length];
+						method.setAnnotations(annotations);
+					}
+					break;
+				case Binding.FIELD :
+					FieldBinding field = (FieldBinding) recipient;
+					if ((field.tagBits & TagBits.AnnotationResolved) != 0) return annotations;
+					field.tagBits |= (TagBits.AnnotationResolved | TagBits.DeprecatedAnnotationResolved);
+					if (length > 0) {
+						annotations = new AnnotationBinding[length];
+						field.setAnnotations(annotations);
+					}
+					break;
+				case Binding.LOCAL :
+					LocalVariableBinding local = (LocalVariableBinding) recipient;
+					if ((local.tagBits & TagBits.AnnotationResolved) != 0) return annotations;
+					local.tagBits |= (TagBits.AnnotationResolved | TagBits.DeprecatedAnnotationResolved);
+					if (length > 0) {
+						annotations = new AnnotationBinding[length];
+						local.setAnnotations(annotations, scope);
+					}
+					break;
+				case Binding.TYPE_PARAMETER :
+				case Binding.TYPE_USE :
+					// deliberately don't set the annotation resolved tagbits, it is not material and also we are working with a dummy static object.
+					annotations = new AnnotationBinding[length];
+					break;
+				default :
+					return annotations;
+			}
+		}
+		if (sourceAnnotations == null)
+			return annotations;
+		for (int i = 0; i < length; i++) {
+			Annotation annotation = sourceAnnotations[i];
+			final Binding annotationRecipient = annotation.recipient;
+			if (annotationRecipient != null && recipient != null) {
+				// only local and field can share annnotations
+				switch (recipient.kind()) {
+					case Binding.FIELD :
+						FieldBinding field = (FieldBinding) recipient;
+						field.tagBits = ((FieldBinding) annotationRecipient).tagBits;
+						if (annotations != null) {
+							// need to fill the instances array
+							for (int j = 0; j < length; j++) {
+								Annotation annot = sourceAnnotations[j];
+								annotations[j] = annot.getCompilerAnnotation();
+							}
+						}
+						break;
+					case Binding.LOCAL :
+						LocalVariableBinding local = (LocalVariableBinding) recipient;
+						long otherLocalTagBits = ((LocalVariableBinding) annotationRecipient).tagBits;
+						local.tagBits = otherLocalTagBits;
+						if ((otherLocalTagBits & TagBits.AnnotationSuppressWarnings) == 0) {
+							// None of the annotations is a SuppressWarnings annotation
+							// need to fill the instances array
+							if (annotations != null) {
+								for (int j = 0; j < length; j++) {
+									Annotation annot = sourceAnnotations[j];
+									annotations[j] = annot.getCompilerAnnotation();
+								}
+							}
+						} else if (annotations != null) {
+							// One of the annotations at least is a SuppressWarnings annotation
+							LocalDeclaration localDeclaration = local.declaration;
+							int declarationSourceEnd = localDeclaration.declarationSourceEnd;
+							int declarationSourceStart = localDeclaration.declarationSourceStart;
+							for (int j = 0; j < length; j++) {
+								Annotation annot = sourceAnnotations[j];
+								/*
+								 * Annotations are shared between two locals, but we still need to record
+								 * the suppress annotation range for the second local
+								 */
+								AnnotationBinding annotationBinding = annot.getCompilerAnnotation();
+								annotations[j] = annotationBinding;
+								if (annotationBinding != null) {
+									final ReferenceBinding annotationType = annotationBinding.getAnnotationType();
+									if (annotationType != null && annotationType.id == TypeIds.T_JavaLangSuppressWarnings) {
+										annot.recordSuppressWarnings(scope, declarationSourceStart, declarationSourceEnd, scope.compilerOptions().suppressWarnings);
+									}
+								}
+							}
+						}
+						break;
+				}
+				return annotations;
+			} else {
+				annotation.recipient = recipient;
+				annotation.resolveType(scope);
+				// null if receiver is a package binding
+				if (annotations != null) {
+					annotations[i] = annotation.getCompilerAnnotation();
+				}
+			}
+		}
+
+		if (copySE8AnnotationsToType)
+			copySE8AnnotationsToType(scope, recipient, annotations);
+		
+		// check duplicate annotations
+		if (annotations != null && length > 1) {
+			AnnotationBinding[] distinctAnnotations = annotations; // only copy after 1st duplicate is detected
+			for (int i = 0; i < length; i++) {
+				AnnotationBinding annotation = distinctAnnotations[i];
+				if (annotation == null) continue;
+				TypeBinding annotationType = annotation.getAnnotationType();
+				boolean foundDuplicate = false;
+				for (int j = i+1; j < length; j++) {
+					AnnotationBinding otherAnnotation = distinctAnnotations[j];
+					if (otherAnnotation == null) continue;
+					if (otherAnnotation.getAnnotationType() == annotationType) {
+						foundDuplicate = true;
+						if (distinctAnnotations == annotations) {
+							System.arraycopy(distinctAnnotations, 0, distinctAnnotations = new AnnotationBinding[length], 0, length);
+						}
+						distinctAnnotations[j] = null; // report it only once
+						scope.problemReporter().duplicateAnnotation(sourceAnnotations[j]);
+					}
+				}
+				if (foundDuplicate) {
+					scope.problemReporter().duplicateAnnotation(sourceAnnotations[i]);
+				}
+			}
+		}
+		return annotations;
+	}
+
