@@ -1,20 +1,31 @@
 	/** When SE8 annotations feature in SE7 locations, they get attributed to the declared entity. Copy these to the type of the declared entity (field, local, argument etc.)
 	    We leave in the annotation in the declared entity's binding as of now, i.e we do a copy not a transfer.
 	*/
-	public static void copySE8AnnotationsToType(BlockScope scope, Binding recipient, AnnotationBinding[] annotations) {
+	public static void copySE8AnnotationsToType(BlockScope scope, Binding recipient, Annotation[] annotations) {
 		if (annotations != null && recipient.kind() != Binding.TYPE_USE) {
 			AnnotationBinding [] se8Annotations = null;
 			int se8count = 0;
+			long se8nullBits = 0;
+			Annotation se8NullAnnotation = null;
 			for (int i = 0, length = annotations.length; i < length; i++) {
-				final ReferenceBinding annotationType = annotations[i].getAnnotationType();
+				AnnotationBinding annotation = annotations[i].getCompilerAnnotation();
+				if (annotation == null) continue;
+				final ReferenceBinding annotationType = annotation.getAnnotationType();
 				long metaTagBits = annotationType.getAnnotationTagBits();
 				if ((metaTagBits & TagBits.AnnotationForTypeUse) != 0) {
 					if (se8Annotations == null) {
-						se8Annotations = new AnnotationBinding[] { annotations[i] };
+						se8Annotations = new AnnotationBinding[] { annotation };
 						se8count = 1;
 					} else {
 						System.arraycopy(se8Annotations, 0, se8Annotations = new AnnotationBinding[se8count + 1], 0, se8count);
-						se8Annotations[se8count++] = annotations[i];
+						se8Annotations[se8count++] = annotation;
+					}
+					if (annotationType.id == TypeIds.T_ConfiguredAnnotationNonNull) {
+						se8nullBits = TagBits.AnnotationNonNull;
+						se8NullAnnotation = annotations[i];
+					} else if (annotationType.id == TypeIds.T_ConfiguredAnnotationNullable) {
+						se8nullBits = TagBits.AnnotationNullable;
+						se8NullAnnotation = annotations[i];
 					}
 				}
 			}
@@ -25,6 +36,10 @@
 						if (Annotation.isTypeUseCompatible(local.declaration.type, scope)) { // discard hybrid annotations on package qualified types.
 							local.declaration.bits |= HasTypeAnnotations;
 							final TypeBinding localType = local.type;
+							long prevNullBits = localType.tagBits & TagBits.AnnotationNullMASK;
+							if (se8nullBits != 0 && prevNullBits != se8nullBits && ((prevNullBits | se8nullBits) == TagBits.AnnotationNullMASK)) {
+								scope.problemReporter().contradictoryNullAnnotations(se8NullAnnotation);
+							}
 							TypeBinding oldLeafType = localType.leafComponentType();
 							AnnotationBinding [][] goodies = new AnnotationBinding[local.declaration.type.getAnnotatableLevels()][];
 							goodies[0] = se8Annotations;  // @T X.Y.Z local; ==> @T should annotate X
@@ -38,6 +53,10 @@
 						FieldDeclaration fieldDeclaration = sourceType.scope.referenceContext.declarationOf(field);
 						if (Annotation.isTypeUseCompatible(fieldDeclaration.type, scope)) { // discard hybrid annotations on package qualified types.
 							TypeBinding fieldType = field.type;
+							long prevNullBits = fieldType.tagBits & TagBits.AnnotationNullMASK;
+							if (se8nullBits != 0 && prevNullBits != se8nullBits && ((prevNullBits | se8nullBits) == TagBits.AnnotationNullMASK)) {
+								scope.problemReporter().contradictoryNullAnnotations(se8NullAnnotation);
+							}
 							TypeBinding oldLeafType = fieldType.leafComponentType();
 							AnnotationBinding [][] goodies = new AnnotationBinding[fieldDeclaration.type.getAnnotatableLevels()][];
 							goodies[0] = se8Annotations; // @T X.Y.Z field; ==> @T should annotate X
@@ -52,6 +71,10 @@
 							MethodDeclaration methodDecl = (MethodDeclaration) sourceType.scope.referenceContext.declarationOf(method);
 							if (Annotation.isTypeUseCompatible(methodDecl.returnType, scope)) {
 								final TypeBinding returnType = method.returnType;
+								long prevNullBits = returnType.tagBits & TagBits.AnnotationNullMASK;
+								if (se8nullBits != 0 && prevNullBits != se8nullBits && ((prevNullBits | se8nullBits) == TagBits.AnnotationNullMASK)) {
+									scope.problemReporter().contradictoryNullAnnotations(se8NullAnnotation);
+								}
 								TypeBinding oldLeafType = returnType.leafComponentType();
 								AnnotationBinding [][] goodies = new AnnotationBinding[methodDecl.returnType.getAnnotatableLevels()][];
 								goodies[0] = se8Annotations;
