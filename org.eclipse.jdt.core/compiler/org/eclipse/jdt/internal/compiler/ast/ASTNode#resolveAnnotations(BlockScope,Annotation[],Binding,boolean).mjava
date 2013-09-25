@@ -131,25 +131,47 @@
 		// check duplicate annotations
 		if (annotations != null && length > 1) {
 			AnnotationBinding[] distinctAnnotations = annotations; // only copy after 1st duplicate is detected
+			Map implicitContainerAnnotations = null;
 			for (int i = 0; i < length; i++) {
 				AnnotationBinding annotation = distinctAnnotations[i];
 				if (annotation == null) continue;
-				TypeBinding annotationType = annotation.getAnnotationType();
+				ReferenceBinding annotationType = annotation.getAnnotationType();
 				boolean foundDuplicate = false;
 				for (int j = i+1; j < length; j++) {
 					AnnotationBinding otherAnnotation = distinctAnnotations[j];
 					if (otherAnnotation == null) continue;
 					if (otherAnnotation.getAnnotationType() == annotationType) {
-						foundDuplicate = true;
-						if (distinctAnnotations == annotations) {
-							System.arraycopy(distinctAnnotations, 0, distinctAnnotations = new AnnotationBinding[length], 0, length);
+						if (annotationType.isRepeatableAnnotation()) {
+							ReferenceBinding resolvedContainer = annotationType.resolveContainerAnnotation();
+							if (resolvedContainer != null) {
+								// Since this is a repeated annotation, we need to check if the container is also used - so store it
+								// in a map of (container's ReferenceBinding -> the repeated source Annotation)
+								if (implicitContainerAnnotations == null) implicitContainerAnnotations = new HashMap(3);
+								implicitContainerAnnotations.put(resolvedContainer, sourceAnnotations[i]);
+								Annotation.checkAnnotationContainerTarget(sourceAnnotations[i], scope, annotationType, resolvedContainer);
+							}
+						} else {
+							foundDuplicate = true;
+							if (distinctAnnotations == annotations) {
+								System.arraycopy(distinctAnnotations, 0, distinctAnnotations = new AnnotationBinding[length], 0, length);
+							}
+							distinctAnnotations[j] = null; // report it only once
+							scope.problemReporter().duplicateAnnotation(sourceAnnotations[j], scope.compilerOptions().sourceLevel);
 						}
-						distinctAnnotations[j] = null; // report it only once
-						scope.problemReporter().duplicateAnnotation(sourceAnnotations[j]);
 					}
 				}
 				if (foundDuplicate) {
-					scope.problemReporter().duplicateAnnotation(sourceAnnotations[i]);
+					scope.problemReporter().duplicateAnnotation(sourceAnnotations[i], scope.compilerOptions().sourceLevel);
+				}
+			}
+			if (implicitContainerAnnotations != null) {
+				for (int i = 0; i < length; i++) {
+					if (distinctAnnotations[i] == null) continue;
+					Annotation annotation = sourceAnnotations[i];
+					ReferenceBinding annotationType = distinctAnnotations[i].getAnnotationType();
+					if (implicitContainerAnnotations.containsKey(annotationType)) {
+						scope.problemReporter().repeatedAnnotationWithContainer((Annotation) implicitContainerAnnotations.get(annotationType), annotation);
+					}
 				}
 			}
 		}
