@@ -1,32 +1,35 @@
 	/* This method replaces the version that used to sit in LE. The parameter `annotations' is a flattened sequence of annotations, 
 	   where each dimension's annotations end with a sentinel null.
 	*/
-	public ArrayBinding getArrayType(TypeBinding leafType, int dimensions, AnnotationBinding [] annotations) {
+	public ArrayBinding getArrayType(TypeBinding leafComponentType, int dimensions, AnnotationBinding [] annotations) {
 		
-		if (!haveTypeAnnotations(leafType, annotations))
-			return this.unannotatedTypeSystem.getArrayType(leafType, dimensions);
+		if (!haveTypeAnnotations(leafComponentType, annotations))
+			return this.unannotatedTypeSystem.getArrayType(leafComponentType, dimensions);
 		
-		TypeBinding[] cachedInfo = (TypeBinding[]) this.annotatedTypes.get(leafType);
+		//  Leaf component type can be an annotated type.
+		TypeBinding keyType = getUnannotatedType(leafComponentType);
+		TypeBinding[] cachedInfo = (TypeBinding[]) this.annotatedTypes.get(keyType);  // unannotated key promotes better instance sharing.
 		int index = 0;
 		if (cachedInfo != null) {
 			for (int max = cachedInfo.length; index < max; index++) {
 				TypeBinding cachedType = cachedInfo[index];
 				if (cachedType == null) break;
+				if (cachedType.leafComponentType() != leafComponentType) continue;
 				if (cachedType.isArrayType() && cachedType.dimensions() == dimensions && Util.effectivelyEqual(cachedType.getTypeAnnotations(), annotations)) 
 					return (ArrayBinding) cachedType;
 			}
 		} else {
-			this.annotatedTypes.put(leafType, cachedInfo = new TypeBinding[4]);
+			this.annotatedTypes.put(keyType, cachedInfo = new TypeBinding[4]);
 		}
 		
 		int length = cachedInfo.length;
 		if (index == length) {
 			System.arraycopy(cachedInfo, 0, cachedInfo = new TypeBinding[length * 2], 0, length);
-			this.annotatedTypes.put(leafType, cachedInfo);
+			this.annotatedTypes.put(keyType, cachedInfo);
 		}
 		// Add the newcomer, ensuring its identity is the same as the naked version of it.
-		ArrayBinding unannotatedArrayType = this.unannotatedTypeSystem.getArrayType(leafType, dimensions);
-		TypeBinding arrayBinding = new ArrayBinding(leafType, dimensions, this.environment);
+		ArrayBinding unannotatedArrayType = this.unannotatedTypeSystem.getArrayType(leafComponentType, dimensions);
+		TypeBinding arrayBinding = new ArrayBinding(leafComponentType, dimensions, this.environment);
 		arrayBinding.id = unannotatedArrayType.id;
 		arrayBinding.setTypeAnnotations(annotations, this.environment.globalOptions.isAnnotationBasedNullAnalysisEnabled);
 		return (ArrayBinding) (cachedInfo[index] = arrayBinding);
