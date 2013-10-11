@@ -1,37 +1,29 @@
 	/* This method replaces the version that used to sit in LE. The parameter `annotations' is a flattened sequence of annotations, 
-	   where each dimension's annotations end with a sentinel null.
+	   where each dimension's annotations end with a sentinel null. Leaf type can be an already annotated type.
 	*/
-	public ArrayBinding getArrayType(TypeBinding leafComponentType, int dimensions, AnnotationBinding [] annotations) {
+	public ArrayBinding getArrayType(TypeBinding leafType, int dimensions, AnnotationBinding [] annotations) {
 		
-		if (!haveTypeAnnotations(leafComponentType, annotations))
-			return this.unannotatedTypeSystem.getArrayType(leafComponentType, dimensions);
-		
-		//  Leaf component type can be an annotated type.
-		TypeBinding keyType = getUnannotatedType(leafComponentType);
-		TypeBinding[] cachedInfo = (TypeBinding[]) this.annotatedTypes.get(keyType);  // unannotated key promotes better instance sharing.
-		int index = 0;
-		if (cachedInfo != null) {
-			for (int max = cachedInfo.length; index < max; index++) {
-				TypeBinding cachedType = cachedInfo[index];
-				if (cachedType == null) break;
-				if (cachedType.leafComponentType() != leafComponentType) continue;
-				if (cachedType.isArrayType() && cachedType.dimensions() == dimensions && Util.effectivelyEqual(cachedType.getTypeAnnotations(), annotations)) 
-					return (ArrayBinding) cachedType;
-			}
-		} else {
-			this.annotatedTypes.put(keyType, cachedInfo = new TypeBinding[4]);
+		ArrayBinding nakedType = null;
+		TypeBinding[] derivedTypes = getDerivedTypes(leafType);
+		for (int i = 0, length = derivedTypes.length; i < length; i++) {
+			TypeBinding derivedType = derivedTypes[i];
+			if (derivedType == null) break;
+			if (!derivedType.isArrayType() || derivedType.dimensions() != dimensions || derivedType.leafComponentType() != leafType)
+				continue;
+			if (Util.effectivelyEqual(derivedType.getTypeAnnotations(), annotations)) 
+				return (ArrayBinding) derivedType;
+			if (!derivedType.hasTypeAnnotations())
+				nakedType = (ArrayBinding) derivedType;
 		}
+		if (nakedType == null)
+			nakedType = super.getArrayType(leafType, dimensions);
 		
-		int length = cachedInfo.length;
-		if (index == length) {
-			System.arraycopy(cachedInfo, 0, cachedInfo = new TypeBinding[length * 2], 0, length);
-			this.annotatedTypes.put(keyType, cachedInfo);
-		}
-		// Add the newcomer, ensuring its identity is the same as the naked version of it.
-		ArrayBinding unannotatedArrayType = this.unannotatedTypeSystem.getArrayType(leafComponentType, dimensions);
-		TypeBinding arrayBinding = new ArrayBinding(leafComponentType, dimensions, this.environment);
-		arrayBinding.id = unannotatedArrayType.id;
-		arrayBinding.setTypeAnnotations(annotations, this.environment.globalOptions.isAnnotationBasedNullAnalysisEnabled);
-		return (ArrayBinding) (cachedInfo[index] = arrayBinding);
+		if (!haveTypeAnnotations(leafType, annotations))
+			return nakedType;
+
+		ArrayBinding arrayType = new ArrayBinding(leafType, dimensions, this.environment);
+		arrayType.id = nakedType.id;
+		arrayType.setTypeAnnotations(annotations, this.isAnnotationBasedNullAnalysisEnabled);
+		return (ArrayBinding) cacheDerivedType(leafType, nakedType, arrayType);
 	}
 

@@ -1,0 +1,76 @@
+	/* Private subroutine for public APIs. Create an annotated version of the type. To materialize the annotated version, we can't use new since 
+	   this is a general purpose method designed to deal type bindings of all types. "Clone" the incoming type, specializing for any enclosing type 
+	   that may itself be possibly be annotated. This is so the binding for @Outer Outer.Inner != Outer.@Inner Inner != @Outer Outer.@Inner Inner. 
+	   Likewise so the bindings for @Readonly List<@NonNull String> != @Readonly List<@Nullable String> != @Readonly List<@Interned String> 
+	*/
+	private TypeBinding getAnnotatedType(TypeBinding type, TypeBinding enclosingType, AnnotationBinding[] annotations) {
+		TypeBinding nakedType = null;
+		TypeBinding[] derivedTypes = getDerivedTypes(type);
+		for (int i = 0, length = derivedTypes.length; i < length; i++) {
+			TypeBinding derivedType = derivedTypes[i];
+			if (derivedType == null) break;
+			
+			if (derivedType.enclosingType() != enclosingType || !Util.effectivelyEqual(derivedType.typeArguments(), type.typeArguments()))
+				continue;
+			
+			switch(type.kind()) {
+				case Binding.ARRAY_TYPE:
+					if (!derivedType.isArrayType() || derivedType.dimensions() != type.dimensions() || derivedType.leafComponentType() != type.leafComponentType())
+						continue;
+					break;
+				case Binding.PARAMETERIZED_TYPE:
+					if (!derivedType.isParameterizedType() || derivedType.actualType() != type.actualType())
+						continue;
+					break;
+				case Binding.RAW_TYPE:
+					if (!derivedType.isRawType() || derivedType.actualType() != type.actualType())
+						continue;
+					break;
+				case Binding.WILDCARD_TYPE:
+					if (!derivedType.isWildcard() || derivedType.actualType() != type.actualType() || derivedType.rank() != type.rank() || derivedType.boundKind() != type.boundKind())
+						continue;
+					if (derivedType.bound() != type.bound() || !Util.effectivelyEqual(derivedType.additionalBounds(), type.additionalBounds()))
+						continue;
+					break;
+				default:
+					switch(derivedType.kind()) {
+						case Binding.ARRAY_TYPE:
+						case Binding.PARAMETERIZED_TYPE:
+						case Binding.RAW_TYPE:
+						case Binding.WILDCARD_TYPE:
+							continue;
+					}
+					break;
+			}
+			if (Util.effectivelyEqual(derivedType.getTypeAnnotations(), annotations)) {
+				return derivedType;
+			}
+			if (!derivedType.hasTypeAnnotations())
+				nakedType = derivedType;
+		}
+		if (nakedType == null)
+			nakedType = getUnannotatedType(type);
+		
+		if (!haveTypeAnnotations(type, enclosingType, null, annotations))
+			return nakedType;
+		
+		TypeBinding annotatedType = type.clone(enclosingType);
+		annotatedType.id = nakedType.id;
+		annotatedType.setTypeAnnotations(annotations, this.isAnnotationBasedNullAnalysisEnabled);
+		TypeBinding keyType;
+		switch (type.kind()) {
+			case Binding.ARRAY_TYPE:
+				keyType = type.leafComponentType();
+				break;
+			case Binding.PARAMETERIZED_TYPE:
+			case Binding.RAW_TYPE:
+			case Binding.WILDCARD_TYPE:
+				keyType = type.actualType();
+				break;
+			default:
+				keyType = nakedType;
+				break;
+		}
+		return cacheDerivedType(keyType, nakedType, annotatedType);
+	}
+

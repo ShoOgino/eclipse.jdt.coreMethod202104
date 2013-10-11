@@ -1,2 +1,37 @@
-	public abstract ParameterizedTypeBinding getParameterizedType (ReferenceBinding genericType, TypeBinding[] typeArguments, ReferenceBinding enclosingType);
+	/* Note: parameters will not have type type annotations if lookup environment directly uses TypeSystem. When AnnotatableTypeSystem is in use
+	   they may and we need to materialize the unannotated versions and work on them.
+	*/ 
+	public ParameterizedTypeBinding getParameterizedType(ReferenceBinding genericType, TypeBinding[] typeArguments, ReferenceBinding enclosingType) {
+		ReferenceBinding unannotatedGenericType = (ReferenceBinding) getUnannotatedType(genericType);
+		int typeArgumentsLength = typeArguments == null ? 0: typeArguments.length;
+		TypeBinding [] unannotatedTypeArguments = typeArguments == null ? null : new TypeBinding[typeArgumentsLength];
+		for (int i = 0; i < typeArgumentsLength; i++) {
+			unannotatedTypeArguments[i] = getUnannotatedType(typeArguments[i]);
+		}
+		ReferenceBinding unannotatedEnclosingType = enclosingType == null ? null : (ReferenceBinding) getUnannotatedType(enclosingType);
+		
+		TypeBinding[] derivedTypes = this.types[unannotatedGenericType.id];
+		int i, length = derivedTypes.length;
+		for (i = 0 ; i < length; i++) {
+			TypeBinding derivedType = derivedTypes[i];
+			if (derivedType == null) 
+				break;
+			if (!derivedType.isParameterizedType() || derivedType.actualType() != unannotatedGenericType || derivedType.hasTypeAnnotations())
+				continue;
+			if (derivedType.enclosingType() == unannotatedEnclosingType && Util.effectivelyEqual(derivedType.typeArguments(), unannotatedTypeArguments))
+				return (ParameterizedTypeBinding) derivedType;
+		}
+
+		if (i == length) {
+			System.arraycopy(derivedTypes, 0, derivedTypes = new TypeBinding[length * 2], 0, length);
+			this.types[unannotatedGenericType.id] = derivedTypes;
+		}
+		TypeBinding parameterizedType = derivedTypes[i] = new ParameterizedTypeBinding(unannotatedGenericType, unannotatedTypeArguments, unannotatedEnclosingType, this.environment);
+	
+		int typesLength = this.types.length;
+		if (this.typeid == typesLength)
+			System.arraycopy(this.types, 0, this.types = new TypeBinding[typesLength * 2][], 0, typesLength);
+		this.types[this.typeid] = new TypeBinding[1];
+		return (ParameterizedTypeBinding) (this.types[parameterizedType.id = this.typeid++][0] = parameterizedType);
+	}
 

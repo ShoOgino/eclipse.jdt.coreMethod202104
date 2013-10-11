@@ -1,2 +1,42 @@
-	public abstract WildcardBinding getWildcard(ReferenceBinding genericType, int rank, TypeBinding bound, TypeBinding[] otherBounds, int boundKind);
+	/* Parameters will not have type type annotations if lookup environment directly uses TypeSystem. When AnnotatableTypeSystem is in use,
+	   they may and we need to materialize the unannotated versions and work on them.
+	*/ 
+	public WildcardBinding getWildcard(ReferenceBinding genericType, int rank, TypeBinding bound, TypeBinding[] otherBounds, int boundKind) {
+		if (genericType == null) // pseudo wildcard denoting composite bounds for lub computation
+			genericType = ReferenceBinding.LUB_GENERIC;
+		
+		ReferenceBinding unannotatedGenericType = (ReferenceBinding) getUnannotatedType(genericType);
+		int otherBoundsLength = otherBounds == null ? 0: otherBounds.length;
+		TypeBinding [] unannotatedOtherBounds = otherBounds == null ? null : new TypeBinding[otherBoundsLength];
+		for (int i = 0; i < otherBoundsLength; i++) {
+			unannotatedOtherBounds[i] = getUnannotatedType(otherBounds[i]);
+		}
+		TypeBinding unannotatedBound = bound == null ? null : getUnannotatedType(bound);
+
+		TypeBinding[] derivedTypes = this.types[unannotatedGenericType.id];  // by construction, cachedInfo != null now.
+		int i, length = derivedTypes.length;
+		for (i = 0; i < length; i++) {
+			TypeBinding derivedType = derivedTypes[i];
+			if (derivedType == null) 
+				break;
+			if (!derivedType.isWildcard() || derivedType.actualType() != unannotatedGenericType || derivedType.hasTypeAnnotations())
+				continue;
+			if (derivedType.rank() != rank || derivedType.boundKind() != boundKind || derivedType.bound() != unannotatedBound)
+				continue;
+			if (Util.effectivelyEqual(derivedType.additionalBounds(), unannotatedOtherBounds))
+				return (WildcardBinding) derivedType;
+		}
+		
+		if (i == length) {
+			System.arraycopy(derivedTypes, 0, derivedTypes = new TypeBinding[length * 2], 0, length);
+			this.types[unannotatedGenericType.id] = derivedTypes;
+		}
+		TypeBinding wildcard = derivedTypes[i] = new WildcardBinding(unannotatedGenericType, rank, unannotatedBound, unannotatedOtherBounds, boundKind, this.environment);
+	
+		int typesLength = this.types.length;
+		if (this.typeid == typesLength)
+			System.arraycopy(this.types, 0, this.types = new TypeBinding[typesLength * 2][], 0, typesLength);
+		this.types[this.typeid] = new TypeBinding[1];
+		return (WildcardBinding) (this.types[wildcard.id = this.typeid++][0] = wildcard);
+	}
 
