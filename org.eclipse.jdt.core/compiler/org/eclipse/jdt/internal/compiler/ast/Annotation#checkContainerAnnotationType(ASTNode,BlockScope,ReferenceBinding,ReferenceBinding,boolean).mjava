@@ -1,0 +1,37 @@
+	public static void checkContainerAnnotationType(ASTNode culpritNode, BlockScope scope, ReferenceBinding containerAnnotationType, ReferenceBinding repeatableAnnotationType, boolean useSite) {
+		MethodBinding[] annotationMethods = containerAnnotationType.methods();
+		boolean sawValue = false;
+		for (int i = 0, length = annotationMethods.length; i < length; ++i) {
+			MethodBinding method = annotationMethods[i];
+			if (CharOperation.equals(method.selector, TypeConstants.VALUE)) {
+				sawValue = true;
+				if (method.returnType.isArrayType() && method.returnType.dimensions() == 1) {
+					ArrayBinding array = (ArrayBinding) method.returnType;
+					if (TypeBinding.equalsEquals(array.elementsType(), repeatableAnnotationType)) continue;
+				}
+				repeatableAnnotationType.tagAsHavingDefectiveContainerType();
+				scope.problemReporter().containingAnnotationHasWrongValueType(culpritNode, containerAnnotationType, repeatableAnnotationType, method.returnType);
+			} else {
+				// Not the value() - must have default (or else isn't suitable as container)
+				if ((method.modifiers & ClassFileConstants.AccAnnotationDefault) == 0) {
+					repeatableAnnotationType.tagAsHavingDefectiveContainerType();
+					scope.problemReporter().containingAnnotationHasNonDefaultMembers(culpritNode, containerAnnotationType, method.selector);
+				}
+			}
+		}
+		if (!sawValue) {
+			repeatableAnnotationType.tagAsHavingDefectiveContainerType();
+			scope.problemReporter().containingAnnotationMustHaveValue(culpritNode, containerAnnotationType);
+		}
+		
+		checkContainingAnnotationRetention(culpritNode, scope, containerAnnotationType, repeatableAnnotationType);
+		
+		if (useSite)
+			checkContainingAnnotationTargetAtUse((Annotation) culpritNode, scope, containerAnnotationType, repeatableAnnotationType);
+		else 
+			checkContainingAnnotationTarget(culpritNode, scope, containerAnnotationType, repeatableAnnotationType);
+		
+		checkContaintAnnotationDocumented(culpritNode, scope, containerAnnotationType, repeatableAnnotationType);
+		checkContaintAnnotationInherited(culpritNode, scope, containerAnnotationType, repeatableAnnotationType);
+	}
+
