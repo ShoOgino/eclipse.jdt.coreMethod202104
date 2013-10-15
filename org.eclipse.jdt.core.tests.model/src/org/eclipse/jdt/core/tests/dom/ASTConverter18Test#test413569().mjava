@@ -1,0 +1,51 @@
+	/*
+	 * Type Annotations on Variable Argument of ArrayType
+	 */
+	// https://bugs.eclipse.org/bugs/show_bug.cgi?id=413569
+	public void test413569() throws JavaModelException {
+		String contents =
+			"import java.lang.annotation.*;\n" +
+			"public class X {\n" +
+			"	@Target(ElementType.TYPE_USE) static @interface A {}\n" + 
+			"	@Target(ElementType.TYPE_USE) static @interface B {}\n" + 
+			"	@Target(ElementType.TYPE_USE) static @interface C { Class<?> value() default Object.class; }\n" + 
+			"	@Target(ElementType.TYPE_USE) static @interface D { Class<?> d(); }\n" + 
+			"	void foo(@A int @B()[] @C(int[].class) [] @D(d=String[].class)... arg) {}\n" +
+			"}";
+		this.workingCopy = getWorkingCopy("/Converter18/src/X.java", true/*resolve*/);
+		ASTNode node = buildAST(
+			contents,
+			this.workingCopy);
+		assertEquals("Not a compilation unit", ASTNode.COMPILATION_UNIT, node.getNodeType());
+		CompilationUnit compilationUnit = (CompilationUnit) node;
+		assertProblemsSize(compilationUnit, 0);
+		node = getASTNode(compilationUnit, 0, 4);
+		assertTrue("Not a method declaration", node.getNodeType() == ASTNode.METHOD_DECLARATION);
+		MethodDeclaration methodDeclaration = (MethodDeclaration) node;
+		List parameters = methodDeclaration.parameters();
+		assertEquals("wrong size", 1, parameters.size());
+		SingleVariableDeclaration parameter = (SingleVariableDeclaration) parameters.get(0);
+		
+		ArrayType type = (ArrayType) parameter.getType();
+		List dimensions = type.dimensions();
+		assertEquals(2, dimensions.size());
+		
+		ExtraDimension dimension = (ExtraDimension) dimensions.get(0);
+		List annotations = dimension.annotations();
+		assertEquals("Wrong number of annotations", 1, annotations.size());
+		Annotation annotation = (Annotation) annotations.get(0);
+		checkSourceRange(annotation, "@B()", contents);
+		
+		dimension = (ExtraDimension) dimensions.get(1);
+		annotations = dimension.annotations();
+		assertEquals("Wrong number of annotations", 1, annotations.size());
+		annotation = (Annotation) annotations.get(0);
+		checkSourceRange(annotation, "@C(int[].class)", contents);
+		
+		annotations = parameter.varargsAnnotations();
+		assertEquals("Wrong number of annotations", 1, annotations.size());
+		annotation = (Annotation) annotations.get(0);
+		checkSourceRange(annotation, "@D(d=String[].class)", contents);
+		
+	}
+
