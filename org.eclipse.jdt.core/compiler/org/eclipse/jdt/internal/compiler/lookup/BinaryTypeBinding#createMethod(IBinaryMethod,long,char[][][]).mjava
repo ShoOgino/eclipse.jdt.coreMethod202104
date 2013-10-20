@@ -81,7 +81,7 @@ private MethodBinding createMethod(IBinaryMethod method, long sourceLevel, char[
 			if (size > 0) {
 				exceptions = new ReferenceBinding[size];
 				for (int i = 0; i < size; i++)
-					exceptions[i] = this.environment.getTypeFromConstantPoolName(exceptionTypes[i], 0, -1, false, missingTypeNames);
+					exceptions[i] = this.environment.getTypeFromConstantPoolName(exceptionTypes[i], 0, -1, false, missingTypeNames, walker.toThrows(i));
 			}
 		}
 
@@ -112,9 +112,6 @@ private MethodBinding createMethod(IBinaryMethod method, long sourceLevel, char[
 			wrapper.start++; // skip '>'
 		}
 
-// 		Note(stephan): currently the compiler is not interested in retrieving receiver annotations, here is how we would do it:
-//		IBinaryAnnotation[] receiverAnnotations = walker.toReceiver().getAnnotationsAtCursor();
-		
 		if (wrapper.signature[wrapper.start] == Util.C_PARAM_START) {
 			wrapper.start++; // skip '('
 			if (wrapper.signature[wrapper.start] == Util.C_PARAM_END) {
@@ -157,7 +154,7 @@ private MethodBinding createMethod(IBinaryMethod method, long sourceLevel, char[
 				if (size > 0) {
 					exceptions = new ReferenceBinding[size];
 					for (int i = 0; i < size; i++)
-						exceptions[i] = this.environment.getTypeFromConstantPoolName(exceptionTypes[i], 0, -1, false, missingTypeNames);
+						exceptions[i] = this.environment.getTypeFromConstantPoolName(exceptionTypes[i], 0, -1, false, missingTypeNames, walker.toThrows(i));
 				}
 			}
 		}
@@ -166,12 +163,23 @@ private MethodBinding createMethod(IBinaryMethod method, long sourceLevel, char[
 	MethodBinding result = method.isConstructor()
 		? new MethodBinding(methodModifiers, parameters, exceptions, this)
 		: new MethodBinding(methodModifiers, method.getSelector(), returnType, parameters, exceptions, this);
-	if (this.environment.globalOptions.storeAnnotations)
+	
+	IBinaryAnnotation[] receiverAnnotations = walker.toReceiver().getAnnotationsAtCursor();
+	if (receiverAnnotations != null && receiverAnnotations.length > 0) {
+		result.receiver = this.environment.createAnnotatedType(this, createAnnotations(receiverAnnotations, this.environment, missingTypeNames));
+	}
+
+	if (this.environment.globalOptions.storeAnnotations) {
+		IBinaryAnnotation[] annotations = method.getAnnotations();
+	    if (annotations == null || annotations.length == 0)
+	    	if (method.isConstructor())
+	    		annotations = walker.toMethodReturn().getAnnotationsAtCursor(); // FIXME: When both exist, order could become an issue.
 		result.setAnnotations(
-			createAnnotations(method.getAnnotations(), this.environment, missingTypeNames),
+			createAnnotations(annotations, this.environment, missingTypeNames),
 			paramAnnotations,
 			isAnnotationType() ? convertMemberValue(method.getDefaultValue(), this.environment, missingTypeNames) : null,
 			this.environment);
+	}
 
 	if (argumentNames != null) result.parameterNames = argumentNames;
 	
