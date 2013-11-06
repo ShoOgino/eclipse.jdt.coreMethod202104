@@ -180,7 +180,39 @@
 				}
 
 				if (isAffected) {
-					JavaModel.flushExternalFileCache();
+					Object source = event.getSource();
+					projects = null;
+					if (source instanceof IWorkspace) {
+						 projects = ((IWorkspace) source).getRoot().getProjects();
+					} else if (source instanceof IProject) {
+						projects = new IProject[] {(IProject) source};
+					} else {
+						Util.log(new Exception(),
+								"Expected to see a workspace or project on the PRE_BUILD resource change but was: " + source.toString()); //$NON-NLS-1$
+					}
+					if (projects != null) {
+						// If we are about to do a build and a Java project's first builder is not the Java builder,
+						// then it is possible that one of the earlier builders will build a jar file that is on that
+						// project's classpath. If we see that, then to be safe we must flush the caching of the
+						// JavaModelManager's external file state.
+						// A possible further optimization for this situation where earlier builders can affect the
+						// Java builder would be to add a new classpath element attribute that identifies whether
+						// or not a library jar is "stable" and needs to be flushed.
+						for (int i = 0; i < projects.length; i++) {
+							try {
+								IProject project = projects[i];
+								if (project.isOpen() && project.hasNature(JavaCore.NATURE_ID)) {
+									IBuildConfiguration[] configs = project.getBuildConfigs();
+									if (configs.length > 1 && !JavaCore.BUILDER_ID.equals(configs[0].getName())) {
+										this.manager.resetExternalFilesCache();
+										break;
+									}
+								}
+							} catch (CoreException exception) {
+				        		Util.log(exception, "Exception while checking builder configuration ordering"); //$NON-NLS-1$
+							}
+						 }
+					}
 					JavaBuilder.buildStarting();
 				}
 
