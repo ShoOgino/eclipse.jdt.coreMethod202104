@@ -7,44 +7,34 @@
 		if (sam.parameters.length != this.arguments.length)
 			return false;
 		
-		if (!this.shapeAnalysisComplete && this.body instanceof Expression) {
-			Expression expression = (Expression) this.body;
-			this.voidCompatible = expression.statementExpression();
-			this.valueCompatible = true;
-			this.shapeAnalysisComplete = true;
-		}
-
-		if (this.shapeAnalysisComplete) {
-			if (squarePegInRoundHole(sam))
-				return false;
-		} 
-
-		IErrorHandlingPolicy oldPolicy = this.enclosingScope.problemReporter().switchErrorHandlingPolicy(silentErrorHandlingPolicy);
-		try {
-			final LambdaExpression copy = copy();
-			if (copy == null)
-				return false;
-			copy.setExpressionContext(this.expressionContext);
-			copy.setExpectedType(left);
-			if (this.resultExpressions == null)
-				this.resultExpressions = new SimpleLookupTable(); // gather result expressions for most specific method analysis.
-			this.resultExpressions.put(left, new Expression[0]);
-			copy.resolveType(this.enclosingScope);
-			if (!this.shapeAnalysisComplete) {
-				if (!this.returnsVoid && !this.returnsValue && this.throwsException) {  // () -> { throw new Exception(); } is value compatible.
-					Block block = (Block) this.body;
-					final Statement[] statements = block.statements;
-					final int statementsLength = statements == null ? 0 : statements.length;
-					Statement ultimateStatement = statementsLength == 0 ? null : statements[statementsLength - 1];
-					this.valueCompatible = ultimateStatement instanceof ThrowStatement ? true: copy.doesNotCompleteNormally(); 
-				}
-				this.shapeAnalysisComplete = true;
-				if (squarePegInRoundHole(sam))
+		if (!this.shapeAnalysisComplete) {
+			IErrorHandlingPolicy oldPolicy = this.enclosingScope.problemReporter().switchErrorHandlingPolicy(silentErrorHandlingPolicy);
+			try {
+				final LambdaExpression copy = copy();
+				if (copy == null)
 					return false;
+				copy.setExpressionContext(this.expressionContext);
+				copy.setExpectedType(left);
+				copy.resolveType(this.enclosingScope);
+
+				if (!argumentsTypeElided()) {
+					this.argumentTypes = copy.argumentTypes;
+				}
+			
+				if (this.body instanceof Block) {
+					if (!this.returnsVoid) {
+						this.valueCompatible = copy.doesNotCompleteNormally();
+					}
+				} else {
+					this.voidCompatible = ((Expression) this.body).statementExpression();
+				}
+			
+			} finally {
+				this.shapeAnalysisComplete = true;
+				this.enclosingScope.problemReporter().switchErrorHandlingPolicy(oldPolicy);
 			}
-		} finally {
-			this.enclosingScope.problemReporter().switchErrorHandlingPolicy(oldPolicy);
 		}
-		return true;
+
+		return !squarePegInRoundHole(sam);
 	}
 
