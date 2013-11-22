@@ -1,0 +1,92 @@
+	public void testBug417923m_since_8() throws Exception {
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("import java.lang.annotation.ElementType;\n");
+		buf.append("public class X {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("    	int   @Annot1(value1 = 2, value2 = 10) [][] i;\n");
+		buf.append("    	int[] @Annot2(float[].class) [] j;\n");
+		buf.append("    	int[][] k;\n");
+		buf.append("    }\n");
+		buf.append("}\n");
+		buf.append("@java.lang.annotation.Target(value= {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot1 {\n");
+		buf.append("	int value1() default 1;\n");
+		buf.append("	int value2();\n");
+		buf.append("}\n");
+		buf.append("@java.lang.annotation.Target(value= {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot2 {\n");
+		buf.append("	@SuppressWarnings(\"rawtypes\")\n");
+		buf.append("	Class value() default int[].class;\n");
+		buf.append("}\n");
+		ICompilationUnit cu= pack1.createCompilationUnit("X.java", buf.toString(), false, null);
+
+		CompilationUnit astRoot= createAST(cu);
+		AST ast = astRoot.getAST();
+		ASTRewrite rewrite= ASTRewrite.create(ast);
+
+		TypeDeclaration typeDecl = (TypeDeclaration) astRoot.types().get(0);
+		MethodDeclaration methodDecl= typeDecl.getMethods()[0];
+		Block block= methodDecl.getBody();
+		List statements= block.statements();
+
+		{
+			VariableDeclarationStatement statement = (VariableDeclarationStatement) statements.get(0);
+			ArrayType arrayType = (ArrayType) statement.getType();
+			Dimension dim = (Dimension) arrayType.dimensions().get(0);
+			ListRewrite listRewrite= rewrite.getListRewrite(dim, Dimension.ANNOTATIONS_PROPERTY);
+			listRewrite.remove((ASTNode) dim.annotations().get(0), null);
+		}
+		{
+			VariableDeclarationStatement statement = (VariableDeclarationStatement) statements.get(1);
+			ArrayType arrayType = (ArrayType) statement.getType();
+			Dimension dim = (Dimension) arrayType.dimensions().get(1);
+			ListRewrite listRewrite= rewrite.getListRewrite(dim, Dimension.ANNOTATIONS_PROPERTY);
+			listRewrite.remove((ASTNode) dim.annotations().get(0), null);
+		}
+		{
+			VariableDeclarationStatement statement = (VariableDeclarationStatement) statements.get(1);
+			ArrayType arrayType = (ArrayType) statement.getType();
+			Dimension dim = (Dimension) arrayType.dimensions().get(1);
+			ListRewrite listRewrite= rewrite.getListRewrite(dim, Dimension.ANNOTATIONS_PROPERTY);
+			listRewrite.remove((ASTNode) dim.annotations().get(0), null);
+		}
+		{
+			VariableDeclarationStatement statement = (VariableDeclarationStatement) statements.get(2);
+			ArrayType arrayType = (ArrayType) statement.getType();
+			
+			SingleMemberAnnotation annotation = ast.newSingleMemberAnnotation();
+			annotation.setTypeName(ast.newSimpleName("Annot2"));
+			ArrayType type = ast.newArrayType(ast.newPrimitiveType(PrimitiveType.FLOAT), 1);
+			TypeLiteral literal = ast.newTypeLiteral();
+			literal.setType(type);
+			annotation.setValue(literal);
+			Dimension dim = (Dimension) arrayType.dimensions().get(1);
+			ListRewrite listRewrite= rewrite.getListRewrite(dim, Dimension.ANNOTATIONS_PROPERTY);
+			listRewrite.insertFirst(annotation, null);
+		}
+		String preview= evaluateRewrite(cu, rewrite);
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("import java.lang.annotation.ElementType;\n");
+		buf.append("public class X {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("    	int[][] i;\n");
+		buf.append("    	int[][] j;\n");
+		buf.append("    	int[] @Annot2(float[].class) [] k;\n");
+		buf.append("    }\n");
+		buf.append("}\n");
+		buf.append("@java.lang.annotation.Target(value= {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot1 {\n");
+		buf.append("	int value1() default 1;\n");
+		buf.append("	int value2();\n");
+		buf.append("}\n");
+		buf.append("@java.lang.annotation.Target(value= {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot2 {\n");
+		buf.append("	@SuppressWarnings(\"rawtypes\")\n");
+		buf.append("	Class value() default int[].class;\n");
+		buf.append("}\n");
+		assertEqualString(preview, buf.toString());
+	}
+

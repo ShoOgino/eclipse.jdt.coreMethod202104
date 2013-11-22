@@ -1,0 +1,56 @@
+	public void testBug417923g_since_8() throws Exception {
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("import java.lang.annotation.ElementType;\n");
+		buf.append("public class X {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("    	int[][][] i;\n");
+		buf.append("    	int [][][] j;\n");
+		buf.append("    	int  [][][] k;\n");
+		buf.append("    	int/* comment */[][][] l;\n");
+		buf.append("    	int /* comment [] */ [][][] m;\n");
+		buf.append("    	int  /* comment [] */  [][][] n;\n");
+		buf.append("    }\n");
+		buf.append("}\n");
+		buf.append("@java.lang.annotation.Target(value= {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot1 {}\n");
+		ICompilationUnit cu= pack1.createCompilationUnit("X.java", buf.toString(), false, null);
+
+		CompilationUnit astRoot= createAST(cu);
+		AST ast = astRoot.getAST();
+		ASTRewrite rewrite= ASTRewrite.create(ast);
+
+		TypeDeclaration typeDecl = (TypeDeclaration) astRoot.types().get(0);
+		MethodDeclaration methodDecl= typeDecl.getMethods()[0];
+		Block block= methodDecl.getBody();
+		List statements= block.statements();
+
+		for (int i = 0; i < 6; ++i) {
+			VariableDeclarationStatement statement = (VariableDeclarationStatement) statements.get(i);
+			ArrayType arrayType = (ArrayType) statement.getType();
+			Dimension dim = (Dimension) arrayType.dimensions().get(0);
+			ListRewrite listRewrite= rewrite.getListRewrite(dim, Dimension.ANNOTATIONS_PROPERTY);
+			MarkerAnnotation markerAnnotation= ast.newMarkerAnnotation();
+			markerAnnotation.setTypeName(ast.newSimpleName("Annot1"));
+			listRewrite.insertAt(markerAnnotation, 0, null);
+		}
+		String preview= evaluateRewrite(cu, rewrite);
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("import java.lang.annotation.ElementType;\n");
+		buf.append("public class X {\n");
+		buf.append("    public void foo() {\n");
+		buf.append("    	int @Annot1 [][][] i;\n");
+		buf.append("    	int @Annot1 [][][] j;\n");
+		buf.append("    	int  @Annot1 [][][] k;\n");
+		buf.append("    	int @Annot1 /* comment */[][][] l;\n");
+		buf.append("    	int @Annot1 /* comment [] */ [][][] m;\n");
+		buf.append("    	int  @Annot1 /* comment [] */  [][][] n;\n");
+		buf.append("    }\n");
+		buf.append("}\n");
+		buf.append("@java.lang.annotation.Target(value= {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot1 {}\n");
+		assertEqualString(preview, buf.toString());
+	}
+

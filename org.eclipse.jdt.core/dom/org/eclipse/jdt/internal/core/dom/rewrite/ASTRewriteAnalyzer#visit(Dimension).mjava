@@ -2,7 +2,36 @@
 		if (!hasChildrenChanges(node)) {
 			return doVisitUnchangedChildren(node);
 		}
-		rewriteNodeList(node, Dimension.ANNOTATIONS_PROPERTY, node.getStartPosition(), Util.EMPTY_STRING, " "); //$NON-NLS-1$
+		
+		boolean keywordSpace = true;
+		ASTNode parent = node.getParent();
+		if (parent.getNodeType() == ASTNode.ARRAY_TYPE) {
+			List oldAnnotations = (List) getOriginalValue(node, Dimension.ANNOTATIONS_PROPERTY);
+			List newAnnotations = (List) getNewValue(node, Dimension.ANNOTATIONS_PROPERTY);
+			int oldAnnotationSize = oldAnnotations.size();
+			int newAnnotationSize = newAnnotations.size();
+			if (oldAnnotationSize > 0 && newAnnotationSize == 0) { /* removed all annotations */
+				int delStart = getPreviousTokenEndOffset(node, TerminalTokens.TokenNameAT);
+				int delEnd = ((ASTNode) oldAnnotations.get(0)).getStartPosition();
+				if (delStart >= 0 && delEnd > delStart) {
+					doTextRemove(delStart, delEnd - delStart, null); /* remove spaces before the annotation */
+				}
+
+				ASTNode currNode = (ASTNode) oldAnnotations.get(oldAnnotationSize - 1);
+				delStart = currNode.getStartPosition() + currNode.getLength();
+				try {
+					delEnd = getScanner().getNextStartOffset(delStart, false);
+					doTextRemove(delStart, delEnd - delStart, null); /* remove spaces after the annotation */
+				} catch (CoreException e) {
+					e.printStackTrace();
+				}
+			} else if (oldAnnotationSize == 0 && newAnnotationSize > 0) { /* inserting first annotation */
+				if (ScannerHelper.isWhitespace(this.content[node.getStartPosition() - 1])) {
+					keywordSpace = false; /* space exists already */
+				}
+			}
+		}
+		rewriteNodeList(node, Dimension.ANNOTATIONS_PROPERTY, node.getStartPosition(), keywordSpace ? String.valueOf(' ') : Util.EMPTY_STRING, String.valueOf(' '), String.valueOf(' '));
 		return false;
 	}
 
