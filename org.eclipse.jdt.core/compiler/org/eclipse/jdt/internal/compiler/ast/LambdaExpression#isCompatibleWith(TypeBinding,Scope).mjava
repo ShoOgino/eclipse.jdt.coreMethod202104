@@ -15,26 +15,40 @@
 					return false;
 				copy.setExpressionContext(this.expressionContext);
 				copy.setExpectedType(left);
-				copy.resolveType(this.enclosingScope);
-
+				this.hasIgnoredMandatoryErrors = false;
+				TypeBinding type = copy.resolveType(this.enclosingScope);
 				if (!argumentsTypeElided()) {
 					this.argumentTypes = copy.argumentTypes;
 				}
-			
 				if (this.body instanceof Block) {
-					if (!this.returnsVoid) {
-						this.valueCompatible = copy.doesNotCompleteNormally();
+					if (this.returnsVoid) {
+						this.shapeAnalysisComplete = true;
 					}
 				} else {
 					this.voidCompatible = ((Expression) this.body).statementExpression();
+					this.shapeAnalysisComplete = true;
 				}
-			
-			} finally {
+				// Do not proceed with data/control flow analysis if resolve encountered errors.
+				if (type == null || !type.isValidBinding() || this.hasIgnoredMandatoryErrors) {
+					if (!isPertinentToApplicability(left))
+						return true;
+					return this.arguments.length == 0; // error not because of the target type imposition, but is inherent. Just say compatible since errors in body aren't to influence applicability.
+				}
+				
+				// value compatibility of block lambda's is the only open question.
+				if (!this.shapeAnalysisComplete)
+					this.valueCompatible = copy.doesNotCompleteNormally();
+				
 				this.shapeAnalysisComplete = true;
+			} finally {
+				this.hasIgnoredMandatoryErrors = false;
 				this.enclosingScope.problemReporter().switchErrorHandlingPolicy(oldPolicy);
 			}
 		}
 
+		if (!isPertinentToApplicability(left))
+			return true;
+	
 		if (sam.returnType.id == TypeIds.T_void) {
 			if (!this.voidCompatible)
 				return false;
@@ -43,9 +57,6 @@
 				return false;
 		}
 		
-		if (!isPertinentToApplicability())
-			return true;
-	
 		Expression [] returnExpressions = this.resultExpressions;
 		for (int i = 0, length = returnExpressions.length; i < length; i++) {
 			if (returnExpressions[i] instanceof FunctionalExpression) { // don't want to use the resolvedType - polluted from some other overload resolution candidate
