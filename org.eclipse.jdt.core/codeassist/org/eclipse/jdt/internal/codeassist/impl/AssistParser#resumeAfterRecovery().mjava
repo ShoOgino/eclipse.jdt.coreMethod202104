@@ -5,8 +5,19 @@
  * Move checkpoint location, reset internal stacks and
  * decide which grammar goal is activated.
  */
-protected boolean resumeAfterRecovery() {
-
+protected int resumeAfterRecovery() {
+	if (requireExtendedRecovery()) {
+		if (this.unstackedAct == ERROR_ACTION) {
+			int mode = fallBackToSpringForward((Statement) null);
+			this.resumedAfterRepair = mode == RESUME;
+			if (mode == RESUME || mode == HALT)
+				return mode;
+			// else fall through and RESTART
+		} else {
+			return RESUME;
+		}
+	}
+		
 	// reset internal stacks
 	this.astPtr = -1;
 	this.astLengthPtr = -1;
@@ -14,15 +25,20 @@ protected boolean resumeAfterRecovery() {
 	this.expressionLengthPtr = -1;
 	this.typeAnnotationLengthPtr = -1;
 	this.typeAnnotationPtr = -1;
+	
 	this.identifierPtr = -1;
 	this.identifierLengthPtr	= -1;
 	this.intPtr = -1;
+	
+	
 	this.dimensions = 0 ;
 	this.recoveredStaticInitializerStart = 0;
 
 	this.genericsIdentifiersLengthPtr = -1;
 	this.genericsLengthPtr = -1;
 	this.genericsPtr = -1;
+	
+	this.valueLambdaNestDepth = -1;
 
 	this.modifiers = ClassFileConstants.AccDefault;
 	this.modifiersSourceStart = -1;
@@ -31,7 +47,12 @@ protected boolean resumeAfterRecovery() {
 	if (this.diet) this.dietInt = 0;
 
 	/* attempt to move checkpoint location */
-	if (!moveRecoveryCheckpoint()) return false;
+	if (this.unstackedAct != ERROR_ACTION && this.resumedAfterRepair) {
+		this.scanner.ungetToken(this.currentToken);  // effectively move recovery checkpoint *backwards*.
+	} else {
+		if (!moveRecoveryCheckpoint()) return HALT;
+	}
+	this.resumedAfterRepair = false;
 
 	// only look for headers
 	if (this.referenceContext instanceof CompilationUnitDeclaration
@@ -52,7 +73,7 @@ protected boolean resumeAfterRecovery() {
 			goForHeaders();
 			this.diet = true; // passed this point, will not consider method bodies
 		}
-		return true;
+		return RESTART;
 	}
 	if (this.referenceContext instanceof AbstractMethodDeclaration
 		|| this.referenceContext instanceof TypeDeclaration){
@@ -64,9 +85,9 @@ protected boolean resumeAfterRecovery() {
 			prepareForBlockStatements();
 			goForBlockStatementsOrCatchHeader();
 		}
-		return true;
+		return RESTART;
 	}
 	// does not know how to restart
-	return false;
+	return HALT;
 }
 

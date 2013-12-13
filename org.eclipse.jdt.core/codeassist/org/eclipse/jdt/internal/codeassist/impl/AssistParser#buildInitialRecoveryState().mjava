@@ -8,6 +8,7 @@ public RecoveredElement buildInitialRecoveryState(){
 		RecoveredElement element = super.buildInitialRecoveryState();
 		flushAssistState();
 		flushElementStack();
+		this.snapShot = null;
 		return element;
 	}
 
@@ -48,8 +49,9 @@ public RecoveredElement buildInitialRecoveryState(){
 	element = element.add(block, 1);
 	int blockIndex = 1;	// ignore first block start, since manually rebuilt here
 
-	for(int i = 0; i <= this.astPtr; i++){
-		ASTNode node = this.astStack[i];
+	ASTNode node = null, lastNode = null;
+	for (int i = 0; i <= this.astPtr; i++, lastNode = node) {
+		node = this.astStack[i];
 		if(node instanceof ForeachStatement && ((ForeachStatement)node).action == null) {
 			node = ((ForeachStatement)node).elementVariable;
 		}
@@ -62,7 +64,7 @@ public RecoveredElement buildInitialRecoveryState(){
 					break;
 				}
 				if (this.blockStarts[j] != lastStart){ // avoid multiple block if at same position
-					block = new Block(0);
+					block = new Block(0, lastNode instanceof LambdaExpression);
 					block.sourceStart = lastStart = this.blockStarts[j];
 					element = element.add(block, 1);
 				}
@@ -141,12 +143,6 @@ public RecoveredElement buildInitialRecoveryState(){
 			}
 			continue;
 		}
-		if (node instanceof LambdaExpression) {
-			LambdaExpression lambda = (LambdaExpression) node;
-			element = element.add(lambda, 0);
-			this.lastCheckPoint = lambda.sourceEnd + 1;
-			continue;
-		}
 		if (this.assistNode != null && node instanceof Statement) {
 			Statement stmt = (Statement) node;
 			if (!(stmt instanceof Expression) || ((Expression) stmt).statementExpression()) {
@@ -169,13 +165,16 @@ public RecoveredElement buildInitialRecoveryState(){
 	}
 
 	/* might need some extra block (after the last reduced node) */
+	/* For block bodied lambdas we should create a block even though the lambda header appears before it, so elements from within don't get misattributed. */
 	int pos = this.assistNode == null ? this.lastCheckPoint : this.assistNode.sourceStart;
+	boolean createLambdaBlock = lastNode instanceof LambdaExpression && ((LambdaExpression) node).body() instanceof Block;
 	for (int j = blockIndex; j <= this.realBlockPtr; j++){
 		if (this.blockStarts[j] >= 0) {
-			if ((this.blockStarts[j] < pos) && (this.blockStarts[j] != lastStart)){ // avoid multiple block if at same position
-				block = new Block(0);
+			if ((this.blockStarts[j] < pos || createLambdaBlock) && (this.blockStarts[j] != lastStart)){ // avoid multiple block if at same position
+				block = new Block(0, createLambdaBlock);
 				block.sourceStart = lastStart = this.blockStarts[j];
 				element = element.add(block, 1);
+				createLambdaBlock = false;
 			}
 		} else {
 			if ((this.blockStarts[j] < pos)){ // avoid multiple block if at same position

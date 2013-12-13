@@ -17,6 +17,7 @@ protected void parse() {
 
 	this.hasReportedError = false;
 	int act = START_STATE;
+	this.unstackedAct = ERROR_ACTION;
 	this.stateStackTop = -1;
 	this.currentToken = getFirstToken();
 	
@@ -31,8 +32,7 @@ try {
 				stackLength);
 		}
 		this.stack[this.stateStackTop] = act;
-
-		act = tAction(act, this.currentToken);
+		this.unstackedAct = act = tAction(act, this.currentToken);
 		if (act == ERROR_ACTION || this.restartRecovery) {
 			if (DEBUG_AUTOMATON) {
 				if (this.restartRecovery) {
@@ -44,23 +44,27 @@ try {
 
 			int errorPos = this.scanner.currentPosition - 1;
 			if (!this.hasReportedError) {
-				this.hasError = true;  // looks incorrect for recovery case ?
+				this.hasError = true;
 			}
-			int previousToken = this.currentToken;
+			this.kurrentToken = this.currentToken;
 			switch (resumeOnSyntaxError()) {
 				case HALT:
 					act = ERROR_ACTION;
 					break ProcessTerminals;
 				case RESTART:
-					if (act == ERROR_ACTION && previousToken != 0) this.lastErrorEndPosition = errorPos;
+					if (act == ERROR_ACTION && this.kurrentToken != 0) this.lastErrorEndPosition = errorPos;
 					act = START_STATE;
 					this.stateStackTop = -1;
 					this.currentToken = getFirstToken();
 					continue ProcessTerminals;
 				case RESUME:
-					break; // We presume the world is virgin so we can continue exactly from where we left off.
-				default:
-					throw new IllegalStateException();
+					if (act == ERROR_ACTION) {
+						act = this.stack[this.stateStackTop--];
+						continue ProcessTerminals;
+					} else {
+						this.currentToken = this.kurrentToken; // Gets trashed all over the place.
+					}
+					// FALL THROUGH.
 			}
 		}
 		if (act <= NUM_RULES) {
@@ -79,7 +83,6 @@ try {
 				this.recordStringLiterals = oldValue;
 			}
 			try {
-				this.unstackedAct = act;
 				this.currentToken = this.scanner.getNextToken();
 			} catch(InvalidInputException e){
 				if (!this.hasReportedError){
@@ -89,13 +92,11 @@ try {
 				this.lastCheckPoint = this.scanner.currentPosition;
 				this.currentToken = 0;
 				this.restartRecovery = true;
-			} finally {
-				this.unstackedAct = ERROR_ACTION;
-			}
+			} 
 			if(this.statementRecoveryActivated) {
 				jumpOverType();
 			}
-			act -= ERROR_ACTION;
+			this.unstackedAct = act -= ERROR_ACTION;
 
 			if (DEBUG_AUTOMATON) {
 				System.out.print("Shift/Reduce - (" + name[terminal_index[this.currentToken]]+") ");  //$NON-NLS-1$  //$NON-NLS-2$
@@ -111,7 +112,6 @@ try {
 					this.recordStringLiterals = oldValue;
 				}
 				try{
-					this.unstackedAct = act;
 					this.currentToken = this.scanner.getNextToken();
 				} catch(InvalidInputException e){
 					if (!this.hasReportedError){
@@ -121,8 +121,6 @@ try {
 					this.lastCheckPoint = this.scanner.currentPosition;
 					this.currentToken = 0;
 					this.restartRecovery = true;
-				} finally {
-					this.unstackedAct = ERROR_ACTION;
 				}
 				if(this.statementRecoveryActivated) {
 					jumpOverType();
@@ -143,8 +141,9 @@ try {
 			}
 
 			this.stateStackTop -= (rhs[act] - 1);
+			this.unstackedAct = ntAction(this.stack[this.stateStackTop], lhs[act]);
 			consumeRule(act);
-			act = ntAction(this.stack[this.stateStackTop], lhs[act]);
+			act = this.unstackedAct;
 
 			if (DEBUG_AUTOMATON) {
 				if (act <= NUM_RULES) {
@@ -159,6 +158,7 @@ try {
 		}
 	}
 } finally {
+	this.unstackedAct = ERROR_ACTION;
 	this.scanner.setActiveParser(null);
 }
 
