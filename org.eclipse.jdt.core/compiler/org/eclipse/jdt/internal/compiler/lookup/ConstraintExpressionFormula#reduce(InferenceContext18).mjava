@@ -1,0 +1,109 @@
+	public Object reduce(InferenceContext18 inferenceContext) throws InferenceFailureException {
+		// JLS 18.2.1
+		if (this.right.isProperType(true)) {
+			TypeBinding exprType = this.left.resolvedType;
+			if (exprType == null) {
+				if (this.left instanceof FunctionalExpression)
+					return this.left.isCompatibleWith(this.right, inferenceContext.scope) ? TRUE : FALSE;
+				return FALSE;
+			} else if (!exprType.isValidBinding()) {
+				return FALSE;
+			}
+			if (isCompatibleWithInLooseInvocationContext(exprType, this.right, inferenceContext))
+				return TRUE;
+			return FALSE;
+		}
+		if (!canBePolyExpression(this.left)) {
+			TypeBinding exprType = this.left.resolvedType;
+			if (exprType == null || !exprType.isValidBinding())
+				return FALSE;
+			return new ConstraintTypeFormula(exprType, this.right, COMPATIBLE);
+		} else {
+			// shapes of poly expressions (18.2.1)
+			// - parenthesized expression : these are transparent in our AST
+			if (this.left instanceof Invocation) {
+				Invocation invocation = (Invocation) this.left;
+				// ignore previous (inner) inference result and do a fresh start:
+				MethodBinding method = invocation.binding().original();
+				InvocationRecord prevInvocation = inferenceContext.enterPolyInvocation(invocation, invocation.arguments());
+
+				// Invocation Applicability Inference: 18.5.1
+				try {
+					Expression[] arguments = invocation.arguments();
+					TypeBinding[] argumentTypes = arguments == null ? Binding.NO_PARAMETERS : new TypeBinding[arguments.length];
+					for (int i = 0; i < argumentTypes.length; i++)
+						argumentTypes[i] = arguments[i].resolvedType;
+					int checkType = (invocation.inferenceKind() != 0) ? invocation.inferenceKind() : InferenceContext18.CHECK_LOOSE;
+					boolean isDiamond = method.isConstructor() && this.left.isPolyExpression(method);
+					inferInvocationApplicability(inferenceContext, method, argumentTypes, isDiamond, checkType); // FIXME 3 phases?
+					
+					if (!inferPolyInvocationType(inferenceContext, invocation, this.right, method))
+						return FALSE;
+					return null; // already incorporated
+				} finally {
+					inferenceContext.leavePolyInvocation(prevInvocation);
+				}
+			} else if (this.left instanceof ConditionalExpression) {
+				ConditionalExpression conditional = (ConditionalExpression) this.left;
+				return new ConstraintFormula[] {
+					new ConstraintExpressionFormula(conditional.valueIfTrue, this.right, this.relation),
+					new ConstraintExpressionFormula(conditional.valueIfFalse, this.right, this.relation)
+				};
+			} else if (this.left instanceof LambdaExpression) {
+				LambdaExpression lambda = (LambdaExpression) this.left;
+				Scope scope = inferenceContext.scope;
+				TypeBinding t = this.right;
+				if (!t.isFunctionalInterface(scope))
+					return FALSE;
+				MethodBinding functionType = t.getSingleAbstractMethod(scope);
+				if (functionType == null)
+					return FALSE;
+				TypeBinding[] parameters = functionType.parameters;
+				if (parameters.length != lambda.arguments().length)
+					return FALSE;
+				if (lambda.argumentsTypeElided())
+					for (int i = 0; i < parameters.length; i++)
+						if (!parameters[i].isProperType(true))
+							return FALSE;
+				lambda = lambda.getResolvedCopyForInferenceTargeting(t);
+				if (lambda == null)
+					return FALSE; // not strictly unreduceable, but proceeding with TRUE would likely produce secondary errors
+				if (functionType.returnType == TypeBinding.VOID) {
+					if (!lambda.isVoidCompatible())
+						return FALSE;
+				} else {
+					if (!lambda.isValueCompatible())
+						return FALSE;
+				}
+				List result = new ArrayList();
+				if (!lambda.argumentsTypeElided()) {
+					Argument[] arguments = lambda.arguments();
+					for (int i = 0; i < parameters.length; i++)
+						result.add(new ConstraintTypeFormula(parameters[i], arguments[i].type.resolveType(lambda.enclosingScope), SAME));
+				}
+				if (functionType.returnType != TypeBinding.VOID) {
+					TypeBinding r = functionType.returnType;
+					if (lambda.body() instanceof Expression) {
+						Expression body = (Expression)lambda.body();
+						// before introducing the body into inference, we must ensure it's resolved, hm...
+						ensureResolved(lambda.enclosingScope, body, r);
+						result.add(new ConstraintExpressionFormula(body, r, COMPATIBLE));
+					} else {
+						Expression[] exprs = lambda.resultExpressions();
+						for (int i = 0; i < exprs.length; i++) {
+							// before introducing result expressions into inference, we must ensure they're resolved, hm...
+							ensureResolved(lambda.enclosingScope, exprs[i], r);
+							result.add(new ConstraintExpressionFormula(exprs[i], r, COMPATIBLE));
+						}
+					}
+				}
+				if (result.size() == 0)
+					return TRUE;
+				return result.toArray(new ConstraintFormula[result.size()]);
+			} else if (this.left instanceof ReferenceExpression) {
+				return reduceReferenceExpressionCompatibility((ReferenceExpression) this.left, inferenceContext);
+			}
+		}
+		return FALSE;
+	}
+

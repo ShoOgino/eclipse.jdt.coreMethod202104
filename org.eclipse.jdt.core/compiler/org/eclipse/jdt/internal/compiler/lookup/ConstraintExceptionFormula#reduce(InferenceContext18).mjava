@@ -1,0 +1,73 @@
+	public Object reduce(InferenceContext18 inferenceContext) {
+		// JLS 18.2.5
+		if (this.left instanceof LambdaExpression || this.left instanceof ReferenceExpression) {
+			Scope scope = inferenceContext.scope;
+			if (!this.right.isFunctionalInterface(scope))
+				return FALSE;
+			MethodBinding sam = this.right.getSingleAbstractMethod(scope);
+			if (sam == null)
+				return FALSE;
+			// TODO: this condition is awaiting confirmation, see http://mail.openjdk.java.net/pipermail/lambda-spec-experts/2013-December/000455.html 
+			if (!(this.left instanceof LambdaExpression) || ((LambdaExpression)this.left).argumentsTypeElided()) {
+				int nParam = sam.parameters.length;
+				for (int i = 0; i < nParam; i++)
+					if (!sam.parameters[i].isProperType(true))
+						return FALSE;
+			}
+			if (sam.returnType != TypeBinding.VOID && !sam.returnType.isProperType(true))
+				return FALSE;
+			TypeBinding[] thrown = sam.thrownExceptions;
+			TypeBinding[] e = new TypeBinding[thrown.length];
+			int n = 0;
+			for (int i = 0; i < thrown.length; i++)
+				if (!thrown[i].isProperType(true))
+					e[n++] = thrown[i];
+			TypeBinding[] ePrime = null;
+			if (this.left instanceof LambdaExpression) {
+// TODO find exceptions thrown by the lambda's body
+//				((LambdaExpression)this.left).
+//				InferenceContext18.missingImplementation("NYI");
+			} else {
+				ReferenceExpression referenceExpression = (ReferenceExpression)this.left;
+				MethodBinding method = referenceExpression.findCompileTimeMethodTargeting(this.right, scope);
+				if (method != null)
+					ePrime = method.thrownExceptions;
+			}
+			if (ePrime == null)
+				return TRUE; // TODO is it a bug if we actually get here?
+			int m = ePrime.length;
+			if (n == 0) {
+				actual: for (int i = 0; i < m; i++) {
+					for (int j = 0; j < thrown.length; j++)
+						if (ePrime[i].isCompatibleWith(thrown[j]))
+							continue actual;
+					return FALSE;
+				}
+				return TRUE;
+			} else {
+				List result = new ArrayList();
+				actual: for (int i = 0; i < m; i++) {
+					for (int j = 0; j < thrown.length; j++)
+						if (ePrime[i].isCompatibleWith(thrown[j]))
+							continue actual;
+					for (int j = 0; j < n; j++)
+						result.add(new ConstraintTypeFormula(ePrime[i], e[j], SUBTYPE));
+				}				
+				for (int j = 0; j < n; j++)
+					result.add(new ConstraintExceptionFormula(this.left, e[j]));
+				return result.toArray(new ConstraintFormula[result.size()]);
+			}
+		} else if (this.left.isPolyExpression()) {
+			// parenthesized: transparent in our AST
+
+			if (this.left instanceof ConditionalExpression) {
+				ConditionalExpression conditional = (ConditionalExpression) this.left;
+				return new ConstraintFormula[] {
+						new ConstraintExceptionFormula(conditional.valueIfTrue, this.right),
+						new ConstraintExceptionFormula(conditional.valueIfFalse, this.right)
+				};
+			}
+		}
+		return TRUE;
+	}
+

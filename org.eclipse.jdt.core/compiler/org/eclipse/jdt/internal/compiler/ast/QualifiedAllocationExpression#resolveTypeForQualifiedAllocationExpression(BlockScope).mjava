@@ -73,10 +73,11 @@
 		}
 
 		// resolve type arguments (for generic constructor call)
+		long sourceLevel = scope.compilerOptions().sourceLevel;
 		final boolean isDiamond = this.type != null && (this.type.bits & ASTNode.IsDiamond) != 0;
 		if (this.typeArguments != null) {
 			int length = this.typeArguments.length;
-			boolean argHasError = scope.compilerOptions().sourceLevel < ClassFileConstants.JDK1_5;
+			boolean argHasError = sourceLevel < ClassFileConstants.JDK1_5;
 			this.genericTypeArguments = new TypeBinding[length];
 			for (int i = 0; i < length; i++) {
 				TypeReference typeReference = this.typeArguments[i];
@@ -107,7 +108,6 @@
 		if (this.arguments != null) {
 			int length = this.arguments.length;
 			argumentTypes = new TypeBinding[length];
-			TypeBinding argumentType;
 			for (int i = 0; i < length; i++) {
 				Expression argument = this.arguments[i];
 				if (argument instanceof CastExpression) {
@@ -115,10 +115,10 @@
 					argsContainCast = true;
 				}
 				argument.setExpressionContext(INVOCATION_CONTEXT);
-				if ((argumentType = argumentTypes[i] = argument.resolveType(scope)) == null){
+				if ((argumentTypes[i] = argument.resolveType(scope)) == null){
 					hasError = true;
 				}
-				if (argumentType != null && argumentType.kind() == Binding.POLY_TYPE)
+				if (sourceLevel >= ClassFileConstants.JDK1_8 && argument.isPolyExpression())
 					polyExpressionSeen = true;
 			}
 		}
@@ -183,9 +183,7 @@
 				receiverType = this.type.resolvedType = scope.environment().createParameterizedType(((ParameterizedTypeBinding) receiverType).genericType(), inferredTypes, ((ParameterizedTypeBinding) receiverType).enclosingType());
 			}
 			ReferenceBinding allocationType = (ReferenceBinding) receiverType;
-			this.binding = scope.getConstructor(allocationType, argumentTypes, this);
-			if (polyExpressionSeen)
-				resolvePolyExpressionArguments(scope, this.binding, this.arguments, argumentTypes);
+			this.binding = findConstructorBinding(scope, this, allocationType, argumentTypes, polyExpressionSeen);
 
 			if (this.binding.isValidBinding()) {	
 				if (isMethodUseDeprecated(this.binding, scope, true)) {
@@ -251,9 +249,7 @@
 		if ((this.resolvedType.tagBits & TagBits.HierarchyHasProblems) != 0) {
 			return null; // stop secondary errors
 		}
-		MethodBinding inheritedBinding = scope.getConstructor(anonymousSuperclass, argumentTypes, this);
-		if (polyExpressionSeen)
-			resolvePolyExpressionArguments(scope, inheritedBinding, this.arguments, argumentTypes);
+		MethodBinding inheritedBinding = findConstructorBinding(scope, this, anonymousSuperclass, argumentTypes, polyExpressionSeen);
 			
 		if (!inheritedBinding.isValidBinding()) {
 			if (inheritedBinding.declaringClass == null) {

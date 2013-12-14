@@ -1,0 +1,20 @@
+void analyseOneArgument18(BlockScope currentScope, FlowContext flowContext, FlowInfo flowInfo,
+		TypeBinding expectedType, Expression argument, Boolean expectedNonNullness, TypeBinding originalExpected) {
+	int nullStatus = argument.nullStatus(flowInfo, flowContext);
+	
+	// here we consume special case information generated in the ctor of ParameterizedGenericMethodBinding (see there):
+	int statusFromAnnotatedNull = expectedNonNullness == Boolean.TRUE ? nullStatus : 0;  
+	
+	NullAnnotationMatching annotationStatus = NullAnnotationMatching.analyse(expectedType, argument.resolvedType, nullStatus);
+	
+	if (!annotationStatus.isAnyMismatch() && statusFromAnnotatedNull != 0)
+		expectedType = originalExpected; // to avoid reports mentioning '@NonNull null'!
+	
+	if (annotationStatus.isDefiniteMismatch() || statusFromAnnotatedNull == FlowInfo.NULL) {
+		// immediate reporting:
+		currentScope.problemReporter().nullityMismatchingTypeAnnotation(argument, argument.resolvedType, expectedType, annotationStatus);
+	} else if (annotationStatus.isUnchecked() || (statusFromAnnotatedNull & FlowInfo.POTENTIALLY_NULL) != 0) {
+		flowContext.recordNullityMismatch(currentScope, argument, argument.resolvedType, expectedType, nullStatus);
+	}
+}
+

@@ -1,0 +1,46 @@
+	private Object reduceReferenceExpressionCompatibility(ReferenceExpression reference, InferenceContext18 inferenceContext) {
+		TypeBinding t = this.right;
+		if (t.isProperType(true))
+			throw new IllegalStateException("Should not reach here with T being a proper type");
+		if (!t.isFunctionalInterface(inferenceContext.scope))
+			return FALSE;
+		MethodBinding functionType = t.getSingleAbstractMethod(inferenceContext.scope);
+		if (functionType == null)
+			return FALSE;
+		// potentially-applicable method for the method reference when targeting T (15.28.1),
+		MethodBinding potentiallyApplicable = reference.findCompileTimeMethodTargeting(t, inferenceContext.scope);
+		if (potentiallyApplicable == null)
+			return FALSE;
+		if (reference.isExactMethodReference()) {
+			List /*<ConstraintFormula>*/ newConstraints = new ArrayList();
+			TypeBinding[] p = functionType.parameters;
+			int n = p.length;
+			TypeBinding[] pPrime = potentiallyApplicable.parameters;
+			int k = pPrime.length;
+			int offset = 0;
+			if (n == k+1) {
+				newConstraints.add(new ConstraintTypeFormula(p[0], reference.lhs.resolvedType, COMPATIBLE));
+				offset = 1;
+			}
+			for (int i = offset; i < n; i++)
+				newConstraints.add(new ConstraintTypeFormula(p[i], pPrime[i-offset], COMPATIBLE));
+			TypeBinding r = functionType.returnType;
+			if (r != TypeBinding.VOID) {
+				TypeBinding rAppl = potentiallyApplicable.isConstructor() ? potentiallyApplicable.declaringClass : potentiallyApplicable.returnType;
+				if (rAppl == TypeBinding.VOID)
+					return FALSE;
+				TypeBinding rPrime = rAppl.capture(inferenceContext.scope, 14); // FIXME capture position??
+				newConstraints.add(new ConstraintTypeFormula(rPrime, r, COMPATIBLE));
+			}
+			return newConstraints.toArray(new ConstraintFormula[newConstraints.size()]);
+		} else { // inexact
+			int n = functionType.parameters.length;
+			for (int i = 0; i < n; i++)
+				if (!functionType.parameters[i].isProperType(true))
+					return FALSE;
+			InferenceContext18.missingImplementation("NYI: inexact method reference");
+			// FIXME: Otherwise, a search for a compile-time declaration is performed, as defined in 15.28.1 .....
+		}
+		return FALSE;
+	}
+

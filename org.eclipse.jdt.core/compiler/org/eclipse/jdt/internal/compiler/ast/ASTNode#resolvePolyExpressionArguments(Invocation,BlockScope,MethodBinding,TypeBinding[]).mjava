@@ -1,0 +1,54 @@
+	/**
+	 * After a first round of method lookup has produces 'methodBinding' but when poly expressions have been seen as arguments,
+	 * inspect the arguments to trigger another round of resolving with improved target types from the methods parameters.
+	 * If this resolving produces better types for any arguments, update the 'argumentTypes' array in-place and 
+	 * signal by returning null that the outer should perform another round of method lookup.
+	 * @param invocation the outer invocation which is being resolved
+	 * @param scope scope
+	 * @param methodBinding the candidate method produced by the first round of lookup
+	 * @param argumentTypes the argument types as collected from first resolving the invocation arguments and as used for
+	 * 	the first round of method lookup.
+	 * @return true signals that the caller should try another round of method lookup
+	 */
+	public static boolean resolvePolyExpressionArguments(Invocation invocation, BlockScope scope, MethodBinding methodBinding, TypeBinding[] argumentTypes) {
+		int problemReason = 0;
+		MethodBinding candidateMethod;
+		if (methodBinding.isValidBinding()) {
+			candidateMethod = methodBinding;
+		} else if (methodBinding instanceof ProblemMethodBinding) {
+			problemReason = methodBinding.problemId();
+			candidateMethod = ((ProblemMethodBinding) methodBinding).closestMatch;
+		} else {
+			candidateMethod = null;
+		}
+		boolean hasUpdatedInner = false;
+		if (candidateMethod != null) {
+			boolean variableArity = candidateMethod.isVarargs();
+			final TypeBinding[] parameters = candidateMethod.parameters;
+			final int parametersLength = parameters.length;
+			Expression [] arguments = invocation.arguments();
+			for (int i = 0, length = arguments == null ? 0 : arguments.length; i < length; i++) {
+				Expression argument = arguments[i];
+				TypeBinding parameterType = i < parametersLength ? parameters[i] : variableArity ? parameters[parametersLength - 1] : null;
+				TypeBinding updatedArgumentType = null;
+
+				if (variableArity && i >= parametersLength - 1)
+					argument.tagAsEllipsisArgument();
+				updatedArgumentType = updateExpression(scope, argument, argumentTypes[i], parameterType, invocation.hasInferenceFinished());
+				if (updatedArgumentType == POLY_ERROR) //$IDENTITY-COMPARISON$
+					continue; // don't update if inner poly has errors
+				if (problemReason != ProblemReasons.Ambiguous 	// preserve this error
+						&& updatedArgumentType != null					// do we have a relevant update? ...
+						&& !(updatedArgumentType instanceof PolyTypeBinding)
+						&& TypeBinding.notEquals(updatedArgumentType, argumentTypes[i]))
+				{
+					// update the argumentTypes array (supposed to be owned by the calling method)
+					// in order to give better information into a second round of method lookup:
+					argumentTypes[i] = updatedArgumentType;
+					hasUpdatedInner = true;
+				}
+			}
+		}
+		return hasUpdatedInner;
+	}
+

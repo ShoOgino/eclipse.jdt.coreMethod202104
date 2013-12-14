@@ -1,0 +1,42 @@
+	static boolean inferPolyInvocationType(InferenceContext18 inferenceContext, InvocationSite invocationSite, TypeBinding targetType, MethodBinding method) 
+				throws InferenceFailureException 
+	{
+		TypeBinding[] typeArguments = invocationSite.genericTypeArguments();
+		if (typeArguments == null) {
+			// invocation type inference (18.5.2):
+			TypeBinding returnType = method.isConstructor() ? method.declaringClass : method.returnType;
+			if (returnType == TypeBinding.VOID)
+				throw new InferenceFailureException("expression has no value");
+
+			ParameterizedTypeBinding parameterizedType = parameterizedWithWildcard(returnType);
+			if (parameterizedType != null) {
+				TypeBinding[] arguments = parameterizedType.arguments;
+				InferenceVariable[] betas = inferenceContext.addTypeVariableSubstitutions(arguments);
+				TypeBinding gbeta = inferenceContext.environment.createParameterizedType(
+						parameterizedType.genericType(), betas, parameterizedType.enclosingType(), parameterizedType.getTypeAnnotations());
+				inferenceContext.currentBounds.captures.put(gbeta, parameterizedType);
+				ConstraintTypeFormula newConstraint = new ConstraintTypeFormula(gbeta, targetType, COMPATIBLE);
+				if (!inferenceContext.reduceAndIncorporate(newConstraint))
+					return false;
+			}
+
+			if (targetType.isBaseType()) {
+				TypeBinding thetaR = inferenceContext.substitute(returnType);
+				if (thetaR instanceof InferenceVariable) {
+					TypeBinding wrapper = inferenceContext.currentBounds.findWrapperTypeBound((InferenceVariable)thetaR);
+					if (wrapper != null) {
+						if (!inferenceContext.reduceAndIncorporate(new ConstraintTypeFormula(thetaR, wrapper, ReductionResult.SAME))
+							|| !inferenceContext.reduceAndIncorporate(new ConstraintTypeFormula(wrapper, targetType, ReductionResult.COMPATIBLE)))
+							return false;
+					}
+				}
+			}
+
+			ConstraintTypeFormula newConstraint = new ConstraintTypeFormula(inferenceContext.substitute(returnType), targetType, COMPATIBLE);
+System.out.println("INC: "+newConstraint);
+			if (!inferenceContext.reduceAndIncorporate(newConstraint))
+				return false;
+		}
+		return true;
+	}
+

@@ -1,0 +1,116 @@
+	/**
+	 * <b>JLS 18.4</b> Resolution
+	 * @return answer null if some constraint resolved to FALSE, otherwise the boundset representing the solution
+	 * @throws InferenceFailureException 
+	 */
+	private /*@Nullable*/ BoundSet resolve() throws InferenceFailureException {
+		// NOTE: 18.5.2 ... 
+		// "(While it was necessary to demonstrate that the inference variables in B1 could be resolved
+		//   in order to establish applicability, the resulting instantiations are not considered part of B1.)
+		// For this reason, resolve works on a temporary bound set, copied before any modification.
+		BoundSet tmpBoundSet = this.currentBounds;
+		if (this.inferenceVariables != null) {
+			for (int i = 0; i < this.inferenceVariables.length; i++) {
+				InferenceVariable currentVariable = this.inferenceVariables[i];
+				if (this.currentBounds.isInstantiated(currentVariable)) continue;
+				// find a minimal set of dependent variables:
+				Set variableSet = new HashSet();
+				int numUninstantiated = addDependencies(tmpBoundSet, variableSet, i);
+				final int numVars = variableSet.size();
+				
+				if (numUninstantiated > 0 && numVars > 0) {
+					final InferenceVariable[] variables = (InferenceVariable[]) variableSet.toArray(new InferenceVariable[numVars]);
+					if (!tmpBoundSet.hasCaptureBound(variableSet)) {
+						// try to instantiate this set of variables in a fresh copy of the bound set:
+						BoundSet prevBoundSet = tmpBoundSet;
+						tmpBoundSet = tmpBoundSet.copy();
+						for (int j = 0; j < variables.length; j++) {
+							InferenceVariable variable = variables[j];
+							// try lower bounds:
+							TypeBinding[] lowerBounds = tmpBoundSet.lowerBounds(variable, true/*onlyProper*/);
+							if (lowerBounds != Binding.NO_TYPES) {
+								TypeBinding lub = this.scope.lowerUpperBound(lowerBounds);
+								if (lub == TypeBinding.VOID || lub == null)
+									return null;
+								tmpBoundSet.addBound(new TypeBound(variable, lub, ReductionResult.SAME));
+							} else {
+								TypeBinding[] upperBounds = tmpBoundSet.upperBounds(variable, true/*onlyProper*/);
+								// check exception bounds:
+								if (tmpBoundSet.inThrows.contains(variable) && tmpBoundSet.hasOnlyTrivialExceptionBounds(variable, upperBounds)) {
+									TypeBinding runtimeException = this.scope.getType(TypeConstants.JAVA_LANG_RUNTIMEEXCEPTION, 3);
+									tmpBoundSet.addBound(new TypeBound(variable, runtimeException, ReductionResult.SAME));
+								} else {
+									// try upper bounds:
+									if (upperBounds != Binding.NO_TYPES) {
+										TypeBinding glb;
+										if (upperBounds.length == 1) {
+											glb = upperBounds[0];
+										} else {
+											ReferenceBinding[] glbs = Scope.greaterLowerBound((ReferenceBinding[])upperBounds);
+											if (glbs == null)
+												throw new UnsupportedOperationException("no glb for "+Arrays.asList(upperBounds));
+											else if (glbs.length == 1)
+												glb = glbs[0];
+											else
+												glb = new IntersectionCastTypeBinding(glbs, this.environment);
+										}
+										tmpBoundSet.addBound(new TypeBound(variable, glb, ReductionResult.SAME));
+									}
+								}
+							}
+						}
+						if (tmpBoundSet.incorporate(this))
+							continue;
+						tmpBoundSet = prevBoundSet;// clean-up for second attempt
+					}
+					// Otherwise, a second attempt is made...
+					final CaptureBinding18[] zs = new CaptureBinding18[numVars];
+					for (int j = 0; j < numVars; j++)
+						zs[j] = freshCapture(variables[j]);
+					Substitution theta = new Substitution() {
+						public LookupEnvironment environment() { 
+							return InferenceContext18.this.environment;
+						}
+						public boolean isRawSubstitution() {
+							return false;
+						}
+						public TypeBinding substitute(TypeVariableBinding typeVariable) {
+							for (int j = 0; j < numVars; j++)
+								if (variables[j] == typeVariable) //$IDENTITY-COMPARISON$ InferenceVariable does not participate in type annotation encoding
+									return zs[j];
+							return typeVariable;
+						}
+					};
+					for (int j = 0; j < numVars; j++) {
+						InferenceVariable variable = variables[j];
+						CaptureBinding18 zsj = zs[j];
+						// add lower bounds:
+						TypeBinding[] lowerBounds = tmpBoundSet.lowerBounds(variable, false/*onlyProper*/);
+						if (lowerBounds != Binding.NO_TYPES) {
+							lowerBounds = Scope.substitute(theta, lowerBounds);
+							TypeBinding lub = this.scope.lowerUpperBound(lowerBounds);
+							if (lub != TypeBinding.VOID && lub != null)
+								zsj.lowerBound = lub;
+						}
+						// add upper bounds:
+						TypeBinding[] upperBounds = tmpBoundSet.upperBounds(variable, false/*onlyProper*/);
+						if (upperBounds != Binding.NO_TYPES) {
+							for (int k = 0; k < upperBounds.length; k++)
+								upperBounds[k] = Scope.substitute(theta, upperBounds[k]);
+							if (!setUpperBounds(zsj, upperBounds))
+								continue; // at violation of well-formedness skip this candidate and proceed
+						}
+						if (tmpBoundSet == this.currentBounds)
+							tmpBoundSet = tmpBoundSet.copy();
+						// FIXME: remove capture bounds
+						tmpBoundSet.addBound(new TypeBound(variable, zsj, ReductionResult.SAME));
+					}
+					if (tmpBoundSet.incorporate(this))
+						continue;
+					return null;
+				}
+			}
+		}
+		return tmpBoundSet;
+	}
+
