@@ -1,0 +1,57 @@
+	// https://bugs.eclipse.org/bugs/show_bug.cgi?id=423122, [1.8] Missing incremental build dependency from lambda expression to functional interface.
+	public void test423122a() throws JavaModelException {
+		IPath projectPath = env.addProject("Project", "1.8");
+		env.addExternalJars(projectPath, Util.getJavaClassLibs());
+
+		// remove old package fragment root so that names don't collide
+		env.removePackageFragmentRoot(projectPath, "");
+
+		IPath root = env.addPackageFragmentRoot(projectPath, "src");
+		env.setOutputFolder(projectPath, "bin");
+
+		env.addClass(root, "test1", "I",
+				"package test1;\n" +
+				"public interface I {\n" +
+				"    int method(int a); // change argument type to Object\n" +
+				"}\n"
+		);
+		env.addClass(root, "test1", "E",
+				"package test1;\n" +
+				"public class E {\n" +
+				"    void take(I i) {\n" +
+				"    }\n" +
+				"}\n"
+		);
+		env.addClass(root, "test1", "Ref",
+				"package test1;\n" +
+				"public class Ref {\n" +
+				"    void foo(E e) {\n" +
+				"        e.take((x) -> x+2); // not recompiled when I#method changed\n" +
+				"    }\n" +
+				"}\n"
+			);
+
+		fullBuild(projectPath);
+		expectingNoProblems();
+
+		env.addClass(root, "test1", "I",
+				"package test1;\n" +
+				"public interface I {\n" +
+				"    int method(Object a); // change argument type to Object\n" +
+				"}\n"
+		);
+		incrementalBuild(projectPath);
+		expectingProblemsFor(
+			projectPath,
+			"Problem : The operator + is undefined for the argument type(s) Object, int [ resource : </Project/src/test1/Ref.java> range : <76,79> category : <60> severity : <2>]"
+		);
+		env.addClass(root, "test1", "I",
+				"package test1;\n" +
+				"public interface I {\n" +
+				"    int method(int a); // change argument type back to int\n" +
+				"}\n"
+		);
+		incrementalBuild(projectPath);
+		expectingNoProblems();
+	}
+
