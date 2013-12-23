@@ -1,0 +1,83 @@
+	/**
+	 * Internal use only
+	 * Given a method, returns null if arguments cannot be converted to parameters.
+	 * Will answer a substituted method in case the method was generic and type inference got triggered;
+	 * in case the method was originally compatible, then simply answer it back.
+	 */
+	protected final MethodBinding computeCompatibleMethod(MethodBinding method, TypeBinding[] arguments,
+			InvocationSite invocationSite, int inferenceLevel, boolean tiebreakingVarargsMethods)
+	{
+		TypeBinding[] genericTypeArguments = invocationSite.genericTypeArguments();
+		TypeBinding[] parameters = method.parameters;
+		TypeVariableBinding[] typeVariables = method.typeVariables;
+		if (parameters == arguments
+			&& (method.returnType.tagBits & TagBits.HasTypeVariable) == 0
+			&& genericTypeArguments == null
+			&& typeVariables == Binding.NO_TYPE_VARIABLES)
+				return method;
+
+		int argLength = arguments.length;
+		int paramLength = parameters.length;
+		boolean isVarArgs = method.isVarargs();
+		if (argLength != paramLength)
+			if (!isVarArgs || argLength < paramLength - 1)
+				return null; // incompatible
+		CompilerOptions compilerOptions = this.compilerOptions();
+		// https://bugs.eclipse.org/bugs/show_bug.cgi?id=330435, inference should kick in only at source 1.5+
+		if (typeVariables != Binding.NO_TYPE_VARIABLES && compilerOptions.sourceLevel >= ClassFileConstants.JDK1_5) { // generic method
+			TypeBinding[] newArgs = null;
+			for (int i = 0; i < argLength; i++) {
+				TypeBinding param = i < paramLength ? parameters[i] : parameters[paramLength - 1];
+				if (arguments[i].isBaseType() != param.isBaseType()) {
+					if (newArgs == null) {
+						newArgs = new TypeBinding[argLength];
+						System.arraycopy(arguments, 0, newArgs, 0, argLength);
+					}
+					newArgs[i] = environment().computeBoxingType(arguments[i]);
+				}
+			}
+			if (newArgs != null)
+				arguments = newArgs;
+			else  // ensure that computeCompatibleMethod() below can update arguments without harming our caller: (TODO: always copy before the loop? only in 1.8?)
+				System.arraycopy(arguments, 0, arguments=new TypeBinding[argLength], 0, argLength);
+			method = ParameterizedGenericMethodBinding.computeCompatibleMethod(method, arguments, this, invocationSite, inferenceLevel);
+			if (method == null) return null; // incompatible
+			if (!method.isValidBinding()) return method; // bound check issue is taking precedence
+		} else if (genericTypeArguments != null && compilerOptions.complianceLevel < ClassFileConstants.JDK1_7) {
+			if (method instanceof ParameterizedGenericMethodBinding) {
+				if (!((ParameterizedGenericMethodBinding) method).wasInferred)
+					// attempt to invoke generic method of raw type with type hints <String>foo()
+					return new ProblemMethodBinding(method, method.selector, genericTypeArguments, ProblemReasons.TypeArgumentsForRawGenericMethod);
+			} else if (!method.isOverriding() || !isOverriddenMethodGeneric(method)) {
+				return new ProblemMethodBinding(method, method.selector, genericTypeArguments, ProblemReasons.TypeParameterArityMismatch);
+			}
+		}
+
+		int compatibilityLevel;
+		if (tiebreakingVarargsMethods) {
+			if (CompilerOptions.tolerateIllegalAmbiguousVarargsInvocation && compilerOptions.complianceLevel < ClassFileConstants.JDK1_7)
+				tiebreakingVarargsMethods = false;
+		}
+		if ((compatibilityLevel = parameterCompatibilityLevel18(method, arguments, tiebreakingVarargsMethods, invocationSite)) > NOT_COMPATIBLE) {
+			if (compatibilityLevel == VARARGS_COMPATIBLE) {
+				TypeBinding varargsElementType = method.parameters[method.parameters.length - 1].leafComponentType();
+				if (varargsElementType instanceof ReferenceBinding) {
+					if (!((ReferenceBinding) varargsElementType).canBeSeenBy(this)) {
+						return new ProblemMethodBinding(method, method.selector, genericTypeArguments, ProblemReasons.VarargsElementTypeNotVisible);
+					}
+				}
+			}
+			if ((method.tagBits & TagBits.AnnotationPolymorphicSignature) != 0) {
+				// generate polymorphic method
+				return this.environment().createPolymorphicMethod(method, arguments);
+			}
+			return method;
+		}
+		// if method is generic and type arguments have been supplied, only then answer a problem 
+		// of ParameterizedMethodTypeMismatch, else a non-generic method was invoked using type arguments
+		// in which case this problem category will be bogus
+		if (genericTypeArguments != null && typeVariables != Binding.NO_TYPE_VARIABLES)
+			return new ProblemMethodBinding(method, method.selector, arguments, ProblemReasons.ParameterizedMethodTypeMismatch);
+		return null; // incompatible
+	}
+

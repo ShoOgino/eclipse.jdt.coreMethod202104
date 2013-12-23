@@ -1,0 +1,38 @@
+	/**
+	 * Simplified API to perform Invocation Type Inference (JLS 18.5.2)
+	 * and perform subsequent steps: bound check, rebinding of inner poly expressions,
+	 * and creating of a problem method binding if needed.
+	 * Should only be called if the inference has not yet finished.
+	 * @param invocation invocation being inferred
+	 * @param argumentTypes arguments being passed into the invocation
+	 * @param method current candidate method binding for this invocation
+	 * @return a valid method binding with updated type parameters,
+	 * 	or a problem method binding signaling either inference failure or a bound mismatch.
+	 */
+	public /*@NonNull*/ MethodBinding inferInvocationType(Invocation invocation, TypeBinding[] argumentTypes, ParameterizedGenericMethodBinding method) {
+		// TODO optimize: if outerContext exists and is resolved, we probably don't need to infer again.
+		TypeBinding targetType = invocation.invocationTargetType();
+		ParameterizedGenericMethodBinding finalMethod = method;
+		ParameterizedGenericMethodBinding methodToCheck = method;
+		
+		boolean haveProperTargetType = targetType != null && targetType.isProperType(true);
+		if (haveProperTargetType) {
+			finalMethod = getInvocationTypeInferenceSolution(method.originalMethod, invocation, targetType);
+			if (finalMethod != null)
+				methodToCheck = finalMethod;
+		}
+		
+		MethodBinding problemMethod = methodToCheck.boundCheck18(this.scope, argumentTypes);
+		if (problemMethod != null)
+			return problemMethod;
+
+		if (!haveProperTargetType && invocation.getExpressionContext() != ExpressionContext.VANILLA_CONTEXT)
+			return method; // still not ready!
+
+		if (finalMethod != null) {
+			if (rebindInnerPolies(finalMethod, invocation))
+				return finalMethod;
+		}
+		return getReturnProblemMethodIfNeeded(targetType, method);
+	}
+

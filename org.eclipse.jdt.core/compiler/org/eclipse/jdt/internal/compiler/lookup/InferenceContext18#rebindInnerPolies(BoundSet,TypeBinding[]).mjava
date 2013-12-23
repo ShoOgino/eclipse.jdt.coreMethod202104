@@ -1,9 +1,16 @@
 	/**
-	 * After inference has finished, iterate all inner poly expressions, that have been
-	 * included in the inference. For each of these update some type information
+	 * After inference has finished, iterate all inner poly expressions (Invocations), that
+	 * have been included in the inference. For each of these update some type information
 	 * from the inference result and perhaps trigger follow-up resolving as needed.
+	 * Similar for poly expressions that did not directly participate in the inference
+	 * but are direct arguments of the current invocation (FunctionalExpression, ConditionalExpression).
 	 */
-	public void rebindInnerPolies(BoundSet bounds, TypeBinding[] argumentTypes) {
+	public void rebindInnerPolies(BoundSet bounds, TypeBinding[] parameterTypes) {
+		// This updates all remaining poly expressions that are direct arguments of the current invocation:
+		// (handles FunctionalExpression & ConditionalExpression)
+		acceptPendingPolyArguments(bounds, parameterTypes, this.inferenceKind == CHECK_VARARG);
+		// This loops over all poly expressions for which a sub-inference was triggered:
+		// (handles generic invocations)
 		int len = this.innerPolies.size();
 		for (int i = 0; i < len; i++) {
 			Expression inner = (Expression) this.innerPolies.get(i);
@@ -19,31 +26,23 @@
 					original = ((ParameterizedTypeBinding)declaringClass).createParameterizedMethod(original);
 				}
 				
-				// apply inference results onto the binding of the inner invocation:
+				// apply results of the combined inference onto the binding of the inner invocation:
 				TypeBinding[] solutions = getSolutions(original.typeVariables(), innerMessage, bounds);
 				if (solutions == null) 
 					continue; // play safe, but shouldn't happen in a resolved context
 				ParameterizedGenericMethodBinding innerBinding = this.environment.createParameterizedGenericMethod(original, solutions);
-				innerMessage.updateBindings(innerBinding);
-				innerMessage.markInferenceFinished(); // invocation type inference has already happened on the inner, too.
 				
-				// finalize resolving of arguments of the inner invocation:
-				TypeBinding[] innerParameters = innerBinding.parameters;
-				int inferenceKind = innerMessage.inferenceKind();
-				boolean isVarargs = (inferenceKind == CHECK_VARARG) && innerBinding.isVarargs();
-				TypeBinding varArgsType = isVarargs ? ((ArrayBinding)innerParameters[innerParameters.length-1]).elementsType() : null; 
-				Expression[] arguments = innerMessage.arguments();
-				if (arguments != null) {
-					for (int j = 0; j < arguments.length; j++) {
-						TypeBinding param = (varArgsType == null || (j < innerParameters.length-1))
-												? innerParameters[j]
-												: varArgsType;
-						arguments[j].checkAgainstFinalTargetType(param);
+				if (innerMessage.updateBindings(innerBinding)) { // only if we are actually improving anything
+					TypeBinding[] innerArgumentTypes = null;
+					Expression[] innerArguments = innerMessage.arguments();
+					if (innerArguments != null) {
+						innerArgumentTypes = new TypeBinding[innerArguments.length];
+						for (int j = 0; j < innerArguments.length; j++)
+							innerArgumentTypes[i] = innerArguments[i].resolvedType;
 					}
+					ASTNode.resolvePolyExpressionArguments(innerMessage, innerBinding, innerArgumentTypes);
 				}
 			}
-			// inner FunctionalExpression don't seem to be included in inference.
-			// TODO recheck any inquires on those actually involve inference of which the results are included here. 
 		}
 	}
 

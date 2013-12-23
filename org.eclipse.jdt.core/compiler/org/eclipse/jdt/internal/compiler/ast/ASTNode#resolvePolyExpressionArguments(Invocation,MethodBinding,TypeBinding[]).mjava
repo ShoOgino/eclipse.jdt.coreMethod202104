@@ -1,0 +1,82 @@
+	/**
+	 * After method lookup has produced 'methodBinding' but when poly expressions have been seen as arguments,
+	 * inspect the arguments to trigger another round of resolving with improved target types from the methods parameters.
+	 * If this resolving produces better types for any arguments, update the 'argumentTypes' array in-place as an
+	 * intended side effect that will feed better type information in checkInvocationArguments() and others.
+	 * @param invocation the outer invocation which is being resolved
+	 * @param methodBinding the method produced by lookup (possibly involving type inference).
+	 * @param argumentTypes the argument types as collected from first resolving the invocation arguments and as used for
+	 * 	the method lookup.
+	 */
+	public static void resolvePolyExpressionArguments(Invocation invocation, MethodBinding methodBinding, TypeBinding[] argumentTypes) {
+		int problemReason = 0;
+		MethodBinding candidateMethod;
+		if (methodBinding.isValidBinding()) {
+			candidateMethod = methodBinding;
+		} else if (methodBinding instanceof ProblemMethodBinding) {
+			problemReason = methodBinding.problemId();
+			candidateMethod = ((ProblemMethodBinding) methodBinding).closestMatch;
+		} else {
+			candidateMethod = null;
+		}
+		if (candidateMethod != null) {
+			boolean variableArity = candidateMethod.isVarargs();
+			InferenceContext18 infCtx = null;
+			if (candidateMethod instanceof ParameterizedGenericMethodBinding) {
+				infCtx = invocation.getInferenceContext((ParameterizedGenericMethodBinding) candidateMethod);
+				if (infCtx != null) {
+					if (!infCtx.hasFinished)
+						return; // not yet ready for pushing type information down to arguments
+					variableArity &= infCtx.isVarArgs(); // TODO: if no infCtx is available, do we have to re-check if this is a varargs invocation?
+				}
+			}
+			
+			final TypeBinding[] parameters = candidateMethod.parameters;
+			Expression[] innerArguments = invocation.arguments();
+			Expression [] arguments = innerArguments;
+			for (int i = 0, length = arguments == null ? 0 : arguments.length; i < length; i++) {
+				Expression argument = arguments[i];
+				TypeBinding updatedArgumentType = null;
+				TypeBinding parameterType = InferenceContext18.getParameter(parameters, i, variableArity); 
+
+				if (argument instanceof LambdaExpression && ((LambdaExpression) argument).hasErrors())
+					continue; // don't update if inner poly has errors
+
+				if (argument instanceof Invocation) {
+					Invocation innerInvocation = (Invocation)argument;
+					MethodBinding binding = innerInvocation.binding();
+					if (binding instanceof ParameterizedGenericMethodBinding) {
+						ParameterizedGenericMethodBinding parameterizedMethod = (ParameterizedGenericMethodBinding) binding;
+						InferenceContext18 innerContext = innerInvocation.getInferenceContext(parameterizedMethod);
+						if (innerContext != null && !innerContext.hasFinished) {							
+							argument.setExpectedType(parameterType);
+							TypeBinding[] innerArgumentTypes = null;
+							if (innerArguments != null) {
+								innerArgumentTypes = new TypeBinding[innerArguments.length];
+								for (int j = 0; j < innerArguments.length; j++)
+									innerArgumentTypes[i] = innerArguments[i].resolvedType;
+							}
+							MethodBinding improvedBinding = innerContext.inferInvocationType(innerInvocation, innerArgumentTypes, parameterizedMethod);
+							innerInvocation.updateBindings(improvedBinding);
+						}
+						continue; // otherwise these have been dealt with during inner method lookup
+					}
+				}
+
+				if (argument.isPolyExpression()) {
+					// poly expressions in an invocation context need to be resolved now:
+					updatedArgumentType = argument.checkAgainstFinalTargetType(parameterType);
+
+					if (problemReason == ProblemReasons.NoError // preserve errors
+							&& updatedArgumentType != null					// do we have a relevant update? ...
+							&& !(updatedArgumentType instanceof PolyTypeBinding))
+					{
+						// update the argumentTypes array (supposed to be owned by the calling method)
+						// in order to give better information for subsequent checks
+						argumentTypes[i] = updatedArgumentType;
+					}
+				}
+			}
+		}
+	}
+
