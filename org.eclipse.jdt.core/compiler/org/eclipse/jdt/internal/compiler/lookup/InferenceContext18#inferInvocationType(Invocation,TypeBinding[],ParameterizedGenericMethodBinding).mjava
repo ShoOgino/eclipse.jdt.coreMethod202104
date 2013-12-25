@@ -9,17 +9,34 @@
 	 * @return a valid method binding with updated type parameters,
 	 * 	or a problem method binding signaling either inference failure or a bound mismatch.
 	 */
-	public /*@NonNull*/ MethodBinding inferInvocationType(Invocation invocation, TypeBinding[] argumentTypes, ParameterizedGenericMethodBinding method) {
+	/*@NonNull*/ MethodBinding inferInvocationType(Invocation invocation, TypeBinding[] argumentTypes, ParameterizedGenericMethodBinding method) {
 		// TODO optimize: if outerContext exists and is resolved, we probably don't need to infer again.
 		TypeBinding targetType = invocation.invocationTargetType();
-		ParameterizedGenericMethodBinding finalMethod = method;
+		ParameterizedGenericMethodBinding finalMethod = null;
 		ParameterizedGenericMethodBinding methodToCheck = method;
 		
 		boolean haveProperTargetType = targetType != null && targetType.isProperType(true);
 		if (haveProperTargetType) {
-			finalMethod = getInvocationTypeInferenceSolution(method.originalMethod, invocation, targetType);
+			MethodBinding original = method.originalMethod;
+			// start over from a previous candidate but discard its type variable instantiations
+			// TODO: should we retain any instantiations of type variables not owned by the method? 
+			BoundSet result = null;
+			try {
+				result = inferInvocationType(this.currentBounds, targetType, invocation, original);
+			} catch (InferenceFailureException e) {
+				// no solution, but do more checks below
+			}
+			if (result != null) {
+				TypeBinding[] solutions = getSolutions(original.typeVariables(), invocation, result);
+				if (solutions != null) {
+					finalMethod = this.environment.createParameterizedGenericMethod(original, solutions);
+					invocation.registerInferenceContext(finalMethod, this);
+				}
+			}
 			if (finalMethod != null)
 				methodToCheck = finalMethod;
+		} else {
+			finalMethod = method;
 		}
 		
 		MethodBinding problemMethod = methodToCheck.boundCheck18(this.scope, argumentTypes);
