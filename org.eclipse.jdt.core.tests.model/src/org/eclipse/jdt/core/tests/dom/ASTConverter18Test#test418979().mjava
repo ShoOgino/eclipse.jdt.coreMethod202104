@@ -1,0 +1,48 @@
+	/*
+	 * https://bugs.eclipse.org/bugs/show_bug.cgi?id=418979
+	 */
+	public void test418979() throws JavaModelException {
+		String contents =
+				"import java.lang.annotation.*;\n" +
+				"public class X {\n" +
+				"    void foo(Y.@A Z<?> events) {}\n" +
+				"    void foo(Y.@A ZZ events) {}\n" +
+				" }\n" +
+				"class Y {\n" +
+				"	class Z<T> {}\n" +
+				"   class ZZ{}\n" +
+				"}\n" +
+				"@Target (ElementType.TYPE_USE)\n" +
+				"@interface A{}";
+		this.workingCopy = getWorkingCopy("/Converter18/src/X.java", true/*resolve*/);
+		ASTNode node = buildAST(contents, this.workingCopy, false);
+		assertEquals("Not a compilation unit", ASTNode.COMPILATION_UNIT, node.getNodeType());
+		CompilationUnit compilationUnit = (CompilationUnit) node;
+		assertProblemsSize(compilationUnit, 0);
+		node = getASTNode(compilationUnit, 0);
+		assertEquals("Not a type declaration", ASTNode.TYPE_DECLARATION, node.getNodeType());
+		MethodDeclaration[] methods = ((TypeDeclaration) node).getMethods();
+		assertEquals("Incorrect no of methods", 2, methods.length);
+		MethodDeclaration method = methods[0];
+		List params = method.parameters();
+		assertEquals("Incorrect no of parameters", 1, params.size());
+		SingleVariableDeclaration variable = (SingleVariableDeclaration) params.get(0);
+		Type type = variable.getType();
+		assertTrue(type.isParameterizedType());
+		ParameterizedType parameterizedType = (ParameterizedType) type;
+		checkSourceRange(parameterizedType, "Y.@A Z<?>", contents);
+		type = parameterizedType.getType();
+		assertTrue(type.isNameQualifiedType());
+		NameQualifiedType nameQualifiedType = (NameQualifiedType) type;
+		checkSourceRange(nameQualifiedType, "Y.@A Z", contents);
+
+		method = methods[1];
+		params = method.parameters();
+		assertEquals("Incorrect no of parameters", 1, params.size());
+		variable = (SingleVariableDeclaration) params.get(0);
+		type = variable.getType();
+		assertTrue(type.isNameQualifiedType());
+		nameQualifiedType = (NameQualifiedType) type;
+		checkSourceRange(nameQualifiedType, "Y.@A ZZ", contents);
+}
+
