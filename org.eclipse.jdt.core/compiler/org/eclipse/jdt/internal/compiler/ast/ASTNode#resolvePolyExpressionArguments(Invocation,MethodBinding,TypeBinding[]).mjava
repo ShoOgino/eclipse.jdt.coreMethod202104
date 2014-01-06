@@ -25,7 +25,7 @@
 			if (candidateMethod instanceof ParameterizedGenericMethodBinding) {
 				infCtx = invocation.getInferenceContext((ParameterizedGenericMethodBinding) candidateMethod);
 				if (infCtx != null) {
-					if (!infCtx.hasFinished)
+					if (infCtx.stepCompleted < InferenceContext18.TYPE_INFERRED)
 						return; // not yet ready for pushing type information down to arguments
 					variableArity &= infCtx.isVarArgs(); // TODO: if no infCtx is available, do we have to re-check if this is a varargs invocation?
 				}
@@ -50,7 +50,7 @@
 					if (binding instanceof ParameterizedGenericMethodBinding) {
 						ParameterizedGenericMethodBinding parameterizedMethod = (ParameterizedGenericMethodBinding) binding;
 						InferenceContext18 innerContext = innerInvocation.getInferenceContext(parameterizedMethod);
-						if (innerContext != null && !innerContext.hasFinished) {							
+						if (innerContext != null && innerContext.stepCompleted < InferenceContext18.TYPE_INFERRED) {							
 							argument.setExpectedType(parameterType);
 							MethodBinding improvedBinding = innerContext.inferInvocationType(innerInvocation, parameterizedMethod);
 							innerInvocation.updateBindings(improvedBinding);
@@ -60,8 +60,11 @@
 				}
 
 				if (argument.isPolyExpression()) {
-					// poly expressions in an invocation context need to be resolved now:
-					updatedArgumentType = argument.checkAgainstFinalTargetType(parameterType);
+					// poly expressions in an invocation context may need to be resolved now:
+					if (infCtx != null && infCtx.stepCompleted == InferenceContext18.BINDINGS_UPDATED)
+						updatedArgumentType = argument.resolvedType; // in this case argument was already resolved via InferenceContext18.acceptPendingPolyArguments()
+					else
+						updatedArgumentType = argument.checkAgainstFinalTargetType(parameterType);
 
 					if (problemReason == ProblemReasons.NoError // preserve errors
 							&& updatedArgumentType != null					// do we have a relevant update? ...
