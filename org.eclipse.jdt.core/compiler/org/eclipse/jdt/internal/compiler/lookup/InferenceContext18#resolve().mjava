@@ -10,15 +10,12 @@
 		// For this reason, resolve works on a temporary bound set, copied before any modification.
 		BoundSet tmpBoundSet = this.currentBounds;
 		if (this.inferenceVariables != null) {
-			for (int i = 0; i < this.inferenceVariables.length; i++) {
-				InferenceVariable currentVariable = this.inferenceVariables[i];
-				if (this.currentBounds.isInstantiated(currentVariable)) continue;
-				// find a minimal set of dependent variables:
-				Set variableSet = new HashSet();
-				int numUninstantiated = addDependencies(tmpBoundSet, variableSet, i);
+			// find a minimal set of dependent variables:
+			Set variableSet;
+			while ((variableSet = getSmallestVariableSet(tmpBoundSet)) != null) {
+				int oldNumUninstantiated = tmpBoundSet.numUninstantiatedVariables(this.inferenceVariables);
 				final int numVars = variableSet.size();
-				
-				if (numUninstantiated > 0 && numVars > 0) {
+				if (numVars > 0) {
 					final InferenceVariable[] variables = (InferenceVariable[]) variableSet.toArray(new InferenceVariable[numVars]);
 					if (!tmpBoundSet.hasCaptureBound(variableSet)) {
 						// try to instantiate this set of variables in a fresh copy of the bound set:
@@ -85,7 +82,7 @@
 						InferenceVariable variable = variables[j];
 						CaptureBinding18 zsj = zs[j];
 						// add lower bounds:
-						TypeBinding[] lowerBounds = tmpBoundSet.lowerBounds(variable, false/*onlyProper*/);
+						TypeBinding[] lowerBounds = tmpBoundSet.lowerBounds(variable, true/*onlyProper*/);
 						if (lowerBounds != Binding.NO_TYPES) {
 							lowerBounds = Scope.substitute(theta, lowerBounds);
 							TypeBinding lub = this.scope.lowerUpperBound(lowerBounds);
@@ -105,8 +102,11 @@
 						// FIXME: remove capture bounds
 						tmpBoundSet.addBound(new TypeBound(variable, zsj, ReductionResult.SAME));
 					}
-					if (tmpBoundSet.incorporate(this))
+					if (tmpBoundSet.incorporate(this)) {
+						if (tmpBoundSet.numUninstantiatedVariables(this.inferenceVariables) == oldNumUninstantiated)
+							return null; // abort because we made no progress
 						continue;
+					}
 					return null;
 				}
 			}
