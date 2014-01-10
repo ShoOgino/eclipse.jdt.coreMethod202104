@@ -10,27 +10,45 @@ public boolean isTypeArgumentContainedBy(TypeBinding otherType) {
 				return false;
 			}
 			CaptureBinding capture = (CaptureBinding) otherType;
-			WildcardBinding wildcard = capture.wildcard;
-			TypeBinding upperBound = null;
-			TypeBinding [] otherBounds = null;
-			switch (wildcard.boundKind) {
-				case Wildcard.SUPER:
-					return false; // T super syntax isn't allowed, impossible capture.
-				case Wildcard.UNBOUND:
-					TypeVariableBinding variable = wildcard.genericType.typeVariables()[wildcard.rank];
-					upperBound = variable.upperBound();
-					otherBounds = variable.boundsCount() > 1 ? variable.otherUpperBounds() : null;
-					break;
-				case Wildcard.EXTENDS:
-					upperBound = wildcard.bound;
-					otherBounds = wildcard.otherBounds;
-					break;
+			if (capture instanceof CaptureBinding18) {
+				// by analogy to CaptureBinding but accepting the fact that .wildcard is null:
+				CaptureBinding18 cb18 = (CaptureBinding18) capture;
+				if (cb18.firstBound != null) {
+					if (cb18.lowerBound != null)
+						return false; // type containment is not defined for variables with both upper and lower bound
+					TypeBinding[] otherBounds = null; 
+					int len = cb18.upperBounds.length; // by construction non-null if firstBound is set
+					if (len > 1)
+						System.arraycopy(cb18.upperBounds, 1, otherBounds = new TypeBinding[len-1], 0, len-1);
+					otherType = capture.environment.createWildcard(null, 0, cb18.firstBound, otherBounds, Wildcard.EXTENDS);
+				} else if (cb18.lowerBound != null) {
+					otherType = capture.environment.createWildcard(null, 0, cb18.lowerBound, null, Wildcard.SUPER);
+				} else {
+					return false; // not wellformed
+				}
+			} else {
+				TypeBinding upperBound = null;
+				TypeBinding [] otherBounds = null;
+				WildcardBinding wildcard = capture.wildcard;
+				switch (wildcard.boundKind) {
+					case Wildcard.SUPER:
+						return false; // T super syntax isn't allowed, impossible capture.
+					case Wildcard.UNBOUND:
+						TypeVariableBinding variable = wildcard.genericType.typeVariables()[wildcard.rank];
+						upperBound = variable.upperBound();
+						otherBounds = variable.boundsCount() > 1 ? variable.otherUpperBounds() : null;
+						break;
+					case Wildcard.EXTENDS:
+						upperBound = wildcard.bound;
+						otherBounds = wildcard.otherBounds;
+						break;
+				}
+				// Given class A<T extends B<?>>, A<?> cannot be the universe of all parameterizations of A
+				if (upperBound.id == TypeIds.T_JavaLangObject && otherBounds == null) {
+					return false; // but given class A<T>, A<?> stays an unbounded wildcard, see https://bugs.eclipse.org/bugs/show_bug.cgi?id=348956
+				}
+				otherType = capture.environment.createWildcard(null, 0, upperBound, otherBounds, Wildcard.EXTENDS);
 			}
-			// Given class A<T extends B<?>>, A<?> cannot be the universe of all parameterizations of A
-			if (upperBound.id == TypeIds.T_JavaLangObject && otherBounds == null) {
-				return false; // but given class A<T>, A<?> stays an unbounded wildcard, see https://bugs.eclipse.org/bugs/show_bug.cgi?id=348956
-			}
-			otherType = capture.environment.createWildcard(null, 0, upperBound, otherBounds, Wildcard.EXTENDS);
 			return isTypeArgumentContainedBy(otherType);
 		}
 		// allow wildcard containment
