@@ -136,57 +136,14 @@ public TypeBinding resolveType(BlockScope scope) {
 		scope.problemReporter().cannotInstantiate(this.type, this.resolvedType);
 		return this.resolvedType;
 	}
-	if (isDiamond && !diamondNeedsDeferring) {
-		ReferenceBinding genericType = ((ParameterizedTypeBinding) this.resolvedType).genericType();
-		TypeBinding [] inferredTypes = inferElidedTypes(genericType, genericType.enclosingType(), argumentTypes, scope);
-		if (inferredTypes == null) {
-			scope.problemReporter().cannotInferElidedTypes(this);
-			return this.resolvedType = null;
-		}
-		this.resolvedType = this.type.resolvedType = scope.environment().createParameterizedType(genericType, inferredTypes, ((ParameterizedTypeBinding) this.resolvedType).enclosingType());
- 	}
-	ReferenceBinding receiverType = (ReferenceBinding) this.resolvedType;
+	ResolutionState state = new ResolutionState(scope, isDiamond, diamondNeedsDeferring, argsContainCast, polyExpressionSeen, argumentTypes);
 	if (diamondNeedsDeferring) {
-		// in this preliminary mode use the raw receiver type for constructor lookup, to avoid spurious type errors
-		receiverType = (ReferenceBinding) receiverType.original();
-		receiverType = scope.environment().createRawType(receiverType, receiverType.enclosingType());
-	}
-	
-	this.binding = findConstructorBinding(scope, this, receiverType, argumentTypes, polyExpressionSeen);
-
-	ReferenceBinding allocationType = (ReferenceBinding) this.resolvedType;
-	if (!this.binding.isValidBinding()) {
-		if (this.binding.declaringClass == null) {
-			this.binding.declaringClass = allocationType;
-		}
-		if (this.type != null && !this.type.resolvedType.isValidBinding()) {
-			return null;
-		}
-		scope.problemReporter().invalidConstructor(this, this.binding);
-		return this.resolvedType;
-	}
-	if ((this.binding.tagBits & TagBits.HasMissingType) != 0) {
-		scope.problemReporter().missingTypeInConstructor(this, this.binding);
-	}
-	if (isMethodUseDeprecated(this.binding, scope, true))
-		scope.problemReporter().deprecatedMethod(this.binding, this);
-	if (!diamondNeedsDeferring) { // don't check diamonds before we have the target type
-		if (checkInvocationArguments(scope, null, allocationType, this.binding, this.arguments, argumentTypes, argsContainCast, this)) {
-			this.bits |= ASTNode.Unchecked;
-		}
-	}
-	if (this.typeArguments != null && this.binding.original().typeVariables == Binding.NO_TYPE_VARIABLES) {
-		scope.problemReporter().unnecessaryTypeArgumentsForMethodInvocation(this.binding, this.genericTypeArguments, this.typeArguments);
-	}
-	if (!isDiamond && this.resolvedType.isParameterizedTypeWithActualArguments()) {
- 		checkTypeArgumentRedundancy((ParameterizedTypeBinding) this.resolvedType, this.resolvedType.enclosingType(), argumentTypes, scope);
- 	}
-	if (compilerOptions.isAnnotationBasedNullAnalysisEnabled && (this.binding.tagBits & TagBits.IsNullnessKnown) == 0) {
-		new ImplicitNullAnnotationVerifier(scope.environment(), compilerOptions.inheritNullAnnotations)
-				.checkImplicitNullAnnotations(this.binding, null/*srcMethod*/, false, scope);
-	}
-	if (diamondNeedsDeferring)
+		this.suspendedResolutionState = state; // resolving to be continued later (via binding(TypeBinding targetType)).
 		return new PolyTypeBinding(this);
-	return allocationType;
+	}
+
+	if (!resolvePart2(state))
+		return null;
+	return resolvePart3(state);
 }
 

@@ -1,0 +1,41 @@
+/** Final part of resolving (once): check and report various error conditions. */
+TypeBinding resolvePart3(ResolutionState state) {
+	this.suspendedResolutionState = null;
+	if (state.cannotInferDiamond) {
+		state.scope.problemReporter().cannotInferElidedTypes(this);
+		return this.resolvedType = null;
+	}
+	ReferenceBinding allocationType = (ReferenceBinding) this.resolvedType;
+	if (!this.binding.isValidBinding()) {
+		if (this.binding.declaringClass == null) {
+			this.binding.declaringClass = allocationType;
+		}
+		if (this.type != null && !this.type.resolvedType.isValidBinding()) {
+			return null;
+		}
+		state.scope.problemReporter().invalidConstructor(this, this.binding);
+		return this.resolvedType;
+	}
+	if ((this.binding.tagBits & TagBits.HasMissingType) != 0) {
+		state.scope.problemReporter().missingTypeInConstructor(this, this.binding);
+	}
+	if (isMethodUseDeprecated(this.binding, state.scope, true)) {
+		state.scope.problemReporter().deprecatedMethod(this.binding, this);
+	}
+	if (checkInvocationArguments(state.scope, null, allocationType, this.binding, this.arguments, state.argumentTypes, state.argsContainCast, this)) {
+		this.bits |= ASTNode.Unchecked;
+	}
+	if (this.typeArguments != null && this.binding.original().typeVariables == Binding.NO_TYPE_VARIABLES) {
+		state.scope.problemReporter().unnecessaryTypeArgumentsForMethodInvocation(this.binding, this.genericTypeArguments, this.typeArguments);
+	}
+	if (!state.isDiamond && this.resolvedType.isParameterizedTypeWithActualArguments()) {
+ 		checkTypeArgumentRedundancy((ParameterizedTypeBinding) this.resolvedType, this.resolvedType.enclosingType(), state.argumentTypes, state.scope);
+ 	}
+	CompilerOptions compilerOptions = state.scope.compilerOptions();
+	if (compilerOptions.isAnnotationBasedNullAnalysisEnabled && (this.binding.tagBits & TagBits.IsNullnessKnown) == 0) {
+		new ImplicitNullAnnotationVerifier(state.scope.environment(), compilerOptions.inheritNullAnnotations)
+				.checkImplicitNullAnnotations(this.binding, null/*srcMethod*/, false, state.scope);
+	}
+	return allocationType;
+}
+
