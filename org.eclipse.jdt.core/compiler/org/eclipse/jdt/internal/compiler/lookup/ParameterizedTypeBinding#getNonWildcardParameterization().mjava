@@ -1,0 +1,66 @@
+	// from JLS 9.8
+	public TypeBinding[] getNonWildcardParameterization() {
+		TypeBinding[] typeArguments = this.arguments; 							// A1 ... An
+		if (typeArguments == null)
+			return NO_TYPES;
+		TypeVariableBinding[] typeParameters = genericType().typeVariables(); 	// P1 ... Pn
+		TypeBinding[] types = new TypeBinding[typeArguments.length];  			// T1 ... Tn
+		for (int i = 0, length = typeArguments.length; i < length; i++) {
+			TypeBinding typeArgument = typeArguments[i];
+			if (typeArgument.kind() == Binding.WILDCARD_TYPE) {
+				if (typeParameters[i].mentionsAny(typeParameters, i))
+					return null;
+				WildcardBinding wildcard = (WildcardBinding) typeArgument;
+				switch(wildcard.boundKind) {
+					case Wildcard.EXTENDS :
+						// If Ai is a upper-bounded wildcard ? extends Ui, then Ti = glb(Ui, Bi).
+						// Note: neither Ui nor Bi is necessarily scalar -> need to collect all bounds
+						TypeBinding[] otherUBounds = wildcard.otherBounds;
+						TypeBinding[] otherBBounds = typeParameters[i].otherUpperBounds();
+						int len = 1 + (otherUBounds != null ? otherUBounds.length : 0) + otherBBounds.length;
+						if (typeParameters[i].firstBound != null)
+							len++;
+						ReferenceBinding[] allBounds = new ReferenceBinding[len];
+						try {
+							int idx = 0;
+							// Ui
+							allBounds[idx++] = (ReferenceBinding) wildcard.bound;
+							if (otherUBounds != null)
+								for (int j = 0; j < otherUBounds.length; j++)
+									allBounds[idx++] = (ReferenceBinding) otherUBounds[j];
+							// Bi
+							if (typeParameters[i].firstBound != null)
+								allBounds[idx++] = (ReferenceBinding) typeParameters[i].firstBound;
+							for (int j = 0; j < otherBBounds.length; j++)
+								allBounds[idx++] = (ReferenceBinding) otherBBounds[j];
+						} catch (ClassCastException cce) {
+							return null;
+						}
+						ReferenceBinding[] glb = Scope.greaterLowerBound(allBounds);
+						if (glb == null || glb.length == 0) {
+							return null;
+						} else if (glb.length == 1) {
+							types[i] = glb[0];
+						} else {
+							types[i] = new IntersectionCastTypeBinding(glb, this.environment);
+						}
+						break;
+					case Wildcard.SUPER :
+						// If Ai is a lower-bounded wildcard ? super Li, then Ti = Li.
+						types[i] = wildcard.bound;
+						break;
+					case Wildcard.UNBOUND :
+						// If Ai is an unbound wildcard ?, then Ti = Bi.
+						types[i] = typeParameters[i].firstBound;
+						if (types[i] == null)
+							types[i] = typeParameters[i].superclass; // assumably j.l.Object?
+						break;
+				}
+			} else {
+				// If Ai is a type, then Ti = Ai.
+				types[i] = typeArgument;
+			}
+		}
+		return types;
+	}
+
