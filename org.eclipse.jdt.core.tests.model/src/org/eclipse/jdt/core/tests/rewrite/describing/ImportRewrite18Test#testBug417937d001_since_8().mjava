@@ -1,0 +1,71 @@
+	public void testBug417937d001_since_8() throws Exception {
+		String contents = "package pack1;\n" +
+				"public class X{\n" +
+				"public void foo000( pack3.C1<pack2.B1>.C2<pack2.B1.B2>.C3<pack2.B1> arg, A a) {}\n" +
+				"}\n";
+		createFolder("/" + PROJECT + "/src/pack1");
+		createFile("/" + PROJECT + "/src/pack1/X.java", contents);
+		contents = "package pack1;\n" +
+				"public class A{}\n";
+		createFile("/" + PROJECT + "/src/pack1/A.java", contents);
+		contents = "package pack2;\n" +
+				"public class B1 {\n" +
+				"	public class B2 {\n" +
+				"		public class B3 {\n" +
+				"			\n" +
+				"		}\n" +
+				"	}\n" +
+				"}\n";
+		createFolder("/" + PROJECT + "/src/pack2");
+		createFile("/" + PROJECT + "/src/pack2/B1.java", contents);
+		contents = "package pack3;\n" +
+				"public class C1 <T> {\n" +
+				"	public class C2 <P>{\n" +
+				"		public class C3 <Q> {\n" +
+				"			\n" +
+				"		}\n" +
+				"	}\n" +
+				"}\n" + 
+		createFolder("/" + PROJECT + "/src/pack3");
+		createFile("/" + PROJECT + "/src/pack3/C1.java", contents);
+		contents = "package pack4;\n" +
+				"public class D1 {\n" +
+				"	public class D2 <T>{\n" +
+				"		public class D3 <S> {\n" +
+				"			\n" +
+				"		}\n" +
+				"	}\n" +
+				"}\n" +
+		createFolder("/" + PROJECT + "/src/pack4");
+		createFile("/" + PROJECT + "/src/pack4/D1.java", contents);
+
+		ASTParser parser = ASTParser.newParser(AST.JLS8);
+		ICompilationUnit cu = getCompilationUnit("/" + PROJECT + "/src/pack1/X.java");
+		parser.setSource(cu);
+		parser.setResolveBindings(true);
+		parser.setStatementsRecovery(true);
+		CompilationUnit astRoot = (CompilationUnit) parser.createAST(null);	
+		TypeDeclaration typeDeclaration = (TypeDeclaration) astRoot.types().get(0);
+		MethodDeclaration [] methods =  typeDeclaration.getMethods();
+		MethodDeclaration method = methods[0];
+
+		VariableDeclaration variable= (VariableDeclaration) method.parameters().get(0);
+		IVariableBinding variableBinding = variable.resolveBinding();
+		ITypeBinding typeBinding = variableBinding.getType();
+		cu = getCompilationUnit("/" + PROJECT + "/src/pack1/A.java");
+		ImportRewrite rewrite = newImportsRewrite(cu, new String[0], 99, 99, true);
+		Type actualType = rewrite.addImport(typeBinding, astRoot.getAST());
+		apply(rewrite);
+		String contentsA = "package pack1;\n" +
+				"\n" +
+				"import pack2.B1;\n" +
+				"import pack2.B1.B2;\n" +
+				"import pack3.C1;\n" +
+				"\n" +
+				"public class A{}\n";
+		cu = getCompilationUnit("/" + PROJECT + "/src/pack1/A.java");
+		assertEqualStringIgnoreDelim(cu.getSource(), contentsA);
+		assertEquals("C1<B1>.C2<B2>.C3<B1>", actualType.toString());
+		assertTrue(actualType.isParameterizedType());
+	}
+

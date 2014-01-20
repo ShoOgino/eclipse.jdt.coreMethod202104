@@ -1,0 +1,50 @@
+	public void testBug417937a_since_8() throws Exception {
+		String contents = "package pack1;\n" +
+				"public class X{\n" +
+				"	public void foo( pack2.pack3.@Marker B arg , A a) {}\n" +
+				"}\n" +
+				"@java.lang.annotation.Target (java.lang.annotation.ElementType.TYPE_USE)\n" +
+				"@interface Marker {}\n";
+		createFolder("/" + PROJECT + "/src/pack1");
+		createFile("/" + PROJECT + "/src/pack1/X.java", contents);
+		contents = "package pack1;\n" +
+				"public class A{}\n";
+		createFile("/" + PROJECT + "/src/pack1/A.java", contents);
+		contents = "package pack2/pack3;\n" +
+				"public class B {}\n";
+		createFolder("/" + PROJECT + "/src/pack2");
+		createFolder("/" + PROJECT + "/src/pack2/pack3");
+		createFile("/" + PROJECT + "/src/pack2/pack3/B.java", contents);
+
+		ASTParser parser = ASTParser.newParser(AST.JLS8);
+		parser.setSource(getCompilationUnit("/" + PROJECT + "/src/pack1/A.java"));
+		parser.setResolveBindings(true);
+		parser.setStatementsRecovery(true);
+		CompilationUnit astRoot = (CompilationUnit) parser.createAST(null);
+
+		ICompilationUnit cu = getCompilationUnit("/" + PROJECT + "/src/pack1/X.java");
+		parser.setSource(cu);
+		parser.setResolveBindings(true);
+		parser.setStatementsRecovery(true);
+		astRoot = (CompilationUnit) parser.createAST(null);
+		TypeDeclaration type= (TypeDeclaration) astRoot.types().get(0);
+		MethodDeclaration [] methods =  type.getMethods();
+		MethodDeclaration method = methods[0];
+		VariableDeclaration variable= (VariableDeclaration) method.parameters().get(0);
+		IVariableBinding binding = variable.resolveBinding();
+		ITypeBinding typeBinding = binding.getType();
+		ImportRewrite rewrite = newImportsRewrite(cu, new String[0], 99, 99, true);
+		cu = getCompilationUnit("/" + PROJECT + "/src/pack1/A.java");
+		rewrite = newImportsRewrite(cu, new String[0], 99, 99, true);
+		Type actualType = rewrite.addImport(typeBinding, astRoot.getAST());
+		assertEquals("@Marker B", actualType.toString());
+		assertTrue(actualType.isSimpleType());
+		apply(rewrite);
+		String contentsA = "package pack1;\n" +
+				"\n" +
+				"import pack2.pack3.B;\n" +
+				"\n" +
+				"public class A{}\n";
+		assertEqualStringIgnoreDelim(cu.getSource(), contentsA);
+	}
+

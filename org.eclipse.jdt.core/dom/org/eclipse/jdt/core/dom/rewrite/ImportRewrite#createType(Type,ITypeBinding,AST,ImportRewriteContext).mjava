@@ -1,0 +1,66 @@
+	private Type createType(Type currentType, ITypeBinding binding, AST ast, ImportRewriteContext context) {
+
+		if (binding.isPrimitive()) {
+			return ast.newPrimitiveType(PrimitiveType.toCode(binding.getName()));
+		}
+
+		ITypeBinding normalizedBinding = normalizeTypeBinding(binding);
+		if (normalizedBinding == null) {
+			return ast.newSimpleType(ast.newSimpleName("invalid")); //$NON-NLS-1$
+		}
+
+		if (normalizedBinding.isTypeVariable()) {
+			if (currentType != null) {
+				return ast.newQualifiedType(currentType, ast.newSimpleName(binding.getName()));
+			}
+			return ast.newSimpleType(ast.newSimpleName(binding.getName()));
+		}
+
+		if (normalizedBinding.isWildcardType()) {
+			WildcardType wcType = ast.newWildcardType();
+			ITypeBinding bound = normalizedBinding.getBound();
+			if (bound != null && !bound.isWildcardType() && !bound.isCapture()) {
+				Type boundType = createType(bound, null, ast, (Type) null, context);
+				wcType.setBound(boundType, normalizedBinding.isUpperbound());
+			}
+			return wcType;
+		}
+
+		if (normalizedBinding.isArray()) {
+			Type elementType = createType(currentType, normalizedBinding.getElementType(), ast, context);
+			return ast.newArrayType(elementType, normalizedBinding.getDimensions());
+		}
+
+		if (normalizedBinding.isParameterizedType()) {
+			ITypeBinding[] typeArguments = normalizedBinding.getTypeArguments();
+			if (typeArguments.length > 0) {
+				Type erasureType = currentType == null ? (Type) ast.newSimpleType(ast.newName(getRawName(normalizedBinding))) :
+							(Type) ast.newQualifiedType(currentType, ast.newSimpleName(getRawName(normalizedBinding)));
+				ParameterizedType paramType = ast.newParameterizedType(erasureType);
+				List arguments = paramType.typeArguments();
+				for (int i = 0; i < typeArguments.length; i++) {
+					ITypeBinding curr = typeArguments[i];
+					if (containsNestedCapture(curr, false)) { // see bug 103044
+						arguments.add(ast.newWildcardType());
+					} else {
+						arguments.add(addImport(curr, ast, context));
+					}
+				}
+				return paramType;
+			}
+		}
+
+		if (currentType != null) {
+			if (currentType instanceof AnnotatableType) {
+				AnnotatableType annotatableType = (AnnotatableType) currentType;
+				List annotations = annotatableType.annotations();
+				if (annotations == null || annotations.size() == 0) {
+					Name qualifierName = ast.newName(currentType.toString());
+					return ast.newNameQualifiedType(qualifierName, ast.newSimpleName(getRawName(normalizedBinding)));
+				}
+			}
+			return ast.newQualifiedType(currentType, ast.newSimpleName(getRawName(normalizedBinding)));
+		}
+		return ast.newSimpleType(ast.newName(getRawName(normalizedBinding)));
+	}
+
