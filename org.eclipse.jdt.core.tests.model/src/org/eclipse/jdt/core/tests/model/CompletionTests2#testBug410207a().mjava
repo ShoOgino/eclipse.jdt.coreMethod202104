@@ -1,0 +1,53 @@
+/**
+ * Project's compliance: source: 1.5, compiler: 1.5
+ * Jar's compliance: source: 1.3, compiler: 1.3
+ * Jar contains a class with "enum" package and is located inside the project.
+ * The test verifies that class from the "enum" package is not proposed.
+ */
+public void testBug410207a() throws Exception {
+	try {
+		IJavaProject p = createJavaProject("P", new String[] {"src"}, new String[] {"JCL15_LIB", "/P/lib.jar"}, "bin", "1.5");
+		Util.createJar(new String[] {
+				"a/enum/b/NonCompliant.java",
+				"package a.enum.b;\n" +
+				"public class NonCompliant {\n" +
+				"}",
+				"lib/External.java",
+				"package lib;\n" +
+				"import a.enum.b.NonCompliant;\n" +
+				"public class External {\n" +
+				"   public NonCompliant setNonCompliant(NonCompliant x) {\n" +
+				"      return null;\n" +
+				"	}\n" +
+				"}"
+			},
+			p.getProject().getLocation().append("lib.jar").toOSString(),
+			"1.3");
+		refresh(p);
+		createFolder("/P/src/p/");
+		createFile(
+				"/P/src/p/Main.java",
+				"package p;\n" +
+				"import lib.External;\n" +
+				"public class Main {\n" +
+				"   public void m() {\n" +
+				"      External external = new External();\n" +
+				"      external.setNonCompliant(new );\n" +
+				"   };\n" +
+				"}"
+		);
+		waitUntilIndexesReady();
+		ICompilationUnit cu = getCompilationUnit("P", "src", "p", "Main.java");
+		String source = cu.getSource();
+		String completeBehind = "external.setNonCompliant(new ";
+		int cursorLocation = source.lastIndexOf(completeBehind) + completeBehind.length();
+		CompletionTestsRequestor2 requestor = new CompletionTestsRequestor2(true, false, false, true, true);
+		cu.codeComplete(cursorLocation, requestor);
+		assertResults(
+				"Main[TYPE_REF]{Main, p, Lp.Main;, null, null, 27}",
+				requestor.getResults());
+	} finally {
+		deleteProject("P");
+	}
+}
+
