@@ -1,5 +1,6 @@
 	private int parameterCompatibilityLevel18(MethodBinding method, TypeBinding[] arguments, boolean tiebreakingVarargsMethods, InvocationSite site) {
-		if (site instanceof Invocation) {
+		jdk18checks:
+		if (site instanceof Invocation && compilerOptions().complianceLevel >= ClassFileConstants.JDK1_8) {
 			Invocation invocation = (Invocation) site;
 			if (method instanceof ParameterizedGenericMethodBinding) {
 				InferenceContext18 infCtx = invocation.getInferenceContext((ParameterizedGenericMethodBinding) method);
@@ -15,61 +16,21 @@
 			if (invocationArguments != null) {
 				InnerInferenceHelper innerInferenceHelper = invocation.innerInferenceHelper();
 				int argLen = invocationArguments.length;
-				boolean isVarArgs = argLen != method.parameters.length; // if same lengths, isVarArgs can still be updated below
+				boolean isVarArgs[] = new boolean[1]; // emulate an in-out parameter for compatibilityLevel18FromInner(..)
+				isVarArgs[0] = method.isVarargs() && argLen != method.parameters.length; // if same lengths, isVarArgs can still be updated below
+				int level = COMPATIBLE;
 				for (int i = 0; i < argLen; i++) {
-					Expression invocArg = invocationArguments[i];
-					if (invocArg instanceof Invocation && invocArg.resolvedType != null) { // TODO any poly? ReferenceExpression?
-						Invocation innerPoly = (Invocation) invocArg;
-						TypeBinding resolvedType = invocArg.resolvedType;
-						TypeBinding targetType = InferenceContext18.getParameter(method.parameters, i, isVarArgs);
-						if (!isVarArgs && shouldTryVarargs(method, resolvedType, targetType)) {
-							isVarArgs = true;
-							targetType = InferenceContext18.getParameter(method.parameters, i, true);
-						}
-						if (!resolvedType.isCompatibleWith(targetType, this)) {
-							MethodBinding innerBinding = innerPoly.binding(null); // 1. try without update
-							if (innerBinding instanceof ParameterizedGenericMethodBinding) {
-								ParameterizedGenericMethodBinding innerParameterized = (ParameterizedGenericMethodBinding) innerBinding;
-								InferenceContext18 infCtx18 = innerPoly.getInferenceContext(innerParameterized);
-								if (infCtx18 != null && !infCtx18.hasResultFor(targetType)) {
-									// not detected as compatible, because inference still needs to complete?
-									invocArg.setExpectedType(targetType);
-									MethodBinding solution = infCtx18.inferInvocationType(innerPoly, innerParameterized);
-									if (solution != null && solution.isValidBinding()) {
-										if (innerPoly.updateBindings(solution, targetType)) {
-											if (innerInferenceHelper != null)
-												innerInferenceHelper.registerInnerResult(method, invocArg.resolvedType, argLen, i);
-										}
-										if (solution.returnType != null && solution.returnType.isCompatibleWith(targetType, this))
-											return isVarArgs ? VARARGS_COMPATIBLE : COMPATIBLE;
-									}
-									return NOT_COMPATIBLE;
-								} else if (innerPoly instanceof AllocationExpression) {
-									// not detected as compatible, because its a diamond whose type hasn't yet been inferred?
-									TypeBinding[] typeArguments = resolvedType.typeArguments();
-									if (typeArguments != null && typeArguments.length == 0) {
-										AllocationExpression alloc = (AllocationExpression) innerPoly;
-										if ((alloc.type.bits & ASTNode.IsDiamond) != 0) {
-											// not-yet-inferred diamond: erasure compatibility should suffice, detail will be checked using inference
-											if (invocArg.resolvedType.isCompatibleWith(targetType.erasure(), this))
-												return COMPATIBLE;
-											return NOT_COMPATIBLE;
-										}
-									}
-								}
-							} else if (innerPoly instanceof AllocationExpression) {
-								MethodBinding updatedMethod = innerPoly.binding(targetType); // 2. try with updating
-								if (updatedMethod != innerBinding && updatedMethod != null && updatedMethod.isValidBinding()) {
-									if (updatedMethod.declaringClass.isCompatibleWith(targetType))
-										return COMPATIBLE;
-									return NOT_COMPATIBLE;
-								}
-							}
-						}
-					}
+					int nextLevel = compatibilityLevel18FromInner(method, innerInferenceHelper, invocationArguments[i], argLen, i, isVarArgs);
+					if (nextLevel == NOT_COMPATIBLE)
+						return nextLevel;
+					if (nextLevel == -2)
+						break jdk18checks;
+					level = Math.max(level,  nextLevel);
 				}
+				return level; // neither NOT_COMPATIBLE nor unknown(-2) seen
 			}
 		}
+		// fall back to old method:
 		return parameterCompatibilityLevel(method, arguments, tiebreakingVarargsMethods);
 	}
 
