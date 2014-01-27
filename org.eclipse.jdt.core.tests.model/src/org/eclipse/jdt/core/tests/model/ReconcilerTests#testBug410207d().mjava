@@ -1,0 +1,53 @@
+/**
+ * Two projects:
+ * 		Lib: source: 1.4, compiler: 1.4
+ * 		P: source: 1.5, compiler: 1.5
+ * Lib contains a class with "enum" package and is required by P (dependency on the whole project).
+ * The test verifies that class from the "enum" package is correctly reconciled for P.
+ */
+public void testBug410207d() throws Exception {
+	try {
+		createJavaProject("Lib", new String[] {"src"}, new String[] {"JCL_LIB"}, "bin", "1.4");
+		createFolder("/Lib/src/a/enum/b");
+		createFile(
+				"/Lib/src/a/enum/b/NonCompliant.java",
+				"package a.enum.b;\n" +
+				"public class NonCompliant {\n" +
+				"}"
+		);
+		createFolder("/Lib/src/lib");
+		createFile(
+				"/Lib/src/lib/External.java",
+				"package lib;\n" +
+				"import a.enum.b.NonCompliant;\n" +
+				"public class External {\n" +
+				"   public NonCompliant setNonCompliant(NonCompliant x) {\n" +
+				"      return null;\n" +
+				"	}\n" +
+				"}"
+		);
+		getProject("Lib").build(IncrementalProjectBuilder.FULL_BUILD, null);
+		createJavaProject("P", new String[] {"src"}, new String[] {"JCL15_LIB"}, new String[] {"/Lib"}, "bin", "1.5");
+		setUpWorkingCopy(
+				"/P/src/p/Main.java",
+				"package p;\n" +
+				"import lib.External;\n" +
+				"public class Main {\n" +
+				"   public void m() {\n" +
+				"      External external = new External();\n" +
+				"      external.setNonCompliant(null);\n" +
+				"   };\n" +
+				"}"
+		);
+		this.problemRequestor.reset();
+		this.workingCopy.reconcile(ICompilationUnit.NO_AST, true/*force problem detection*/, null, null);
+		assertProblems(
+				"Unexpected problems",
+				"----------\n" +
+				"----------\n"
+		);
+	} finally {
+		deleteProjects(new String[] { "Lib", "P" });
+	}
+}
+
