@@ -21,58 +21,10 @@
 	 */
 	public Type addImport(ITypeBinding binding, AST ast, ImportRewriteContext context) {
 		ITypeBinding bindingPoint = checkAnnotationAndGenerics(binding);
-		if (bindingPoint != null) {
-			return createType(binding, bindingPoint, ast, context);
+		Type type = internalAddImport(bindingPoint == null ? binding : bindingPoint, ast, context, null, /* getBase */ true);
+		if (bindingPoint != null && !bindingPoint.equals(binding)) {
+			type = buildType(binding, bindingPoint, ast, context, type);
 		}
-		if (binding.isPrimitive()) {
-			return ast.newPrimitiveType(PrimitiveType.toCode(binding.getName()));
-		}
-
-		ITypeBinding normalizedBinding= normalizeTypeBinding(binding);
-		if (normalizedBinding == null) {
-			return ast.newSimpleType(ast.newSimpleName("invalid")); //$NON-NLS-1$
-		}
-
-		if (normalizedBinding.isTypeVariable()) {
-			// no import
-			return ast.newSimpleType(ast.newSimpleName(binding.getName()));
-		}
-		if (normalizedBinding.isWildcardType()) {
-			WildcardType wcType= ast.newWildcardType();
-			ITypeBinding bound= normalizedBinding.getBound();
-			if (bound != null && !bound.isWildcardType() && !bound.isCapture()) { // bug 96942
-				Type boundType= addImport(bound, ast, context);
-				wcType.setBound(boundType, normalizedBinding.isUpperbound());
-			}
-			return wcType;
-		}
-
-		if (normalizedBinding.isArray()) {
-			Type elementType= addImport(normalizedBinding.getElementType(), ast, context);
-			return ast.newArrayType(elementType, normalizedBinding.getDimensions());
-		}
-
-		String qualifiedName= getRawQualifiedName(normalizedBinding);
-		if (qualifiedName.length() > 0) {
-			String res= internalAddImport(qualifiedName, context);
-
-			ITypeBinding[] typeArguments= normalizedBinding.getTypeArguments();
-			if (typeArguments.length > 0) {
-				Type erasureType= ast.newSimpleType(ast.newName(res));
-				ParameterizedType paramType= ast.newParameterizedType(erasureType);
-				List arguments= paramType.typeArguments();
-				for (int i= 0; i < typeArguments.length; i++) {
-					ITypeBinding curr= typeArguments[i];
-					if (containsNestedCapture(curr, false)) { // see bug 103044
-						arguments.add(ast.newWildcardType());
-					} else {
-						arguments.add(addImport(curr, ast, context));
-					}
-				}
-				return paramType;
-			}
-			return ast.newSimpleType(ast.newName(res));
-		}
-		return ast.newSimpleType(ast.newName(getRawName(normalizedBinding)));
+		return type;
 	}
 
