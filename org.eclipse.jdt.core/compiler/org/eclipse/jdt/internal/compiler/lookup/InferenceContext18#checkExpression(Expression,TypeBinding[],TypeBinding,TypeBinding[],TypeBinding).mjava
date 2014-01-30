@@ -1,0 +1,59 @@
+	private boolean checkExpression(Expression expri, TypeBinding[] u, TypeBinding r1, TypeBinding[] v, TypeBinding r2) 
+			throws InferenceFailureException {
+		if (expri instanceof LambdaExpression && !((LambdaExpression)expri).argumentsTypeElided()) {
+			if (r2.id == TypeIds.T_void)
+				return true;
+			LambdaExpression lambda = (LambdaExpression) expri;
+			Expression[] results = lambda.resultExpressions();
+			if (r1.isFunctionalInterface(this.scope) && r2.isFunctionalInterface(this.scope)
+					&& !(r1.isCompatibleWith(r2) || r2.isCompatibleWith(r1))) {
+				// "these rules are applied recursively to R1 and R2, for each result expression in expi."
+				// (what does "applied .. to R1 and R2" mean? Why mention R1/R2 and not U/V?)
+				for (int i = 0; i < results.length; i++) {
+					if (!checkExpression(results[i], u, r1, v, r2))
+						return false;
+				}
+				return true;
+			}
+			checkPrimitive1: if (r1.isBaseType() && !r2.isBaseType()) {
+				// check: each result expression is a standalone expression of a primitive type
+				for (int i = 0; i < results.length; i++) {
+					if (results[i].isPolyExpression() || (results[i].resolvedType != null && !results[i].resolvedType.isBaseType()))
+						break checkPrimitive1;
+				}
+				return true;
+			}
+			checkPrimitive2: if (r2.isBaseType() && !r1.isBaseType()) {
+				for (int i = 0; i < results.length; i++) {
+					// for all expressions (not for any expression not)
+					if (!(
+							(!results[i].isPolyExpression() && (results[i].resolvedType != null && !results[i].resolvedType.isBaseType())) // standalone of a referencetype
+							|| results[i].isPolyExpression()))	// or a poly
+						break checkPrimitive2;
+				}
+				return true;
+			}
+			return reduceAndIncorporate(new ConstraintTypeFormula(r1, r2, ReductionResult.SUBTYPE));
+		} else if (expri instanceof ReferenceExpression && ((ReferenceExpression)expri).isExactMethodReference()) {
+			for (int i = 0; i < u.length; i++) {
+				ReferenceExpression reference = (ReferenceExpression) expri;
+				if (!reduceAndIncorporate(new ConstraintTypeFormula(u[i], v[i], ReductionResult.SAME)))
+					return false;
+				if (r2.id == TypeIds.T_void)
+					return true;
+				MethodBinding method = reference.findCompileTimeMethodTargeting(null, this.scope); // TODO directly access exactMethodBinding!
+				TypeBinding returnType = method.isConstructor() ? method.declaringClass : method.returnType;
+				if (r1.isBaseType() && !r2.isBaseType() && returnType.isBaseType()) 
+					return true;
+				if (r2.isBaseType() && !r1.isBaseType() && !returnType.isBaseType())
+					return true;
+			}
+			return reduceAndIncorporate(new ConstraintTypeFormula(r1, r2, ReductionResult.SUBTYPE));
+		} else if (expri instanceof ConditionalExpression) {
+			ConditionalExpression cond = (ConditionalExpression) expri;
+			return  checkExpression(cond.valueIfTrue, u, r1, v, r2) && checkExpression(cond.valueIfFalse, u, r1, v, r2);
+		} else {
+			return false;
+		}
+	}
+

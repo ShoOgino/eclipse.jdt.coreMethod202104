@@ -1,0 +1,39 @@
+	// FALSE: inference fails
+	// TRUE:  constraints have been incorporated
+	// null:  need the otherwise branch
+	private Boolean moreSpecificMain(TypeBinding si, TypeBinding ti, Expression expri) throws InferenceFailureException {
+		if (si.isProperType(true) && ti.isProperType(true)) {
+			return expri.sIsMoreSpecific(si, ti) ? Boolean.TRUE : Boolean.FALSE;
+		}
+		if (si.isFunctionalInterface(this.scope)) {
+			TypeBinding funcI = ti.original();
+			if (funcI.isFunctionalInterface(this.scope)) {
+				// "... none of the following is true:" 
+				if (siSuperI(si, funcI) || siSubI(si, funcI))
+					return null;
+				if (si instanceof IntersectionCastTypeBinding) {
+					TypeBinding[] elements = ((IntersectionCastTypeBinding)si).intersectingTypes;
+					checkSuper: {
+						for (int i = 0; i < elements.length; i++)
+							if (!siSuperI(elements[i], funcI))
+								break checkSuper;
+						return null; // each element of the intersection is a superinterface of I, or a parameterization of a superinterface of I.
+					}
+					for (int i = 0; i < elements.length; i++)
+						if (siSubI(elements[i], funcI))
+							return null; // some element of the intersection is a subinterface of I, or a parameterization of a subinterface of I.	
+				}
+				// all passed, time to do some work:
+				TypeBinding siCapture = si.capture(this.scope, this.captureId++);
+				MethodBinding sam = siCapture.getSingleAbstractMethod(this.scope, false); // no wildcards should be left needing replacement
+				TypeBinding[] u = sam.parameters;
+				TypeBinding r1 = sam.isConstructor() ? sam.declaringClass : sam.returnType;
+				sam = ti.getSingleAbstractMethod(this.scope, true); // TODO
+				TypeBinding[] v = sam.parameters;
+				TypeBinding r2 = sam.isConstructor() ? sam.declaringClass : sam.returnType;
+				return Boolean.valueOf(checkExpression(expri, u, r1, v, r2));
+			}
+		}
+		return null;
+	}
+
