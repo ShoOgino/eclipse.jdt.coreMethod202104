@@ -1,0 +1,59 @@
+	public void generateImplicitLambda(BlockScope currentScope, CodeStream codeStream, boolean valueRequired) {
+		
+		final Parser parser = new Parser(this.enclosingScope.problemReporter(), false);
+		final char[] source = this.compilationResult.getCompilationUnit().getContents();
+		ReferenceExpression copy =  (ReferenceExpression) parser.parseExpression(source, this.sourceStart, this.sourceEnd - this.sourceStart + 1, 
+										this.enclosingScope.referenceCompilationUnit(), false /* record line separators */);
+		
+		int argc = this.descriptor.parameters.length;
+		
+		LambdaExpression implicitLambda = new LambdaExpression(this.compilationResult, false);
+		Argument [] arguments = new Argument[argc];
+		for (int i = 0; i < argc; i++)
+			arguments[i] = new Argument(("arg" + i).toCharArray(), 0, null, 0, true); //$NON-NLS-1$
+		implicitLambda.setArguments(arguments);
+		implicitLambda.setExpressionContext(this.expressionContext);
+		implicitLambda.setExpectedType(this.expectedType);
+		
+		int parameterShift = this.receiverPrecedesParameters ? 1 : 0;
+		Expression [] argv = new SingleNameReference[argc - parameterShift];
+		for (int i = 0, length = argv.length; i < length; i++) {
+			String name = "arg" + (i + parameterShift); //$NON-NLS-1$
+			argv[i] = new SingleNameReference(name.toCharArray(), 0);
+		}
+		if (isMethodReference()) {
+			MessageSend message = new MessageSend();
+			message.selector = this.selector;
+			message.receiver = this.receiverPrecedesParameters ? new SingleNameReference("arg0".toCharArray(), 0) : copy.lhs; //$NON-NLS-1$
+			message.typeArguments = copy.typeArguments;
+			message.arguments = argv;
+			implicitLambda.setBody(message);
+		} else {
+			AllocationExpression allocation = new AllocationExpression();
+			if (this.lhs instanceof TypeReference) {
+				allocation.type = (TypeReference) this.lhs;
+			} else if (this.lhs instanceof SingleNameReference) {
+				allocation.type = new SingleTypeReference(((SingleNameReference) this.lhs).token, 0);
+			} else if (this.lhs instanceof QualifiedNameReference) {
+				allocation.type = new QualifiedTypeReference(((QualifiedNameReference) this.lhs).tokens, new long [((QualifiedNameReference) this.lhs).tokens.length]);
+			} else {
+				throw new IllegalStateException("Unexpected node type"); //$NON-NLS-1$
+			}
+			allocation.typeArguments = copy.typeArguments;
+			allocation.arguments = argv;
+			implicitLambda.setBody(allocation);
+		}
+		
+		// Process the lambda, taking care not to double report diagnostics. Don't expect any from resolve, Any from code generation should surface, but not those from flow analysis.
+		implicitLambda.resolve(currentScope);
+		IErrorHandlingPolicy oldPolicy = currentScope.problemReporter().switchErrorHandlingPolicy(silentErrorHandlingPolicy);
+		try {
+			implicitLambda.analyseCode(currentScope, 
+					new ExceptionHandlingFlowContext(null, this, Binding.NO_EXCEPTIONS, null, currentScope, FlowInfo.DEAD_END), 
+					UnconditionalFlowInfo.fakeInitializedFlowInfo(currentScope.outerMostMethodScope().analysisIndex, currentScope.referenceType().maxFieldCount));
+		} finally {
+			currentScope.problemReporter().switchErrorHandlingPolicy(oldPolicy);
+		}
+		implicitLambda.generateCode(currentScope, codeStream, valueRequired);
+	}	
+
