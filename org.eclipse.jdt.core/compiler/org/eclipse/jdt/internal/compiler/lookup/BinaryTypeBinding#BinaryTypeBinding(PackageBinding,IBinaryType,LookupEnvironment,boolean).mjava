@@ -1,0 +1,57 @@
+/**
+ * Standard constructor for creating binary type bindings from binary models (classfiles)
+ * @param packageBinding
+ * @param binaryType
+ * @param environment
+ * @param needFieldsAndMethods
+ */
+public BinaryTypeBinding(PackageBinding packageBinding, IBinaryType binaryType, LookupEnvironment environment, boolean needFieldsAndMethods) {
+	
+	this.prototype = this;
+	this.compoundName = CharOperation.splitOn('/', binaryType.getName());
+	computeId();
+
+	this.tagBits |= TagBits.IsBinaryBinding;
+	this.environment = environment;
+	this.fPackage = packageBinding;
+	this.fileName = binaryType.getFileName();
+
+	/* https://bugs.eclipse.org/bugs/show_bug.cgi?id=324850, even in a 1.4 project, we
+	   must internalize type variables and observe any parameterization of super class
+	   and/or super interfaces in order to be able to detect overriding in the presence
+	   of generics.
+	 */
+	char[] typeSignature = binaryType.getGenericSignature();
+	this.typeVariables = typeSignature != null && typeSignature.length > 0 && typeSignature[0] == Util.C_GENERIC_START
+		? null // is initialized in cachePartsFrom (called from LookupEnvironment.createBinaryTypeFrom())... must set to null so isGenericType() answers true
+		: Binding.NO_TYPE_VARIABLES;
+
+	this.sourceName = binaryType.getSourceName();
+	this.modifiers = binaryType.getModifiers();
+
+	if ((binaryType.getTagBits() & TagBits.HierarchyHasProblems) != 0)
+		this.tagBits |= TagBits.HierarchyHasProblems;
+
+	if (binaryType.isAnonymous()) {
+		this.tagBits |= TagBits.AnonymousTypeMask;
+	} else if (binaryType.isLocal()) {
+		this.tagBits |= TagBits.LocalTypeMask;
+	} else if (binaryType.isMember()) {
+		this.tagBits |= TagBits.MemberTypeMask;
+	}
+	// need enclosing type to access type variables
+	char[] enclosingTypeName = binaryType.getEnclosingTypeName();
+	if (enclosingTypeName != null) {
+		// attempt to find the enclosing type if it exists in the cache (otherwise - resolve it when requested)
+		this.enclosingType = environment.getTypeFromConstantPoolName(enclosingTypeName, 0, -1, true, null /* could not be missing */); // pretend parameterized to avoid raw
+		this.tagBits |= TagBits.MemberTypeMask;   // must be a member type not a top-level or local type
+		this.tagBits |= TagBits.HasUnresolvedEnclosingType;
+		if (enclosingType().isStrictfp())
+			this.modifiers |= ClassFileConstants.AccStrictfp;
+		if (enclosingType().isDeprecated())
+			this.modifiers |= ExtraCompilerModifiers.AccDeprecatedImplicitly;
+	}
+	if (needFieldsAndMethods)
+		cachePartsFrom(binaryType, true);
+}
+
