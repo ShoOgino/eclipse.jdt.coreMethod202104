@@ -1,5 +1,112 @@
 	private ConstraintFormula pickFromCycle(Set<ConstraintFormula> c) {
-		missingImplementation("Breaking a dependency cycle NYI"); //$NON-NLS-1$
-		return null; // never
+		// Detail from 18.5.2 bullet 6.1
+
+		// Note on performance: this implementation could quite possibly be optimized a lot.
+		// However, we only *very rarely* reach here,
+		// so nobody should really be affected by the performance penalty paid here.
+
+		// Note on spec conformance: the spec seems to require _all_ criteria (i)-(iv) to be fulfilled
+		// with the sole exception of (iii), which should only be used, if _any_ constraints matching (i) & (ii)
+		// also fulfill this condition.
+		// Experiments, however, show that strict application of the above is prone to failing to pick any constraint,
+		// causing non-termination of the algorithm.
+		// Since that is not acceptable, I'm *interpreting* the spec to request a search for a constraint
+		// that "best matches" the given conditions.
+		
+		// collect all constraints participating in a cycle
+		HashMap<ConstraintFormula,Set<ConstraintFormula>> dependencies = new HashMap<ConstraintFormula, Set<ConstraintFormula>>();
+		Set<ConstraintFormula> cycles = new HashSet<ConstraintFormula>();
+		for (ConstraintFormula constraint : c) {
+			Collection<InferenceVariable> infVars = constraint.inputVariables(this);
+			for (ConstraintFormula other : c) {
+				if (other == constraint) continue;
+				if (dependsOn(infVars, other.outputVariables(this))) {
+					// found a dependency, record it:
+					Set<ConstraintFormula> targetSet = dependencies.get(constraint);
+					if (targetSet == null)
+						dependencies.put(constraint, targetSet = new HashSet<ConstraintFormula>());
+					targetSet.add(other);
+					// look for a cycle:
+					Set<ConstraintFormula> nodesInCycle = new HashSet<ConstraintFormula>();
+					if (isReachable(dependencies, other, constraint, new HashSet<ConstraintFormula>(), nodesInCycle)) {
+						// found a cycle, record the involved nodes:
+						cycles.addAll(nodesInCycle);
+					}
+				}
+			}
+		}
+		Set<ConstraintFormula> outside = new HashSet<ConstraintFormula>(c);
+		outside.removeAll(cycles);
+
+		Set<ConstraintFormula> candidatesII = new HashSet<ConstraintFormula>();
+		// (i): participates in a cycle:
+		candidates: for (ConstraintFormula candidate : cycles) {
+			Collection<InferenceVariable> infVars = candidate.inputVariables(this);
+			// (ii) does not depend on any constraints outside the cycle
+			for (ConstraintFormula out : outside) {
+				if (dependsOn(infVars, out.outputVariables(this)))
+					continue candidates;
+			}
+			candidatesII.add(candidate);
+		}
+		if (candidatesII.isEmpty())
+			candidatesII = c; // not spec'ed but needed to avoid returning null below, witness: java.util.stream.Collectors
+		
+		// tentatively: (iii)  has the form ⟨Expression → T⟩
+		Set<ConstraintFormula> candidatesIII = new HashSet<ConstraintFormula>();
+		for (ConstraintFormula candidate : candidatesII) {
+			if (candidate instanceof ConstraintExpressionFormula)
+				candidatesIII.add(candidate);
+		}
+		if (candidatesIII.isEmpty()) {
+			candidatesIII = candidatesII; // no constraint fulfills (iii) -> ignore this condition
+		} else { // candidatesIII contains all relevant constraints ⟨Expression → T⟩
+			// (iv) contains an expression that appears to the left of the expression
+			// 		of every other constraint satisfying the previous three requirements
+			
+			// collect containment info regarding all expressions in candidate constraints:
+			// (a) find minimal enclosing expressions:
+			Map<ConstraintExpressionFormula,ConstraintExpressionFormula> expressionContainedBy = new HashMap<ConstraintExpressionFormula, ConstraintExpressionFormula>();
+			for (ConstraintFormula one : candidatesIII) {
+				ConstraintExpressionFormula oneCEF = (ConstraintExpressionFormula) one;
+				Expression exprOne = oneCEF.left;
+				for (ConstraintFormula two : candidatesIII) {
+					if (one == two) continue;
+					ConstraintExpressionFormula twoCEF = (ConstraintExpressionFormula) two;
+					Expression exprTwo = twoCEF.left;
+					if (doesExpressionContain(exprOne, exprTwo)) {
+						ConstraintExpressionFormula previous = expressionContainedBy.get(two);
+						if (previous == null || doesExpressionContain(previous.left, exprOne)) // only if improving
+							expressionContainedBy.put(twoCEF, oneCEF);
+					}
+				}
+			}
+			// (b) build the tree from the above
+			Map<ConstraintExpressionFormula,Set<ConstraintExpressionFormula>> containmentForest = new HashMap<ConstraintExpressionFormula, Set<ConstraintExpressionFormula>>();
+			for (Map.Entry<ConstraintExpressionFormula, ConstraintExpressionFormula> parentRelation : expressionContainedBy.entrySet()) {
+				ConstraintExpressionFormula parent = parentRelation.getValue();
+				Set<ConstraintExpressionFormula> children = containmentForest.get(parent);
+				if (children == null)
+					containmentForest.put(parent, children = new HashSet<ConstraintExpressionFormula>());
+				children.add(parentRelation.getKey());
+			}
+			
+			// approximate the spec by searching the largest containment tree:
+			int bestRank = -1;
+			ConstraintExpressionFormula candidate = null;
+			for (ConstraintExpressionFormula parent : containmentForest.keySet()) {
+				int rank = rankNode(parent, expressionContainedBy, containmentForest);
+				if (rank > bestRank) {
+					bestRank = rank;
+					candidate = parent;
+				}
+			}
+			if (candidate != null)
+				return candidate;
+		}
+		
+		if (candidatesIII.isEmpty())
+			throw new IllegalStateException("cannot pick constraint from cyclic set"); //$NON-NLS-1$
+		return candidatesIII.iterator().next();
 	}
 
