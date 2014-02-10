@@ -1,0 +1,50 @@
+	// https://bugs.eclipse.org/bugs/show_bug.cgi?id=427320
+	public void testBug427320() throws Exception {
+		try {
+			String contents = 
+					"public class X {\n" +
+					"	@A @B @C X() {}\n" +
+					"	@A @B @C String foo() {\nreturn null;\n}\n" +
+					"}\n" +
+					"@java.lang.annotation.Target ({java.lang.annotation.ElementType.CONSTRUCTOR, "
+													+ "java.lang.annotation.ElementType.METHOD, java.lang.annotation.ElementType.TYPE_USE})\n" +
+					"@interface A {}\n" +
+					"@java.lang.annotation.Target ({java.lang.annotation.ElementType.CONSTRUCTOR, "
+													+ "java.lang.annotation.ElementType.METHOD})\n" +
+					"@interface B {}\n" +
+					"@java.lang.annotation.Target (java.lang.annotation.ElementType.TYPE_USE)\n" +
+					"@interface C {}\n";
+		
+		this.workingCopy = getWorkingCopy("/Converter18/src/X.java", true/*resolve*/);
+		ASTNode node = buildAST(contents, this.workingCopy, false);
+		assertEquals("Not a compilation unit", ASTNode.COMPILATION_UNIT, node.getNodeType());
+		CompilationUnit compilationUnit = (CompilationUnit) node;
+		assertProblemsSize(compilationUnit, 0);
+		List types = compilationUnit.types();
+		TypeDeclaration typeDecl = (TypeDeclaration) types.get(0);
+		MethodDeclaration method = typeDecl.getMethods()[0];
+		assertTrue("Should be a constructor", method.isConstructor());
+		IMethodBinding methodBinding = method.resolveBinding();
+		IAnnotationBinding[] annots = methodBinding.getAnnotations();
+		assertEquals("Incorrect no of annotations", 2, annots.length);
+		assertEquals("Incorrect annotations attached","@A()", annots[0].toString());
+		assertEquals("Incorrect annotations attached","@B()", annots[1].toString());
+		ITypeBinding binding = methodBinding.getReturnType();
+		annots = binding.getTypeAnnotations();
+		assertEquals("Incorrect no of annotations", 0, annots.length);
+		
+		method = typeDecl.getMethods()[1];
+		methodBinding = method.resolveBinding();
+		annots = methodBinding.getAnnotations();
+		assertEquals("Incorrect no of annotations", 2, annots.length);
+		assertEquals("Incorrect annotations attached","@A()", annots[0].toString());
+		assertEquals("Incorrect annotations attached","@B()", annots[1].toString());
+		binding = methodBinding.getReturnType();
+		annots = binding.getTypeAnnotations();
+		assertEquals("Incorrect no of annotations", 2, annots.length);
+		assertEquals("Incorrect annotations attached","@A @C String", binding.toString());
+		} finally {
+			deleteFile("/Converter18/src/X.java");
+		}
+	}
+
