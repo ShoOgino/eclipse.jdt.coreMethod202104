@@ -1,6 +1,41 @@
 	/* Answer true if the receiver type can be assigned to the argument type (right)
 	 */
 	public boolean isCompatibleWith(TypeBinding right, Scope scope) {
+
+		// easy way out?
+		if (TypeBinding.equalsEquals(this, right))
+			return true;
+
+		// need to compare two intersection types?
+		int rightKind = right.kind();
+		TypeBinding[] rightIntersectingTypes = null;
+		if (rightKind == INTERSECTION_TYPE && right.boundKind() == Wildcard.EXTENDS) {
+			TypeBinding allRightBounds = ((WildcardBinding) right).allBounds();
+			if (allRightBounds instanceof IntersectionCastTypeBinding)
+				rightIntersectingTypes = ((IntersectionCastTypeBinding) allRightBounds).intersectingTypes;
+		} else if (rightKind == INTERSECTION_CAST_TYPE) {
+			rightIntersectingTypes = ((IntersectionCastTypeBinding) right).intersectingTypes;
+		}
+		if (rightIntersectingTypes != null) {
+			int numRequired = rightIntersectingTypes.length;
+			TypeBinding[] required = new TypeBinding[numRequired];
+			System.arraycopy(rightIntersectingTypes, 0, required, 0, numRequired);
+			for (int i = 0; i < this.length; i++) {
+				TypeBinding provided = this.intersectingTypes[i];
+				for (int j = 0; j < required.length; j++) {
+					if (required[j] == null) continue;
+					if (provided.isCompatibleWith(required[j], scope)) {
+						required[j] = null;
+						if (--numRequired == 0)
+							return true;
+						break;
+					}
+				}
+			}
+			return false;
+		}
+
+		// normal case:
 		for (int i = 0; i < this.length; i++) {		
 			if (this.intersectingTypes[i].isCompatibleWith(right, scope))
 				return true;
