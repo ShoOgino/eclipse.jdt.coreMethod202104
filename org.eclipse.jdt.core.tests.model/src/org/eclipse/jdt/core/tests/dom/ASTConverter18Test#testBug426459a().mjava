@@ -1,0 +1,75 @@
+	// https://bugs.eclipse.org/bugs/show_bug.cgi?id=426459
+	public void testBug426459a() throws JavaModelException {
+		String contents =
+			"import java.lang.annotation.*;\n" +
+			"@Target(ElementType.TYPE_USE) @interface A {}\n" +
+			"@Target(ElementType.TYPE_USE) @interface B {}\n" +
+			"@Target(ElementType.TYPE_USE) @interface C {}\n" +
+			"public class X {\n" +
+			"		public void foo() {}\n" +
+			"		public @A X.@B Y foo(@C int i){ return null;}\n" +
+			"		public @A @B X foo(int i, int j){ return null;}\n" +
+			"		public @A X.Y [] @B [] foo(float f){ return null;}\n" +
+			"		class Y {}\n" +
+			"}";
+		this.workingCopy = getWorkingCopy("/Converter18/src/X.java", true);
+		ASTNode node = buildAST(contents, this.workingCopy);
+		assertEquals("Not a compilation unit", ASTNode.COMPILATION_UNIT, node.getNodeType());
+		CompilationUnit compilationUnit = (CompilationUnit) node;
+		assertProblemsSize(compilationUnit, 0);
+		
+		node = getASTNode(compilationUnit, 3, 0);
+		assertEquals("Not a method declaration", ASTNode.METHOD_DECLARATION, node.getNodeType());
+		Type type = ((MethodDeclaration) node).getReturnType2();
+		ITypeBinding binding = type.resolveBinding();
+		assertNotNull("Binding should not be null", binding);
+		try {
+			binding = binding.createArrayType(1);
+			binding = null;
+		} catch(IllegalArgumentException iae) {
+		}
+		assertNotNull("IllegalArgumentException should have been thrown", binding);
+
+		node = getASTNode(compilationUnit, 3, 1);
+		assertEquals("Not a method declaration", ASTNode.METHOD_DECLARATION, node.getNodeType());
+		type = ((MethodDeclaration) node).getReturnType2();
+		binding = type.resolveBinding();
+		assertEquals("Incorrect type binding", "@A X.@B Y", binding.toString());
+		binding = binding.createArrayType(2);
+		assertEquals("Incorrect type binding", "@A X.@B Y [] []", binding.toString());
+		int dims = binding.getDimensions();
+		assertEquals("Incorrect no of dimensions", 2, dims);
+		SingleVariableDeclaration param = (SingleVariableDeclaration) ((MethodDeclaration) node).parameters().get(0);
+		type = param.getType();
+		binding = type.resolveBinding();
+		assertEquals("Incorrect type binding", "@C int", binding.toString());
+		binding = binding.createArrayType(2);
+		assertEquals("Incorrect type binding", "@C int [] []", binding.toString());
+		
+		node = getASTNode(compilationUnit, 3, 2);
+		assertEquals("Not a method declaration", ASTNode.METHOD_DECLARATION, node.getNodeType());
+		type = ((MethodDeclaration) node).getReturnType2();
+		binding = type.resolveBinding();
+		assertEquals("Incorrect type binding", "@A @B X", binding.toString());
+		binding = binding.createArrayType(2);
+		assertEquals("Incorrect type binding", "@A @B X [] []", binding.toString());
+		dims = binding.getDimensions();
+		assertEquals("Incorrect no of dimensions", 2, dims);
+		
+		node = getASTNode(compilationUnit, 3, 3);
+		assertEquals("Not a method declaration", ASTNode.METHOD_DECLARATION, node.getNodeType());
+		type = ((MethodDeclaration) node).getReturnType2();
+		ITypeBinding original = type.resolveBinding();
+		assertEquals("Incorrect type binding", "@A X.Y [] @B []", original.toString());
+		binding = original.createArrayType(1);
+		assertEquals("Incorrect type binding", "@A X.Y [] [] @B []", binding.toString());
+		dims = binding.getDimensions();
+		assertEquals("Incorrect no of dimensions", 3, dims);
+		
+		binding = original.createArrayType(-1);
+		assertEquals("Incorrect type binding", "@A X.Y @B []", binding.toString());
+		dims = binding.getDimensions();
+		assertEquals("Incorrect no of dimensions", 1, dims);
+
+	}
+
