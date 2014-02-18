@@ -21,6 +21,17 @@
 				break;
 		}
 
+		boolean isResourceProducer = false;
+		if (expression.resolvedType instanceof ReferenceBinding) {
+			ReferenceBinding resourceType = (ReferenceBinding) expression.resolvedType;
+			if (resourceType.hasTypeBit(TypeIds.BitResourceFreeCloseable)) {
+				if (isBlacklistedMethod(expression))
+					isResourceProducer = true;
+				else
+					return null; // (a) resource-free closeable: -> null
+			}
+		}
+
 		// analyze by node type:
 		if (expression instanceof AllocationExpression) {
 			// allocation expressions already have their tracking variables analyzed by analyseCloseableAllocation(..)
@@ -35,7 +46,8 @@
 		{
 			// we *might* be responsible for the resource obtained
 			FakedTrackingVariable tracker = new FakedTrackingVariable(local, location, flowInfo, flowContext, FlowInfo.POTENTIALLY_NULL); // shed some doubt
-			tracker.globalClosingState |= SHARED_WITH_OUTSIDE;
+			if (!isResourceProducer)
+				tracker.globalClosingState |= SHARED_WITH_OUTSIDE;
 			return tracker;
 		} else if (
 				(expression.bits & RestrictiveFlagMASK) == Binding.FIELD
@@ -49,13 +61,6 @@
 			return tracker;			
 		}
 
-		if (expression.resolvedType instanceof ReferenceBinding) {
-			ReferenceBinding resourceType = (ReferenceBinding) expression.resolvedType;
-			if (resourceType.hasTypeBit(TypeIds.BitResourceFreeCloseable)) {
-				// (a) resource-free closeable: -> null
-				return null;
-			}
-		}
 		if (local.closeTracker != null)
 			// (c): inner has already been analyzed: -> re-use track var
 			return local.closeTracker;
