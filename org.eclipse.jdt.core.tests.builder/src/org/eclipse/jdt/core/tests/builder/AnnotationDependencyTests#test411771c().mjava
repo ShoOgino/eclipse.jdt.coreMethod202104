@@ -1,0 +1,42 @@
+	//https://bugs.eclipse.org/bugs/show_bug.cgi?id=411771
+	//[compiler][null] Enum constants not recognized as being NonNull.
+	//A enum may contain fields other than predefined constants. We
+	//should not tag them as NonNull.
+	public void test411771c() throws IOException, JavaModelException {
+		setupProjectForNullAnnotations();
+		String testClass = "package p1;\n" +
+				"public class A {}";
+		env.addClass( this.srcRoot, "p1", "A", testClass );
+		fullBuild( this.projectPath );
+		expectingNoProblems();
+
+		String testEnumCode = "package p1;\n" +
+				"enum TestEnum {\n" +
+				"		FOO;\n" +
+				" 		public static A a;" +
+				"};\n";
+		env.addClass( this.srcRoot, "p1", "TestEnum", testEnumCode );
+		incrementalBuild( this.projectPath );
+		expectingNoProblems();
+
+		String nullTestCode = "package p1;\n" +
+				"import org.eclipse.jdt.annotation.NonNull;\n" +
+				"public class NullTest {\n" +
+				"	public static TestEnum bla() {\n" +
+				"		@NonNull final TestEnum t = TestEnum.FOO;\n" +
+				"		return t;\n" +
+				"	}\n" +
+				"	public A testint() {\n" +
+				"		@NonNull A a = TestEnum.a;\n" +
+				"       return a;\n" +
+				"   }\n" +
+				"}";
+		IPath test1Path = env.addClass( this.srcRoot, "p1", "NullTest", nullTestCode );
+		incrementalBuild( this.projectPath );
+		expectingProblemsFor(test1Path,
+				"Problem : Null type safety: The expression of type A needs unchecked conversion to conform to " +
+				"'@NonNull A' [ resource : </Project/src/p1/NullTest.java> range : <209,219> category : <90> severity : <1>]");
+
+		expectingUniqueCompiledClasses(new String[] { "p1.NullTest" });
+	}
+
