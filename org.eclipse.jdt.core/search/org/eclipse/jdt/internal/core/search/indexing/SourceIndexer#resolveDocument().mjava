@@ -1,30 +1,34 @@
 	public void resolveDocument() {
-		IPath path = new Path(this.document.getPath());
-		IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(path.segment(0));
-		JavaModel model = JavaModelManager.getJavaModelManager().getJavaModel();
-		JavaProject javaProject = (JavaProject) model.getJavaProject(project);
 		try {
-			CancelableNameEnvironment nameEnvironment;
-			nameEnvironment = new CancelableNameEnvironment(javaProject, DefaultWorkingCopyOwner.PRIMARY, null);
+			IPath path = new Path(this.document.getPath());
+			IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(path.segment(0));
+			JavaModel model = JavaModelManager.getJavaModelManager().getJavaModel();
+			JavaProject javaProject = (JavaProject) model.getJavaProject(project);
+
 			this.options = new CompilerOptions(javaProject.getOptions(true));
-			this.problemReporter =
+			ProblemReporter problemReporter =
 					new ProblemReporter(
-						DefaultErrorHandlingPolicies.proceedWithAllProblems(),
-						this.options,
-						new DefaultProblemFactory());
-			this.lookupEnvironment = new LookupEnvironment(this, this.options, this.problemReporter, nameEnvironment);
-		} catch (JavaModelException e) {
+							DefaultErrorHandlingPolicies.proceedWithAllProblems(),
+							this.options,
+							new DefaultProblemFactory());
+
+			// Re-parse using normal parser, IndexingParser swallows several nodes, see comment above class.
+			this.basicParser = new Parser(problemReporter, false);
+			this.basicParser.reportOnlyOneSyntaxError = true;
+			this.cud = this.basicParser.parse(this.compilationUnit, new CompilationResult(this.compilationUnit, 0, 0, this.options.maxProblemsPerUnit));
+
+			// Use a non model name environment to avoid locks, monitors and such.
+			INameEnvironment nameEnvironment = new JavaSearchNameEnvironment(javaProject, JavaModelManager.getJavaModelManager().getWorkingCopies(DefaultWorkingCopyOwner.PRIMARY, true/*add primary WCs*/));
+			this.lookupEnvironment = new LookupEnvironment(this, this.options, problemReporter, nameEnvironment);
+
+			this.lookupEnvironment.buildTypeBindings(this.cud, null);
+			this.lookupEnvironment.completeTypeBindings();
+			this.cud.scope.faultInTypes();
+			this.cud.resolve();
+		} catch (Exception e) {
 			if (JobManager.VERBOSE) {
 				e.printStackTrace();
 			}
-			this.cu = null;
-			return;
-		}
-		this.lookupEnvironment.buildTypeBindings(this.cu, null);
-		this.lookupEnvironment.completeTypeBindings();
-		if (this.cu.scope != null) {
-			this.cu.scope.faultInTypes();
-			this.cu.resolve();
 		}
 	}
 
