@@ -1,0 +1,50 @@
+	// interpreting 'type' as a required type, compute the required null bits
+	// we inspect the main type plus bounds of type variables and wildcards
+	static long requiredNullTagBits(TypeBinding type) {
+
+		long tagBits = type.tagBits & TagBits.AnnotationNullMASK;
+		if (tagBits != 0)
+			return validNullTagBits(tagBits);
+
+		if (type.isWildcard()) {
+			WildcardBinding wildcard = (WildcardBinding)type;
+			if (wildcard.boundKind == Wildcard.UNBOUND)
+				return 0;
+			tagBits = wildcard.bound.tagBits & TagBits.AnnotationNullMASK;
+			if (tagBits == 0)
+				return 0;
+			switch (wildcard.boundKind) {
+				case Wildcard.EXTENDS :
+					if (tagBits == TagBits.AnnotationNonNull)
+						return TagBits.AnnotationNonNull;
+					return TagBits.AnnotationNullMASK; // wildcard accepts @Nullable or better
+				case Wildcard.SUPER :
+					if (tagBits == TagBits.AnnotationNullable)
+						return TagBits.AnnotationNullable;
+					return TagBits.AnnotationNullMASK; // wildcard accepts @NonNull or worse
+			}
+			return 0;
+		} 
+		
+		if (type.isTypeVariable()) {
+			// assume we must require @NonNull, unless: (1) lower @Nullable bound, or (2) no nullness specified
+			TypeVariableBinding typeVariable = (TypeVariableBinding)type;
+			boolean haveNullBits = false;
+			if (type.isCapture()) {
+				TypeBinding lowerBound = ((CaptureBinding) type).lowerBound;
+				if (lowerBound != null) {
+					tagBits = lowerBound.tagBits & TagBits.AnnotationNullMASK;
+					if (tagBits == TagBits.AnnotationNullable)
+						return TagBits.AnnotationNullable; // (1) type cannot require @NonNull
+					haveNullBits = tagBits != 0;
+				}
+			}
+			if (typeVariable.firstBound != null)
+				haveNullBits |= (typeVariable.firstBound.tagBits & TagBits.AnnotationNullMASK) != 0;
+			if (haveNullBits)
+				return TagBits.AnnotationNonNull; // could require @NonNull (unless (2) unspecified nullness)
+		}
+
+		return 0;
+	}
+
