@@ -1,3 +1,4 @@
+// pre: null annotation analysis is enabled
 private void scanTypeForNullDefaultAnnotation(IBinaryType binaryType, PackageBinding packageBinding, BinaryTypeBinding binaryBinding) {
 	if (!isPrototype()) throw new IllegalStateException();
 	char[][] nonNullByDefaultAnnotationName = this.environment.getNonNullByDefaultAnnotationName();
@@ -6,6 +7,7 @@ private void scanTypeForNullDefaultAnnotation(IBinaryType binaryType, PackageBin
 
 	IBinaryAnnotation[] annotations = binaryType.getAnnotations();
 	boolean isPackageInfo = CharOperation.equals(binaryBinding.sourceName(), TypeConstants.PACKAGE_INFO_NAME);
+	boolean useTypeAnnotations = this.environment.globalOptions.sourceLevel >= ClassFileConstants.JDK1_8;
 	if (annotations != null) {
 		long annotationBit = 0L;
 		int nullness = NO_NULL_DEFAULT;
@@ -17,21 +19,28 @@ private void scanTypeForNullDefaultAnnotation(IBinaryType binaryType, PackageBin
 			char[][] typeName = CharOperation.splitOn('/', annotationTypeName, 1, annotationTypeName.length-1); // cut of leading 'L' and trailing ';'
 			if (CharOperation.equals(typeName, nonNullByDefaultAnnotationName)) {
 				IBinaryElementValuePair[] elementValuePairs = annotations[i].getElementValuePairs();
-				if (elementValuePairs != null && elementValuePairs.length == 1) {
-					Object value = elementValuePairs[0].getValue();
-					if (value instanceof BooleanConstant
-						&& !((BooleanConstant)value).booleanValue())
-					{
-						// parameter is 'false': this means we cancel defaults from outer scopes:
-						annotationBit = TagBits.AnnotationNullUnspecifiedByDefault;
-						nullness = NULL_UNSPECIFIED_BY_DEFAULT;
-						break;
-					} else if (value instanceof Object[] && ((Object[])value).length == 0) {
-						// parameter is '{}': this means we cancel defaults from outer scopes:
-						annotationBit = TagBits.AnnotationNullUnspecifiedByDefault;
-						nullness = NULL_UNSPECIFIED_BY_DEFAULT;
-						break;
+				if (!useTypeAnnotations) {
+					if (elementValuePairs != null && elementValuePairs.length == 1) {
+						Object value = elementValuePairs[0].getValue();
+						if (value instanceof BooleanConstant
+							&& !((BooleanConstant)value).booleanValue())
+						{
+							// parameter is 'false': this means we cancel defaults from outer scopes:
+							annotationBit = TagBits.AnnotationNullUnspecifiedByDefault;
+							nullness = NULL_UNSPECIFIED_BY_DEFAULT;
+							break;
+						}
 					}
+				} else {
+					// using NonNullByDefault we need to inspect the details of the value() attribute:
+					nullness = getNonNullByDefaultValue(annotations[i]);
+					if (nullness == NULL_UNSPECIFIED_BY_DEFAULT) {
+						annotationBit = TagBits.AnnotationNullUnspecifiedByDefault;
+					} else if (nullness != 0) {
+						annotationBit = TagBits.AnnotationNonNullByDefault;
+					}	
+					this.defaultNullness = nullness;
+					break;
 				}
 				annotationBit = TagBits.AnnotationNonNullByDefault;
 				nullness = NONNULL_BY_DEFAULT;
@@ -52,12 +61,19 @@ private void scanTypeForNullDefaultAnnotation(IBinaryType binaryType, PackageBin
 	}
 	ReferenceBinding enclosingTypeBinding = binaryBinding.enclosingType;
 	if (enclosingTypeBinding != null) {
-		if ((enclosingTypeBinding.tagBits & TagBits.AnnotationNonNullByDefault) != 0) {
-			binaryBinding.tagBits |= TagBits.AnnotationNonNullByDefault;
-			return;
-		} else if ((enclosingTypeBinding.tagBits & TagBits.AnnotationNullUnspecifiedByDefault) != 0) {
-			binaryBinding.tagBits |= TagBits.AnnotationNullUnspecifiedByDefault;
-			return;
+		if (useTypeAnnotations) {
+			binaryBinding.defaultNullness = enclosingTypeBinding.getNullDefault();
+			if (binaryBinding.defaultNullness != 0) {
+				return;
+			}
+		} else {
+			if ((enclosingTypeBinding.tagBits & TagBits.AnnotationNonNullByDefault) != 0) {
+				binaryBinding.tagBits |= TagBits.AnnotationNonNullByDefault;
+				return;
+			} else if ((enclosingTypeBinding.tagBits & TagBits.AnnotationNullUnspecifiedByDefault) != 0) {
+				binaryBinding.tagBits |= TagBits.AnnotationNullUnspecifiedByDefault;
+				return;
+			}
 		}
 	}
 	// no annotation found on the type or its enclosing types
@@ -70,13 +86,17 @@ private void scanTypeForNullDefaultAnnotation(IBinaryType binaryType, PackageBin
 		}
 	}
 	// no @NonNullByDefault at type level, check containing package:
-	switch (packageBinding.defaultNullness) {
-		case Binding.NONNULL_BY_DEFAULT : 
-			binaryBinding.tagBits |= TagBits.AnnotationNonNullByDefault;
-			break;
-		case Binding.NULL_UNSPECIFIED_BY_DEFAULT :
-			binaryBinding.tagBits |= TagBits.AnnotationNullUnspecifiedByDefault;
-			break;
+	if (useTypeAnnotations) {
+		binaryBinding.defaultNullness = packageBinding.defaultNullness;
+	} else {
+		switch (packageBinding.defaultNullness) {
+			case Binding.NONNULL_BY_DEFAULT : 
+				binaryBinding.tagBits |= TagBits.AnnotationNonNullByDefault;
+				break;
+			case Binding.NULL_UNSPECIFIED_BY_DEFAULT :
+				binaryBinding.tagBits |= TagBits.AnnotationNullUnspecifiedByDefault;
+				break;
+		}
 	}
 }
 

@@ -1,0 +1,57 @@
+	/*
+	 * Resolves type on a Block, Class or CompilationUnit scope.
+	 * We need to modify resoling behavior to avoid raw type creation.
+	 */
+	protected TypeBinding internalResolveType(Scope scope, int location) {
+		// handle the error here
+		this.constant = Constant.NotAConstant;
+		if (this.resolvedType != null) { // is a shared type reference which was already resolved
+			if (this.resolvedType.isValidBinding()) {
+				return this.resolvedType;
+			} else {
+				switch (this.resolvedType.problemId()) {
+					case ProblemReasons.NotFound :
+					case ProblemReasons.NotVisible :
+						TypeBinding type = this.resolvedType.closestMatch();
+						return type;
+					default :
+						return null;
+				}
+			}
+		}
+		boolean hasError;
+		TypeBinding type = this.resolvedType = getTypeBinding(scope);
+		if (type == null) {
+			return null; // detected cycle while resolving hierarchy
+		} else if ((hasError = !type.isValidBinding())== true) {
+			reportInvalidType(scope);
+			switch (type.problemId()) {
+				case ProblemReasons.NotFound :
+				case ProblemReasons.NotVisible :
+					type = type.closestMatch();
+					if (type == null) return null;
+					break;
+				default :
+					return null;
+			}
+		}
+		if (type.isArrayType() && ((ArrayBinding) type).leafComponentType == TypeBinding.VOID) {
+			scope.problemReporter().cannotAllocateVoidArray(this);
+			return null;
+		}
+		if (isTypeUseDeprecated(type, scope)) {
+			reportDeprecatedType(type, scope);
+		}
+		// https://bugs.eclipse.org/bugs/show_bug.cgi?id=209936
+		// raw convert all enclosing types when dealing with Javadoc references
+		if (type.isGenericType() || type.isParameterizedType()) {
+			type = scope.environment().convertToRawType(type, true /*force the conversion of enclosing types*/);
+		}
+
+		if (hasError) {
+			// do not store the computed type, keep the problem type instead
+			return type;
+		}
+		return this.resolvedType = type;
+	}
+

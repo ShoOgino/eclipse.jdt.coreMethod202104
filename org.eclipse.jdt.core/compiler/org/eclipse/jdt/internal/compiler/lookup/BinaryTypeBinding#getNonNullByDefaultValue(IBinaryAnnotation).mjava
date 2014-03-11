@@ -1,0 +1,30 @@
+/** given an application of @NonNullByDefault convert the annotation argument (if any) into a bitvector a la {@link Binding#NullnessDefaultMASK} */
+// pre: null annotation analysis is enabled
+int getNonNullByDefaultValue(IBinaryAnnotation annotation) {
+	char[] annotationTypeName = annotation.getTypeName();
+	char[][] typeName = CharOperation.splitOn('/', annotationTypeName, 1, annotationTypeName.length-1); // cut of leading 'L' and trailing ';'
+	IBinaryElementValuePair[] elementValuePairs = annotation.getElementValuePairs();
+	if (elementValuePairs == null || elementValuePairs.length == 0 ) {
+		// no argument: apply default default
+		ReferenceBinding annotationType = this.environment.getType(typeName);
+		if (annotationType == null) return 0;
+		if (annotationType.isUnresolvedType())
+			annotationType = ((UnresolvedReferenceBinding) annotationType).resolve(this.environment, false);
+		MethodBinding[] annotationMethods = annotationType.methods();
+		if (annotationMethods != null && annotationMethods.length == 1) {
+			Object value = annotationMethods[0].getDefaultValue();
+			return Annotation.nullTagBitsFromAnnotationValue(value);
+		}
+	} else if (elementValuePairs.length > 0) {
+		// evaluate the contained EnumConstantSignatures:
+		int nullness = 0;
+		for (int i = 0; i < elementValuePairs.length; i++)
+			nullness |= Annotation.nullTagBitsFromAnnotationValue(elementValuePairs[i].getValue());
+		return nullness;
+	} else {
+		// empty argument: cancel all defaults from enclosing scopes
+		return NULL_UNSPECIFIED_BY_DEFAULT;
+	}
+	return 0;
+}
+

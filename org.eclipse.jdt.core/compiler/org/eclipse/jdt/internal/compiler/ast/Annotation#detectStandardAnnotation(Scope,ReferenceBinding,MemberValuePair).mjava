@@ -1,5 +1,6 @@
 	/**
-	 * Compute the bit pattern for recognized standard annotations the compiler may need to act upon
+	 * Compute the bit pattern for recognized standard annotations the compiler may need to act upon.
+	 * The lower bits (Binding.NullnessDefaultMASK) do not belong in tagBits, but in defaultNullness.
 	 */
 	private long detectStandardAnnotation(Scope scope, ReferenceBinding annotationType, MemberValuePair valueAttribute) {
 		long tagBits = 0;
@@ -83,23 +84,30 @@
 				tagBits |= TagBits.AnnotationNonNull;
 				break;
 			case TypeIds.T_ConfiguredAnnotationNonNullByDefault :
+				// seeing this id implies that null annotation analysis is enabled
+				Object value = null;
 				if (valueAttribute != null) {
 					if (valueAttribute.value instanceof FalseLiteral) {
 						// parameter 'false' means: this annotation cancels any defaults
 						tagBits |= TagBits.AnnotationNullUnspecifiedByDefault;
 						break;
 					} else if (valueAttribute.compilerElementPair != null) {
-						Object value = valueAttribute.compilerElementPair.value;
-						if (value instanceof Object[] && ((Object[])value).length == 0) {
-							// empty parameter means: this annotation cancels any defaults
-							tagBits |= TagBits.AnnotationNullUnspecifiedByDefault;
-							break;
-						} else {
-							scope.problemReporter().nonNullDefaultDetailNotEvaluated(valueAttribute);
-						}
+						value = valueAttribute.compilerElementPair.value;
+					}
+				} else if (scope.compilerOptions().sourceLevel >= ClassFileConstants.JDK1_8) { // fetch default value  - TODO: cache it?
+					MethodBinding[] methods = annotationType.methods();
+					if (methods != null && methods.length == 1) {
+						Object defaultValue = methods[0].getDefaultValue();
+						if (defaultValue instanceof Object[])
+							value = defaultValue;
 					}
 				}
-				tagBits |= TagBits.AnnotationNonNullByDefault;
+				if (value != null) {
+					tagBits |= nullTagBitsFromAnnotationValue(value);
+				} else {
+					// neither explicit value, nor default value from DefaultLocation (1.8)
+					tagBits |= TagBits.AnnotationNonNullByDefault;
+				}
 				break;
 		}
 		return tagBits;
