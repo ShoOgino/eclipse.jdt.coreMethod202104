@@ -1,0 +1,56 @@
+//405026 - IJavaProject#findType(String) finds secondary type if editor is open
+//Partial Match is set for the API's.
+public void test405026b() throws CoreException, IOException {
+	try {
+		JavaProject project = (JavaProject) createJavaProject("P", new String[] {"src"}, new String[] {"JCL15_LIB"}, "bin", "1.5");
+		String source = "package p;\n"  +
+						"\n" +
+						"public interface test13 {\n"  +
+						"}\n"  +
+						"\n"  +
+						"/**\n" +
+						" * @noreference\n"  +
+						" */\n"  +
+						"interface test13outer {}\n"  +
+						"class Foo {}\n";
+		createFolder("/P/src/p");
+		createFile("/P/src/p/test13.java", source);
+		waitForAutoBuild();
+
+		ICompilationUnit[] workingCopy = new ICompilationUnit[1];
+		workingCopy[0] = getWorkingCopy("/P/src/p/test13.java", source);
+		NameLookup nameLookup = project.newNameLookup(workingCopy);
+
+		IType itype = nameLookup.findType("p.test13", true, NameLookup.ACCEPT_ALL);
+		assertNotNull(itype);
+		Answer answer = nameLookup.findType("p.test13outer", true, /*NameLookup.ACCEPT_ALL*/ NameLookup.ACCEPT_INTERFACES, false, true, false, null);
+		itype = (answer == null) ? null : answer.type;
+		assertNull("Should be a null", itype);
+		itype = project.findType("p.test13");
+		assertNotNull(itype);
+		itype = project.findType("p.test13outer");
+		assertNull("Should be a null", itype);
+
+		IPackageFragment[] packageFragments = project.newNameLookup(workingCopy[0].getOwner()).findPackageFragments("p", false);
+		itype = nameLookup.findType("test13outer", packageFragments[0], false, NameLookup.ACCEPT_ALL);
+		assertNull(itype);
+
+		itype = nameLookup.findType("test13o", packageFragments[0], true, NameLookup.ACCEPT_ALL, false, true);
+		assertEquals("test13outer", itype.getElementName());
+
+		itype = nameLookup.findType("test13outer", packageFragments[0], true, NameLookup.ACCEPT_ALL, false, false);
+		assertNull(itype);
+
+		itype = nameLookup.findType("test1", packageFragments[0], true, NameLookup.ACCEPT_ALL, false, false);
+		assertEquals("test13", itype.getElementName());
+
+		itype = nameLookup.findType("test1", packageFragments[0], true, NameLookup.ACCEPT_ALL, false, true);
+		assertEquals("test13", itype.getElementName());
+
+		answer = nameLookup.findType("test13out", "p", true, NameLookup.ACCEPT_ALL, /* considerSecondaryTypes */ true, true, false, null);
+		assertEquals("test13outer", answer.type.getElementName());
+	} finally {
+		deleteProject("P");
+	}
+}
+
