@@ -1,0 +1,45 @@
+	private String[] bootstrapArgumentsDescription(IBootstrapMethodsEntry entry, IConstantPool constantPool) {
+		// http://docs.oracle.com/javase/specs/jvms/se7/html/jvms-4.html#jvms-4.7.21
+		// bootstrap_arguments
+		// 	    Each entry in the bootstrap_arguments array must be a valid index into the constant_pool table.
+		//      The constant_pool entry at that index must be a CONSTANT_String_info, CONSTANT_Class_info, CONSTANT_Integer_info
+		//      CONSTANT_Long_info, CONSTANT_Float_info, CONSTANT_Double_info, CONSTANT_MethodHandle_info, or
+		//      CONSTANT_MethodType_info structure (�4.4.3, �4.4.1, �4.4.4, �4.4.5), �4.4.8, �4.4.9).
+		if (entry.getBootstrapArguments().length == 0)
+			return null;
+		int[] bootstrapArguments = entry.getBootstrapArguments();
+		String[] arguments = new String[bootstrapArguments.length];
+		for (int i = 0, length = bootstrapArguments.length; i < length; i++) {
+			ConstantPoolEntry constantPoolEntry =  (ConstantPoolEntry) constantPool.decodeEntry(bootstrapArguments[i]);
+			switch(constantPoolEntry.getKind()) {
+				case IConstantPoolConstant.CONSTANT_Integer:
+					arguments[i] = ((Integer) constantPoolEntry.getIntegerValue()).toString();
+					break;
+				case IConstantPoolConstant.CONSTANT_MethodHandle:
+					// http://docs.oracle.com/javase/specs/jvms/se7/html/jvms-4.html#jvms-4.4.8
+					// If the value of the reference_kind item is 5 (REF_invokeVirtual), 6 (REF_invokeStatic),
+					// 7 (REF_invokeSpecial), or 8 (REF_newInvokeSpecial), then the constant_pool entry at that
+					// index must be a CONSTANT_Methodref_info structure (�4.4.2) representing a class's method or
+					// constructor (�2.9) for which a method handle is to be created.
+					ConstantPoolEntry2 constantPoolEntry2 = (ConstantPoolEntry2) constantPoolEntry;
+					StringBuilder builder = new StringBuilder(10);
+					switch(constantPoolEntry2.getReferenceKind()) {
+						case IConstantPoolConstant.METHOD_TYPE_REF_InvokeStatic:
+							builder.append("invokestatic "); //$NON-NLS-1$
+							//$FALL-THROUGH$
+						case IConstantPoolConstant.METHOD_TYPE_REF_InvokeVirtual:
+						case IConstantPoolConstant.METHOD_TYPE_REF_NewInvokeSpecial:
+							constantPoolEntry = (ConstantPoolEntry) constantPool.decodeEntry(constantPoolEntry2.getReferenceIndex());
+							builder.append(Messages.bind("{0}.{1}:{2}", methodDescription(constantPoolEntry))); //$NON-NLS-1$
+							arguments[i] =  builder.toString();
+							break;
+					}
+					break;
+				case IConstantPoolConstant.CONSTANT_MethodType:
+					arguments[i] = new String(((ConstantPoolEntry2) constantPoolEntry).getMethodDescriptor());
+					break;
+			}
+		}
+		return arguments;
+	}
+
