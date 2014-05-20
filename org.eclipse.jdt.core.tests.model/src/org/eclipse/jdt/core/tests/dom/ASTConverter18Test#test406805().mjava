@@ -1,0 +1,60 @@
+//Bug 406805 - [1.8] Parameter names for enum constructor not available
+// https://bugs.eclipse.org/bugs/show_bug.cgi?id=406805
+public void test406805() throws CoreException, IOException {
+	String contents1 =
+			"package test406805;\n" +
+			"public class X {\n" +
+			"}";
+	createFolder("/Converter18/src/test406805");
+	createFile("/Converter18/src/test406805/X.java", contents1);
+	this.workingCopy = getWorkingCopy(
+			"/Converter18/src/test406805/X.java",
+			contents1,
+			true
+		);
+
+	String jarName = "getParameters.jar";
+	String srcName = "getParameters_src.zip";
+	final IJavaProject javaProject = this.workingCopy.getJavaProject();
+	try {
+	String[] contents = new String[] {
+		"TestEnum.java",
+		"package test406805;\n" +
+		"public enum TestEnum {\n" +
+		"	FirstValue(\"Zonk\") {\n" +
+		"		@Override\n" +
+		"		public String toString() {\n" +
+		"			return super.toString();\n" +
+		"		}\n" +
+		"	},\n" +
+		"	SecondValue(\"Bla\");\n" +
+		"	String string;\n" +
+		"	TestEnum(String string) {\n" +
+		"		this.string = string;\n" +
+		"	}\n" +
+		"}"
+	};
+	addLibrary(javaProject, jarName, srcName, contents, JavaCore.VERSION_1_8);
+
+	ASTParser parser = ASTParser.newParser(AST.JLS8);
+	parser.setIgnoreMethodBodies(true);
+	parser.setProject(javaProject);
+	IType type = javaProject.findType("test406805.TestEnum");
+	IBinding[] bindings = parser.createBindings(new IJavaElement[] { type }, null);
+	ITypeBinding typeBinding = (ITypeBinding) bindings[0];
+	IMethodBinding[] methods = typeBinding.getDeclaredMethods();
+
+	for (int i = 0, length = methods.length; i < length; i++) {
+		IMethodBinding method = methods[i];
+		if (method.isConstructor()) {
+			ResolvedBinaryMethod bm = (ResolvedBinaryMethod) method.getJavaElement();
+			assertTrue(bm.getParameterNames().length == 1);
+			assertEquals(bm.getParameterNames()[0], "string");
+			assertEquals(bm.getParameterTypes()[0], "Ljava.lang.String;");
+		}
+	}
+	} finally {
+		removeLibrary(javaProject, jarName, srcName);
+	}
+}
+
