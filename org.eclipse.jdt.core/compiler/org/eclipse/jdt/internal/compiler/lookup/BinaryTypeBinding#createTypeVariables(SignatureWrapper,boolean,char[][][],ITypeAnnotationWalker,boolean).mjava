@@ -1,0 +1,53 @@
+private TypeVariableBinding[] createTypeVariables(SignatureWrapper wrapper, boolean assignVariables, char[][][] missingTypeNames,
+													ITypeAnnotationWalker walker, boolean isClassTypeParameter)
+{
+	if (!isPrototype()) throw new IllegalStateException();
+	// detect all type variables first
+	char[] typeSignature = wrapper.signature;
+	int depth = 0, length = typeSignature.length;
+	int rank = 0;
+	ArrayList variables = new ArrayList(1);
+	depth = 0;
+	boolean pendingVariable = true;
+	createVariables: {
+		for (int i = 1; i < length; i++) {
+			switch(typeSignature[i]) {
+				case Util.C_GENERIC_START :
+					depth++;
+					break;
+				case Util.C_GENERIC_END :
+					if (--depth < 0)
+						break createVariables;
+					break;
+				case Util.C_NAME_END :
+					if ((depth == 0) && (i +1 < length) && (typeSignature[i+1] != Util.C_COLON))
+						pendingVariable = true;
+					break;
+				default:
+					if (pendingVariable) {
+						pendingVariable = false;
+						int colon = CharOperation.indexOf(Util.C_COLON, typeSignature, i);
+						char[] variableName = CharOperation.subarray(typeSignature, i, colon);
+						TypeVariableBinding typeVariable = new TypeVariableBinding(variableName, this, rank, this.environment);
+						AnnotationBinding [] annotations = BinaryTypeBinding.createAnnotations(walker.toTypeParameter(isClassTypeParameter, rank++).getAnnotationsAtCursor(0), 
+																										this.environment, missingTypeNames);
+						if (annotations != null && annotations != Binding.NO_ANNOTATIONS)
+							typeVariable.setTypeAnnotations(annotations, this.environment.globalOptions.isAnnotationBasedNullAnalysisEnabled);
+						variables.add(typeVariable);
+					}
+			}
+		}
+	}
+	// initialize type variable bounds - may refer to forward variables
+	TypeVariableBinding[] result;
+	variables.toArray(result = new TypeVariableBinding[rank]);
+	// when creating the type variables for a type, the type must remember them before initializing each variable
+	// see https://bugs.eclipse.org/bugs/show_bug.cgi?id=163680
+	if (assignVariables)
+		this.typeVariables = result;
+	for (int i = 0; i < rank; i++) {
+		initializeTypeVariable(result[i], result, wrapper, missingTypeNames, walker.toTypeParameterBounds(isClassTypeParameter, i));
+	}
+	return result;
+}
+
