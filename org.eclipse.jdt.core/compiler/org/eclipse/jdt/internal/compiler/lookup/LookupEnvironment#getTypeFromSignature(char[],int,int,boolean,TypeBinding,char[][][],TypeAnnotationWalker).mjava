@@ -1,0 +1,86 @@
+/* Answer the type corresponding to the signature from the binary file.
+* Does not ask the oracle for the type if its not found in the cache... instead an
+* unresolved type is returned which must be resolved before used.
+*
+* NOTE: Does answer base types & array types.
+*/
+TypeBinding getTypeFromSignature(char[] signature, int start, int end, boolean isParameterized, TypeBinding enclosingType, 
+		char[][][] missingTypeNames, TypeAnnotationWalker walker)
+{
+	int dimension = 0;
+	while (signature[start] == '[') {
+		start++;
+		dimension++;
+	}
+	// annotations on dimensions?
+	AnnotationBinding [][] annotationsOnDimensions = null;
+	if (dimension > 0 && walker != TypeAnnotationWalker.EMPTY_ANNOTATION_WALKER) {
+		for (int i = 0; i < dimension; i++) {
+			AnnotationBinding [] annotations = BinaryTypeBinding.createAnnotations(walker.getAnnotationsAtCursor(0), this, missingTypeNames);
+			if (annotations != Binding.NO_ANNOTATIONS) { 
+				if (annotationsOnDimensions == null)
+					annotationsOnDimensions = new AnnotationBinding[dimension][];
+					annotationsOnDimensions[i] = annotations;
+			}
+			walker = walker.toNextArrayDimension();
+		}
+	}
+	
+	if (end == -1)
+		end = signature.length - 1;
+
+	// Just switch on signature[start] - the L case is the else
+	TypeBinding binding = null;
+	if (start == end) {
+		switch (signature[start]) {
+			case 'I' :
+				binding = TypeBinding.INT;
+				break;
+			case 'Z' :
+				binding = TypeBinding.BOOLEAN;
+				break;
+			case 'V' :
+				binding = TypeBinding.VOID;
+				break;
+			case 'C' :
+				binding = TypeBinding.CHAR;
+				break;
+			case 'D' :
+				binding = TypeBinding.DOUBLE;
+				break;
+			case 'B' :
+				binding = TypeBinding.BYTE;
+				break;
+			case 'F' :
+				binding = TypeBinding.FLOAT;
+				break;
+			case 'J' :
+				binding = TypeBinding.LONG;
+				break;
+			case 'S' :
+				binding = TypeBinding.SHORT;
+				break;
+			default :
+				this.problemReporter.corruptedSignature(enclosingType, signature, start);
+				// will never reach here, since error will cause abort
+		}
+	} else {
+		binding = getTypeFromConstantPoolName(signature, start + 1, end, isParameterized, missingTypeNames); // skip leading 'L' or 'T'
+	}
+	
+	if (isParameterized) {
+		if (dimension != 0)
+			throw new IllegalStateException();
+		return binding;
+	}
+	
+	if (walker != TypeAnnotationWalker.EMPTY_ANNOTATION_WALKER) {
+		binding = annotateType(binding, walker, missingTypeNames);
+	}
+	
+	if (dimension != 0)
+		binding =  this.typeSystem.getArrayType(binding, dimension, AnnotatableTypeSystem.flattenedAnnotations(annotationsOnDimensions));
+	
+	return binding;
+}
+
