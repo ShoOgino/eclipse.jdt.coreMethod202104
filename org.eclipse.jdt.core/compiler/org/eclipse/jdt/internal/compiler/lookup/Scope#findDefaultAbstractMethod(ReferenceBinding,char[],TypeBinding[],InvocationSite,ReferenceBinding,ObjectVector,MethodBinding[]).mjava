@@ -10,7 +10,7 @@
 		InvocationSite invocationSite,
 		ReferenceBinding classHierarchyStart,
 		ObjectVector found,
-		MethodBinding concreteMatch) {
+		MethodBinding [] concreteMatches) {
 
 		int startFoundSize = found.size;
 		final boolean sourceLevel18 = this.compilerOptions().sourceLevel >= ClassFileConstants.JDK1_8;
@@ -20,10 +20,14 @@
 			findMethodInSuperInterfaces(currentType, selector, found, visitedTypes, invocationSite);
 			currentType = currentType.superclass();
 		}
-		MethodBinding[] candidates = null;
-		int candidatesCount = 0;
-		MethodBinding problemMethod = null;
+		
+		int candidatesCount = concreteMatches == null ? 0 : concreteMatches.length;
 		int foundSize = found.size;
+		MethodBinding[] candidates = new MethodBinding[foundSize - startFoundSize + candidatesCount];
+		if (concreteMatches != null)
+			System.arraycopy(concreteMatches, 0, candidates, 0, candidatesCount);
+		
+		MethodBinding problemMethod = null;
 		if (foundSize > startFoundSize) {
 			// argument type compatibility check
 			final MethodVerifier methodVerifier = environment().methodVerifier();
@@ -33,9 +37,11 @@
 				MethodBinding compatibleMethod = computeCompatibleMethod(methodBinding, argumentTypes, invocationSite, APPLICABILITY);
 				if (compatibleMethod != null) {
 					if (compatibleMethod.isValidBinding()) {
-						if (concreteMatch != null) {
-							if (methodVerifier.areMethodsCompatible(concreteMatch, compatibleMethod))
-								continue; // can skip this method since concreteMatch overrides it
+						if (concreteMatches != null) {
+							for (int j = 0, length = concreteMatches.length; j < length; j++) {
+								if (methodVerifier.areMethodsCompatible(concreteMatches[j], compatibleMethod))
+									continue; // can skip this method since concreteMatch overrides it
+							}
 						}
 						if (sourceLevel18 || !(compatibleMethod.isVarargs() && compatibleMethod instanceof ParameterizedGenericMethodBinding)) {
 							for (int j = 0; j < startFoundSize; j++) {
@@ -44,11 +50,6 @@
 									continue next; // can skip this method since classMethod overrides it
 							}
 						}
-						if (candidatesCount == 0) {
-							candidates = new MethodBinding[foundSize - startFoundSize + 1];
-							if (concreteMatch != null)
-								candidates[candidatesCount++] = concreteMatch;
-						}
 						candidates[candidatesCount++] = compatibleMethod;
 					} else if (problemMethod == null) {
 						problemMethod = compatibleMethod;
@@ -56,13 +57,13 @@
 				}
 			}
 		}
-
+		MethodBinding concreteMatch = null;
 		if (candidatesCount < 2) {
-			if (concreteMatch == null) {
+			if (concreteMatches == null) {
 				if (candidatesCount == 0)
 					return problemMethod; // can be null
-				concreteMatch = candidates[0];
 			}
+			concreteMatch = candidates[0];
 			// 1.8: Give inference a chance to perform outstanding tasks (18.5.2):
 			concreteMatch = inferInvocationType(invocationSite, concreteMatch, argumentTypes);
 			if (concreteMatch != null)
