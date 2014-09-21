@@ -55,10 +55,7 @@
 			return this.resolvedType = null;	// nope, no useful type found
     	
     	// Convert parameters into argument expressions for look up.
-		TypeBinding[] descriptorParameters = this.descriptor != null && this.descriptor.parameters != null && this.descriptor.parameters.length > 0 ? 
-															new TypeBinding[this.descriptor.parameters.length] : Binding.NO_PARAMETERS;
-		for (int i = 0, length = descriptorParameters.length; i < length; i++)
-			descriptorParameters[i] = this.descriptor.parameters[i].capture(scope, this.sourceEnd);
+		TypeBinding[] descriptorParameters = descriptorParametersAsArgumentExpressions();
 		
 		if (lhsType.isBaseType()) {
 			scope.problemReporter().errorNoMethodFor(this.lhs, lhsType, this.selector, descriptorParameters);
@@ -86,8 +83,19 @@
 		
 		// handle the special case of array construction first.
 		this.receiverType = lhsType;
+		
+		this.haveReceiver = true;
+		if (this.lhs instanceof NameReference) {
+			if ((this.lhs.bits & ASTNode.RestrictiveFlagMASK) == Binding.TYPE) {
+				this.haveReceiver = false;
+			}
+		} else if (this.lhs instanceof TypeReference) {
+			this.haveReceiver = false;
+		}
+		
 		if (!this.haveReceiver && !this.lhs.isSuper() && !this.isArrayConstructorReference())
 			this.receiverType = lhsType.capture(scope, this.sourceEnd);
+		
 		final int parametersLength = descriptorParameters.length;
         if (isConstructorReference() && lhsType.isArrayType()) {
         	final TypeBinding leafComponentType = lhsType.leafComponentType();
@@ -106,15 +114,6 @@
         	this.binding = this.exactMethodBinding = scope.getExactConstructor(lhsType, this);
         	return this.resolvedType;
         }
-		
-		this.haveReceiver = true;
-		if (this.lhs instanceof NameReference) {
-			if ((this.lhs.bits & ASTNode.RestrictiveFlagMASK) == Binding.TYPE) {
-				this.haveReceiver = false;
-			}
-		} else if (this.lhs instanceof TypeReference) {
-			this.haveReceiver = false;
-		}
 
 		/* For Reference expressions unlike other call sites, we always have a receiver _type_ since LHS of :: cannot be empty. 
 		   LHS's resolved type == actual receiver type. All code below only when a valid descriptor is available.

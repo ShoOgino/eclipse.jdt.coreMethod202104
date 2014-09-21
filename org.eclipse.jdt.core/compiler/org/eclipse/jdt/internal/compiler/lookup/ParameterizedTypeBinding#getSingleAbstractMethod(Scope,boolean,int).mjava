@@ -1,0 +1,48 @@
+	public MethodBinding getSingleAbstractMethod(final Scope scope, boolean replaceWildcards, int capturePosition) {
+		int index = replaceWildcards ? capturePosition < 0 ? 0 : 1 : 2; // capturePosition >= 0 IFF replaceWildcard == true
+		if (this.singleAbstractMethod != null) {
+			if (this.singleAbstractMethod[index] != null)
+				return this.singleAbstractMethod[index];
+		} else {
+			this.singleAbstractMethod = new MethodBinding[3];
+		}
+		if (!isValidBinding())
+			return null;
+		final ReferenceBinding genericType = genericType();
+		MethodBinding theAbstractMethod = genericType.getSingleAbstractMethod(scope, replaceWildcards);
+		if (theAbstractMethod == null || !theAbstractMethod.isValidBinding())
+			return this.singleAbstractMethod[index] = theAbstractMethod;
+		
+		ParameterizedTypeBinding declaringType = null;
+		TypeBinding [] types = this.arguments; 
+		if (replaceWildcards) {
+			types = getNonWildcardParameterization(scope);
+			if (types == null)
+				return this.singleAbstractMethod[index] = new ProblemMethodBinding(TypeConstants.ANONYMOUS_METHOD, null, ProblemReasons.NotAWellFormedParameterizedType);
+		} else if (types == null) {
+			types = NO_TYPES;
+		}
+		if (capturePosition >= 0) { 
+			// caller is going to require the sam's parameters to be treated as argument expressions, post substitution capture will lose identity, where substitution results in fan out
+			// capture first and then substitute.
+			for (int i = 0, length = types.length; i < length; i++) {
+				types[i] = types[i].capture(scope, 0);
+			}
+		}
+		declaringType = scope.environment().createParameterizedType(genericType, types, genericType.enclosingType());
+		TypeVariableBinding [] typeParameters = genericType.typeVariables();
+		for (int i = 0, length = typeParameters.length; i < length; i++) {
+			if (typeParameters[i].boundCheck(declaringType, types[i], scope) != TypeConstants.OK)
+				return this.singleAbstractMethod[index] = new ProblemMethodBinding(TypeConstants.ANONYMOUS_METHOD, null, ProblemReasons.NotAWellFormedParameterizedType);			
+		}
+		ReferenceBinding substitutedDeclaringType = (ReferenceBinding) declaringType.findSuperTypeOriginatingFrom(theAbstractMethod.declaringClass);
+		MethodBinding [] choices = substitutedDeclaringType.getMethods(theAbstractMethod.selector);
+		for (int i = 0, length = choices.length; i < length; i++) {
+			MethodBinding method = choices[i];
+			if (!method.isAbstract() || method.redeclaresPublicObjectMethod(scope)) continue; // (re)skip statics, defaults, public object methods ...
+			this.singleAbstractMethod[index] = method;
+			break;
+		}
+		return this.singleAbstractMethod[index];
+	}
+
