@@ -7,11 +7,9 @@
 		MethodBinding functionType = t.getSingleAbstractMethod(inferenceContext.scope, true);
 		if (functionType == null)
 			return FALSE;
-		// potentially-applicable method for the method reference when targeting T (15.13.1),
-		MethodBinding potentiallyApplicable = reference.findCompileTimeMethodTargeting(t, inferenceContext.scope);
-		if (potentiallyApplicable == null)
-			return FALSE;
+
 		if (reference.isExactMethodReference()) {
+			MethodBinding potentiallyApplicable = reference.getExactMethod(); 
 			List<ConstraintFormula> newConstraints = new ArrayList<ConstraintFormula>();
 			TypeBinding[] p = functionType.parameters;
 			int n = p.length;
@@ -21,6 +19,8 @@
 			if (n == k+1) {
 				newConstraints.add(ConstraintTypeFormula.create(p[0], reference.lhs.resolvedType, COMPATIBLE));
 				offset = 1;
+			} else if (n != k) {
+				return FALSE;
 			}
 			for (int i = offset; i < n; i++)
 				newConstraints.add(ConstraintTypeFormula.create(p[i], pPrime[i-offset], COMPATIBLE));
@@ -29,11 +29,15 @@
 				TypeBinding rAppl = potentiallyApplicable.isConstructor() && !reference.isArrayConstructorReference() ? potentiallyApplicable.declaringClass : potentiallyApplicable.returnType;
 				if (rAppl == TypeBinding.VOID)
 					return FALSE;
-				TypeBinding rPrime = rAppl.capture(inferenceContext.scope, 14); // FIXME capture position??
+				TypeBinding rPrime = rAppl.capture(inferenceContext.scope, reference.sourceEnd);
 				newConstraints.add(ConstraintTypeFormula.create(rPrime, r, COMPATIBLE));
 			}
 			return newConstraints.toArray(new ConstraintFormula[newConstraints.size()]);
 		} else { // inexact
+			MethodBinding potentiallyApplicable = reference.findCompileTimeMethodTargeting(t, inferenceContext.scope); // // potentially-applicable method for the method reference when targeting T (15.13.1),
+			if (potentiallyApplicable == null)
+				return FALSE;
+			
 			int n = functionType.parameters.length;
 			for (int i = 0; i < n; i++)
 				if (!functionType.parameters[i].isProperType(true))
@@ -52,7 +56,7 @@
 			TypeBinding compileTypeReturn = original.isConstructor() ? original.declaringClass : original.returnType;
 			if (reference.typeArguments == null
 					&& ((original.typeVariables() != Binding.NO_TYPE_VARIABLES && compileTypeReturn.mentionsAny(original.typeVariables(), -1))
-						|| (original.isConstructor() && original.declaringClass.typeVariables() != Binding.NO_TYPE_VARIABLES)))
+						|| (original.isConstructor() && compileTimeDecl.declaringClass.isRawType())))
 							// not checking r.mentionsAny for constructors, because A::new resolves to the raw type
 							// whereas in fact the type of all expressions of this shape depends on their type variable (if any)
 			{
@@ -74,7 +78,7 @@
 					inferenceContext.resumeSuspendedInference(prevInvocation);
 				}
 			}
-			TypeBinding rPrime = compileTimeDecl.isConstructor() ? compileTimeDecl.declaringClass : compileTimeDecl.returnType;
+			TypeBinding rPrime = compileTimeDecl.isConstructor() ? compileTimeDecl.declaringClass : compileTimeDecl.returnType.capture(inferenceContext.scope, reference.sourceEnd());
 			if (rPrime.id == TypeIds.T_void)
 				return FALSE;
 			return ConstraintTypeFormula.create(rPrime, r, COMPATIBLE, this.isSoft);

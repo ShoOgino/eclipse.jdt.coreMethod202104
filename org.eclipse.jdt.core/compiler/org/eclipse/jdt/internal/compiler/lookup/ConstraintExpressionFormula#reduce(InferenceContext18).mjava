@@ -1,40 +1,7 @@
 	public Object reduce(InferenceContext18 inferenceContext) throws InferenceFailureException {
 		// JLS 18.2.1
-		proper:
 		if (this.right.isProperType(true)) {
-			TypeBinding exprType = this.left.resolvedType;
-			if (exprType == null) {
-				// if we get here for some kinds of poly expressions (incl. ConditionalExpression),
-				// then other ways for checking compatibility are needed:
-                if (this.left instanceof FunctionalExpression) {
-                    if (this.left instanceof LambdaExpression) {
-                        // cf. NegativeLambdaExpressionTest.test412453()
-                        LambdaExpression copy = ((LambdaExpression) this.left).getResolvedCopyForInferenceTargeting(this.right);
-                        return (copy != null && copy.resolvedType != null && copy.resolvedType.isValidBinding()) ? TRUE : FALSE;
-                    }
-                }
-                return this.left.isCompatibleWith(this.right, inferenceContext.scope) ? TRUE : FALSE;
-			} else if (!exprType.isValidBinding()) {
-				return FALSE;
-			}
-			if (isCompatibleWithInLooseInvocationContext(exprType, this.right, inferenceContext)) {
-				return TRUE;
-			} else if (this.left instanceof AllocationExpression && this.left.isPolyExpression()) {
-				// half-resolved diamond has a resolvedType, but that may not be the final word, try one more step of resolution:
-            	MethodBinding binding = ((AllocationExpression) this.left).binding(this.right, false, null);
-            	return (binding != null && binding.declaringClass.isCompatibleWith(this.right, inferenceContext.scope)) ? TRUE : FALSE;
-            } else if (this.left instanceof Invocation && this.left.isPolyExpression()) {
-            	Invocation invoc = (Invocation) this.left;
-            	MethodBinding binding = invoc.binding(this.right, false, null);
-            	if (binding instanceof ParameterizedGenericMethodBinding) {
-            		ParameterizedGenericMethodBinding method = (ParameterizedGenericMethodBinding) binding;
-					InferenceContext18 leftCtx = invoc.getInferenceContext(method);
-            		if (leftCtx.stepCompleted < InferenceContext18.TYPE_INFERRED) {
-            			break proper; // fall through into nested inference below (not explicit in the spec!)
-            		}
-            	}
-            }
-			return FALSE;
+			return this.left.isCompatibleWith(this.right, inferenceContext.scope) || this.left.isBoxingCompatibleWith(this.right, inferenceContext.scope) ? TRUE : FALSE;
 		}
 		if (!canBePolyExpression(this.left)) {
 			TypeBinding exprType = this.left.resolvedType;
@@ -46,7 +13,7 @@
 			// - parenthesized expression : these are transparent in our AST
 			if (this.left instanceof Invocation) {
 				Invocation invocation = (Invocation) this.left;
-				MethodBinding previousMethod = invocation.binding(this.right, false, null);
+				MethodBinding previousMethod = invocation.binding(this.right, inferenceContext.scope);
 				if (previousMethod == null)  	// can happen, e.g., if inside a copied lambda with ignored errors
 					return null; 				// -> proceed with no new constraints
 				MethodBinding method = previousMethod;
@@ -71,8 +38,11 @@
 								return FALSE;
 							return ConstraintTypeFormula.create(exprType, this.right, COMPATIBLE, this.isSoft);
 						}
+						if (innerCtx.stepCompleted >= InferenceContext18.TYPE_INFERRED) {
+							// The constraints and initial bounds that would effectively reduce to b3 are already transferred to current context during C Set construction.
+							return TRUE;
+						}
 						inferenceContext.inferenceKind = innerCtx.inferenceKind;
-						innerCtx.outerContext = inferenceContext;
 					}
 					boolean isDiamond = method.isConstructor() && this.left.isPolyExpression(method);
 					inferInvocationApplicability(inferenceContext, method, argumentTypes, isDiamond, inferenceContext.inferenceKind);
@@ -132,13 +102,8 @@
 				}
 				if (functionType.returnType != TypeBinding.VOID) {
 					TypeBinding r = functionType.returnType;
-					Expression[] exprs;
-					if (lambda.body() instanceof Expression) {
-						exprs = new Expression[] {(Expression)lambda.body()};
-					} else {
-						exprs = lambda.resultExpressions();
-					}
-					for (int i = 0; i < exprs.length; i++) {
+					Expression[] exprs = lambda.resultExpressions();
+					for (int i = 0, length = exprs == null ? 0 : exprs.length; i < length; i++) {
 						Expression expr = exprs[i];
 						if (r.isProperType(true) && expr.resolvedType != null) {
 							TypeBinding exprType = expr.resolvedType;

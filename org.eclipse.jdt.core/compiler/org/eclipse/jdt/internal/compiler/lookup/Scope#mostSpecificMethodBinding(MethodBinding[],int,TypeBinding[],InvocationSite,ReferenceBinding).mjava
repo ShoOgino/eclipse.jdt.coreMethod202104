@@ -2,33 +2,22 @@
 	protected final MethodBinding mostSpecificMethodBinding(MethodBinding[] visible, int visibleSize, TypeBinding[] argumentTypes, final InvocationSite invocationSite, ReferenceBinding receiverType) {
 
 		boolean isJdk18 = compilerOptions().sourceLevel >= ClassFileConstants.JDK1_8;
-
 		// common part for all compliance levels:
 		int[] compatibilityLevels = new int[visibleSize];
 		int compatibleCount = 0;
-		for (int i = 0; i < visibleSize; i++) {
-			TypeBinding[] argTypes = argumentTypes;
-			if (isJdk18 && invocationSite instanceof Invocation) {
-				InnerInferenceHelper innerInferenceHelper = ((Invocation)invocationSite).innerInferenceHelper();
-				if (innerInferenceHelper != null)
-					argTypes = innerInferenceHelper.getArgumentTypesForCandidate(visible[i], argumentTypes);
-			}
-			if ((compatibilityLevels[i] = parameterCompatibilityLevel(visible[i], argTypes)) != NOT_COMPATIBLE) {
+		for (int i = 0; i < visibleSize; i++)
+			if ((compatibilityLevels[i] = parameterCompatibilityLevel(visible[i], argumentTypes)) != NOT_COMPATIBLE) {
 				if (i != compatibleCount) {
 					visible[compatibleCount] = visible[i];
 					compatibilityLevels[compatibleCount] = compatibilityLevels[i];
 				}
 				compatibleCount++;
 			}
-		}
-// TODO: Disabled, because we know a situation where this is expected, see https://bugs.eclipse.org/429490
-//		if (compatibleCount != visibleSize) {
-//			problemReporter().genericInferenceProblem("(Recovered) Internal inconsistency while checking invocation ambiguity", invocationSite, ProblemSeverities.Warning); //$NON-NLS-1$
-//		}
+		
 		if (compatibleCount == 0) {
 			return new ProblemMethodBinding(visible[0].selector, argumentTypes, ProblemReasons.NotFound);
 		} else if (compatibleCount == 1) {
-			MethodBinding candidate = inferInvocationType(invocationSite, visible[0], argumentTypes);
+			MethodBinding candidate = visible[0];
 			if (candidate != null)
 				compilationUnitScope().recordTypeReferences(candidate.thrownExceptions);
 			return candidate;
@@ -38,8 +27,8 @@
 			System.arraycopy(compatibilityLevels, 0, compatibilityLevels = new int[compatibleCount], 0, compatibleCount);
 		}
 		
+		
 		MethodBinding[] moreSpecific = new MethodBinding[visibleSize];
-
 		if (isJdk18) {
 			// 15.12.2.5 Choosing the Most Specific Method
 			int count = 0;
@@ -99,7 +88,7 @@
 			if (count == 0) {
 				return new ProblemMethodBinding(visible[0], visible[0].selector, visible[0].parameters, ProblemReasons.Ambiguous);
 			} else if (count == 1) {
-				MethodBinding candidate = inferInvocationType(invocationSite, moreSpecific[0], argumentTypes);
+				MethodBinding candidate = moreSpecific[0];
 				if (candidate != null)
 					compilationUnitScope().recordTypeReferences(candidate.thrownExceptions);
 				return candidate;
@@ -153,7 +142,7 @@
 							}
 						}
 						MethodBinding acceptable = computeCompatibleMethod(methodToTest, tiebreakMethod.parameters,
-								tieBreakInvocationSite, INVOCATION_TYPE, level == VARARGS_COMPATIBLE);
+								tieBreakInvocationSite, level == VARARGS_COMPATIBLE);
 						/* There are 4 choices to consider with current & next :
 						 foo(B) & foo(A) where B extends A
 						 1. the 2 methods are equal (both accept each others parameters) -> want to continue
@@ -177,8 +166,7 @@
 			if (count == 1) {
 				for (int i = 0; i < visibleSize; i++) {
 					if (moreSpecific[i] != null) {
-						// 1.8: Give inference a chance to perform outstanding tasks (18.5.2):
-						MethodBinding candidate = inferInvocationType(invocationSite, visible[i], argumentTypes);
+						MethodBinding candidate = visible[i];
 						if (candidate != null)
 							compilationUnitScope().recordTypeReferences(candidate.thrownExceptions);
 						return candidate;
@@ -299,8 +287,7 @@
 				if (mostSpecificExceptions != null && mostSpecificExceptions != current.thrownExceptions) {
 					return new MostSpecificExceptionMethodBinding(current, mostSpecificExceptions);
 				}
-				// 1.8: Before returning give inference a chance to perform outstanding tasks (18.5.2):
-				return inferInvocationType(invocationSite, current, argumentTypes);
+				return current;
 			}
 		}
 

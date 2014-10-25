@@ -1,112 +1,109 @@
 public TypeBinding resolveType(BlockScope scope) {
-	// Answer the signature return type
+	// Answer the signature return type, answers PolyTypeBinding if there is at least one generic overloaded candidate that encoded type variables in return type and there is no target type  
 	// Base type promotion
+	if (this.constant != Constant.NotAConstant) {
+		this.constant = Constant.NotAConstant;
+		long sourceLevel = scope.compilerOptions().sourceLevel;
+		boolean receiverCast = false;
+		if (this.receiver instanceof CastExpression) {
+			this.receiver.bits |= ASTNode.DisableUnnecessaryCastCheck; // will check later on
+			receiverCast = true;
+		}
+		this.actualReceiverType = this.receiver.resolveType(scope);
+		this.receiverIsType = this.receiver instanceof NameReference && (((NameReference) this.receiver).bits & Binding.TYPE) != 0;
+		if (receiverCast && this.actualReceiverType != null) {
+			// due to change of declaring class with receiver type, only identity cast should be notified
+			if (TypeBinding.equalsEquals(((CastExpression)this.receiver).expression.resolvedType, this.actualReceiverType)) {
+				scope.problemReporter().unnecessaryCast((CastExpression)this.receiver);
+			}
+		}
+		// resolve type arguments (for generic constructor call)
+		if (this.typeArguments != null) {
+			int length = this.typeArguments.length;
+			this.argumentsHaveErrors = sourceLevel < ClassFileConstants.JDK1_5; // typeChecks all arguments
+			this.genericTypeArguments = new TypeBinding[length];
+			for (int i = 0; i < length; i++) {
+				TypeReference typeReference = this.typeArguments[i];
+				if ((this.genericTypeArguments[i] = typeReference.resolveType(scope, true /* check bounds*/)) == null) {
+					this.argumentsHaveErrors = true;
+				}
+				if (this.argumentsHaveErrors && typeReference instanceof Wildcard) {
+					scope.problemReporter().illegalUsageOfWildcard(typeReference);
+				}
+			}
+			if (this.argumentsHaveErrors) {
+				if (this.arguments != null) { // still attempt to resolve arguments
+					for (int i = 0, max = this.arguments.length; i < max; i++) {
+						this.arguments[i].resolveType(scope);
+					}
+				}
+				return null;
+			}
+		}
+		// will check for null after args are resolved
+		if (this.arguments != null) {
+			this.argumentsHaveErrors = false; // typeChecks all arguments
+			int length = this.arguments.length;
+			this.argumentTypes = new TypeBinding[length];
+			for (int i = 0; i < length; i++){
+				Expression argument = this.arguments[i];
+				if (this.arguments[i].resolvedType != null) 
+					scope.problemReporter().genericInferenceError("Argument was unexpectedly found resolved", this); //$NON-NLS-1$
+				if (argument instanceof CastExpression) {
+					argument.bits |= ASTNode.DisableUnnecessaryCastCheck; // will check later on
+					this.argsContainCast = true;
+				}
+				argument.setExpressionContext(INVOCATION_CONTEXT);
+				if ((this.argumentTypes[i] = argument.resolveType(scope)) == null){
+					this.argumentsHaveErrors = true;
+				}
+			}
+			if (this.argumentsHaveErrors) {
+				if (this.actualReceiverType instanceof ReferenceBinding) {
+					//  record a best guess, for clients who need hint about possible method match
+					TypeBinding[] pseudoArgs = new TypeBinding[length];
+					for (int i = length; --i >= 0;)
+						pseudoArgs[i] = this.argumentTypes[i] == null ? TypeBinding.NULL : this.argumentTypes[i]; // replace args with errors with null type
 
-	this.constant = Constant.NotAConstant;
-	long sourceLevel = scope.compilerOptions().sourceLevel;
-	boolean receiverCast = false;
-	if (this.receiver instanceof CastExpression) {
-		this.receiver.bits |= ASTNode.DisableUnnecessaryCastCheck; // will check later on
-		receiverCast = true;
-	}
-	if (this.receiver.resolvedType != null)
-		scope.problemReporter().genericInferenceError("Receiver was unexpectedly found resolved", this); //$NON-NLS-1$
-	this.actualReceiverType = this.receiver.resolveType(scope);
-	this.receiverIsType = this.receiver instanceof NameReference && (((NameReference) this.receiver).bits & Binding.TYPE) != 0;
-	if (receiverCast && this.actualReceiverType != null) {
-		 // due to change of declaring class with receiver type, only identity cast should be notified
-		if (TypeBinding.equalsEquals(((CastExpression)this.receiver).expression.resolvedType, this.actualReceiverType)) {
-			scope.problemReporter().unnecessaryCast((CastExpression)this.receiver);
-		}
-	}
-	// resolve type arguments (for generic constructor call)
-	if (this.typeArguments != null) {
-		int length = this.typeArguments.length;
-		this.argumentsHaveErrors = sourceLevel < ClassFileConstants.JDK1_5; // typeChecks all arguments
-		this.genericTypeArguments = new TypeBinding[length];
-		for (int i = 0; i < length; i++) {
-			TypeReference typeReference = this.typeArguments[i];
-			if ((this.genericTypeArguments[i] = typeReference.resolveType(scope, true /* check bounds*/)) == null) {
-				this.argumentsHaveErrors = true;
-			}
-			if (this.argumentsHaveErrors && typeReference instanceof Wildcard) {
-				scope.problemReporter().illegalUsageOfWildcard(typeReference);
-			}
-		}
-		if (this.argumentsHaveErrors) {
-			if (this.arguments != null) { // still attempt to resolve arguments
-				for (int i = 0, max = this.arguments.length; i < max; i++) {
-					this.arguments[i].resolveType(scope);
-				}
-			}
-			return null;
-		}
-	}
-	// will check for null after args are resolved
-	if (this.arguments != null) {
-		this.argumentsHaveErrors = false; // typeChecks all arguments
-		int length = this.arguments.length;
-		this.argumentTypes = new TypeBinding[length];
-		for (int i = 0; i < length; i++){
-			Expression argument = this.arguments[i];
-			if (this.arguments[i].resolvedType != null) 
-				scope.problemReporter().genericInferenceError("Argument was unexpectedly found resolved", this); //$NON-NLS-1$
-			if (argument instanceof CastExpression) {
-				argument.bits |= ASTNode.DisableUnnecessaryCastCheck; // will check later on
-				this.argsContainCast = true;
-			}
-			argument.setExpressionContext(INVOCATION_CONTEXT);
-			if ((this.argumentTypes[i] = argument.resolveType(scope)) == null){
-				this.argumentsHaveErrors = true;
-			}
-			if (sourceLevel >= ClassFileConstants.JDK1_8) {
-				if (argument.isPolyExpression()
-					|| (argument instanceof Invocation && ((Invocation)argument).usesInference())) {
-					if (this.innerInferenceHelper == null)
-						this.innerInferenceHelper = new InnerInferenceHelper();
-				}
-			}
-		}
-		if (this.argumentsHaveErrors) {
-			if (this.actualReceiverType instanceof ReferenceBinding) {
-				//  record a best guess, for clients who need hint about possible method match
-				TypeBinding[] pseudoArgs = new TypeBinding[length];
-				for (int i = length; --i >= 0;)
-					pseudoArgs[i] = this.argumentTypes[i] == null ? TypeBinding.NULL : this.argumentTypes[i]; // replace args with errors with null type
-				this.binding =
-					this.receiver.isImplicitThis()
-						? scope.getImplicitMethod(this.selector, pseudoArgs, this)
-						: scope.findMethod((ReferenceBinding) this.actualReceiverType, this.selector, pseudoArgs, this, false);
-				if (this.binding != null && !this.binding.isValidBinding()) {
-					MethodBinding closestMatch = ((ProblemMethodBinding)this.binding).closestMatch;
-					// record the closest match, for clients who may still need hint about possible method match
-					if (closestMatch != null) {
-						if (closestMatch.original().typeVariables != Binding.NO_TYPE_VARIABLES) { // generic method
-							// shouldn't return generic method outside its context, rather convert it to raw method (175409)
-							closestMatch = scope.environment().createParameterizedGenericMethod(closestMatch.original(), (RawTypeBinding)null);
-						}
-						this.binding = closestMatch;
-						MethodBinding closestMatchOriginal = closestMatch.original();
-						if (closestMatchOriginal.isOrEnclosedByPrivateType() && !scope.isDefinedInMethod(closestMatchOriginal)) {
-							// ignore cases where method is used from within inside itself (e.g. direct recursions)
-							closestMatchOriginal.modifiers |= ExtraCompilerModifiers.AccLocallyUsed;
+					this.binding = this.receiver.isImplicitThis() ?
+								scope.getImplicitMethod(this.selector, pseudoArgs, this) :
+									scope.findMethod((ReferenceBinding) this.actualReceiverType, this.selector, pseudoArgs, this, false);
+
+					if (this.binding != null && !this.binding.isValidBinding()) {
+						MethodBinding closestMatch = ((ProblemMethodBinding)this.binding).closestMatch;
+						// record the closest match, for clients who may still need hint about possible method match
+						if (closestMatch != null) {
+							if (closestMatch.original().typeVariables != Binding.NO_TYPE_VARIABLES) { // generic method
+								// shouldn't return generic method outside its context, rather convert it to raw method (175409)
+								closestMatch = scope.environment().createParameterizedGenericMethod(closestMatch.original(), (RawTypeBinding)null);
+							}
+							this.binding = closestMatch;
+							MethodBinding closestMatchOriginal = closestMatch.original();
+							if (closestMatchOriginal.isOrEnclosedByPrivateType() && !scope.isDefinedInMethod(closestMatchOriginal)) {
+								// ignore cases where method is used from within inside itself (e.g. direct recursions)
+								closestMatchOriginal.modifiers |= ExtraCompilerModifiers.AccLocallyUsed;
+							}
 						}
 					}
 				}
+				return null;
 			}
+		}
+		if (this.actualReceiverType == null) {
+			return null;
+		}
+		// base type cannot receive any message
+		if (this.actualReceiverType.isBaseType()) {
+			scope.problemReporter().errorNoMethodFor(this, this.actualReceiverType, this.argumentTypes);
 			return null;
 		}
 	}
-	if (this.actualReceiverType == null) {
-		return null;
+	
+	TypeBinding methodType = findMethodBinding(scope);
+	if (methodType != null && methodType.isPolyType()) {
+		this.resolvedType = this.binding.returnType.capture(scope, this.sourceEnd);
+		return methodType;
 	}
-	// base type cannot receive any message
-	if (this.actualReceiverType.isBaseType()) {
-		scope.problemReporter().errorNoMethodFor(this, this.actualReceiverType, this.argumentTypes);
-		return null;
-	}
-
-	findMethodBinding(scope);
 
 	if (!this.binding.isValidBinding()) {
 		if (this.binding.declaringClass == null) {
@@ -129,6 +126,12 @@ public TypeBinding resolveType(BlockScope scope) {
 		switch (this.binding.problemId()) {
 			case ProblemReasons.Ambiguous :
 				break; // no resilience on ambiguous
+			case ProblemReasons.InferredApplicableMethodInapplicable:
+			case ProblemReasons.InvocationTypeInferenceFailure:
+				// Grabbing the closest match improves error reporting in nested invocation contexts
+				if (this.expressionContext != INVOCATION_CONTEXT)
+					break;
+				//$FALL-THROUGH$
 			case ProblemReasons.NotVisible :
 			case ProblemReasons.NonStaticReferenceInConstructorInvocation :
 			case ProblemReasons.NonStaticReferenceInStaticContext :

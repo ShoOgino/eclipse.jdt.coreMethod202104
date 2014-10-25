@@ -1,0 +1,109 @@
+	/**
+	 * Perform inference of generic method type parameters and/or expected type
+	 * <p>
+	 * In 1.8+ if the expected type is not yet available due to this call being an argument to an outer call which is not overload-resolved yet,
+	 * the returned method binding will be a PolyParameterizedGenericMethodBinding.
+	 * </p>  
+	 */
+	public static MethodBinding computeCompatibleMethod(MethodBinding originalMethod, TypeBinding[] arguments, Scope scope,	InvocationSite invocationSite)
+	{
+		ParameterizedGenericMethodBinding methodSubstitute;
+		TypeVariableBinding[] typeVariables = originalMethod.typeVariables;
+		TypeBinding[] substitutes = invocationSite.genericTypeArguments();
+		InferenceContext inferenceContext = null;
+		TypeBinding[] uncheckedArguments = null;
+		computeSubstitutes: {
+			if (substitutes != null) {
+				// explicit type arguments got supplied
+				if (substitutes.length != typeVariables.length) {
+			        // incompatible due to wrong arity
+			        return new ProblemMethodBinding(originalMethod, originalMethod.selector, substitutes, ProblemReasons.TypeParameterArityMismatch);
+				}
+				methodSubstitute = scope.environment().createParameterizedGenericMethod(originalMethod, substitutes);
+				break computeSubstitutes;
+			}
+			// perform type argument inference (15.12.2.7)
+			// initializes the map of substitutes (var --> type[][]{ equal, extends, super}
+			TypeBinding[] parameters = originalMethod.parameters;
+
+			CompilerOptions compilerOptions = scope.compilerOptions();
+			if (compilerOptions.sourceLevel >= ClassFileConstants.JDK1_8)
+				return computeCompatibleMethod18(originalMethod, arguments, scope, invocationSite);
+
+			// 1.7- only.
+			inferenceContext = new InferenceContext(originalMethod);
+			methodSubstitute = inferFromArgumentTypes(scope, originalMethod, arguments, parameters, inferenceContext);
+			if (methodSubstitute == null)
+				return null;
+
+			// substitutes may hold null to denote unresolved vars, but null arguments got replaced with respective original variable in param method
+			// 15.12.2.8 - inferring unresolved type arguments
+			if (inferenceContext.hasUnresolvedTypeArgument()) {
+				if (inferenceContext.isUnchecked) { // only remember unchecked status post 15.12.2.7
+					int length = inferenceContext.substitutes.length;
+					System.arraycopy(inferenceContext.substitutes, 0, uncheckedArguments = new TypeBinding[length], 0, length);
+				}
+				if (methodSubstitute.returnType != TypeBinding.VOID) {
+					TypeBinding expectedType = invocationSite.invocationTargetType();
+					if (expectedType != null) {
+						// record it was explicit from context, as opposed to assumed by default (see below)
+						inferenceContext.hasExplicitExpectedType = true;
+					} else {
+						expectedType = scope.getJavaLangObject(); // assume Object by default
+					}
+					inferenceContext.expectedType = expectedType;
+				}
+				methodSubstitute = methodSubstitute.inferFromExpectedType(scope, inferenceContext);
+				if (methodSubstitute == null)
+					return null;
+			}
+		}
+
+		/* bounds check: https://bugs.eclipse.org/bugs/show_bug.cgi?id=242159, Inferred types may contain self reference
+		   in formal bounds. If "T extends I<T>" is a original type variable and T was inferred to be I<T> due possibly
+		   to under constraints and resultant glb application per 15.12.2.8, using this.typeArguments to drive the bounds
+		   check against itself is doomed to fail. For, the variable T would after substitution be I<I<T>> and would fail
+		   bounds check against I<T>. Use the inferred types from the context directly - see that there is one round of
+		   extra substitution that has taken place to properly substitute a remaining unresolved variable which also appears
+		   in a formal bound  (So we really have a bounds mismatch between I<I<T>> and I<I<I<T>>>, in the absence of a fix.)
+		*/
+		Substitution substitution = null;
+		if (inferenceContext != null) {
+			substitution = new LingeringTypeVariableEliminator(typeVariables, inferenceContext.substitutes, scope);
+		} else {
+			substitution = methodSubstitute;
+		}
+		for (int i = 0, length = typeVariables.length; i < length; i++) {
+		    TypeVariableBinding typeVariable = typeVariables[i];
+		    TypeBinding substitute = methodSubstitute.typeArguments[i]; // retain for diagnostics
+		    /* https://bugs.eclipse.org/bugs/show_bug.cgi?id=375394, To avoid spurious bounds check failures due to circularity in formal bounds, 
+		       we should eliminate only the lingering embedded type variable references after substitution, not alien type variable references
+		       that constitute the inference per se.
+		     */ 
+		    TypeBinding substituteForChecks;
+		    if (substitute instanceof TypeVariableBinding) {
+		    	substituteForChecks = substitute;
+		    } else {
+		    	substituteForChecks = Scope.substitute(new LingeringTypeVariableEliminator(typeVariables, null, scope), substitute); // while using this for bounds check
+		    }
+		    
+		    if (uncheckedArguments != null && uncheckedArguments[i] == null) continue; // only bound check if inferred through 15.12.2.6
+			switch (typeVariable.boundCheck(substitution, substituteForChecks, scope)) {
+				case TypeConstants.MISMATCH :
+			        // incompatible due to bound check
+					int argLength = arguments.length;
+					TypeBinding[] augmentedArguments = new TypeBinding[argLength + 2]; // append offending substitute and typeVariable
+					System.arraycopy(arguments, 0, augmentedArguments, 0, argLength);
+					augmentedArguments[argLength] = substitute;
+					augmentedArguments[argLength+1] = typeVariable;
+			        return new ProblemMethodBinding(methodSubstitute, originalMethod.selector, augmentedArguments, ProblemReasons.ParameterBoundMismatch);
+				case TypeConstants.UNCHECKED :
+					// tolerate unchecked bounds
+					methodSubstitute.tagBits |= TagBits.HasUncheckedTypeArgumentForBoundCheck;
+					break;
+			}
+		}
+		// check presence of unchecked argument conversion a posteriori (15.12.2.6)
+		return methodSubstitute;
+	}
+

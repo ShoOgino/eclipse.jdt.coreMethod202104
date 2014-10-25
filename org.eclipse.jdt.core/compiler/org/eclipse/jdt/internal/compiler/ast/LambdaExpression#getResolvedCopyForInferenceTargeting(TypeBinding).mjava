@@ -6,58 +6,13 @@
 	 * @return a resolved copy of 'this' or null if significant errors where encountered
 	 */
 	public LambdaExpression getResolvedCopyForInferenceTargeting(TypeBinding targetType) {
-		// note: this is essentially a simplified extract from isCompatibleWith(TypeBinding,Scope).
-		if (this.shapeAnalysisComplete && this.binding != null)
-			return this;
-		
-		targetType = targetType.uncapture(this.enclosingScope);
-		// TODO: caching
-		IErrorHandlingPolicy oldPolicy = this.enclosingScope.problemReporter().switchErrorHandlingPolicy(silentErrorHandlingPolicy);
-		final CompilerOptions compilerOptions = this.enclosingScope.compilerOptions();
-		boolean analyzeNPE = compilerOptions.isAnnotationBasedNullAnalysisEnabled;
-		final LambdaExpression copy = copy();
-		if (copy == null) {
-			return null;
-		}
-		try {
-			compilerOptions.isAnnotationBasedNullAnalysisEnabled = false;
-			copy.setExpressionContext(this.expressionContext);
-			copy.setExpectedType(targetType);
-			this.hasIgnoredMandatoryErrors = false;
-			TypeBinding type = copy.resolveType(this.enclosingScope);
-			if (type == null || !type.isValidBinding())
-				return null;
-			if (this.body instanceof Block) {
-				if (copy.returnsVoid) {
-					copy.shapeAnalysisComplete = true;
-				}
-			} else {
-				copy.voidCompatible = ((Expression) this.body).statementExpression();
-				TypeBinding resultType = ((Expression) this.body).resolvedType;
-				if (resultType == null) // case of a yet-unresolved poly expression?
-					copy.valueCompatible = true;
-				else
-					copy.valueCompatible = (resultType != TypeBinding.VOID);
-				copy.shapeAnalysisComplete = true;
+		LambdaExpression lambda = this.resolvedCopies.get(targetType);
+		if (lambda == null) {
+			lambda = getResolvedCopyForInferenceTargeting0(targetType);
+			if (lambda != null) {
+				this.resolvedCopies.put(targetType, lambda);
 			}
-			// Do not proceed with data/control flow analysis if resolve encountered errors.
-			if (!this.hasIgnoredMandatoryErrors && !enclosingScopesHaveErrors()) {
-				// value compatibility of block lambda's is the only open question.
-				if (!copy.shapeAnalysisComplete)
-					copy.valueCompatible = copy.doesNotCompleteNormally();
-			} else {
-				if (!copy.returnsVoid)
-					copy.valueCompatible = true; // optimistically, TODO: is this OK??
-			}
-			
-			copy.shapeAnalysisComplete = true;
-			copy.resultExpressions = this.resultExpressions;
-			this.resultExpressions = NO_EXPRESSIONS;
-		} finally {
-			compilerOptions.isAnnotationBasedNullAnalysisEnabled = analyzeNPE;
-			this.hasIgnoredMandatoryErrors = false;
-			this.enclosingScope.problemReporter().switchErrorHandlingPolicy(oldPolicy);
 		}
-		return copy;
+		return lambda;
 	}
 

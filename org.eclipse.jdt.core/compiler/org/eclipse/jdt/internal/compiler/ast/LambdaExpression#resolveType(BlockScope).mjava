@@ -23,6 +23,7 @@
 				this.argumentTypes[i] = this.arguments[i].type.resolveType(blockScope, true /* check bounds*/);
 		}
 		if (this.expectedType == null && this.expressionContext == INVOCATION_CONTEXT) {
+			this.resolvedCopies = new HashMap<TypeBinding, LambdaExpression>();
 			return new PolyTypeBinding(this);
 		} 
 		
@@ -100,11 +101,18 @@
 				expectedSAMType = (ReferenceBinding) this.expectedType;
 			if (expectedSAMType != null)
 				groundType = findGroundTargetType(blockScope, expectedSAMType, argumentsTypeElided);
+			
 			if (groundType != null) {
 				this.descriptor = groundType.getSingleAbstractMethod(blockScope, true);
 				if (!this.descriptor.isValidBinding()) {
 					reportSamProblem(blockScope, this.descriptor);
 				} else {
+					if (groundType != expectedSAMType) { //$IDENTITY-COMPARISON$
+						if (!groundType.isCompatibleWith(expectedSAMType, this.scope)) { // the ground has shifted, are we still on firm grounds ? 
+							blockScope.problemReporter().typeMismatchError(groundType, this.expectedType, this, null); // report deliberately against block scope so as not to blame the lambda.
+							return this.resolvedType = null;
+						}
+					}
 					this.resolvedType = groundType;
 				}
 				// TODO: in which cases do we have to assign this.resolvedType & this.descriptor (with problem bindings) to prevent NPE downstream??
@@ -193,6 +201,7 @@
 		if (this.body instanceof Expression) {
 			Expression expression = (Expression) this.body;
 			new ReturnStatement(expression, expression.sourceStart, expression.sourceEnd, true).resolve(this.scope); // :-) ;-)
+			this.voidCompatible = this.original.voidCompatible = expression.statementExpression();
 		} else {
 			this.body.resolve(this.scope);
 		}

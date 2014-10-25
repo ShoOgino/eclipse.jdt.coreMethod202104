@@ -1,13 +1,16 @@
-/**
- * Find the method binding; 
- * if this.innersNeedUpdate allow for two attempts where the first round may stop
- * after applicability checking (18.5.1) to include more information into the final
- * invocation type inference (18.5.2).
- */
-protected void findMethodBinding(BlockScope scope) {
-	this.binding = this.receiver.isImplicitThis()
-			? scope.getImplicitMethod(this.selector, this.argumentTypes, this)
+protected TypeBinding findMethodBinding(BlockScope scope) {
+	
+	
+	this.binding = this.receiver.isImplicitThis() ? 
+			scope.getImplicitMethod(this.selector, this.argumentTypes, this) 
 			: scope.getMethod(this.actualReceiverType, this.selector, this.argumentTypes, this);
+
+	if (this.binding == null) // can't happen ? I think we always get a problem binding, anyways.
+		return null;
+	
+	if (this.binding instanceof PolyParameterizedGenericMethodBinding)
+		return new PolyTypeBinding(this);
+	
 	resolvePolyExpressionArguments(this, this.binding, this.argumentTypes, scope);
 	
 	/* There are embedded assumptions in the JLS8 type inference scheme that a successful solution of the type equations results in an
@@ -22,11 +25,8 @@ protected void findMethodBinding(BlockScope scope) {
 	final CompilerOptions compilerOptions = scope.compilerOptions();
 	if (compilerOptions.sourceLevel >= ClassFileConstants.JDK1_8 && this.binding instanceof ParameterizedGenericMethodBinding && this.binding.isValidBinding()) {
 		if (!compilerOptions.postResolutionRawTypeCompatibilityCheck)
-			return;
+			return this.binding.returnType;
 		ParameterizedGenericMethodBinding pgmb = (ParameterizedGenericMethodBinding) this.binding;
-		InferenceContext18 ctx = getInferenceContext(pgmb);
-		if (ctx == null || ctx.stepCompleted < InferenceContext18.BINDINGS_UPDATED)
-			return;
 		int length = pgmb.typeArguments == null ? 0 : pgmb.typeArguments.length;
 		boolean sawRawType = false;
 		for (int i = 0;  i < length; i++) {
@@ -35,24 +35,25 @@ protected void findMethodBinding(BlockScope scope) {
 			   does not appear fully hooked up into isCompatibleWith and isEquivalent to everywhere. At the moment, bail out if we see capture.
 			*/   
 			if (pgmb.typeArguments[i].isCapture())
-				return;
+				return this.binding.returnType;
 			if (pgmb.typeArguments[i].isRawType())
 				sawRawType = true;
 		}
 		if (!sawRawType)
-			return;
+			return this.binding.returnType;
 		length = this.arguments == null ? 0 : this.arguments.length;
 		if (length == 0)
-			return;
+			return this.binding.returnType;
 		TypeBinding [] finalArgumentTypes = new TypeBinding[length];
 		for (int i = 0; i < length; i++) {
 			TypeBinding finalArgumentType = this.arguments[i].resolvedType;
 			if (finalArgumentType == null || !finalArgumentType.isValidBinding())  // already sided with the devil.
-				return;
+				return this.binding.returnType;
 			finalArgumentTypes[i] = finalArgumentType; 
 		}
-		if (scope.parameterCompatibilityLevel(this.binding, finalArgumentTypes, false, false) == Scope.NOT_COMPATIBLE)
+		if (scope.parameterCompatibilityLevel(this.binding, finalArgumentTypes, false) == Scope.NOT_COMPATIBLE)
 			this.binding = new ProblemMethodBinding(this.binding.original(), this.binding.selector, finalArgumentTypes, ProblemReasons.NotFound);
 	}
+	return this.binding.returnType;
 }
 
