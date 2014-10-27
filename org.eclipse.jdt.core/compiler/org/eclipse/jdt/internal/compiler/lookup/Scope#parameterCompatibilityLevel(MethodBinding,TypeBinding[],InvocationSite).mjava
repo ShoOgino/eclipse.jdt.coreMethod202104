@@ -1,0 +1,45 @@
+	// Version that just answers based on inference kind (at 1.8+) when available.
+	public int parameterCompatibilityLevel(MethodBinding method, TypeBinding[] arguments, InvocationSite site) {
+		if (compilerOptions().sourceLevel >= ClassFileConstants.JDK1_8 && method instanceof ParameterizedGenericMethodBinding) {
+			int inferenceKind = InferenceContext18.CHECK_UNKNOWN;
+			InferenceContext18 context = null;
+			if (site instanceof Invocation) {
+				Invocation invocation = (Invocation) site;
+				context = invocation.getInferenceContext((ParameterizedGenericMethodBinding) method);
+				if (context != null)
+					inferenceKind = context.inferenceKind;
+			} else if (site instanceof ReferenceExpression) {
+				inferenceKind = ((ReferenceExpression) site).inferenceKind;
+			}
+			/* 1.8+ Post inference compatibility check policy: For non-functional-type arguments, trust inference. For functional type arguments apply compatibility checks as inference
+			   engine may not have checked arguments that are not pertinent to applicability. One complication to deal with is when the generic method's parameter is its own type variable 
+			   and only applicability was inferred and applicability inference instantiated it with jlO due to lack of upper bounds in the bound set.
+			*/
+			if (site instanceof Invocation && context != null) { // this block can be readily seen to be not relevant for reference expressions
+				MethodBinding shallowOriginal = method.shallowOriginal();
+				for (int i = 0, length = arguments.length; i < length; i++) {
+					TypeBinding argument = arguments[i];
+					if (!argument.isFunctionalType())
+						continue;
+					TypeBinding parameter = InferenceContext18.getParameter(method.parameters, i, context.isVarArgs());
+					if (argument.isCompatibleWith(parameter, this))
+						continue;
+					TypeBinding shallowParameter = InferenceContext18.getParameter(shallowOriginal.parameters, i, context.isVarArgs());
+					if (shallowParameter.isPertinentToApplicability(argument, shallowOriginal))
+						return NOT_COMPATIBLE;
+				}
+			}
+			switch (inferenceKind) {
+				case InferenceContext18.CHECK_STRICT:
+					return COMPATIBLE;
+				case InferenceContext18.CHECK_LOOSE:
+					return AUTOBOX_COMPATIBLE;
+				case InferenceContext18.CHECK_VARARG:
+					return VARARGS_COMPATIBLE;
+				default:
+					break;
+				}
+		}
+		return parameterCompatibilityLevel(method, arguments, false);
+	}
+
