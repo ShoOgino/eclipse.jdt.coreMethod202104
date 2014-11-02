@@ -25,14 +25,14 @@ private void evaluateNullAnnotations(long annotationTagBits) {
 		}
 	}
 	this.nullnessDefaultInitialized = 1;
-	boolean isJdk18 = this.scope.compilerOptions().sourceLevel >= ClassFileConstants.JDK1_8;
-	if (isJdk18) {
+	boolean usesNullTypeAnnotations = this.scope.environment().usesNullTypeAnnotations();
+	if (usesNullTypeAnnotations) {
 		if (this.defaultNullness != 0) {
 			if (isPackageInfo) {
 				pkg.defaultNullness = this.defaultNullness;
 			} else {
 				TypeDeclaration typeDecl = this.scope.referenceContext;
-				checkRedundantNullnessDefaultRecurse(typeDecl, typeDecl.annotations, this.defaultNullness, isJdk18);
+				checkRedundantNullnessDefaultRecurse(typeDecl, typeDecl.annotations, this.defaultNullness, true);
 			}
 		} else if (isPackageInfo || (isInDefaultPkg && !(this instanceof NestedTypeBinding))) {
 			this.scope.problemReporter().missingNonNullByDefaultAnnotation(this.scope.referenceContext);
@@ -40,12 +40,22 @@ private void evaluateNullAnnotations(long annotationTagBits) {
 				pkg.defaultNullness = NULL_UNSPECIFIED_BY_DEFAULT;
 		}
 	} else {
-		// transfer nullness info from tagBits to this.nullnessDefaultAnnotation
+		// transfer nullness info from tagBits to this.defaultNullness
 		int newDefaultNullness = NO_NULL_DEFAULT;
-		if ((annotationTagBits & TagBits.AnnotationNullUnspecifiedByDefault) != 0)
+		if ((annotationTagBits & TagBits.AnnotationNullUnspecifiedByDefault) != 0) {
 			newDefaultNullness = NULL_UNSPECIFIED_BY_DEFAULT;
-		else if ((annotationTagBits & TagBits.AnnotationNonNullByDefault) != 0)
+		} else if ((annotationTagBits & TagBits.AnnotationNonNullByDefault) != 0) {
 			newDefaultNullness = NONNULL_BY_DEFAULT;
+		} else if (this.defaultNullness != 0) {
+			 // NNBD with argument while NN & NU are SE5 annotations, revert to old default & encoding.
+			if (this.defaultNullness == NULL_UNSPECIFIED_BY_DEFAULT) {
+				annotationTagBits = TagBits.AnnotationNullUnspecifiedByDefault;
+				newDefaultNullness = NULL_UNSPECIFIED_BY_DEFAULT;
+			} else {
+				annotationTagBits = TagBits.AnnotationNonNullByDefault;
+				newDefaultNullness = NONNULL_BY_DEFAULT;
+			}
+		}
 		if (newDefaultNullness != NO_NULL_DEFAULT) {
 			if (isPackageInfo) {
 				pkg.defaultNullness = newDefaultNullness;

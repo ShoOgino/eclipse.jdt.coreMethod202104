@@ -1,0 +1,60 @@
+// pre: null annotation analysis is enabled
+private void scanTypeForNullDefaultAnnotation(IBinaryType binaryType, PackageBinding packageBinding) {
+	if (!isPrototype()) throw new IllegalStateException();
+	char[][] nonNullByDefaultAnnotationName = this.environment.getNonNullByDefaultAnnotationName();
+	if (nonNullByDefaultAnnotationName == null)
+		return; // not well-configured to use null annotations
+
+	IBinaryAnnotation[] annotations = binaryType.getAnnotations();
+	boolean isPackageInfo = CharOperation.equals(sourceName(), TypeConstants.PACKAGE_INFO_NAME);
+	if (annotations != null) {
+		long annotationBit = 0L;
+		int nullness = NO_NULL_DEFAULT;
+		int length = annotations.length;
+		for (int i = 0; i < length; i++) {
+			char[] annotationTypeName = annotations[i].getTypeName();
+			if (annotationTypeName[0] != Util.C_RESOLVED)
+				continue;
+			char[][] typeName = CharOperation.splitOn('/', annotationTypeName, 1, annotationTypeName.length-1); // cut of leading 'L' and trailing ';'
+			if (CharOperation.equals(typeName, nonNullByDefaultAnnotationName)) {
+				// using NonNullByDefault we need to inspect the details of the value() attribute:
+				nullness = getNonNullByDefaultValue(annotations[i]);
+				if (nullness == NULL_UNSPECIFIED_BY_DEFAULT) {
+					annotationBit = TagBits.AnnotationNullUnspecifiedByDefault;
+				} else if (nullness != 0) {
+					annotationBit = TagBits.AnnotationNonNullByDefault;
+				}
+				this.defaultNullness = nullness;
+				break;
+			}
+		}
+		if (annotationBit != 0L) {
+			this.tagBits |= annotationBit;
+			if (isPackageInfo)
+				packageBinding.defaultNullness = nullness;
+			return;
+		}
+	}
+	if (isPackageInfo) {
+		// no default annotations found in package-info
+		packageBinding.defaultNullness = Binding.NO_NULL_DEFAULT;
+		return;
+	}
+	ReferenceBinding enclosingTypeBinding = this.enclosingType;
+	if (enclosingTypeBinding != null) {
+		if (setNullDefault(enclosingTypeBinding.tagBits, enclosingTypeBinding.getNullDefault()))
+			return;
+	}
+	// no annotation found on the type or its enclosing types
+	// check the package-info for default annotation if not already done before
+	if (packageBinding.defaultNullness == Binding.NO_NULL_DEFAULT && !isPackageInfo) {
+		// this will scan the annotations in package-info
+		ReferenceBinding packageInfo = packageBinding.getType(TypeConstants.PACKAGE_INFO_NAME);
+		if (packageInfo == null) {
+			packageBinding.defaultNullness = Binding.NO_NULL_DEFAULT;
+		}
+	}
+	// no @NonNullByDefault at type level, check containing package:
+	setNullDefault(0L, packageBinding.defaultNullness);
+}
+

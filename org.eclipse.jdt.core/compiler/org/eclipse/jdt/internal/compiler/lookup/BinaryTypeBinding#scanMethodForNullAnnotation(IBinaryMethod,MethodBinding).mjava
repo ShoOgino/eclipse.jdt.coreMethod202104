@@ -1,9 +1,5 @@
 private void scanMethodForNullAnnotation(IBinaryMethod method, MethodBinding methodBinding) {
 	if (!isPrototype()) throw new IllegalStateException();
-	if (!this.environment.globalOptions.isAnnotationBasedNullAnalysisEnabled)
-		return;
-	boolean useTypeAnnotations = this.environment.globalOptions.sourceLevel >= ClassFileConstants.JDK1_8;
-	// in 1.8 we only need @NonNullByDefault, see below and exit further down.
 	char[][] nullableAnnotationName = this.environment.getNullableAnnotationName();
 	char[][] nonNullAnnotationName = this.environment.getNonNullAnnotationName();
 	char[][] nonNullByDefaultAnnotationName = this.environment.getNonNullByDefaultAnnotationName();
@@ -12,7 +8,6 @@ private void scanMethodForNullAnnotation(IBinaryMethod method, MethodBinding met
 
 	// return:
 	IBinaryAnnotation[] annotations = method.getAnnotations();
-	boolean explicitNullness = false;
 	if (annotations != null) {
 		for (int i = 0; i < annotations.length; i++) {
 			char[] annotationTypeName = annotations[i].getTypeName();
@@ -20,24 +15,18 @@ private void scanMethodForNullAnnotation(IBinaryMethod method, MethodBinding met
 				continue;
 			char[][] typeName = CharOperation.splitOn('/', annotationTypeName, 1, annotationTypeName.length-1); // cut of leading 'L' and trailing ';'
 			if (CharOperation.equals(typeName, nonNullByDefaultAnnotationName)) {
-				methodBinding.tagBits |= TagBits.AnnotationNonNullByDefault;
-				if (useTypeAnnotations)
-					methodBinding.defaultNullness = getNonNullByDefaultValue(annotations[i]);
-			}
-			if (!useTypeAnnotations && !explicitNullness) {
-				if (CharOperation.equals(typeName, nonNullAnnotationName)) {
-					methodBinding.tagBits |= TagBits.AnnotationNonNull;
-					explicitNullness = true;
-				} else if (CharOperation.equals(typeName, nullableAnnotationName)) {
-					methodBinding.tagBits |= TagBits.AnnotationNullable;
-					explicitNullness = true;
-				}
+				methodBinding.defaultNullness = getNonNullByDefaultValue(annotations[i]);
+				if (methodBinding.defaultNullness == Binding.NULL_UNSPECIFIED_BY_DEFAULT)
+					methodBinding.tagBits |= TagBits.AnnotationNullUnspecifiedByDefault;
+				else if (methodBinding.defaultNullness != 0)
+					methodBinding.tagBits |= TagBits.AnnotationNonNullByDefault;
+			} else if (CharOperation.equals(typeName, nonNullAnnotationName)) {
+				methodBinding.tagBits |= TagBits.AnnotationNonNull;
+			} else if (CharOperation.equals(typeName, nullableAnnotationName)) {
+				methodBinding.tagBits |= TagBits.AnnotationNullable;
 			}
 		}
 	}
-
-	if (useTypeAnnotations)
-		return;
 
 	// parameters:
 	TypeBinding[] parameters = methodBinding.parameters;
