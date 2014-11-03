@@ -1,0 +1,53 @@
+	public void forwardResults(BoundSet result, Invocation invocation, ParameterizedMethodBinding pmb, TypeBinding targetType) {
+		if (targetType != null)
+			invocation.registerResult(targetType, pmb);
+		Expression[] arguments = invocation.arguments();
+		for (int i = 0, length = arguments == null ? 0 : arguments.length; i < length; i++) {
+			Expression [] expressions = arguments[i].getPolyExpressions();
+			for (int j = 0, jLength = expressions.length; j < jLength; j++) {
+				Expression expression = expressions[j];
+				if (!(expression instanceof Invocation))
+					continue;
+				Invocation polyInvocation = (Invocation) expression;
+				MethodBinding binding = polyInvocation.binding();
+				if (binding == null || !binding.isValidBinding())
+					continue;
+				ParameterizedMethodBinding methodSubstitute = null;
+				if (binding instanceof ParameterizedGenericMethodBinding) {
+					MethodBinding shallowOriginal = binding.shallowOriginal();
+					TypeBinding[] solutions = getSolutions(shallowOriginal.typeVariables(), polyInvocation, result);
+					if (solutions == null)  // in CEF.reduce, we lift inner poly expressions into outer context only if their target type has inference variables. 
+						continue;
+					methodSubstitute = this.environment.createParameterizedGenericMethod(shallowOriginal, solutions);
+				} else {
+					if (!binding.isConstructor() || !(binding instanceof ParameterizedMethodBinding))
+						continue; // throw ISE ?
+					MethodBinding shallowOriginal = binding.shallowOriginal();
+					ReferenceBinding genericType = shallowOriginal.declaringClass;
+					TypeBinding[] solutions = getSolutions(genericType.typeVariables(), polyInvocation, result);
+					if (solutions == null)  // in CEF.reduce, we lift inner poly expressions into outer context only if their target type has inference variables. 
+						continue;
+					ParameterizedTypeBinding parameterizedType = this.environment.createParameterizedType(genericType, solutions, binding.declaringClass.enclosingType());
+					for (MethodBinding parameterizedMethod : parameterizedType.methods()) {
+						if (parameterizedMethod.original() == shallowOriginal) {
+							methodSubstitute = (ParameterizedMethodBinding) parameterizedMethod;
+							break;
+						}
+					}
+				}
+				if (methodSubstitute == null || !methodSubstitute.isValidBinding())
+					continue;
+				boolean variableArity = pmb.isVarargs();
+				final TypeBinding[] parameters = pmb.parameters;
+				if (variableArity && parameters.length == arguments.length && i == length - 1) {
+					TypeBinding returnType = methodSubstitute.returnType.capture(this.scope, expression.sourceStart, expression.sourceEnd);
+					if (returnType.isCompatibleWith(parameters[parameters.length - 1], this.scope)) {
+						variableArity = false;
+					}
+				}
+				TypeBinding parameterType = InferenceContext18.getParameter(parameters, i, variableArity);
+				forwardResults(result, polyInvocation, methodSubstitute, parameterType);		
+			}
+		}
+	}
+

@@ -1,5 +1,9 @@
 public MethodBinding inferConstructorOfElidedParameterizedType(final Scope scope) {
-	
+	if (this.typeExpected != null && this.binding != null) {
+		MethodBinding cached = this.solutionsPerTargetType != null ? this.solutionsPerTargetType.get(this.typeExpected) : null;
+		if (cached != null)
+			return cached;
+	}
 	ReferenceBinding genericType = ((ParameterizedTypeBinding) this.resolvedType).genericType();
 	ReferenceBinding enclosingType = this.resolvedType.enclosingType();
 	ParameterizedTypeBinding allocationType = scope.environment().createParameterizedType(genericType, genericType.typeVariables(), enclosingType);
@@ -17,9 +21,12 @@ public MethodBinding inferConstructorOfElidedParameterizedType(final Scope scope
 												constructorTypeArguments, 0, constructorTypeArguments.length);
 		MethodBinding constructor = sfmb.applyTypeArgumentsOnConstructor(((ParameterizedTypeBinding)factory.returnType).arguments, constructorTypeArguments);
 		if (constructor instanceof ParameterizedGenericMethodBinding && scope.compilerOptions().sourceLevel >= ClassFileConstants.JDK1_8) {
-			// force an inference context to be established, but avoid tunneling through overload resolution. We know this is the MSMB.
-			return ParameterizedGenericMethodBinding.computeCompatibleMethod18(constructor.shallowOriginal(), this.argumentTypes, scope, this);
+			// force an inference context to be established for nested poly allocations (to be able to transfer b2), but avoid tunneling through overload resolution. We know this is the MSMB.
+			if (this.expressionContext == INVOCATION_CONTEXT && this.typeExpected == null)
+				constructor = ParameterizedGenericMethodBinding.computeCompatibleMethod18(constructor.shallowOriginal(), this.argumentTypes, scope, this);
 		}
+		if (this.typeExpected != null)
+			registerResult(this.typeExpected, constructor);
 		return constructor;
 	}
 	return null;
