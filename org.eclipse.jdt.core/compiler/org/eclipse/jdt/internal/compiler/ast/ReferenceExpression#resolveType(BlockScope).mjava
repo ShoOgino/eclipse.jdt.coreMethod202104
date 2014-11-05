@@ -33,27 +33,49 @@
     				return this.resolvedType = null;
     			}
     		}
+    		if (this.typeArgumentsHaveErrors || lhsType == null)
+				return this.resolvedType = null;
+	
+    		if (lhsType.problemId() == ProblemReasons.AttemptToBypassDirectSuper)
+    			lhsType = lhsType.closestMatch();	// improve resolving experience
+        	if (lhsType == null || !lhsType.isValidBinding()) 
+    			return this.resolvedType = null;	// nope, no useful type found
+        	
+    		this.receiverType = lhsType;
+			this.haveReceiver = true;
+			if (this.lhs instanceof NameReference) {
+				if ((this.lhs.bits & ASTNode.RestrictiveFlagMASK) == Binding.TYPE) {
+					this.haveReceiver = false;
+				}
+			} else if (this.lhs instanceof TypeReference) {
+				this.haveReceiver = false;
+			}
+			if (!this.haveReceiver && !this.lhs.isSuper() && !this.isArrayConstructorReference())
+				this.receiverType = lhsType.capture(scope, this.sourceStart, this.sourceEnd);
+
+			if (!lhsType.isRawType()) // RawType::m and RawType::new are not exact method references
+	    		this.exactMethodBinding = isMethodReference() ? scope.getExactMethod(lhsType, this.selector, this) : scope.getExactConstructor(lhsType, this);
+
+    		if (isConstructorReference() && !lhsType.canBeInstantiated()) {
+    			scope.problemReporter().cannotInstantiate(this.lhs, lhsType);
+    			return this.resolvedType = null;
+    		}
+    		
+    		if (this.lhs instanceof TypeReference && ((TypeReference)this.lhs).hasNullTypeAnnotation()) {
+    			scope.problemReporter().nullAnnotationUnsupportedLocation((TypeReference) this.lhs);
+    		}
+
+	    	if (this.expectedType == null && this.expressionContext == INVOCATION_CONTEXT) {
+	    		return this.resolvedType = new PolyTypeBinding(this);
+			}
     	} else {
     		lhsType = this.lhs.resolvedType;
     		if (this.typeArgumentsHaveErrors || lhsType == null)
 				return this.resolvedType = null;
     	}
 
-    	if (lhsType != null && !lhsType.isRawType()) // RawType::m and RawType::new are not exact method references
-    		this.exactMethodBinding = isMethodReference() ? scope.getExactMethod(lhsType, this.selector, this) : scope.getExactConstructor(lhsType, this);
-
-    	if (this.expectedType == null && this.expressionContext == INVOCATION_CONTEXT) {
-    		return new PolyTypeBinding(this);
-		}
-		super.resolveType(scope);
+    	super.resolveType(scope);
 		
-    	if (lhsType == null) 
-			return this.resolvedType = null; 	// no hope
-		if (lhsType.problemId() == ProblemReasons.AttemptToBypassDirectSuper)
-			lhsType = lhsType.closestMatch();	// improve resolving experience
-    	if (!lhsType.isValidBinding()) 
-			return this.resolvedType = null;	// nope, no useful type found
-    	
     	// Convert parameters into argument expressions for look up.
 		TypeBinding[] descriptorParameters = descriptorParametersAsArgumentExpressions();
 		
@@ -62,15 +84,6 @@
 			return this.resolvedType = null;
 		}
 		
-		if (isConstructorReference() && !lhsType.canBeInstantiated()) {
-			scope.problemReporter().cannotInstantiate(this.lhs, lhsType);
-			return this.resolvedType = null;
-		}
-		
-		if (this.lhs instanceof TypeReference && ((TypeReference)this.lhs).hasNullTypeAnnotation()) {
-			scope.problemReporter().nullAnnotationUnsupportedLocation((TypeReference) this.lhs);
-		}
-
 		/* 15.13: "If a method reference expression has the form super :: [TypeArguments] Identifier or TypeName . super :: [TypeArguments] Identifier,
 		   it is a compile-time error if the expression occurs in a static context. ": This is nop since the primary when it resolves
 		   itself will complain automatically.
@@ -82,20 +95,6 @@
 		*/
 		
 		// handle the special case of array construction first.
-		this.receiverType = lhsType;
-		
-		this.haveReceiver = true;
-		if (this.lhs instanceof NameReference) {
-			if ((this.lhs.bits & ASTNode.RestrictiveFlagMASK) == Binding.TYPE) {
-				this.haveReceiver = false;
-			}
-		} else if (this.lhs instanceof TypeReference) {
-			this.haveReceiver = false;
-		}
-		
-		if (!this.haveReceiver && !this.lhs.isSuper() && !this.isArrayConstructorReference())
-			this.receiverType = lhsType.capture(scope, this.sourceStart, this.sourceEnd);
-		
 		final int parametersLength = descriptorParameters.length;
         if (isConstructorReference() && lhsType.isArrayType()) {
         	final TypeBinding leafComponentType = lhsType.leafComponentType();

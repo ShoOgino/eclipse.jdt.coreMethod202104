@@ -1,0 +1,90 @@
+	@Override
+	public boolean isPotentiallyCompatibleWith(TypeBinding targetType, Scope scope) {
+		
+		// We get here only when the reference expression is NOT pertinent to applicability.
+		if (!super.isPertinentToApplicability(targetType, null))
+			return true;
+		final MethodBinding sam = targetType.getSingleAbstractMethod(this.enclosingScope, true);
+		if (sam == null || !sam.isValidBinding())
+			return false;
+		if (this.typeArgumentsHaveErrors || this.lhs.resolvedType == null || !this.lhs.resolvedType.isValidBinding())
+			return false;
+		
+		int parametersLength = sam.parameters.length;
+		TypeBinding[] descriptorParameters = new TypeBinding[parametersLength];
+		for (int i = 0; i < parametersLength; i++) {
+			descriptorParameters[i] = new ReferenceBinding() {
+				{
+					this.compoundName = CharOperation.NO_CHAR_CHAR;
+				}
+				public boolean isCompatibleWith(TypeBinding otherType, Scope captureScope) {
+					return true;
+				}
+				public TypeBinding findSuperTypeOriginatingFrom(TypeBinding otherType) {
+					return otherType;
+				}
+				public String toString() {
+					return "(wildcard)"; //$NON-NLS-1$
+				}
+			};
+		}
+		
+		// 15.13.1
+        final boolean isMethodReference = isMethodReference();
+        this.freeParameters = descriptorParameters;
+        this.checkingPotentialCompatibility = true;
+        try {
+        	MethodBinding compileTimeDeclaration = isMethodReference ? scope.getMethod(this.receiverType, this.selector, descriptorParameters, this) :
+        		scope.getConstructor((ReferenceBinding) this.receiverType, descriptorParameters, this);
+
+        	if (compileTimeDeclaration != null && compileTimeDeclaration.isValidBinding()) // we have the mSMB.
+        		this.potentialMethods = new MethodBinding [] { compileTimeDeclaration };
+        	else {
+        		/* We EITHER have potential methods that are input to Scope.mSMb already captured in this.potentialMethods 
+        	       OR there are no potentially compatible compile time declaration ...
+        		 */
+        	}
+
+        	/* 15.12.2.1: A method reference expression (§15.13) is potentially compatible with a functional interface type if, where the type's function type arity is n, 
+		       there exists at least one potentially applicable method for the method reference expression with arity n (§15.13.1), and one of the following is true:
+                   – The method reference expression has the form ReferenceType ::[TypeArguments] Identifier and at least one potentially applicable method is
+                        i) static and supports arity n, or ii) not static and supports arity n-1.
+                   – The method reference expression has some other form and at least one potentially applicable method is not static.
+        	*/
+
+        	for (int i = 0, length = this.potentialMethods.length; i < length; i++) {
+        		if (this.potentialMethods[i].isStatic() || this.potentialMethods[i].isConstructor()) {
+        			if (!this.haveReceiver) // form ReferenceType ::[TypeArguments] Identifier
+        				return true;
+        		} else {
+        			if (this.haveReceiver) // some other form.
+        				return true;
+        		}
+        	}
+
+        	if (this.haveReceiver || parametersLength == 0)
+        		return false;
+
+        	System.arraycopy(descriptorParameters, 1, descriptorParameters = new TypeBinding[parametersLength - 1], 0, parametersLength - 1);
+        	this.freeParameters = descriptorParameters;
+        	compileTimeDeclaration = scope.getMethod(this.receiverType, this.selector, descriptorParameters, this);
+        
+        	if (compileTimeDeclaration != null && compileTimeDeclaration.isValidBinding()) // we have the mSMB.
+        		this.potentialMethods = new MethodBinding [] { compileTimeDeclaration };
+        	else {
+        		/* We EITHER have potential methods that are input to Scope.mSMb already captured in this.potentialMethods 
+              	   OR there are no potentially compatible compile time declaration ...
+        		*/
+        	}
+        	for (int i = 0, length = this.potentialMethods.length; i < length; i++) {
+        		if (!this.potentialMethods[i].isStatic()) {
+        			return true;
+        		}
+        	}
+        } finally {
+        	this.checkingPotentialCompatibility = false;
+        	this.potentialMethods = Binding.NO_METHODS;
+        }
+        return false;
+	}
+
