@@ -1,6 +1,6 @@
 	public TypeBinding resolveType(BlockScope scope) {
 		
-		if (this.expectedType != null && !this.trialResolution) {  // final resolution ? may be not - i.e may be, but only in a non-final universe.
+		if (this.expectedType != null && this.original == this) {  // final resolution ? may be not - i.e may be, but only in a non-final universe.
 			recordFunctionalType(scope);
 		}
 		
@@ -54,7 +54,7 @@
 				this.receiverType = lhsType.capture(scope, this.sourceStart, this.sourceEnd);
 
 			if (!lhsType.isRawType()) // RawType::m and RawType::new are not exact method references
-	    		this.exactMethodBinding = isMethodReference() ? scope.getExactMethod(lhsType, this.selector, this) : scope.getExactConstructor(lhsType, this);
+	    		this.binding = this.exactMethodBinding = isMethodReference() ? scope.getExactMethod(lhsType, this.selector, this) : scope.getExactConstructor(lhsType, this);
 
     		if (isConstructorReference() && !lhsType.canBeInstantiated()) {
     			scope.problemReporter().cannotInstantiate(this.lhs, lhsType);
@@ -130,8 +130,11 @@
         final boolean isMethodReference = isMethodReference();
         this.depth = 0;
         this.freeParameters = descriptorParameters;
+        this.inferenceKind = InferenceContext18.CHECK_UNKNOWN;
         MethodBinding someMethod = isMethodReference ? scope.getMethod(this.receiverType, this.selector, descriptorParameters, this) :
         											       scope.getConstructor((ReferenceBinding) this.receiverType, descriptorParameters, this);
+        int someMethodInfereceKind = this.inferenceKind;
+        int anotherMethodInferenceKind = this.inferenceKind = InferenceContext18.CHECK_UNKNOWN;
         int someMethodDepth = this.depth, anotherMethodDepth = 0;
     	if (someMethod != null && someMethod.isValidBinding()) {
     		if (someMethod.isStatic() && (this.haveReceiver || this.receiverType.isParameterizedTypeWithActualArguments())) {
@@ -163,6 +166,7 @@
         		this.depth = 0;
         		this.freeParameters = parameters;
         		anotherMethod = scope.getMethod(typeToSearch, this.selector, parameters, this);
+        		anotherMethodInferenceKind = this.inferenceKind;
         		anotherMethodDepth = this.depth;
         		this.depth = 0;
         	}
@@ -175,6 +179,7 @@
         
         if (someMethod != null && someMethod.isValidBinding() && (anotherMethod == null || !anotherMethod.isValidBinding() || anotherMethod.isStatic())) {
         	this.binding = someMethod;
+        	this.inferenceKind = someMethodInfereceKind;
         	this.bits &= ~ASTNode.DepthMASK;
         	if (someMethodDepth > 0) {
         		this.bits |= (someMethodDepth & 0xFF) << ASTNode.DepthSHIFT;
@@ -187,6 +192,7 @@
         	} 
         } else if (anotherMethod != null && anotherMethod.isValidBinding() && (someMethod == null || !someMethod.isValidBinding() || !someMethod.isStatic())) {
         	this.binding = anotherMethod;
+        	this.inferenceKind = anotherMethodInferenceKind;
         	this.receiverPrecedesParameters = true; // 0 is receiver, real parameters start at 1
         	this.bits &= ~ASTNode.DepthMASK;
         	if (anotherMethodDepth > 0) {
@@ -198,6 +204,7 @@
         	}
         } else {
         	this.binding = null;
+        	this.inferenceKind = InferenceContext18.CHECK_UNKNOWN;
         	this.bits &= ~ASTNode.DepthMASK;
         }
 

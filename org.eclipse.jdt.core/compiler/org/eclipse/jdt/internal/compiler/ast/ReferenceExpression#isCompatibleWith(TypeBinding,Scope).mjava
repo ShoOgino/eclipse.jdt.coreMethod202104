@@ -1,30 +1,25 @@
-	public boolean isCompatibleWith(TypeBinding left, Scope scope) {
-		if (this.binding != null && this.binding.isValidBinding() // binding indicates if full resolution has already happened
-				&& this.resolvedType != null && this.resolvedType.isValidBinding()) {
-			return this.resolvedType.isCompatibleWith(left, scope);
-		}
+	public boolean isCompatibleWith(TypeBinding targetType, Scope scope) {
+		ReferenceExpression copy = this.copiesPerTargetType != null ? this.copiesPerTargetType.get(targetType) : null;
+		if (copy != null)
+			return copy.resolvedType != null && copy.resolvedType.isValidBinding() && copy.binding != null && copy.binding.isValidBinding();
+		
 		// 15.13.2
-		final MethodBinding sam = left.getSingleAbstractMethod(this.enclosingScope, true);
+		final MethodBinding sam = targetType.getSingleAbstractMethod(this.enclosingScope, true);
 		if (sam == null || !sam.isValidBinding())
 			return false;
-		boolean isCompatible;
-		setExpectedType(left);
 		IErrorHandlingPolicy oldPolicy = this.enclosingScope.problemReporter().switchErrorHandlingPolicy(silentErrorHandlingPolicy);
 		try {
-			this.binding = null;
-			this.trialResolution = true;
-			this.binding = this.declarationPerTargetType != null ? this.declarationPerTargetType.get(left) : null;
-			if (this.binding == null) {
-				resolveType(this.enclosingScope);
-				registerResult(left, this.binding);
+			copy = copy();
+			if (copy == null) { // should never happen even for code assist.
+				return false;
 			}
+			copy.setExpressionContext(this.expressionContext);
+			copy.setExpectedType(targetType);
+			copy.resolveType(this.enclosingScope);
+			registerCopy(targetType, copy);
+			return copy.resolvedType != null && copy.resolvedType.isValidBinding() && copy.binding != null && copy.binding.isValidBinding();
 		} finally {
 			this.enclosingScope.problemReporter().switchErrorHandlingPolicy(oldPolicy);
-			isCompatible = this.binding != null && this.binding.isValidBinding();
-			this.binding = null;
-			setExpectedType(null);
-			this.trialResolution = false;
 		}
-		return isCompatible;
 	}
 
