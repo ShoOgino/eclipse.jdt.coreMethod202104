@@ -6,13 +6,32 @@
 	 * @return a resolved copy of 'this' or null if significant errors where encountered
 	 */
 	public LambdaExpression resolveExpressionExpecting(TypeBinding targetType, Scope skope) {
-		LambdaExpression lambda = this.copiesPerTargetType != null ? this.copiesPerTargetType.get(targetType) : null;
-		if (lambda == null) {
-			lambda = getResolvedCopyForInferenceTargeting(targetType);
-			if (this.copiesPerTargetType == null)
-				this.copiesPerTargetType = new HashMap<TypeBinding, LambdaExpression>();
-			this.copiesPerTargetType.put(targetType, lambda);
+		LambdaExpression copy = null;
+		try {
+			copy = cachedResolvedCopy(targetType);
+		} catch (CopyFailureException cfe) {
+			return null;
 		}
-		return lambda;
+		if (copy == null) {
+			return null;
+		}
+		final CompilerOptions compilerOptions = this.enclosingScope.compilerOptions();
+		boolean analyzeNPE = compilerOptions.isAnnotationBasedNullAnalysisEnabled;
+		IErrorHandlingPolicy oldPolicy = this.enclosingScope.problemReporter().switchErrorHandlingPolicy(silentErrorHandlingPolicy);
+		try {
+			compilerOptions.isAnnotationBasedNullAnalysisEnabled = false;
+			// Do not proceed with data/control flow analysis if resolve encountered errors.
+			if (!copy.hasIgnoredMandatoryErrors && !enclosingScopesHaveErrors()) {
+				// value compatibility of block lambda's is the only open question.
+				copy.valueCompatible |= copy.doesNotCompleteNormally();
+			} else {
+				if (!copy.returnsVoid)
+					copy.valueCompatible = true; // optimistically, TODO: is this OK??
+			}
+		} finally {
+			compilerOptions.isAnnotationBasedNullAnalysisEnabled = analyzeNPE;
+			this.enclosingScope.problemReporter().switchErrorHandlingPolicy(oldPolicy);
+		}
+		return copy;
 	}
 
