@@ -1,0 +1,53 @@
+	private LambdaExpression cachedResolvedCopy(TypeBinding targetType, boolean anyTargetOk, boolean requireExceptionAnalysis) {
+
+		targetType = findGroundTargetType(this.enclosingScope, targetType, argumentsTypeElided());
+		if (targetType == null)
+			return null;
+		
+		MethodBinding sam = targetType.getSingleAbstractMethod(this.enclosingScope, true);
+		if (sam == null || !sam.isValidBinding())
+			return null;
+		
+		if (sam.parameters.length != this.arguments.length)
+			return null;
+		
+		LambdaExpression copy = null;
+		if (this.copiesPerTargetType != null) {
+			copy = this.copiesPerTargetType.get(targetType);
+			if (copy == null) {
+				if (anyTargetOk && this.copiesPerTargetType.values().size() > 0)
+					copy = this.copiesPerTargetType.values().iterator().next();
+			}
+		}
+		final CompilerOptions compilerOptions = this.enclosingScope.compilerOptions();
+		boolean analyzeNPE = compilerOptions.isAnnotationBasedNullAnalysisEnabled;
+		IErrorHandlingPolicy oldPolicy = this.enclosingScope.problemReporter().switchErrorHandlingPolicy(silentErrorHandlingPolicy);
+		compilerOptions.isAnnotationBasedNullAnalysisEnabled = false;
+		try {
+			if (copy == null) {
+				copy = copy();
+				if (copy == null)
+					throw new CopyFailureException();
+
+				copy.setExpressionContext(this.expressionContext);
+				copy.setExpectedType(targetType);
+				TypeBinding type = copy.resolveType(this.enclosingScope);
+				if (type == null || !type.isValidBinding())
+					return null;
+
+				if (this.copiesPerTargetType == null)
+					this.copiesPerTargetType = new HashMap<TypeBinding, LambdaExpression>();
+				this.copiesPerTargetType.put(targetType, copy);
+			}
+			if (!requireExceptionAnalysis)
+				return copy;
+			if (copy.thrownExceptions == null)
+				if (!copy.hasIgnoredMandatoryErrors && !enclosingScopesHaveErrors())
+					copy.analyzeExceptions();
+			return copy;
+		} finally {
+			compilerOptions.isAnnotationBasedNullAnalysisEnabled = analyzeNPE;
+			this.enclosingScope.problemReporter().switchErrorHandlingPolicy(oldPolicy);
+		}
+	}
+
