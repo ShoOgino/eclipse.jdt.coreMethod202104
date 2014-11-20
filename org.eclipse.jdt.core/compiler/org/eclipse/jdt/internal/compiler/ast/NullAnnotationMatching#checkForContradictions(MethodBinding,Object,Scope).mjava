@@ -2,8 +2,8 @@
 	 * After a method has substituted type parameters, check if this resulted in any contradictory null annotations.
 	 * Problems are either reported directly (if scope != null) or by returning a ProblemMethodBinding.
 	 */
-	public static MethodBinding checkForContraditions(
-			final MethodBinding method, final InvocationSite invocationSite, final Scope scope) {
+	public static MethodBinding checkForContradictions(
+			final MethodBinding method, final Object location, final Scope scope) {
 		
 		class SearchContradictions extends TypeBindingVisitor {
 			ReferenceBinding typeWithContradiction;
@@ -25,19 +25,27 @@
 			}
 		}
 
+		int start = 0, end = 0;
+		if (location instanceof InvocationSite) {
+			start = ((InvocationSite) location).sourceStart();
+			end = ((InvocationSite) location).sourceEnd();
+		} else if (location instanceof ASTNode) {
+			start = ((ASTNode) location).sourceStart;
+			end = ((ASTNode) location).sourceEnd;
+		}
 		SearchContradictions searchContradiction = new SearchContradictions();
 		TypeBindingVisitor.visit(searchContradiction, method.returnType);
 		if (searchContradiction.typeWithContradiction != null) {
 			if (scope == null)
 				return new ProblemMethodBinding(method, method.selector, method.parameters, ProblemReasons.ContradictoryNullAnnotations);
-			scope.problemReporter().contradictoryNullAnnotationsInferred(method, invocationSite);
+			scope.problemReporter().contradictoryNullAnnotationsInferred(method, start, end, location instanceof FunctionalExpression);
 			// note: if needed, we might want to update the method by removing the contradictory annotations??
 			return method;
 		}
 
 		Expression[] arguments = null;
-		if (invocationSite instanceof Invocation)
-			arguments = ((Invocation)invocationSite).arguments();
+		if (location instanceof Invocation)
+			arguments = ((Invocation)location).arguments();
 		for (int i = 0; i < method.parameters.length; i++) {
 			TypeBindingVisitor.visit(searchContradiction, method.parameters[i]);
 			if (searchContradiction.typeWithContradiction != null) {
@@ -46,7 +54,7 @@
 				if (arguments != null && i < arguments.length)
 					scope.problemReporter().contradictoryNullAnnotationsInferred(method, arguments[i]);
 				else
-					scope.problemReporter().contradictoryNullAnnotationsInferred(method, invocationSite);
+					scope.problemReporter().contradictoryNullAnnotationsInferred(method, start, end, location instanceof FunctionalExpression);
 				return method;
 			}
 		}
