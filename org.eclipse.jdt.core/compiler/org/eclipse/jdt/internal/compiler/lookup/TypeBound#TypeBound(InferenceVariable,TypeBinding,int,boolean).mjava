@@ -1,6 +1,22 @@
 	TypeBound(InferenceVariable inferenceVariable, TypeBinding typeBinding, int relation, boolean isSoft) {
 		this.left = inferenceVariable;
 		this.right = safeType(typeBinding);
+		if (((inferenceVariable.tagBits | this.right.tagBits) & TagBits.AnnotationNullMASK) != 0) {
+			if ((inferenceVariable.tagBits & TagBits.AnnotationNullMASK) == (this.right.tagBits & TagBits.AnnotationNullMASK)) {
+				// strip off identical nullness on both sides:
+				this.left = (InferenceVariable) inferenceVariable.withoutToplevelNullAnnotation();
+				this.right = this.right.withoutToplevelNullAnnotation();
+			} else {
+				long mask = 0;
+				// extract hint, e.g.: T#0 <: @NonNull Right  =>  T#0 hinted as @NonNull
+				switch (relation) {
+					case SAME: 		mask = TagBits.AnnotationNullMASK; break;
+					case SUBTYPE: 	mask = TagBits.AnnotationNonNull; break;  // sub of @Nullable is irrelevant
+					case SUPERTYPE: mask = TagBits.AnnotationNullable; break; // super of @NonNull is irrelevant
+				}
+				inferenceVariable.prototype().nullHints |= this.right.tagBits & mask;
+			}
+		}
 		this.relation = relation;
 		this.isSoft = isSoft;
 	}
