@@ -1,0 +1,49 @@
+	public TextEdit getRootEdit() {
+		// https://bugs.eclipse.org/bugs/show_bug.cgi?id=208541
+		adaptRegions();
+		// https://bugs.eclipse.org/bugs/show_bug.cgi?id=234583
+		adaptEdits();
+
+		MultiTextEdit edit = null;
+		int regionsLength = this.adaptedRegions.length;
+		int textRegionStart;
+		int textRegionEnd;
+		if (regionsLength == 1) {
+			IRegion lastRegion = this.adaptedRegions[0];
+			textRegionStart = lastRegion.getOffset();
+			textRegionEnd = textRegionStart + lastRegion.getLength();
+		} else {
+			textRegionStart = this.adaptedRegions[0].getOffset();
+			IRegion lastRegion = this.adaptedRegions[regionsLength - 1];
+			textRegionEnd = lastRegion.getOffset() + lastRegion.getLength();
+		}
+
+		int length = textRegionEnd - textRegionStart + 1;
+		if (textRegionStart <= 0) {
+			if (length <= 0) {
+				edit = new MultiTextEdit(0, 0);
+			} else {
+				edit = new MultiTextEdit(0, textRegionEnd);
+			}
+		} else {
+			edit = new MultiTextEdit(textRegionStart, length - 1);
+		}
+		for (int i= 0, max = this.editsIndex; i < max; i++) {
+			OptimizedReplaceEdit currentEdit = this.edits[i];
+			if (currentEdit.offset >= 0 && currentEdit.offset <= this.scannerEndPosition) {
+				if (currentEdit.length == 0 || (currentEdit.offset != this.scannerEndPosition && isMeaningfulEdit(currentEdit))) {
+					try {
+						edit.addChild(new ReplaceEdit(currentEdit.offset, currentEdit.length, currentEdit.replacement));
+					}
+					catch (MalformedTreeException ex) {
+						// log exception in case of error
+						CommentFormatterUtil.log(ex);
+	 					throw ex;
+					}
+				}
+			}
+		}
+		this.edits = null;
+		return edit;
+	}
+

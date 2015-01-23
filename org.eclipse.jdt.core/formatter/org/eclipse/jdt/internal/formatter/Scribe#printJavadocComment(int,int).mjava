@@ -1,0 +1,81 @@
+	/*
+	 * Print and formats a javadoc comments
+	 */
+	void printJavadocComment(int start, int end) {
+		int lastIndentationLevel = this.indentationLevel;
+		try {
+			// parse the comment on the fly
+			this.scanner.resetTo(start, end-1);
+			if (! this.formatterCommentParser.parse(start, end-1)) {
+				// problem occurred while parsing the javadoc, early abort formatting
+				return;
+			}
+
+			FormatJavadoc javadoc = (FormatJavadoc) this.formatterCommentParser.docComment;
+
+			// handle indentation
+			if (this.indentationLevel != 0) {
+				printIndentationIfNecessary();
+			}
+
+			// handle pending space if any
+			if (this.pendingSpace) {
+				addInsertEdit(start, " "); //$NON-NLS-1$
+			}
+
+			if (javadoc.blocks == null) {
+				// no FormatJavadocTags in this this javadoc
+				return;
+			}
+
+			// init properly
+			this.needSpace = false;
+			this.pendingSpace = false;
+			int length = javadoc.blocks.length;
+
+			// format empty lines between before the first block
+			FormatJavadocBlock previousBlock = javadoc.blocks[0];
+			this.lastNumberOfNewLines = 0;
+			int currentLine = this.line;
+			int firstBlockStart = previousBlock.sourceStart;
+			printIndentationIfNecessary(null);
+			this.column += JAVADOC_HEADER_LENGTH; // consider that the header is already scanned
+
+			// If there are several blocks in the javadoc
+			int index = 1;
+			if (length > 1) {
+				// format the description if any
+				if (previousBlock.isDescription()) {
+					printJavadocBlock(previousBlock);
+					FormatJavadocBlock block = javadoc.blocks[index++];
+					int newLines = this.formatter.preferences.comment_insert_empty_line_before_root_tags ? 2 : 1;
+					printJavadocGapLines(previousBlock.sourceEnd+1, block.sourceStart-1, newLines, this.formatter.preferences.comment_clear_blank_lines_in_javadoc_comment, false, null);
+					previousBlock = block;
+				}
+
+				// format all tags but the last one composing this comment
+				while (index < length) {
+					printJavadocBlock(previousBlock);
+					FormatJavadocBlock block = javadoc.blocks[index++];
+					printJavadocGapLines(previousBlock.sourceEnd+1, block.sourceStart-1, 1, this.formatter.preferences.comment_clear_blank_lines_in_javadoc_comment, false, null);
+					previousBlock = block;
+				}
+			}
+
+			// format the last block
+			printJavadocBlock(previousBlock);
+
+			// format the header and footer empty spaces
+			int newLines = (this.formatter.preferences.comment_new_lines_at_javadoc_boundaries && (this.line > currentLine || javadoc.isMultiLine())) ? 1 : 0;
+			printJavadocGapLines(javadoc.textStart, firstBlockStart-1, newLines, this.formatter.preferences.comment_clear_blank_lines_in_javadoc_comment, false, null);
+			printJavadocGapLines(previousBlock.sourceEnd+1, javadoc.textEnd, newLines, this.formatter.preferences.comment_clear_blank_lines_in_javadoc_comment, true, null);
+		}
+		finally {
+			// reset the scanner
+			this.scanner.resetTo(end, this.scannerEndPosition - 1);
+			this.needSpace = false;
+			this.indentationLevel = lastIndentationLevel;
+			this.lastNumberOfNewLines = 0;
+		}
+	}
+

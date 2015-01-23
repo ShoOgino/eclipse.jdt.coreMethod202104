@@ -1,0 +1,167 @@
+	/*
+	 * prints a code snippet
+	 */
+	private void printCodeSnippet(int startPosition, int endPosition, int linesGap) {
+		String snippet = new String(this.scanner.source, startPosition, endPosition - startPosition + 1);
+	
+		// 1 - strip content prefix (@see JavaDocRegion#preprocessCodeSnippet)
+		int firstLine = Util.getLineNumber(startPosition, this.lineEnds, 0, this.maxLines) - 1;
+		int lastLine = Util.getLineNumber(endPosition, this.lineEnds, firstLine>1 ? firstLine-2 : 0, this.maxLines) - 1;
+		this.codeSnippetBuffer.setLength(0);
+		if (firstLine == lastLine && linesGap == 0) {
+			this.codeSnippetBuffer.append(snippet);
+		} else {
+			boolean hasCharsAfterStar = false;
+			if (linesGap == 0) {
+				this.codeSnippetBuffer.append(this.scanner.source, startPosition, this.lineEnds[firstLine]+1-startPosition);
+				firstLine++;
+			}
+			int initialLength = this.codeSnippetBuffer.length();
+			for (int currentLine=firstLine; currentLine<=lastLine; currentLine++) {
+				this.scanner.resetTo(this.lineEnds[currentLine-1]+1, this.lineEnds[currentLine]);
+				int lineStart = this.scanner.currentPosition;
+				boolean hasStar = false;
+				loop: while (!this.scanner.atEnd()) {
+					char ch = (char) this.scanner.getNextChar();
+					switch (ch) {
+						case ' ':
+						case '\t' :
+						case '\u000c' :
+							break;
+						case '\r' :
+						case '\n' :
+							break loop;
+						case '*':
+							hasStar = true;
+							break loop;
+						default:
+							if (ScannerHelper.isWhitespace(ch)) {
+								break;
+							}
+							break loop;
+					}
+				}
+				if (hasStar) {
+					lineStart = this.scanner.currentPosition;
+					if (!hasCharsAfterStar && !this.scanner.atEnd()) {
+						char ch = (char) this.scanner.getNextChar();
+						boolean atEnd = this.scanner.atEnd();
+						switch (ch) {
+							case ' ':
+							case '\t' :
+							case '\u000c' :
+								break;
+							case '\r' :
+							case '\n' :
+								atEnd = true;
+								break;
+							default:
+								if (!ScannerHelper.isWhitespace(ch)) {
+									if (hasStar) {
+										// A non whitespace character is just after the star
+										// then we need to restart from the beginning without
+										// consuming the space after the star
+										hasCharsAfterStar = true;
+										currentLine = firstLine-1;
+										this.codeSnippetBuffer.setLength(initialLength);
+										continue;
+									}
+								}
+								break;
+						}
+						if (!hasCharsAfterStar && !atEnd) {
+							// Until then, there's always a whitespace after each star
+							// of the comment, hence we need to consume it as it will
+							// be rewritten while reindenting the snippet lines
+							lineStart = this.scanner.currentPosition;
+						}
+					}
+				}
+				int end = currentLine == lastLine ? endPosition : this.lineEnds[currentLine];
+				this.codeSnippetBuffer.append(this.scanner.source, lineStart, end+1-lineStart);
+			}
+		}
+	
+		// 2 - convert HTML to Java (@see JavaDocRegion#convertHtml2Java)
+		HTMLEntity2JavaReader reader= new HTMLEntity2JavaReader(new StringReader(this.codeSnippetBuffer.toString()));
+		char[] buf= new char[this.codeSnippetBuffer.length()]; // html2text never gets longer, only shorter!
+		String convertedSnippet;
+		try {
+			int read= reader.read(buf);
+			convertedSnippet = new String(buf, 0, read);
+			reader.close();
+		} catch (IOException e) {
+			// should not happen
+			CommentFormatterUtil.log(e);
+			return;
+		}
+	
+		// 3 - format snippet (@see JavaDocRegion#formatCodeSnippet)
+		// include comments in case of line comments are present in the snippet
+		String formattedSnippet = convertedSnippet;
+		Map options = this.formatter.preferences.getMap();
+		if (this.scanner.sourceLevel > ClassFileConstants.JDK1_3) {
+			options.put(JavaCore.COMPILER_SOURCE, CompilerOptions.versionFromJdkLevel(this.scanner.sourceLevel));
+		}
+		TextEdit edit= CommentFormatterUtil.format2(CodeFormatter.K_UNKNOWN | CodeFormatter.F_INCLUDE_COMMENTS, convertedSnippet, 0, this.lineSeparator, options);
+		if (edit == null) {
+			// 3.a - not a valid code to format, keep initial buffer
+			formattedSnippet = this.codeSnippetBuffer.toString();
+		} else {
+			// 3.b - valid code formatted
+			// 3.b.i - get the result
+			formattedSnippet = CommentFormatterUtil.evaluateFormatterEdit(convertedSnippet, edit, null);
+	
+			// 3.b.ii- convert back to HTML (@see JavaDocRegion#convertJava2Html)
+			Java2HTMLEntityReader javaReader= new Java2HTMLEntityReader(new StringReader(formattedSnippet));
+			buf= new char[256];
+			this.codeSnippetBuffer.setLength(0);
+			int l;
+			try {
+				do {
+					l= javaReader.read(buf);
+					if (l != -1)
+						this.codeSnippetBuffer.append(buf, 0, l);
+				} while (l > 0);
+				formattedSnippet = this.codeSnippetBuffer.toString();
+				javaReader.close();
+			} catch (IOException e) {
+				// should not happen
+				CommentFormatterUtil.log(e);
+				return;
+			}
+		}
+	
+		// 4 - add the content prefix (@see JavaDocRegion#postprocessCodeSnippet)
+		this.codeSnippetBuffer.setLength(0);
+		ILineTracker tracker = new DefaultLineTracker();
+		this.column = 1;
+		printIndentationIfNecessary(this.codeSnippetBuffer); // append indentation
+		this.codeSnippetBuffer.append(BLOCK_LINE_PREFIX);
+		String linePrefix = this.codeSnippetBuffer.toString();
+		this.codeSnippetBuffer.setLength(0);
+		String replacement = formattedSnippet;
+		tracker.set(formattedSnippet);
+		int numberOfLines = tracker.getNumberOfLines();
+		if (numberOfLines > 1) {
+			int lastLineOffset = -1;
+			for (int i=0; i<numberOfLines-1; i++) {
+				if (i>0) this.codeSnippetBuffer.append(linePrefix);
+				try {
+					lastLineOffset = tracker.getLineOffset(i+1);
+					this.codeSnippetBuffer.append(formattedSnippet.substring(tracker.getLineOffset(i), lastLineOffset));
+				} catch (BadLocationException e) {
+					// should not happen
+					CommentFormatterUtil.log(e);
+					return;
+				}
+			}
+			this.codeSnippetBuffer.append(linePrefix);
+			this.codeSnippetBuffer.append(formattedSnippet.substring(lastLineOffset));
+			replacement = this.codeSnippetBuffer.toString();
+		}
+	
+		// 5 - replace old text with the formatted snippet
+		addReplaceEdit(startPosition, endPosition, replacement);
+	}
+

@@ -1,0 +1,173 @@
+	/**
+	 * @see org.eclipse.jdt.internal.compiler.ASTVisitor#visit(org.eclipse.jdt.internal.compiler.ast.MethodDeclaration, org.eclipse.jdt.internal.compiler.lookup.ClassScope)
+	 */
+	public boolean visit(
+		MethodDeclaration methodDeclaration,
+		ClassScope scope) {
+
+		if (methodDeclaration.ignoreFurtherInvestigation) {
+			this.scribe.printComment();
+			if (this.scribe.indentationLevel != 0) {
+				this.scribe.printIndentationIfNecessary();
+			}
+			this.scribe.scanner.resetTo(methodDeclaration.declarationSourceEnd + 1, this.scribe.scannerEndPosition - 1);
+			this.scribe.printComment(CodeFormatter.K_UNKNOWN, Scribe.BASIC_TRAILING_COMMENT);
+			if (!this.scribe.scanner.atEnd()) {
+				switch(this.scribe.scanner.source[this.scribe.scanner.currentPosition]) {
+					case '\n' :
+						this.scribe.scanner.currentPosition++;
+						this.scribe.lastNumberOfNewLines = 1;
+						break;
+					case '\r' :
+						this.scribe.scanner.currentPosition++;
+						if (this.scribe.scanner.source[this.scribe.scanner.currentPosition] == '\n') {
+							this.scribe.scanner.currentPosition++;
+						}
+						this.scribe.lastNumberOfNewLines = 1;
+				}
+			}
+			return false;
+		}
+
+		/*
+		 * Print comments to get proper line number
+		 */
+		this.scribe.printComment();
+		int line = this.scribe.line;
+
+		// Create alignment
+		Alignment methodDeclAlignment = this.scribe.createAlignment(
+				Alignment.METHOD_DECLARATION,
+				this.preferences.alignment_for_method_declaration,
+				Alignment.R_INNERMOST,
+				3,
+				this.scribe.scanner.currentPosition);
+		this.scribe.enterAlignment(methodDeclAlignment);
+		boolean ok = false;
+		final MethodScope methodDeclarationScope = methodDeclaration.scope;
+		do {
+			try {
+
+				this.scribe.printModifiers(methodDeclaration.annotations, this, ICodeFormatterConstants.ANNOTATION_ON_METHOD);
+				int fragmentIndex = 0;
+				this.scribe.alignFragment(methodDeclAlignment, fragmentIndex);
+
+				if (this.scribe.line > line) {
+					// annotations introduced new line, but this is not a line wrapping
+					// see 158267
+					line = this.scribe.line;
+				}
+				this.scribe.space();
+
+				TypeParameter[] typeParameters = methodDeclaration.typeParameters;
+				if (typeParameters != null) {
+					this.scribe.printNextToken(TerminalTokens.TokenNameLESS, this.preferences.insert_space_before_opening_angle_bracket_in_type_parameters);
+					if (this.preferences.insert_space_after_opening_angle_bracket_in_type_parameters) {
+						this.scribe.space();
+					}
+					int length = typeParameters.length;
+					for (int i = 0; i < length - 1; i++) {
+						typeParameters[i].traverse(this, methodDeclaration.scope);
+						this.scribe.printNextToken(TerminalTokens.TokenNameCOMMA, this.preferences.insert_space_before_comma_in_type_parameters);
+						if (this.preferences.insert_space_after_comma_in_type_parameters) {
+							this.scribe.space();
+						}
+					}
+					typeParameters[length - 1].traverse(this, methodDeclaration.scope);
+					if (isClosingGenericToken()) {
+						this.scribe.printNextToken(CLOSING_GENERICS_EXPECTEDTOKENS, this.preferences.insert_space_before_closing_angle_bracket_in_type_parameters);
+					}
+					if (this.preferences.insert_space_after_closing_angle_bracket_in_type_parameters) {
+						this.scribe.space();
+					}
+					this.scribe.alignFragment(methodDeclAlignment, ++fragmentIndex);
+				}
+
+				/*
+				 * Print the method return type
+				 */
+				final TypeReference returnType = methodDeclaration.returnType;
+		
+				if (returnType != null) {
+					returnType.traverse(this, methodDeclarationScope);
+				}
+				this.scribe.alignFragment(methodDeclAlignment, ++fragmentIndex);
+
+				/*
+				 * Print the method name
+				 */
+				this.scribe.printNextToken(TerminalTokens.TokenNameIdentifier, true);
+
+				// Format arguments
+				formatMethodArguments(
+					methodDeclaration,
+					this.preferences.insert_space_before_opening_paren_in_method_declaration,
+					this.preferences.insert_space_between_empty_parens_in_method_declaration,
+					this.preferences.insert_space_before_closing_paren_in_method_declaration,
+					this.preferences.insert_space_after_opening_paren_in_method_declaration,
+					this.preferences.insert_space_before_comma_in_method_declaration_parameters,
+					this.preferences.insert_space_after_comma_in_method_declaration_parameters,
+					this.preferences.alignment_for_parameters_in_method_declaration);
+
+				formatExtraDimensions(methodDeclaration.returnType);
+
+				// Format throws
+				formatThrowsClause(
+					methodDeclaration,
+					this.preferences.insert_space_before_comma_in_method_declaration_throws,
+					this.preferences.insert_space_after_comma_in_method_declaration_throws,
+					this.preferences.alignment_for_throws_clause_in_method_declaration);
+				ok = true;
+			} catch (AlignmentException e) {
+				this.scribe.redoAlignment(e);
+			}
+		} while (!ok);
+		this.scribe.exitAlignment(methodDeclAlignment, true);
+
+		if (!methodDeclaration.isNative() && !methodDeclaration.isAbstract() && ((methodDeclaration.modifiers & ExtraCompilerModifiers.AccSemicolonBody) == 0)) {
+			/*
+			 * Method body
+			 */
+			String method_declaration_brace = this.preferences.brace_position_for_method_declaration;
+			formatLeftCurlyBrace(line, method_declaration_brace);
+			formatOpeningBrace(method_declaration_brace, this.preferences.insert_space_before_opening_brace_in_method_declaration);
+			final int numberOfBlankLinesAtBeginningOfMethodBody = this.preferences.blank_lines_at_beginning_of_method_body;
+			if (numberOfBlankLinesAtBeginningOfMethodBody > 0) {
+				this.scribe.printEmptyLines(numberOfBlankLinesAtBeginningOfMethodBody);
+			}
+			final Statement[] statements = methodDeclaration.statements;
+			if (statements != null) {
+				this.scribe.printNewLine();
+				if (this.preferences.indent_statements_compare_to_body) {
+					this.scribe.indent();
+				}
+				formatStatements(methodDeclarationScope, statements, true);
+				this.scribe.printComment(Scribe.PRESERVE_EMPTY_LINES_AT_END_OF_METHOD_DECLARATION);
+				if (this.preferences.indent_statements_compare_to_body) {
+					this.scribe.unIndent();
+				}
+			} else {
+				if (this.preferences.insert_new_line_in_empty_method_body) {
+					this.scribe.printNewLine();
+				}
+				if (this.preferences.indent_statements_compare_to_body) {
+					this.scribe.indent();
+				}
+				this.scribe.printComment(Scribe.PRESERVE_EMPTY_LINES_AT_END_OF_METHOD_DECLARATION);
+				if (this.preferences.indent_statements_compare_to_body) {
+					this.scribe.unIndent();
+				}
+			}
+			this.scribe.printNextToken(TerminalTokens.TokenNameRBRACE);
+			this.scribe.printComment(CodeFormatter.K_UNKNOWN, Scribe.BASIC_TRAILING_COMMENT);
+			if (method_declaration_brace.equals(DefaultCodeFormatterConstants.NEXT_LINE_SHIFTED)) {
+				this.scribe.unIndent();
+			}
+		} else {
+			// no method body
+			this.scribe.printNextToken(TerminalTokens.TokenNameSEMICOLON, this.preferences.insert_space_before_semicolon);
+			this.scribe.printComment(CodeFormatter.K_UNKNOWN, Scribe.COMPLEX_TRAILING_COMMENT);
+		}
+		return false;
+	}
+

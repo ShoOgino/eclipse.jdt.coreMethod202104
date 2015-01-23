@@ -1,0 +1,55 @@
+	/**
+	 * Returns whether the alignment can be aligned or not.
+	 * Only used for message send alignment, it currently blocks its alignment
+	 * when it's at the first nesting level of a message send. It allow to save
+	 * space on the argument broken line by reducing the number of indentations.
+	 */
+	public boolean canAlign() {
+		if (this.tooLong) {
+			return true;
+		}
+		boolean canAlign = true;
+		Alignment enclosingAlignment = this.enclosing;
+		while (enclosingAlignment != null) {
+			switch (enclosingAlignment.kind) {
+				case Alignment.ALLOCATION:
+				case Alignment.MESSAGE_ARGUMENTS:
+					// message send inside arguments, avoid to align
+					if (enclosingAlignment.isWrapped() && 
+							(enclosingAlignment.fragmentIndex > 0 || enclosingAlignment.fragmentCount < 2)) {
+						return !this.blockAlign;
+					}
+					if (enclosingAlignment.tooLong) {
+						return true;
+					}
+					canAlign = false;
+					break;
+				case Alignment.MESSAGE_SEND:
+					// multiple depth of message send, hence allow current to align
+					switch (this.kind) {
+						case Alignment.ALLOCATION:
+						case Alignment.MESSAGE_ARGUMENTS:
+						case Alignment.MESSAGE_SEND:
+							Alignment superEnclosingAlignment = enclosingAlignment.enclosing;
+							while (superEnclosingAlignment != null) {
+								switch (superEnclosingAlignment.kind) {
+									case Alignment.ALLOCATION:
+									case Alignment.MESSAGE_ARGUMENTS:
+									case Alignment.MESSAGE_SEND:
+										// block the alignment of the intermediate message send
+										if (this.scribe.nlsTagCounter == 0) {
+											enclosingAlignment.blockAlign = true;
+										}
+										return !this.blockAlign;
+								}
+								superEnclosingAlignment = superEnclosingAlignment.enclosing;
+							}
+							break;
+					}
+					return !this.blockAlign;
+			}
+			enclosingAlignment = enclosingAlignment.enclosing;
+		}
+		return canAlign && !this.blockAlign;
+	}
+

@@ -1,0 +1,142 @@
+	/**
+	 * @see org.eclipse.jdt.internal.compiler.ASTVisitor#visit(org.eclipse.jdt.internal.compiler.ast.ConstructorDeclaration, org.eclipse.jdt.internal.compiler.lookup.ClassScope)
+	 */
+	public boolean visit(
+		ConstructorDeclaration constructorDeclaration,
+		ClassScope scope) {
+
+		if (constructorDeclaration.ignoreFurtherInvestigation) {
+			this.scribe.printComment();
+			if (this.scribe.indentationLevel != 0) {
+				this.scribe.printIndentationIfNecessary();
+			}
+			this.scribe.scanner.resetTo(constructorDeclaration.declarationSourceEnd + 1, this.scribe.scannerEndPosition - 1);
+			this.scribe.printComment(CodeFormatter.K_UNKNOWN, Scribe.BASIC_TRAILING_COMMENT);
+			switch(this.scribe.scanner.source[this.scribe.scanner.currentPosition]) {
+				case '\n' :
+					this.scribe.scanner.currentPosition++;
+					this.scribe.lastNumberOfNewLines = 1;
+					break;
+				case '\r' :
+					this.scribe.scanner.currentPosition++;
+					if (this.scribe.scanner.source[this.scribe.scanner.currentPosition] == '\n') {
+						this.scribe.scanner.currentPosition++;
+					}
+					this.scribe.lastNumberOfNewLines = 1;
+			}
+			return false;
+		}
+        /*
+         * Print comments to get proper line number
+         */
+        this.scribe.printComment();
+        int line = this.scribe.line;
+		this.scribe.printModifiers(constructorDeclaration.annotations, this, ICodeFormatterConstants.ANNOTATION_ON_METHOD);
+		if (this.scribe.line > line) {
+        	// annotations introduced new line, but this is not a line wrapping
+			// see 158267
+			line = this.scribe.line;
+		}
+		this.scribe.space();
+
+		TypeParameter[] typeParameters = constructorDeclaration.typeParameters;
+		if (typeParameters != null) {
+			this.scribe.printNextToken(TerminalTokens.TokenNameLESS, this.preferences.insert_space_before_opening_angle_bracket_in_type_parameters);
+			if (this.preferences.insert_space_after_opening_angle_bracket_in_type_parameters) {
+				this.scribe.space();
+			}
+			int length = typeParameters.length;
+			for (int i = 0; i < length - 1; i++) {
+				typeParameters[i].traverse(this, constructorDeclaration.scope);
+				this.scribe.printNextToken(TerminalTokens.TokenNameCOMMA, this.preferences.insert_space_before_comma_in_type_parameters);
+				if (this.preferences.insert_space_after_comma_in_type_parameters) {
+					this.scribe.space();
+				}
+			}
+			typeParameters[length - 1].traverse(this, constructorDeclaration.scope);
+			if (isClosingGenericToken()) {
+				this.scribe.printNextToken(CLOSING_GENERICS_EXPECTEDTOKENS, this.preferences.insert_space_before_closing_angle_bracket_in_type_parameters);
+			}
+			if (this.preferences.insert_space_after_closing_angle_bracket_in_type_parameters) {
+				this.scribe.space();
+			}
+		}
+
+		/*
+		 * Print the method name
+		 */
+		this.scribe.printNextToken(TerminalTokens.TokenNameIdentifier, true);
+
+		formatMethodArguments(
+			constructorDeclaration,
+			this.preferences.insert_space_before_opening_paren_in_constructor_declaration,
+			this.preferences.insert_space_between_empty_parens_in_constructor_declaration,
+			this.preferences.insert_space_before_closing_paren_in_constructor_declaration,
+			this.preferences.insert_space_after_opening_paren_in_constructor_declaration,
+			this.preferences.insert_space_before_comma_in_constructor_declaration_parameters,
+			this.preferences.insert_space_after_comma_in_constructor_declaration_parameters,
+			this.preferences.alignment_for_parameters_in_constructor_declaration);
+
+		formatThrowsClause(
+				constructorDeclaration,
+				this.preferences.insert_space_before_comma_in_constructor_declaration_throws,
+				this.preferences.insert_space_after_comma_in_constructor_declaration_throws,
+				this.preferences.alignment_for_throws_clause_in_constructor_declaration);
+
+		if (!constructorDeclaration.isNative() && !constructorDeclaration.isAbstract()) {
+			/*
+			 * Method body
+			 */
+			String constructor_declaration_brace = this.preferences.brace_position_for_constructor_declaration;
+			formatLeftCurlyBrace(line, constructor_declaration_brace);
+			formatOpeningBrace(constructor_declaration_brace, this.preferences.insert_space_before_opening_brace_in_constructor_declaration);
+			final int numberOfBlankLinesAtBeginningOfMethodBody = this.preferences.blank_lines_at_beginning_of_method_body;
+			if (numberOfBlankLinesAtBeginningOfMethodBody > 0) {
+				this.scribe.printEmptyLines(numberOfBlankLinesAtBeginningOfMethodBody);
+			}
+			if (constructorDeclaration.constructorCall != null && !constructorDeclaration.constructorCall.isImplicitSuper()) {
+				this.scribe.printNewLine();
+				if (this.preferences.indent_statements_compare_to_body) {
+					this.scribe.indent();
+				}
+				constructorDeclaration.constructorCall.traverse(this, constructorDeclaration.scope);
+				if (this.preferences.indent_statements_compare_to_body) {
+					this.scribe.unIndent();
+				}
+			}
+			final Statement[] statements = constructorDeclaration.statements;
+			if (statements != null) {
+				this.scribe.printNewLine();
+				if (this.preferences.indent_statements_compare_to_body) {
+					this.scribe.indent();
+				}
+				formatStatements(constructorDeclaration.scope, statements, true);
+				this.scribe.printComment();
+				if (this.preferences.indent_statements_compare_to_body) {
+					this.scribe.unIndent();
+				}
+			} else {
+				if (this.preferences.insert_new_line_in_empty_method_body) {
+					this.scribe.printNewLine();
+				}
+				if (this.preferences.indent_statements_compare_to_body) {
+					this.scribe.indent();
+				}
+				this.scribe.printComment();
+				if (this.preferences.indent_statements_compare_to_body) {
+					this.scribe.unIndent();
+				}
+			}
+			this.scribe.printNextToken(TerminalTokens.TokenNameRBRACE);
+			this.scribe.printComment(CodeFormatter.K_UNKNOWN, Scribe.BASIC_TRAILING_COMMENT);
+			if (constructor_declaration_brace.equals(DefaultCodeFormatterConstants.NEXT_LINE_SHIFTED)) {
+				this.scribe.unIndent();
+			}
+		} else {
+			// no method body
+			this.scribe.printNextToken(TerminalTokens.TokenNameSEMICOLON, this.preferences.insert_space_before_semicolon);
+			this.scribe.printComment(CodeFormatter.K_UNKNOWN, Scribe.BASIC_TRAILING_COMMENT);
+		}
+		return false;
+	}
+

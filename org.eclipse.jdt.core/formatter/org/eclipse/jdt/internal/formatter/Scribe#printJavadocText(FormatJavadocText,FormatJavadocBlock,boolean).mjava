@@ -1,0 +1,60 @@
+	private void printJavadocText(FormatJavadocText text, FormatJavadocBlock block, boolean textOnNewLine) {
+
+		boolean clearBlankLines = this.formatter.preferences.comment_clear_blank_lines_in_javadoc_comment;
+		boolean joinLines = this.formatter.preferences.join_lines_in_comments;
+		this.javadocTextBuffer.setLength(0);
+		int textStart = text.sourceStart;
+		int nextStart = textStart;
+		int startLine = Util.getLineNumber(textStart, this.lineEnds, 0, this.maxLines);
+
+		// Iterate on text line separators
+		for (int idx=0, max=text.separatorsPtr; idx<=max ; idx++) {
+
+			// append text to buffer realigning with the line length
+			int end = (int) (text.separators[idx] >>> 32);
+			boolean needIndentation = textOnNewLine;
+			if (idx > 0) {
+				if (!needIndentation && text.isTextAfterHtmlSeparatorTag(idx-1)) {
+					needIndentation = true;
+				}
+			}
+			this.needSpace = idx > 0;
+			printJavadocTextLine(this.javadocTextBuffer, nextStart, end, block, idx==0 || (!joinLines && textOnNewLine)/*first text?*/, needIndentation, false /*not an html tag*/);
+			textOnNewLine = false;
+
+			// Replace with current buffer if there are several empty lines between text lines
+			nextStart = (int) text.separators[idx];
+			if (!clearBlankLines || !joinLines) {
+				int endLine = Util.getLineNumber(end, this.lineEnds, startLine-1, this.maxLines);
+				startLine = Util.getLineNumber(nextStart, this.lineEnds, endLine-1, this.maxLines);
+				int gapLine = endLine;
+				if (joinLines) gapLine++; // if not preserving line break then gap must be at least of one line
+				if (startLine > gapLine) {
+					addReplaceEdit(textStart, end, this.javadocTextBuffer.toString());
+					textStart = nextStart;
+					this.javadocTextBuffer.setLength(0);
+					int newLines = startLine - endLine;
+					if (clearBlankLines) newLines = 1;
+					printJavadocGapLines(end+1, nextStart-1, newLines, this.formatter.preferences.comment_clear_blank_lines_in_javadoc_comment, false, null);
+					textOnNewLine = true;
+				}
+				else if (startLine > endLine) {
+					textOnNewLine = !joinLines;
+				}
+			}
+		}
+
+		// Replace remaining line
+		boolean needIndentation = textOnNewLine;
+		this.needSpace = text.separatorsPtr >= 0;
+		printJavadocTextLine(this.javadocTextBuffer, nextStart, text.sourceEnd, block, text.separatorsPtr==-1 /* first text?*/, needIndentation, false /*not an html tag*/);
+		// TODO Bring back following optimization
+		// if (lastNewLines != this.lastNumberOfNewLines || (this.column - currentColumn) != (text.sourceEnd - text.sourceStart + 1)) {
+			addReplaceEdit(textStart, text.sourceEnd, this.javadocTextBuffer.toString());
+		// }
+
+		// Reset
+		this.needSpace = false;
+		this.scanner.resetTo(text.sourceEnd+1, this.scannerEndPosition - 1);
+	}
+

@@ -1,0 +1,54 @@
+	/**
+	 * This method will adapt the selected regions if needed.
+	 * If a region should be adapted (see isAdaptableRegion(IRegion))
+	 * retrieve correct upper and lower bounds and replace the region.
+	 */
+	private void adaptRegions() {
+		int max = this.regions.length;
+		if (max == 1) {
+			// It's not necessary to adapt the single region which covers all the source
+			if (this.regions[0].getOffset() == 0 && this.regions[0].getLength() == this.scannerEndPosition) {
+				this.adaptedRegions = this.regions;
+				return;
+			}
+		}
+		this.adaptedRegions = new IRegion[max];
+		int commentIndex = 0;
+		for (int i = 0; i < max; i++) {
+			IRegion aRegion = this.regions[i];
+			int offset = aRegion.getOffset();
+			int length = aRegion.getLength();
+
+			// First look if the region starts or ends inside a comment
+			int index = getCommentIndex(commentIndex, offset);
+			int adaptedOffset = offset;
+			int adaptedLength = length;
+			if (index >= 0) {
+				// the offset of the region is inside a comment => restart the region from the comment start
+				adaptedOffset = this.commentPositions[index][0];
+				if (adaptedOffset >= 0) {
+					// adapt only javadoc or block comments. Since fix for bug
+					// https://bugs.eclipse.org/bugs/show_bug.cgi?id=238210
+					// edits in line comments only concerns whitespaces hence can be
+					// treated as edits in code
+					adaptedLength = length + offset - adaptedOffset;
+					commentIndex = index;
+				}
+			}
+			index = getCommentIndex(commentIndex, offset+length-1);
+			if (index >= 0 && this.commentPositions[index][0] >= 0) { // only javadoc or block comment
+				// the region end is inside a comment => set the region end at the comment end
+				int commentEnd = this.commentPositions[index][1];
+				if (commentEnd < 0) commentEnd = -commentEnd;
+				adaptedLength = commentEnd - adaptedOffset;
+				commentIndex = index;
+			}
+			if (adaptedLength != length) {
+				// adapt the region and jump to next one
+				this.adaptedRegions[i] = new Region(adaptedOffset, adaptedLength);
+			} else {
+				this.adaptedRegions[i] = aRegion;
+			}
+		}
+	}
+

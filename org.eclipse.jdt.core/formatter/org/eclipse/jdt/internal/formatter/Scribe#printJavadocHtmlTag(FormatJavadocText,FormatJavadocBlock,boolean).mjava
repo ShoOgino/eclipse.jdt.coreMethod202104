@@ -1,0 +1,221 @@
+	private int printJavadocHtmlTag(FormatJavadocText text, FormatJavadocBlock block, boolean textOnNewLine) {
+
+		// Compute indentation if necessary
+		boolean clearBlankLines = this.formatter.preferences.comment_clear_blank_lines_in_javadoc_comment;
+
+		// Local variables init
+		int textStart = text.sourceStart;
+		int nextStart = textStart;
+		int startLine = Util.getLineNumber(textStart, this.lineEnds, 0, this.maxLines);
+	    int htmlTagID = text.getHtmlTagID();
+	    if (text.depth >= this.javadocHtmlTagBuffers.length) {
+	    	int length = this.javadocHtmlTagBuffers.length;
+	    	System.arraycopy(this.javadocHtmlTagBuffers, 0, this.javadocHtmlTagBuffers = new StringBuffer[text.depth+6], 0, length);
+	    }
+	    StringBuffer buffer = this.javadocHtmlTagBuffers[text.depth];
+	    if (buffer == null) {
+	    	buffer = new StringBuffer();
+	    	this.javadocHtmlTagBuffers[text.depth] = buffer;
+	    } else {
+	    	buffer.setLength(0);
+	    }
+
+	    // New line will be added before next node
+	    int max = text.separatorsPtr;
+		int linesAfter = 0;
+		int previousEnd = -1;
+	    boolean isHtmlBreakTag = htmlTagID == JAVADOC_SINGLE_BREAK_TAG_ID;
+		boolean isHtmlSeparatorTag = htmlTagID == JAVADOC_SEPARATOR_TAGS_ID;
+		if (isHtmlBreakTag) {
+			return 1;
+		}
+
+		// Iterate on text line separators
+		boolean isCode = htmlTagID == JAVADOC_CODE_TAGS_ID;
+		for (int idx=0, ptr=0; idx<=max || (text.htmlNodesPtr != -1 && ptr <= text.htmlNodesPtr); idx++) {
+
+			// append text to buffer realigning with the line length
+			int end = (idx > max) ? text.sourceEnd : (int) (text.separators[idx] >>> 32);
+			int nodeKind = 0; // text break
+			if (text.htmlNodesPtr >= 0 && ptr <= text.htmlNodesPtr && end > text.htmlNodes[ptr].sourceStart) {
+				FormatJavadocNode node = text.htmlNodes[ptr];
+				FormatJavadocText htmlTag = node.isText() ? (FormatJavadocText) node : null;
+				int newLines = htmlTag == null ? 0 : htmlTag.linesBefore;
+				if (linesAfter > newLines) {
+					newLines = linesAfter;
+					if (newLines > 1 && clearBlankLines) {
+						if (idx < 2 || (text.htmlIndexes[idx-2] & JAVADOC_TAGS_ID_MASK) != JAVADOC_CODE_TAGS_ID) {
+							newLines = 1;
+						}
+					}
+				}
+				if (textStart < previousEnd) {
+					addReplaceEdit(textStart, previousEnd, buffer.toString());
+				}
+				boolean immutable = node.isImmutable();
+				if (newLines == 0) {
+					newLines = printJavadocBlockNodesNewLines(block, node, previousEnd);
+				}
+				int nodeStart = node.sourceStart;
+				if (newLines > 0 || (idx > 1 && nodeStart > (previousEnd+1))) {
+					printJavadocGapLines(previousEnd+1, nodeStart-1, newLines, clearBlankLines, false, null);
+				}
+				if (newLines > 0) textOnNewLine = true;
+				buffer.setLength(0);
+				if (node.isText()) {
+					if (immutable) {
+						// do not change immutable tags, just increment column
+						if (textOnNewLine && this.commentIndentation != null) {
+					    	addInsertEdit(node.sourceStart, this.commentIndentation);
+					    	this.column += this.commentIndentation.length();
+						}
+						printJavadocImmutableText(htmlTag, block, textOnNewLine);
+						this.column += getTextLength(block, htmlTag);
+						linesAfter = 0;
+					} else {
+						linesAfter = printJavadocHtmlTag(htmlTag, block, textOnNewLine);
+					}
+					nodeKind = 1; // text
+				} else {
+					if (textOnNewLine && this.commentIndentation != null) {
+				    	addInsertEdit(node.sourceStart, this.commentIndentation);
+				    	this.column += this.commentIndentation.length();
+					}
+					printJavadocBlock((FormatJavadocBlock)node);
+					linesAfter = 0;
+					nodeKind = 2; // block
+				}
+				textStart = node.sourceEnd+1;
+				ptr++;
+				if (idx > max)  {
+					return linesAfter;
+				}
+			} else {
+				if (idx > 0 && linesAfter > 0) {
+					printJavadocGapLines(previousEnd+1, nextStart-1, linesAfter, clearBlankLines, false, buffer);
+					textOnNewLine = true;
+				}
+				boolean needIndentation = textOnNewLine;
+				if (idx > 0) {
+					if (!needIndentation && text.isTextAfterHtmlSeparatorTag(idx-1)) {
+						needIndentation = true;
+					}
+				}
+				this.needSpace = idx > 1 && (previousEnd+1) < nextStart; // There's no space between text and html tag or inline block => do not insert space a the beginning of the text
+				printJavadocTextLine(buffer, nextStart, end, block, idx==0, needIndentation, idx==0/* opening html tag?*/ || text.htmlIndexes[idx-1] != -1);
+				linesAfter = 0;
+			    if (idx==0) {
+			    	if (isHtmlSeparatorTag) {
+				    	linesAfter = 1;
+				    }
+				} else if (text.htmlIndexes[idx-1] == JAVADOC_SINGLE_BREAK_TAG_ID) {
+			    	linesAfter = 1;
+			    }
+			}
+
+			// Replace with current buffer if there are several empty lines between text lines
+			nextStart = (int) text.separators[idx];
+			int endLine = Util.getLineNumber(end, this.lineEnds, startLine-1, this.maxLines);
+			startLine = Util.getLineNumber(nextStart, this.lineEnds, endLine-1, this.maxLines);
+			int linesGap = startLine - endLine;
+			if (linesGap > 0) {
+				if (clearBlankLines) {
+					// keep previously computed lines after
+				} else {
+					if (idx==0 || linesGap > 1 || (idx < max && nodeKind==1 && (text.htmlIndexes[idx-1] & JAVADOC_TAGS_ID_MASK) != JAVADOC_IMMUTABLE_TAGS_ID)) {
+						if (linesAfter < linesGap) {
+							linesAfter = linesGap;
+						}
+					}
+				}
+			}
+			textOnNewLine = linesAfter > 0;
+
+			// print <pre> tag
+			if (isCode) {
+    			int codeEnd = (int) (text.separators[max] >>> 32);
+    			if (codeEnd > end) {
+    				if (this.formatter.preferences.comment_format_source) {
+						if (textStart < end) addReplaceEdit(textStart, end, buffer.toString());
+						// See whether there's a space before the code
+						if (linesGap > 0) {
+							int lineStart = this.scanner.getLineStart(startLine);
+							if (nextStart > lineStart) { // if code starts at the line, then no leading space is needed
+								this.scanner.resetTo(lineStart, nextStart-1);
+								try {
+									int token = this.scanner.getNextToken();
+									if (token == TerminalTokens.TokenNameWHITESPACE) {
+										// skip indentation
+										token = this.scanner.getNextToken();
+									}
+									if (token == TerminalTokens.TokenNameMULTIPLY) {
+										nextStart = this.scanner.currentPosition;
+									}
+								}
+								catch (InvalidInputException iie) {
+									// skip
+								}
+							}
+						}
+						// Format gap lines before code
+						int newLines = linesGap;
+						if (newLines == 0) newLines=1;
+						this.needSpace = false;
+						printJavadocGapLines(end+1, nextStart-1, newLines, false/* clear first blank lines inside <pre> tag as done by old formatter */, false, null);
+						// Format the code
+						printCodeSnippet(nextStart, codeEnd, linesGap);
+						// Format the gap lines after the code
+						nextStart = (int) text.separators[max];
+	    				printJavadocGapLines(codeEnd+1, nextStart-1, 1, false/* clear blank lines inside <pre> tag as done by old formatter */, false, null);
+	    				return 2;
+    				}
+    			} else {
+					nextStart = (int) text.separators[max];
+					if ((nextStart-1) > (end+1)) {
+						int line1 = Util.getLineNumber(end+1, this.lineEnds, startLine-1, this.maxLines);
+						int line2 = Util.getLineNumber(nextStart-1, this.lineEnds, line1-1, this.maxLines);
+	    				int gapLines = line2-line1-1;
+						printJavadocGapLines(end+1, nextStart-1, gapLines, false/* never clear blank lines inside <pre> tag*/, false, null);
+						if (gapLines > 0) textOnNewLine = true;
+					}
+    			}
+				return 1;
+			}
+
+			// store previous end
+			previousEnd = end;
+		}
+
+		// Insert last gap
+	    boolean closingTag = isHtmlBreakTag || (text.htmlIndexes != null && (text.htmlIndexes[max] & JAVADOC_TAGS_ID_MASK) == htmlTagID);
+		boolean isValidHtmlSeparatorTag = max > 0 && isHtmlSeparatorTag && closingTag;
+		if (previousEnd != -1) {
+		    if (isValidHtmlSeparatorTag) {
+				if (linesAfter == 0) linesAfter = 1;
+			}
+			if (linesAfter > 0) {
+				printJavadocGapLines(previousEnd+1, nextStart-1, linesAfter, clearBlankLines, false, buffer);
+				textOnNewLine = linesAfter > 0;
+			}
+		}
+
+	    // Print closing tag
+		boolean needIndentation = textOnNewLine;
+		if (!needIndentation && !isHtmlBreakTag && text.htmlIndexes != null && text.isTextAfterHtmlSeparatorTag(max)) {
+			needIndentation = true;
+		}
+		this.needSpace = !closingTag && max > 0 // not a single or not closed tag (e.g. <br>)
+			&& (previousEnd+1) < nextStart; // There's no space between text and html tag or inline block => do not insert space a the beginning of the text
+		printJavadocTextLine(buffer, nextStart, text.sourceEnd, block, max <= 0, needIndentation, closingTag/* closing html tag*/);
+		if (textStart < text.sourceEnd) {
+			addReplaceEdit(textStart, text.sourceEnd, buffer.toString());
+		}
+
+		// Reset
+		this.needSpace = false;
+		this.scanner.resetTo(text.sourceEnd+1, this.scannerEndPosition - 1);
+
+		// Return the new lines to insert after
+	    return isValidHtmlSeparatorTag ? 1 : 0;
+    }
+

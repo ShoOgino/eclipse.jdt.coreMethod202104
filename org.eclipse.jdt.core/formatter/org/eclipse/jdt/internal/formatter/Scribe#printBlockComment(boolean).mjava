@@ -1,0 +1,163 @@
+	private void printBlockComment(boolean isJavadoc) {
+		int currentTokenStartPosition = this.scanner.getCurrentTokenStartPosition();
+		int currentTokenEndPosition = this.scanner.getCurrentTokenEndPosition() + 1;
+		boolean includesBlockComments = !isJavadoc && includesBlockComments();
+
+		this.scanner.resetTo(currentTokenStartPosition, currentTokenEndPosition - 1);
+		int currentCharacter;
+		boolean isNewLine = false;
+		int start = currentTokenStartPosition;
+		int nextCharacterStart = currentTokenStartPosition;
+		int previousStart = currentTokenStartPosition;
+		boolean onFirstColumn = isOnFirstColumn(start);
+
+		boolean indentComment = false;
+		if (this.indentationLevel != 0) {
+			if (isJavadoc
+					|| !this.formatter.preferences.never_indent_block_comments_on_first_column
+					|| !onFirstColumn) {
+				indentComment = true;
+				printIndentationIfNecessary();
+			}
+		}
+		if (this.pendingSpace) {
+			addInsertEdit(currentTokenStartPosition, " "); //$NON-NLS-1$
+		}
+		this.needSpace = false;
+		this.pendingSpace = false;
+
+		int commentColumn = this.column;
+		if (includesBlockComments) {
+			if (printBlockComment(currentTokenStartPosition, currentTokenEndPosition)) {
+				return;
+			}
+		}
+
+		int currentIndentationLevel = this.indentationLevel;
+		if ((commentColumn-1) > this.indentationLevel) {
+			this.indentationLevel = commentColumn-1;
+		}
+		int currentCommentIndentation = onFirstColumn ? 0 : getCurrentCommentIndentation(start);
+		boolean formatComment = (isJavadoc && (this.formatComments & CodeFormatter.K_JAVA_DOC) != 0) || (!isJavadoc && (this.formatComments & CodeFormatter.K_MULTI_LINE_COMMENT) != 0);
+
+		try {
+			while (nextCharacterStart <= currentTokenEndPosition && (currentCharacter = this.scanner.getNextChar()) != -1) {
+				nextCharacterStart = this.scanner.currentPosition;
+
+				switch(currentCharacter) {
+					case '\r' :
+						start = previousStart;
+						isNewLine = true;
+						if (this.scanner.getNextChar('\n')) {
+							currentCharacter = '\n';
+							nextCharacterStart = this.scanner.currentPosition;
+						}
+						break;
+					case '\n' :
+						start = previousStart;
+						isNewLine = true;
+						nextCharacterStart = this.scanner.currentPosition;
+						break;
+					default:
+						if (isNewLine) {
+							this.column = 1;
+							this.line++;
+							isNewLine = false;
+
+							boolean addSpace = false;
+							if (onFirstColumn) {
+								if (formatComment) {
+									if (ScannerHelper.isWhitespace((char) currentCharacter)) {
+										int previousStartPosition = this.scanner.currentPosition;
+										while(currentCharacter != -1 && currentCharacter != '\r' && currentCharacter != '\n' && ScannerHelper.isWhitespace((char) currentCharacter)) {
+											previousStart = nextCharacterStart;
+											previousStartPosition = this.scanner.currentPosition;
+											currentCharacter = this.scanner.getNextChar();
+											nextCharacterStart = this.scanner.currentPosition;
+										}
+										if (currentCharacter == '\r' || currentCharacter == '\n') {
+											nextCharacterStart = previousStartPosition;
+										}
+									}
+									if (currentCharacter != '\r' && currentCharacter != '\n') {
+										addSpace = true;
+									}
+								}
+							} else {
+								if (ScannerHelper.isWhitespace((char) currentCharacter)) {
+									int previousStartPosition = this.scanner.currentPosition;
+									int currentIndentation = 0;
+									loop: while(currentCharacter != -1 && currentCharacter != '\r' && currentCharacter != '\n' && ScannerHelper.isWhitespace((char) currentCharacter)) {
+										if (currentIndentation >= currentCommentIndentation) {
+											break loop;
+										}
+										previousStart = nextCharacterStart;
+										previousStartPosition = this.scanner.currentPosition;
+										switch(currentCharacter) {
+											case '\t' :
+												if (this.tabLength != 0) {
+													int reminder = currentIndentation % this.tabLength;
+													if (reminder == 0) {
+														currentIndentation += this.tabLength;
+													} else {
+														currentIndentation = ((currentIndentation / this.tabLength) + 1) * this.tabLength;
+													}
+												}
+												break;
+											default :
+												currentIndentation ++;
+										}
+										currentCharacter = this.scanner.getNextChar();
+										nextCharacterStart = this.scanner.currentPosition;
+									}
+									if (currentCharacter == '\r' || currentCharacter == '\n') {
+										nextCharacterStart = previousStartPosition;
+									}
+								}
+								if (formatComment) {
+									int previousStartTemp = previousStart;
+									int nextCharacterStartTemp = nextCharacterStart;
+									while(currentCharacter != -1 && currentCharacter != '\r' && currentCharacter != '\n' && ScannerHelper.isWhitespace((char) currentCharacter)) {
+										previousStart = nextCharacterStart;
+										currentCharacter = this.scanner.getNextChar();
+										nextCharacterStart = this.scanner.currentPosition;
+									}
+									if (currentCharacter == '*') {
+										addSpace = true;
+									} else {
+										previousStart = previousStartTemp;
+										nextCharacterStart = nextCharacterStartTemp;
+									}
+									this.scanner.currentPosition = nextCharacterStart;
+								}
+							}
+							String replacement;
+							if (indentComment) {
+								this.tempBuffer.setLength(0);
+								this.tempBuffer.append(this.lineSeparator);
+								if (this.indentationLevel > 0) {
+									printIndentationIfNecessary(this.tempBuffer);
+								}
+								if (addSpace) {
+									this.tempBuffer.append(' ');
+								}
+								replacement = this.tempBuffer.toString();
+							} else {
+								replacement = addSpace ? this.lineSeparatorAndSpace : this.lineSeparator;
+							}
+							addReplaceEdit(start, previousStart - 1, replacement);
+						} else {
+							this.column += (nextCharacterStart - previousStart);
+						}
+				}
+				previousStart = nextCharacterStart;
+				this.scanner.currentPosition = nextCharacterStart;
+			}
+		} finally {
+			this.indentationLevel = currentIndentationLevel;
+		}
+		this.lastNumberOfNewLines = 0;
+		this.needSpace = false;
+		this.scanner.resetTo(currentTokenEndPosition, this.scannerEndPosition - 1);
+	}
+

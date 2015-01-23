@@ -1,0 +1,93 @@
+	/*
+	 * Print the indentation of a disabling comment
+	 */
+	private void printNewLinesBeforeDisablingComment() {
+
+		// Get the beginning of comment line
+		int linePtr = Arrays.binarySearch(this.lineEnds, this.scanner.startPosition);
+		if (linePtr < 0) {
+			linePtr = -linePtr - 1;
+		}
+		int indentation = 0;
+		int beginningOfLine = getLineEnd(linePtr)+1;
+		if (beginningOfLine == -1) {
+			beginningOfLine = 0;
+		}
+		
+		// If the comment is in the middle of the line, then there's nothing to do
+		OptimizedReplaceEdit currentEdit = this.edits[this.editsIndex-1];
+		int offset = currentEdit.offset;
+		if (offset >= beginningOfLine) return;
+
+		// Compute the comment indentation
+		int scannerStartPosition = this.scanner.startPosition;
+		int scannerEofPosition = this.scanner.eofPosition;
+		int scannerCurrentPosition = this.scanner.currentPosition;
+		char scannerCurrentChar = this.scanner.currentCharacter;
+		int length = currentEdit.length;
+		this.scanner.resetTo(beginningOfLine, offset+length-1);
+		try {
+			while (!this.scanner.atEnd()) {
+				char ch = (char) this.scanner.getNextChar();
+				switch (ch) {
+					case '\t' :
+						if (this.tabLength != 0) {
+							int reminder = indentation % this.tabLength;
+							if (reminder == 0) {
+								indentation += this.tabLength;
+							} else {
+								indentation = ((indentation / this.tabLength) + 1) * this.tabLength;
+							}
+						}
+						break;
+					case ' ':
+						indentation++;
+						break;
+					default:
+						// Should not happen as the offset of the edit is before the beginning of line
+						return;
+				}
+			}
+		
+			// Split the existing edit to keep the change before the beginning of the last line
+			// but change the indentation after. Note that at this stage, the add*Edit methods
+			// cannot be longer used as the edits are disabled
+			String indentationString;
+			int currentIndentation = getCurrentIndentation(this.scanner.currentPosition);
+			if (currentIndentation > 0 && this.indentationLevel > 0) {
+				int col = this.column;
+				this.tempBuffer.setLength(0);
+				printIndentationIfNecessary(this.tempBuffer);
+				indentationString = this.tempBuffer.toString();
+				this.column = col;
+			} else {
+				indentationString = Util.EMPTY_STRING;
+			}
+			String replacement = currentEdit.replacement;
+			if (replacement.length() == 0) {
+				// previous edit was a delete, as we're sure to have a new line before
+				// the comment, then the edit needs to be either replaced entirely with
+				// the expected indentation
+				this.edits[this.editsIndex-1] = new OptimizedReplaceEdit(beginningOfLine, offset+length-beginningOfLine, indentationString);
+			} else {
+				int idx = replacement.lastIndexOf(this.lineSeparator);
+				if (idx >= 0) {
+					// replace current edit if it contains a line separator
+					int start = idx + this.lsLength;
+					this.tempBuffer.setLength(0);
+					this.tempBuffer.append(replacement.substring(0, start));
+					if (indentationString != Util.EMPTY_STRING) {
+						this.tempBuffer.append(indentationString);
+					}
+					this.edits[this.editsIndex-1] = new OptimizedReplaceEdit(offset, length, this.tempBuffer.toString());
+				}
+			}
+		}
+		finally {
+			this.scanner.startPosition = scannerStartPosition;
+			this.scanner.eofPosition = scannerEofPosition;
+			this.scanner.currentPosition = scannerCurrentPosition;
+			this.scanner.currentCharacter = scannerCurrentChar;
+		}
+	}
+

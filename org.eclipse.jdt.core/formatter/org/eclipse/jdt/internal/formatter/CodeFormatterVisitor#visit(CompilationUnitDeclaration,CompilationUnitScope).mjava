@@ -1,0 +1,96 @@
+	/**
+	 * @see org.eclipse.jdt.internal.compiler.ASTVisitor#visit(org.eclipse.jdt.internal.compiler.ast.CompilationUnitDeclaration, org.eclipse.jdt.internal.compiler.lookup.CompilationUnitScope)
+	 */
+	public boolean visit(
+		CompilationUnitDeclaration compilationUnitDeclaration,
+		CompilationUnitScope scope) {
+
+		// fake new line to handle empty lines before package declaration or import declarations
+		this.scribe.lastNumberOfNewLines = 1;
+
+		// Set header end position
+		final TypeDeclaration[] types = compilationUnitDeclaration.types;
+		int headerEndPosition = types == null ? compilationUnitDeclaration.sourceEnd : types[0].declarationSourceStart;
+		this.scribe.setHeaderComment(headerEndPosition);
+
+		/*
+		 * Package declaration
+		 */
+		ImportReference currentPackage = compilationUnitDeclaration.currentPackage;
+		final boolean hasPackage = currentPackage != null;
+		if (hasPackage) {
+			printComment();
+			int blankLinesBeforePackage = this.preferences.blank_lines_before_package;
+			if (blankLinesBeforePackage > 0) {
+				this.scribe.printEmptyLines(blankLinesBeforePackage);
+			}
+
+			this.scribe.printModifiers(currentPackage.annotations, this, ICodeFormatterConstants.ANNOTATION_ON_PACKAGE);
+			this.scribe.space();
+			// dump the package keyword
+			this.scribe.printNextToken(TerminalTokens.TokenNamepackage);
+			this.scribe.space();
+			this.scribe.printQualifiedReference(compilationUnitDeclaration.currentPackage.sourceEnd, false/*do not expect parenthesis*/);
+			this.scribe.printNextToken(TerminalTokens.TokenNameSEMICOLON, this.preferences.insert_space_before_semicolon);
+			this.scribe.printComment(CodeFormatter.K_UNKNOWN, Scribe.BASIC_TRAILING_COMMENT);
+			int blankLinesAfterPackage = this.preferences.blank_lines_after_package;
+			if (blankLinesAfterPackage > 0) {
+				this.scribe.printEmptyLines(blankLinesAfterPackage);
+			} else {
+				this.scribe.printNewLine();
+			}
+		} else {
+			this.scribe.printComment();
+		}
+
+		/*
+		 * Import statements
+		 */
+		final ImportReference[] imports = compilationUnitDeclaration.imports;
+		if (imports != null) {
+			if (hasPackage) {
+				int blankLinesBeforeImports = this.preferences.blank_lines_before_imports;
+				if (blankLinesBeforeImports > 0) {
+					this.scribe.printEmptyLines(blankLinesBeforeImports);
+				}
+			}
+			int importLength = imports.length;
+			if (importLength != 1) {
+				format(imports[0], false);
+    			for (int i = 1; i < importLength - 1; i++) {
+    				format(imports[i], false);
+    			}
+    			format(imports[importLength - 1], true);
+			} else {
+				format(imports[0], true);
+			}
+
+			int blankLinesAfterImports = this.preferences.blank_lines_after_imports;
+			if (blankLinesAfterImports > 0) {
+				this.scribe.printEmptyLines(blankLinesAfterImports);
+			}
+		}
+
+		formatEmptyTypeDeclaration(true);
+
+		int blankLineBetweenTypeDeclarations = this.preferences.blank_lines_between_type_declarations;
+		/*
+		 * Type declarations
+		 */
+		if (types != null) {
+			int typesLength = types.length;
+			for (int i = 0; i < typesLength - 1; i++) {
+				types[i].traverse(this, scope);
+				formatEmptyTypeDeclaration(false);
+				if (blankLineBetweenTypeDeclarations != 0) {
+					this.scribe.printEmptyLines(blankLineBetweenTypeDeclarations);
+				} else {
+					this.scribe.printNewLine();
+				}
+			}
+			types[typesLength - 1].traverse(this, scope);
+		}
+		this.scribe.printEndOfCompilationUnit();
+		return false;
+	}
+

@@ -1,0 +1,82 @@
+	private ASTNode[] computeMergedMemberDeclarations(TypeDeclaration typeDeclaration){
+
+		int fieldIndex = 0, fieldCount = (typeDeclaration.fields == null) ? 0 : typeDeclaration.fields.length;
+		FieldDeclaration field = fieldCount == 0 ? null : typeDeclaration.fields[fieldIndex];
+		int fieldStart = field == null ? Integer.MAX_VALUE : field.declarationSourceStart;
+
+		int methodIndex = 0, methodCount = (typeDeclaration.methods == null) ? 0 : typeDeclaration.methods.length;
+		AbstractMethodDeclaration method = methodCount == 0 ? null : typeDeclaration.methods[methodIndex];
+		int methodStart = method == null ? Integer.MAX_VALUE : method.declarationSourceStart;
+
+		int typeIndex = 0, typeCount = (typeDeclaration.memberTypes == null) ? 0 : typeDeclaration.memberTypes.length;
+		TypeDeclaration type = typeCount == 0 ? null : typeDeclaration.memberTypes[typeIndex];
+		int typeStart = type == null ? Integer.MAX_VALUE : type.declarationSourceStart;
+
+		final int memberLength = fieldCount+methodCount+typeCount;
+		ASTNode[] members = new ASTNode[memberLength];
+		if (memberLength != 0) {
+			int index = 0;
+			int previousFieldStart = -1;
+			do {
+				if (fieldStart < methodStart && fieldStart < typeStart) {
+					if (field.getKind() == AbstractVariableDeclaration.ENUM_CONSTANT) {
+						// filter out enum constants
+						previousFieldStart = fieldStart;
+						if (++fieldIndex < fieldCount) { // find next field if any
+							fieldStart = (field = typeDeclaration.fields[fieldIndex]).declarationSourceStart;
+						} else {
+							fieldStart = Integer.MAX_VALUE;
+						}
+						continue;
+					}
+					// next member is a field
+					if (fieldStart == previousFieldStart){
+						ASTNode previousMember = members[index - 1];
+						if (previousMember instanceof MultiFieldDeclaration) {
+							MultiFieldDeclaration multiField = (MultiFieldDeclaration) previousMember;
+							int length = multiField.declarations.length;
+							System.arraycopy(multiField.declarations, 0, multiField.declarations=new FieldDeclaration[length+1], 0, length);
+							multiField.declarations[length] = field;
+						} else {
+							FieldDeclaration fieldDeclaration = (FieldDeclaration)previousMember;
+							final MultiFieldDeclaration multiFieldDeclaration = new MultiFieldDeclaration(new FieldDeclaration[]{ fieldDeclaration, field});
+							multiFieldDeclaration.annotations = fieldDeclaration.annotations;
+							members[index - 1] = multiFieldDeclaration;
+						}
+					} else {
+						members[index++] = field;
+					}
+					previousFieldStart = fieldStart;
+					if (++fieldIndex < fieldCount) { // find next field if any
+						fieldStart = (field = typeDeclaration.fields[fieldIndex]).declarationSourceStart;
+					} else {
+						fieldStart = Integer.MAX_VALUE;
+					}
+				} else if (methodStart < fieldStart && methodStart < typeStart) {
+					// next member is a method
+					if (!method.isDefaultConstructor() && !method.isClinit()) {
+						members[index++] = method;
+					}
+					if (++methodIndex < methodCount) { // find next method if any
+						methodStart = (method = typeDeclaration.methods[methodIndex]).declarationSourceStart;
+					} else {
+						methodStart = Integer.MAX_VALUE;
+					}
+				} else {
+					// next member is a type
+					members[index++] = type;
+					if (++typeIndex < typeCount) { // find next type if any
+						typeStart = (type = typeDeclaration.memberTypes[typeIndex]).declarationSourceStart;
+					} else {
+						typeStart = Integer.MAX_VALUE;
+					}
+				}
+			} while ((fieldIndex < fieldCount) || (typeIndex < typeCount) || (methodIndex < methodCount));
+
+			if (members.length != index) {
+				System.arraycopy(members, 0, members=new ASTNode[index], 0, index);
+			}
+		}
+		return members;
+	}
+

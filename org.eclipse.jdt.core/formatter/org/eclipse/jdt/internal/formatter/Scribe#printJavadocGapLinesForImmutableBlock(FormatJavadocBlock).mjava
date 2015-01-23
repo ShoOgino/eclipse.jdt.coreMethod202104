@@ -1,0 +1,170 @@
+	/*
+	 *  Print the gap lines for an immutable block.
+	 *  That's needed to  be specific as the formatter needs to keep white spaces
+	 *  if possible except those which are indentation ones.
+	 *  Note that in the peculiar case of a two lines immutable tag (multi lines block),
+	 *  the formatter will join the two lines.
+	 */
+	private void printJavadocGapLinesForImmutableBlock(FormatJavadocBlock block) {
+
+		// Init
+		int firstLineEnd = -1; // not initialized
+		int newLineStart = -1; // not initialized
+		int secondLineStart = -1; // not initialized
+		int starPosition = -1; // not initialized
+		int offset = 0;
+		int start = block.tagEnd + 1;
+		int end = block.nodes[0].sourceStart-1;
+		this.scanner.resetTo(start, end);
+		int lineStart = block.lineStart;
+		int lineEnd = Util.getLineNumber(block.nodes[0].sourceEnd, this.lineEnds, lineStart-1, this.maxLines);
+		boolean multiLinesBlock = lineEnd > (lineStart+1);
+		int previousPosition = this.scanner.currentPosition;
+		String newLineString = null;
+		int indentationColumn = 0;
+		int leadingSpaces = -1;
+
+		// Scan the existing gap
+		while (!this.scanner.atEnd()) {
+			char ch = (char) this.scanner.getNextChar();
+			switch (ch) {
+				case '\t' :
+					// increase the corresponding counter from the appropriate tab value
+					if (secondLineStart > 0 || firstLineEnd < 0) {
+						int reminder = this.tabLength == 0 ? 0 : offset % this.tabLength;
+						if (reminder == 0) {
+							offset += this.tabLength;
+						} else {
+							offset = ((offset / this.tabLength) + 1) * this.tabLength;
+						}
+					} else if (leadingSpaces >= 0) {
+						int reminder = this.tabLength == 0 ? 0 : offset % this.tabLength;
+						if (reminder == 0) {
+							leadingSpaces += this.tabLength;
+						} else {
+							leadingSpaces = ((offset / this.tabLength) + 1) * this.tabLength;
+						}
+					}
+					break;
+				case '\r' :
+				case '\n' :
+					// new line, store the end of the first one
+					if (firstLineEnd < 0) {
+						firstLineEnd = previousPosition;
+					}
+					// print indentation if there were spaces without any star on the line
+					if (leadingSpaces > 0 && multiLinesBlock) {
+						if (newLineString == null) {
+							this.column = 1;
+							this.tempBuffer.setLength(0);
+							printIndentationIfNecessary(this.tempBuffer);
+							this.tempBuffer.append(BLOCK_LINE_PREFIX);
+							this.column += BLOCK_LINE_PREFIX_LENGTH;
+							newLineString = this.tempBuffer.toString();
+							indentationColumn = this.column;
+						} else {
+							this.column = indentationColumn;
+						}
+						addReplaceEdit(newLineStart, newLineStart+indentationColumn-2, newLineString);
+					}
+					// store line start and reset positions
+					newLineStart = this.scanner.currentPosition;
+					leadingSpaces = 0;
+					starPosition = -1;
+					if (multiLinesBlock) {
+						offset = 0;
+						secondLineStart = -1;
+					}
+					break;
+				case '*' :
+					// store line start position if this is the first star of the line
+					if (starPosition < 0 && firstLineEnd > 0) {
+						secondLineStart = this.scanner.currentPosition;
+						starPosition = this.scanner.currentPosition;
+						leadingSpaces = -1;
+					}
+					break;
+				default :
+					// increment offset if line has started
+					if (secondLineStart > 0) {
+						// skip first white space after the first '*'
+						if (secondLineStart == starPosition) {
+							secondLineStart = this.scanner.currentPosition;
+						} else {
+							// print indentation before the following characters
+							if (offset == 0 && multiLinesBlock) {
+								if (newLineString == null) {
+									this.tempBuffer.setLength(0);
+									this.column = 1;
+									printIndentationIfNecessary(this.tempBuffer);
+									this.tempBuffer.append(BLOCK_LINE_PREFIX);
+									this.column += BLOCK_LINE_PREFIX_LENGTH;
+									indentationColumn = this.column;
+									newLineString = this.tempBuffer.toString();
+								} else {
+									this.column = indentationColumn;
+								}
+								addReplaceEdit(newLineStart, secondLineStart-1, newLineString);
+							}
+							offset++;
+						}
+					} else if (firstLineEnd < 0) {
+						// no new line yet, increment the offset
+						offset++;
+					} else if (leadingSpaces >= 0) {
+						// no star yet, increment the leading spaces
+						leadingSpaces++;
+					}
+					break;
+			}
+			previousPosition = this.scanner.currentPosition;
+		}
+		
+		// Increment the columns from the numbers of characters counted on the line
+		if (multiLinesBlock) {
+			this.column += offset;
+		} else {
+			this.column++;
+		}
+		
+		// Replace the new line with a single space when there's only one separator
+		// or, if necessary, print the indentation on the last line
+		if (!multiLinesBlock) {
+			if (firstLineEnd > 0) {
+				addReplaceEdit(firstLineEnd, end, " "); //$NON-NLS-1$
+			}
+		}
+		else if (secondLineStart > 0) {
+			if (newLineString == null) {
+				this.tempBuffer.setLength(0);
+				this.column = 1;
+				printIndentationIfNecessary(this.tempBuffer);
+				this.tempBuffer.append(BLOCK_LINE_PREFIX);
+				this.column += BLOCK_LINE_PREFIX_LENGTH;
+				newLineString = this.tempBuffer.toString();
+				indentationColumn = this.column;
+			} else {
+				this.column = indentationColumn;
+			}
+			addReplaceEdit(newLineStart, secondLineStart-1, newLineString);
+		}
+		else if (leadingSpaces > 0) {
+			if (newLineString == null) {
+				this.tempBuffer.setLength(0);
+				this.column = 1;
+				printIndentationIfNecessary(this.tempBuffer);
+				this.tempBuffer.append(BLOCK_LINE_PREFIX);
+				this.column += BLOCK_LINE_PREFIX_LENGTH;
+				newLineString = this.tempBuffer.toString();
+				indentationColumn = this.column;
+			} else {
+				this.column = indentationColumn;
+			}
+			addReplaceEdit(newLineStart, newLineStart+indentationColumn-2, newLineString);
+		}
+
+		// Reset
+		this.needSpace = false;
+		this.scanner.resetTo(end+1, this.scannerEndPosition - 1);
+	}
+
