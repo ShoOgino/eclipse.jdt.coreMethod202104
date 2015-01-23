@@ -1,0 +1,95 @@
+	private boolean tokenizeMultilineComment(Token commentToken) {
+		if (this.noSubstituteWrapping == null || this.noSubstituteWrapping.length < commentToken.countChars()) {
+			this.noSubstituteWrapping = new boolean[commentToken.countChars()];
+		} else {
+			Arrays.fill(this.noSubstituteWrapping, 0, commentToken.countChars(), false);
+		}
+
+		final boolean cleanBlankLines = commentToken.tokenType == TokenNameCOMMENT_JAVADOC
+				? this.options.comment_clear_blank_lines_in_javadoc_comment
+				: this.options.comment_clear_blank_lines_in_block_comment;
+
+		List<Token> structure = new ArrayList<Token>();
+
+		int firstTokenEnd = commentToken.originalStart + 1;
+		while (firstTokenEnd < commentToken.originalEnd - 1 && this.tm.charAt(firstTokenEnd + 1) == '*')
+			firstTokenEnd++;
+		Token first = new Token(commentToken.originalStart, firstTokenEnd, commentToken.tokenType);
+		first.spaceAfter();
+		structure.add(first);
+
+		int lastTokenStart = commentToken.originalEnd - 1;
+		while (lastTokenStart - 1 > firstTokenEnd && this.tm.charAt(lastTokenStart - 1) == '*')
+			lastTokenStart--;
+
+		int position = firstTokenEnd + 1;
+		int lineBreaks = 0;
+		while (position <= commentToken.originalEnd) {
+			// find line start
+			for (int i = position; i < lastTokenStart; i++) {
+				char c = this.tm.charAt(i);
+				if (c == '\r' || c == '\n') {
+					lineBreaks++;
+					char c2 = this.tm.charAt(i + 1);
+					if ((c2 == '\r' || c2 == '\n') && c2 != c)
+						i++;
+					position = i + 1;
+				} else if (!ScannerHelper.isWhitespace(c)) {
+					while (this.tm.charAt(i) == '*' && lineBreaks > 0)
+						i++;
+					position = i;
+					break;
+				}
+			}
+
+			int tokenStart = position;
+			while (position <= commentToken.originalEnd + 1) {
+				char c = 0;
+				if (position == commentToken.originalEnd + 1 || position == lastTokenStart
+						|| ScannerHelper.isWhitespace(c = this.tm.charAt(position))) {
+					if (tokenStart < position) {
+						Token outputToken = new Token(tokenStart, position - 1, commentToken.tokenType);
+						outputToken.spaceBefore();
+						if (lineBreaks > 0) {
+							if (cleanBlankLines)
+								lineBreaks = 1;
+							if (lineBreaks > 1 || !this.options.join_lines_in_comments)
+								outputToken.putLineBreaksBefore(lineBreaks);
+						}
+						if (this.tm.charAt(tokenStart) == '@') {
+							outputToken.setWrapPolicy(WrapPolicy.DISABLE_WRAP);
+							if (commentToken.tokenType == TokenNameCOMMENT_BLOCK && lineBreaks == 1
+									&& structure.size() > 1)
+								outputToken.putLineBreaksBefore(cleanBlankLines ? 1 : 2);
+							if (this.tm.charAt(tokenStart + 1) == '@' && lineBreaks > 0 && this.firstTagToken == null) {
+								// Commons Attributes annotation, see bug 237051
+								this.firstTagToken = outputToken;
+							}
+						}
+						structure.add(outputToken);
+						lineBreaks = 0;
+					}
+					if (c == '\r' || c == '\n')
+						break;
+					tokenStart = position == lastTokenStart ? position : position + 1;
+				}
+				position++;
+			}
+		}
+
+		Token last = structure.get(structure.size() - 1);
+		boolean newLinesAtBoundries = commentToken.tokenType == TokenNameCOMMENT_JAVADOC
+				? this.options.comment_new_lines_at_javadoc_boundaries
+				: this.options.comment_new_lines_at_block_boundaries;
+		if (newLinesAtBoundries && this.tm.countLineBreaksBetween(first, last) > 0) {
+			first.breakAfter();
+			last.breakBefore();
+			last.setAlign(1);
+		}
+
+		if (structure.size() == 2)
+			return false;
+		commentToken.setInternalStructure(structure);
+		return true;
+	}
+

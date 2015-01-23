@@ -1,0 +1,61 @@
+	@Override
+	protected boolean token(Token token, int index) {
+		int positionIfNewLine = this.lineStartPosition + token.getAlign() + token.getIndent();
+		if (token.tokenType != TokenNameNotAToken)
+			positionIfNewLine += COMMENT_LINE_SEPARATOR_LENGTH;
+		if (getLineBreaksBefore() > 0) {
+			this.lineCounter = Math.max(this.lineCounter + getLineBreaksBefore(), 4);
+			this.counter = positionIfNewLine;
+			this.potentialWrapToken = this.potentialWrapTokenSubstitute = null;
+
+			boolean isFormattedCode = token.getWrapPolicy() != null
+					&& token.getWrapPolicy() != WrapPolicy.SUBSTITUTE_ONLY;
+			if (!isFormattedCode && token.getAlign() == 0) {
+				// Indents are reserved for code inside <pre>.
+				// Indentation of javadoc tags can be achieved with align
+				token.setAlign(token.getIndent());
+				token.setIndent(0);
+			}
+		}
+
+		boolean canWrap = getNext() != null && getLineBreaksBefore() == 0 && index > 1
+				&& positionIfNewLine < this.counter;
+		if (canWrap) {
+			if (token.getWrapPolicy() == null) {
+				this.potentialWrapToken = token;
+				this.counterIfWrapped = positionIfNewLine;
+			} else if (token.getWrapPolicy() == WrapPolicy.SUBSTITUTE_ONLY) {
+				this.potentialWrapTokenSubstitute = token;
+				this.counterIfWrappedSubstitute = positionIfNewLine;
+			}
+		}
+
+		this.counter += this.tm.getLength(token, this.counter);
+		this.counterIfWrapped += this.tm.getLength(token, this.counterIfWrapped);
+		this.counterIfWrappedSubstitute += this.tm.getLength(token, this.counterIfWrappedSubstitute);
+		if (shouldWrap()) {
+			if (this.potentialWrapToken == null) {
+				assert this.potentialWrapTokenSubstitute != null;
+				this.potentialWrapToken = this.potentialWrapTokenSubstitute;
+				this.counterIfWrapped = this.counterIfWrappedSubstitute;
+			}
+			this.counter = this.counterIfWrapped;
+			if (!this.simulation) {
+				this.potentialWrapToken.breakBefore();
+				// Indents are reserved for code inside <pre>.
+				// Indentation of javadoc tags can be achieved with align
+				this.potentialWrapToken.setAlign(this.potentialWrapToken.getIndent());
+				this.potentialWrapToken.setIndent(0);
+			}
+			this.lineCounter = Math.max(this.lineCounter + 1, 4);
+			this.potentialWrapToken = this.potentialWrapTokenSubstitute = null;
+		}
+
+		if (isSpaceAfter()) {
+			this.counter++;
+			this.counterIfWrapped++;
+		}
+
+		return true;
+	}
+

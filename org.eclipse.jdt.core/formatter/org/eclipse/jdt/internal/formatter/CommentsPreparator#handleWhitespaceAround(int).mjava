@@ -1,0 +1,66 @@
+	private boolean handleWhitespaceAround(int commentIndex) {
+		Token commentToken = this.tm.get(commentIndex);
+		char charBefore = commentToken.originalStart > 0 ? this.tm.charAt(commentToken.originalStart - 1) : 0;
+		if (charBefore == ' ' || charBefore == '\t')
+			commentToken.spaceBefore();
+
+		if (commentToken.originalEnd < this.tm.getSourceLength() - 1) {
+			char charAfter = this.tm.charAt(commentToken.originalEnd + 1);
+			if (charAfter == ' ' || charAfter == '\t')
+				commentToken.spaceAfter();
+		}
+
+		Token previous = null, next = null;
+		int existingBreaksBefore = 2, existingBreaksAfter = 2;
+		if (commentIndex > 0) {
+			previous = this.tm.get(commentIndex - 1);
+			existingBreaksBefore = this.tm.countLineBreaksBetween(previous, commentToken);
+			if (existingBreaksBefore > 0) {
+				commentToken.breakBefore();
+				commentToken.clearSpaceBefore();
+			}
+		}
+		if (commentIndex < this.tm.size() - 1) {
+			next = this.tm.get(commentIndex + 1);
+			existingBreaksAfter = this.tm.countLineBreaksBetween(commentToken, next);
+			if (existingBreaksAfter > 0)
+				commentToken.breakAfter();
+		}
+
+		if (existingBreaksBefore <= 1
+				&& (previous.tokenType == TokenNameCOMMENT_LINE || previous.tokenType == TokenNameCOMMENT_BLOCK)) {
+			commentToken.setWrapPolicy(previous.getWrapPolicy());
+		} else {
+			int i = commentIndex + 2;
+			while (existingBreaksAfter <= 1 && i < this.tm.size()
+					&& (next.tokenType == TokenNameCOMMENT_LINE || next.tokenType == TokenNameCOMMENT_BLOCK)) {
+				Token next2 = this.tm.get(i++);
+				existingBreaksAfter = this.tm.countLineBreaksBetween(next, next2);
+				next = next2;
+			}
+
+			if (previous != null && previous.getLineBreaksAfter() == 0
+					&& next != null && next.getLineBreaksBefore() == 0
+					&& Arrays.binarySearch(NO_INDENT_AFTER_COMMENT, next.tokenType) < 0) {
+				int policyIndent = (commentToken.getIndent() - previous.getIndent());
+				WrapPolicy wrapPolicy = new WrapPolicy(policyIndent, commentIndex - 1, true);
+				if (this.tm.countLineBreaksBetween(previous, commentToken) == 1)
+					commentToken.setWrapPolicy(wrapPolicy);
+				if (this.tm.countLineBreaksBetween(commentToken, next) == 1)
+					next.setWrapPolicy(wrapPolicy);
+			}
+
+			if (existingBreaksBefore < existingBreaksAfter && previous != null) {
+				commentToken.putLineBreaksAfter(previous.getLineBreaksAfter());
+				previous.clearLineBreaksAfter();
+			} else if (existingBreaksAfter <= existingBreaksBefore && next != null
+					&& commentIndex > 0 /* doesn't apply to a comment before the package declaration */) {
+				commentToken.putLineBreaksBefore(next.getLineBreaksBefore());
+				next.clearLineBreaksBefore();
+			}
+		}
+
+		boolean isFirstColumn = (charBefore == '\r' || charBefore == '\n' || commentToken.originalStart == 0);
+		return isFirstColumn;
+	}
+

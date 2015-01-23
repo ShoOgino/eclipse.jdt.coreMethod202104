@@ -1,0 +1,37 @@
+	private void formatCode(int javadocNoFormatCloseStart, int javadocNoFormatCloseEnd) {
+		int openingTagLastIndex = tokenEndingAt(this.formatCodeTagOpenEnd);
+		int closingTagFirstIndex = tokenStartingAt(javadocNoFormatCloseStart);
+
+		int codeStartPosition = this.formatCodeTagOpenEnd + 1;
+		int codeEndPosition = javadocNoFormatCloseStart - 1;
+		StringBuilder codeBuilder = new StringBuilder(codeEndPosition - codeStartPosition + 1);
+		int[] positionMapping = new int[codeEndPosition - codeStartPosition + 1];
+		// ^ index: original source position (minus startPosition), value: position in code string
+		getCodeToFormat(codeStartPosition, codeEndPosition, codeBuilder, positionMapping);
+
+		List<Token> formattedTokens = getCommentCodeFormatter().prepareFormattedCode(codeBuilder.toString(),
+				CodeFormatter.K_UNKNOWN);
+
+		if (formattedTokens == null) {
+			disableFormattingExclusively(openingTagLastIndex, closingTagFirstIndex);
+			closingTagFirstIndex = tokenStartingAt(javadocNoFormatCloseStart);
+			cleanupHTMLElement(openingTagLastIndex, closingTagFirstIndex, false);
+			return;
+		}
+
+		formattedTokens = translateFormattedTokens(codeStartPosition, formattedTokens, positionMapping, null);
+		// there are too few linebreaks at the start and end
+		Token start = formattedTokens.get(0);
+		start.putLineBreaksBefore(start.getLineBreaksBefore() + 1);
+		Token end = formattedTokens.get(formattedTokens.size() - 1);
+		end.putLineBreaksAfter(end.getLineBreaksAfter() + 1);
+		// and there may be too many line breaks before closing tag
+		this.ctm.get(closingTagFirstIndex).clearLineBreaksBefore();
+
+		List<Token> tokensToReplace = this.commentStructure.subList(openingTagLastIndex + 1, closingTagFirstIndex);
+		tokensToReplace.clear();
+		tokensToReplace.addAll(formattedTokens);
+		cleanupHTMLElement(openingTagLastIndex, openingTagLastIndex + formattedTokens.size() + 1, true);
+		noSubstituteWrapping(codeStartPosition, codeEndPosition);
+	}
+

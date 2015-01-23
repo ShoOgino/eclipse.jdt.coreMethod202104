@@ -1,0 +1,42 @@
+	private List<Token> translateFormattedTokens(int startPosition, List<Token> formattedTokens, int[] positionMapping,
+			HashMap<Token, Token> translationMap) {
+		int previousLineBreaks = 0;
+		List<Token> result = new ArrayList<Token>();
+		for (Token token : formattedTokens) {
+			int newStart = Arrays.binarySearch(positionMapping, token.originalStart);
+			while (newStart > 0 && positionMapping[newStart - 1] == token.originalStart)
+				newStart--;
+			int newEnd = Arrays.binarySearch(positionMapping, token.originalEnd);
+			while (newEnd + 1 < positionMapping.length && positionMapping[newEnd + 1] == token.originalEnd)
+				newEnd++;
+			Token translated = new Token(token, newStart + startPosition, newEnd + startPosition, token.tokenType);
+			if (translated.getWrapPolicy() == null)
+				translated.setWrapPolicy(WrapPolicy.DISABLE_WRAP);
+			if (token.hasNLSTag())
+				translationMap.put(token, translated);
+
+			int lineBreaks = Math.max(previousLineBreaks, token.getLineBreaksBefore());
+			List<Token> structure = token.getInternalStructure();
+			if (structure != null && !structure.isEmpty()) {
+				if (translationMap == null)
+					translationMap = new HashMap<Token, Token>();
+				translated.setInternalStructure(translateFormattedTokens(startPosition, structure, positionMapping,
+						translationMap));
+			}
+			translated.putLineBreaksBefore(lineBreaks);
+			result.add(translated);
+			previousLineBreaks = token.getLineBreaksAfter();
+		}
+		result.get(result.size() - 1).putLineBreaksAfter(previousLineBreaks);
+
+		for (Token translated : result) {
+			if (translated.getNLSTag() != null) {
+				Token nlsTagToken = translationMap.get(translated.getNLSTag());
+				translated.setNLSTag(nlsTagToken);
+				nlsTagToken.setNLSTag(translated);
+				assert translated.getNLSTag() != null;
+			}
+		}
+		return result;
+	}
+
