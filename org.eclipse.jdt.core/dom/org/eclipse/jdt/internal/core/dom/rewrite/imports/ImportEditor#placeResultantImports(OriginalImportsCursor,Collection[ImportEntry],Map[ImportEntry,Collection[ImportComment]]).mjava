@@ -1,0 +1,66 @@
+	/**
+	 * Creates TextEdits that place each resultant import in the correct (rewritten) position.
+	 */
+	private Collection<TextEdit> placeResultantImports(
+			OriginalImportsCursor cursor,
+			Collection<ImportEntry> resultantImports,
+			Map<ImportEntry, Collection<ImportComment>> commentReassignments) {
+		Collection<TextEdit> edits = new ArrayList<TextEdit>();
+
+		ImportEntry lastResultantImport = null;
+		for (ImportEntry currentResultantImport : resultantImports) {
+			if (currentResultantImport.isOriginal()) {
+				// Skip forward to this import's place in the original order.
+				while (cursor.currentOriginalImport != null
+						&& cursor.currentOriginalImport != currentResultantImport) {
+					cursor.advance();
+				}
+			}
+
+			Collection<ImportComment> reassignedComments = commentReassignments.get(currentResultantImport);
+			if (reassignedComments == null) {
+				reassignedComments = Collections.emptyList();
+			}
+
+			ImportEdits importPlacement;
+			if (currentResultantImport.isOriginal()) {
+				OriginalImportEntry originalImport = currentResultantImport.asOriginalImportEntry();
+				if (cursor.currentOriginalImport == currentResultantImport) {
+					importPlacement = preserveStationaryImport(originalImport);
+				} else {
+					importPlacement = moveOriginalImport(originalImport, cursor.currentPosition);
+				}
+			} else {
+				importPlacement = placeNewImport(currentResultantImport, cursor.currentPosition);
+			}
+
+			String newDelimiter = determineNewDelimiter(
+					lastResultantImport, currentResultantImport, reassignedComments);
+			if (newDelimiter == null) {
+				edits.addAll(importPlacement.leadingDelimiterEdits);
+			} else if (!newDelimiter.isEmpty()) {
+				edits.add(new InsertEdit(cursor.currentPosition, newDelimiter));
+			}
+
+			if (!reassignedComments.isEmpty()) {
+				edits.addAll(relocateComments(reassignedComments, cursor.currentPosition));
+
+				boolean hasFloatingComment = currentResultantImport.isOriginal()
+						&& containsFloatingComment(currentResultantImport.asOriginalImportEntry().comments);
+				String delimiterAfterReassignedComments =
+						hasFloatingComment ? this.twoLineDelimiters : this.lineDelimiter;
+				edits.add(new InsertEdit(cursor.currentPosition, delimiterAfterReassignedComments));
+			}
+
+			edits.addAll(importPlacement.commentAndDeclarationEdits);
+
+			if (currentResultantImport == cursor.currentOriginalImport) {
+				cursor.advance();
+			}
+
+			lastResultantImport = currentResultantImport;
+		}
+
+		return edits;
+	}
+

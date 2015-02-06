@@ -1,0 +1,58 @@
+	public void testConflictsBetweenOriginalOnDemands() throws Exception {
+		// Create a type named "A" in each of two packages.
+		createCompilationUnit("conflicting1", "A");
+		createCompilationUnit("conflicting2", "A");
+
+		// Create a static member named "doStuff" in each of two types.
+		StringBuffer statics1 = new StringBuffer();
+		statics1.append("package statics;\n");
+		statics1.append("\n");
+		statics1.append("public class Statics1 {\n");
+		statics1.append("    public static void doStuff() {}\n");
+		statics1.append("}\n");
+		createCompilationUnit("statics", "Statics1", statics1.toString());
+		StringBuffer statics2 = new StringBuffer();
+		statics2.append("package statics;\n");
+		statics2.append("\n");
+		statics2.append("public class Statics2 {\n");
+		statics2.append("    public static void doStuff() {}\n");
+		statics2.append("}\n");
+		createCompilationUnit("statics", "Statics2", statics2.toString());
+
+		// Import the types and static members ambiguously via conflicting on-demand imports.
+		StringBuffer contents = new StringBuffer();
+		contents.append("package pack1;\n");
+		contents.append("\n");
+		contents.append("import static statics.Statics1.*;\n");
+		contents.append("import static statics.Statics2.*;\n");
+		contents.append("\n");
+		contents.append("import conflicting1.*;\n");
+		contents.append("import conflicting2.*;\n");
+		contents.append("\n");
+		contents.append("class Clazz {}");
+		ICompilationUnit cu = createCompilationUnit("pack1", "Clazz", contents.toString());
+
+		ImportRewrite imports = newImportsRewrite(cu, new String[0], 1, 1, true);
+		imports.setUseContextToFilterImplicitImports(true);
+		// Add imports that surface the ambiguity between the existing on-demand imports.
+		imports.addImport("conflicting1.A");
+		imports.addStaticImport("statics.Statics1", "doStuff", false);
+
+		apply(imports);
+
+		StringBuffer expected = new StringBuffer();
+		// Expect that explicit single imports are added to resolve the conflicts.
+		expected.append("package pack1;\n");
+		expected.append("\n");
+		expected.append("import static statics.Statics1.*;\n");
+		expected.append("import static statics.Statics1.doStuff;\n");
+		expected.append("import static statics.Statics2.*;\n");
+		expected.append("\n");
+		expected.append("import conflicting1.*;\n");
+		expected.append("import conflicting1.A;\n");
+		expected.append("import conflicting2.*;\n");
+		expected.append("\n");
+		expected.append("class Clazz {}");
+		assertEqualString(cu.getSource(), expected.toString());
+	}
+

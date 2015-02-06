@@ -1,0 +1,43 @@
+	/**
+	 * Expects that a conflict between a static on-demand import and a type on-demand import
+	 * is resolved with an explicit import of one of the conflicting member types.
+	 *
+	 * Inspired by https://bugs.eclipse.org/360789
+	 */
+	public void testOnDemandConflictBetweenTypeAndNestedStaticType() throws Exception {
+		ICompilationUnit cu = createCompilationUnit("pack1", "C");
+
+		IPackageFragment pack2 = this.sourceFolder.createPackageFragment("pack2", false, null);
+		StringBuffer containingType = new StringBuffer();
+		containingType.append("package pack2;\n");
+		containingType.append("public class ContainingType {\n");
+		containingType.append("    public static class TypeWithSameName {}\n");
+		containingType.append("    public static final int CONSTANT = 42;\n");
+		containingType.append("}\n");
+		pack2.createCompilationUnit("ContainingType.java", containingType.toString(), false, null);
+
+		IPackageFragment pack3 = this.sourceFolder.createPackageFragment("pack3", false, null);
+		StringBuffer typeWithSameName = new StringBuffer();
+		typeWithSameName.append("package pack3;\n");
+		typeWithSameName.append("public class TypeWithSameName {}\n");
+		pack3.createCompilationUnit("TypeWithSameName.java", typeWithSameName.toString(), false, null);
+
+		String[] order = new String[] {};
+
+		ImportRewrite imports = newImportsRewrite(cu, order, 1, 1, false);
+		imports.addStaticImport("pack2.ContainingType", "CONSTANT", true);
+		imports.addImport("pack3.TypeWithSameName");
+
+		apply(imports);
+
+		StringBuffer expected = new StringBuffer();
+		expected.append("package pack1;\n");
+		expected.append("\n");
+		expected.append("import static pack2.ContainingType.*;\n");
+		expected.append("\n");
+		expected.append("import pack3.TypeWithSameName;\n");
+		expected.append("\n");
+		expected.append("public class C {}");
+		assertEqualString(cu.getSource(), expected.toString());
+	}
+

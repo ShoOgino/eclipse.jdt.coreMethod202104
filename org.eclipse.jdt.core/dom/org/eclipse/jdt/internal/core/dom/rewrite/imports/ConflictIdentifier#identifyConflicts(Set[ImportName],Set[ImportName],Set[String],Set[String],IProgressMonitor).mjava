@@ -1,0 +1,55 @@
+	/**
+	 * Identifies the simple names (of the elements of {@code imports}) which would be imported from
+	 * multiple on-demand or implicit import containers.
+	 *
+	 * @param imports
+	 *            imports whose simple names are to be considered for conflicts
+	 * @param addedImports
+	 *            imports which have been added as part of the rewrite (and could therefore trigger
+	 *            on-demand reductions; a subset of {@code imports}
+	 * @param typeExplicitSimpleNames
+	 *            simple names of types which are already known to require explicit imports
+	 * @param staticExplicitSimpleNames
+	 *            simple names of statics which are already known to require explicit imports
+	 * @param progressMonitor
+	 *            a progress monitor used to track time spent searching for conflicts
+	 * @return a {@link Conflicts} object encapsulating the found conflicting type and static names
+	 * @throws JavaModelException if an error occurs while searching for declarations
+	 */
+	Conflicts identifyConflicts(
+			Set<ImportName> imports,
+			Set<ImportName> addedImports,
+			Set<String> typeExplicitSimpleNames,
+			Set<String> staticExplicitSimpleNames,
+			IProgressMonitor progressMonitor) throws JavaModelException {
+		Collection<OnDemandReduction> onDemandCandidates = this.onDemandComputer.identifyPossibleReductions(
+				imports, addedImports, typeExplicitSimpleNames, staticExplicitSimpleNames);
+
+		Set<String> typeOnDemandContainers = new HashSet<String>(extractContainerNames(onDemandCandidates, false));
+		Set<String> staticOnDemandContainers = new HashSet<String>(extractContainerNames(onDemandCandidates, true));
+
+		if (!typeOnDemandContainers.isEmpty()) {
+			// Existing on-demands might conflict with new or existing on-demands.
+			typeOnDemandContainers.addAll(extractOnDemandContainerNames(imports, false));
+
+			// Implicitly imported types might conflict with type on-demands.
+			typeOnDemandContainers.addAll(this.implicitImportContainers);
+
+			// Member types imported by static on-demands might conflict with type on-demands.
+			typeOnDemandContainers.addAll(staticOnDemandContainers);
+		}
+
+		if (!staticOnDemandContainers.isEmpty()) {
+			// Existing on-demands might conflict with new or existing on-demands.
+			staticOnDemandContainers.addAll(extractOnDemandContainerNames(imports, true));
+		}
+
+		Set<String> typeConflicts = findConflictingSimpleNames(
+				this.typeConflictFinder, imports, false, typeOnDemandContainers, progressMonitor);
+
+		Set<String> staticConflicts = findConflictingSimpleNames(
+				this.staticConflictFinder, imports, true, staticOnDemandContainers, progressMonitor);
+
+		return new Conflicts(typeConflicts, staticConflicts);
+	}
+

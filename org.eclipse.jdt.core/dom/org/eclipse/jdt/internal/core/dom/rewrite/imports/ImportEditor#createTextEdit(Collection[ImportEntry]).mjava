@@ -1,0 +1,66 @@
+	/**
+	 * Generates and returns a TextEdit to replace or update the import declarations in the
+	 * compilation unit to match the given list.
+	 * <p>
+	 * Standardizes whitespace between subsequent imports to the correct number of line delimiters
+	 * (either for every pair of subsequent imports, or only for pairs not originally subsequent,
+	 * depending on the value of {@link #fixAllLineDelimiters}).
+	 * <p>
+	 * Relocates leading and trailing comments of removed imports as determined by
+	 * {@link #commentReassigner}.
+	 */
+	TextEdit createTextEdit(Collection<ImportEntry> resultantImports) {
+		TextEdit edit = new MultiTextEdit();
+
+		IRegion surroundingRegion = this.rewriteSite.surroundingRegion;
+
+		if (resultantImports.isEmpty()) {
+			if (this.originalImportEntries.isEmpty()) {
+				// Leave the compilation unit as is.
+			}
+			else {
+				// Replace original imports and surrounding whitespace with enough line delimiters
+				// around preceding and/or succeeding elements.
+
+				String newWhitespace;
+				if (this.rewriteSite.hasPrecedingElements) {
+					int newDelims = this.rewriteSite.hasSucceedingElements ? 2 : 1;
+					newWhitespace = createDelimiter(newDelims);
+				} else {
+					newWhitespace = ""; //$NON-NLS-1$
+				}
+
+				edit.addChild(new ReplaceEdit(
+						surroundingRegion.getOffset(), surroundingRegion.getLength(), newWhitespace));
+			}
+		}
+		else {
+			if (this.originalImportEntries.isEmpty()) {
+				// Replace existing whitespace with preceding line delimiters, import declarations,
+				// and succeeding line delimiters.
+
+				Collection<TextEdit> importEdits = determineEditsForImports(
+						surroundingRegion, resultantImports);
+
+				if (this.rewriteSite.hasPrecedingElements) {
+					edit.addChild(new InsertEdit(surroundingRegion.getOffset(), createDelimiter(2)));
+				}
+
+				edit.addChildren(importEdits.toArray(new TextEdit[importEdits.size()]));
+
+				int newSucceedingDelims = this.rewriteSite.hasSucceedingElements ? 2 : 1;
+				String newSucceeding = createDelimiter(newSucceedingDelims);
+				edit.addChild(new InsertEdit(surroundingRegion.getOffset(), newSucceeding));
+			}
+			else {
+				// Replace original imports with new ones, leaving surrounding whitespace in place.
+
+				Collection<TextEdit> importEdits = determineEditsForImports(
+						this.rewriteSite.importsRegion, resultantImports);
+
+				edit.addChildren(importEdits.toArray(new TextEdit[importEdits.size()]));
+			}
+		}
+		return edit;
+	}
+

@@ -1,0 +1,85 @@
+	/**
+	 * Reads the positions of each existing import declaration along with any associated comments,
+	 * and returns these in a list whose iteration order reflects the existing order of the imports
+	 * in the compilation unit.
+	 */
+	private static List<OriginalImportEntry> readOriginalImports(CompilationUnit compilationUnit) {
+		List<ImportDeclaration> importDeclarations = compilationUnit.imports();
+
+		if (importDeclarations.isEmpty()) {
+			return Collections.emptyList();
+		}
+
+		List<Comment> comments = compilationUnit.getCommentList();
+
+		int currentCommentIndex = 0;
+
+		// Skip over package and file header comments (see https://bugs.eclipse.org/121428).
+		ImportDeclaration firstImport = importDeclarations.get(0);
+		PackageDeclaration packageDeclaration = compilationUnit.getPackage();
+		int firstImportStartPosition = packageDeclaration == null
+				? firstImport.getStartPosition()
+				: compilationUnit.getExtendedStartPosition(packageDeclaration)
+						+ compilationUnit.getExtendedLength(packageDeclaration);
+		while (currentCommentIndex < comments.size()
+				&& comments.get(currentCommentIndex).getStartPosition() < firstImportStartPosition) {
+			currentCommentIndex++;
+		}
+
+		List<OriginalImportEntry> imports = new ArrayList<OriginalImportEntry>(importDeclarations.size());
+		int previousExtendedEndPosition = -1;
+		for (ImportDeclaration currentImport : importDeclarations) {
+			int extendedEndPosition = compilationUnit.getExtendedStartPosition(currentImport)
+					+ compilationUnit.getExtendedLength(currentImport);
+
+			int commentAfterImportIndex = currentCommentIndex;
+			while (commentAfterImportIndex < comments.size()
+					&& comments.get(commentAfterImportIndex).getStartPosition() < extendedEndPosition) {
+				commentAfterImportIndex++;
+			}
+
+			List<ImportComment> importComments;
+			if (commentAfterImportIndex == currentCommentIndex) {
+				importComments = Collections.emptyList();
+			} else {
+				importComments = selectImportComments(
+						compilationUnit,
+						comments,
+						currentImport.getStartPosition(),
+						currentCommentIndex,
+						commentAfterImportIndex);
+			}
+
+			int importAndCommentsStartPosition = importComments.isEmpty()
+					? currentImport.getStartPosition()
+							: Math.min(currentImport.getStartPosition(), importComments.get(0).region.getOffset());
+
+			IRegion leadingWhitespaceRegion;
+			int precedingLineDelimiters;
+			if (previousExtendedEndPosition == -1) {
+				leadingWhitespaceRegion = new Region(importAndCommentsStartPosition, 0);
+				precedingLineDelimiters = 0;
+			} else {
+				leadingWhitespaceRegion = new Region(
+						previousExtendedEndPosition, importAndCommentsStartPosition - previousExtendedEndPosition);
+				int importAndCommentsFirstLine = compilationUnit.getLineNumber(importAndCommentsStartPosition);
+				int lastLineOfPrevious = compilationUnit.getLineNumber(previousExtendedEndPosition - 1);
+				precedingLineDelimiters = importAndCommentsFirstLine - lastLineOfPrevious;
+			}
+			IRegion importAndCommentsRegion =
+					new Region(importAndCommentsStartPosition, extendedEndPosition - importAndCommentsStartPosition);
+
+			imports.add(new OriginalImportEntry(
+					ImportName.createFor(currentImport),
+					importComments,
+					precedingLineDelimiters,
+					leadingWhitespaceRegion,
+					importAndCommentsRegion));
+
+			currentCommentIndex = commentAfterImportIndex;
+			previousExtendedEndPosition = extendedEndPosition;
+		}
+
+		return imports;
+	}
+

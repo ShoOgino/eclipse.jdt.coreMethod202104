@@ -1,0 +1,62 @@
+	/**
+	 * Determines whether and how to standardize the whitespace between the end of the previous
+	 * import (or its last trailing comment) and the start of the current import (or its first
+	 * leading comment).
+	 * <p>
+	 * Returns a string containing the correct whitespace to place between the two imports, or
+	 * {@code null} if the current import's original leading whitespace should be preserved.
+	 */
+	private String determineNewDelimiter(
+			ImportEntry lastImport,
+			ImportEntry currentImport,
+			Collection<ImportComment> reassignedComments) {
+		if (lastImport == null) {
+			// The first import in the compilation unit needs no preceding line delimiters.
+			return ""; //$NON-NLS-1$
+		}
+
+		boolean hasReassignedComments = !reassignedComments.isEmpty();
+
+		if (!needsStandardDelimiter(lastImport, currentImport, hasReassignedComments)) {
+			return null;
+		}
+
+		int numberOfLineDelimiters = 1;
+
+		Collection<ImportComment> leadingComments;
+		if (hasReassignedComments) {
+			leadingComments = reassignedComments;
+		} else if (currentImport.isOriginal()) {
+			leadingComments = currentImport.asOriginalImportEntry().comments;
+		} else {
+			leadingComments = Collections.emptyList();
+		}
+		if (containsFloatingComment(leadingComments)) {
+			// Prevent a floating leading comment from becoming attached to the preceding import.
+			numberOfLineDelimiters = 2;
+		}
+
+		if (this.importGroupComparator.compare(lastImport.importName, currentImport.importName) != 0) {
+			// Separate imports belonging to different import groups.
+			numberOfLineDelimiters = Math.max(numberOfLineDelimiters, this.lineDelimitersBetweenImportGroups);
+		}
+
+		String standardDelimiter = createDelimiter(numberOfLineDelimiters);
+
+		// Reuse the original preceding delimiter if it matches the standard delimiter, but only
+		// if there are no reassigned comments (which would necessitate relocating the delimiter).
+		if (currentImport.isOriginal() && !hasReassignedComments) {
+			OriginalImportEntry originalImport = currentImport.asOriginalImportEntry();
+			IRegion originalDelimiter = originalImport.leadingDelimiter;
+			if (originalImport.precedingLineDelimiters == numberOfLineDelimiters) {
+				boolean delimiterIsSameLength = originalDelimiter == null && standardDelimiter.isEmpty()
+						|| originalDelimiter != null && originalDelimiter.getLength() == standardDelimiter.length();
+				if (delimiterIsSameLength) {
+					return null;
+				}
+			}
+		}
+
+		return standardDelimiter;
+	}
+

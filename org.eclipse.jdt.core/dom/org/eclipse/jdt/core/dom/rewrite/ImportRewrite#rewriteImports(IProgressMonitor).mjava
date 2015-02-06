@@ -33,35 +33,37 @@
 				usedAstRoot= (CompilationUnit) parser.createAST(new SubProgressMonitor(monitor, 1));
 			}
 
+			ImportRewriteConfiguration config= buildImportRewriteConfiguration();
+
 			ImportRewriteAnalyzer computer=
-				new ImportRewriteAnalyzer(
-						this.compilationUnit,
-						usedAstRoot,
-						this.importOrder,
-						this.importOnDemandThreshold,
-						this.staticImportOnDemandThreshold,
-						this.restoreExistingImports,
-						this.useContextToFilterImplicitImports);
-			computer.setFilterImplicitImports(this.filterImplicitImports);
+				new ImportRewriteAnalyzer(this.compilationUnit, usedAstRoot, config);
 
-			if (this.addedImports != null) {
-				for (int i= 0; i < this.addedImports.size(); i++) {
-					String curr= (String) this.addedImports.get(i);
-					computer.addImport(curr.substring(1), STATIC_PREFIX == curr.charAt(0), usedAstRoot, this.restoreExistingImports);
-				}
+			for (String addedImport : this.addedImports) {
+				boolean isStatic = STATIC_PREFIX == addedImport.charAt(0);
+				String qualifiedName = addedImport.substring(1);
+				computer.addImport(isStatic, qualifiedName);
 			}
 
-			if (this.removedImports != null) {
-				for (int i= 0; i < this.removedImports.size(); i++) {
-					String curr= (String) this.removedImports.get(i);
-					computer.removeImport(curr.substring(1), STATIC_PREFIX == curr.charAt(0));
-				}
+			for (String removedImport : this.removedImports) {
+				boolean isStatic = STATIC_PREFIX == removedImport.charAt(0);
+				String qualifiedName = removedImport.substring(1);
+				computer.removeImport(isStatic, qualifiedName);
 			}
 
-			TextEdit result= computer.getResultingEdits(new SubProgressMonitor(monitor, 1));
-			this.createdImports= computer.getCreatedImports();
-			this.createdStaticImports= computer.getCreatedStaticImports();
-			return result;
+			for (String typeExplicitSimpleName : this.typeExplicitSimpleNames) {
+				computer.requireExplicitImport(false, typeExplicitSimpleName);
+			}
+
+			for (String staticExplicitSimpleName : this.staticExplicitSimpleNames) {
+				computer.requireExplicitImport(true, staticExplicitSimpleName);
+			}
+
+			ImportRewriteAnalyzer.RewriteResult result= computer.analyzeRewrite(new SubProgressMonitor(monitor, 1));
+
+			this.createdImports= result.getCreatedImports();
+			this.createdStaticImports= result.getCreatedStaticImports();
+
+			return result.getTextEdit();
 		} finally {
 			monitor.done();
 		}

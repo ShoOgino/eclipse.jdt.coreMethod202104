@@ -1,0 +1,67 @@
+	public ImportRewriteAnalyzer(
+			ICompilationUnit cu,
+			CompilationUnit astRoot,
+			ImportRewriteConfiguration configuration) throws JavaModelException {
+		this.originalImportEntries = Collections.unmodifiableList(readOriginalImports(astRoot));
+
+		List<ImportName> importsList = new ArrayList<ImportName>(this.originalImportEntries.size());
+		Set<ImportName> importsSet = new HashSet<ImportName>();
+		for (ImportEntry originalImportEntry : this.originalImportEntries) {
+			ImportName importName = originalImportEntry.importName;
+			importsList.add(importName);
+			importsSet.add(importName);
+		}
+		this.originalImportsList = Collections.unmodifiableList(importsList);
+		this.originalImportsSet = Collections.unmodifiableSet(importsSet);
+
+		this.importsToAdd = new LinkedHashSet<ImportName>();
+
+		this.importsToRemove = new LinkedHashSet<ImportName>();
+		if (configuration.originalImportHandling.shouldRemoveOriginalImports()) {
+			this.importsToRemove.addAll(importsSet);
+			this.reportAllResultantImportsAsCreated = true;
+		} else {
+			this.reportAllResultantImportsAsCreated = false;
+		}
+
+		this.typeExplicitSimpleNames = new HashSet<String>();
+		this.staticExplicitSimpleNames = new HashSet<String>();
+
+		ImportGroupComparator importGroupComparator = new ImportGroupComparator(configuration.importOrder);
+
+		JavaProject javaProject = (JavaProject) cu.getJavaProject();
+
+		this.importAdder = configuration.originalImportHandling.createImportAdder(new ImportComparator(
+				importGroupComparator,
+				configuration.typeContainerSorting.createContainerComparator(javaProject),
+				configuration.staticContainerSorting.createContainerComparator(javaProject)));
+
+		this.implicitImportContainerNames =
+				configuration.implicitImportIdentification.determineImplicitImportContainers(cu);
+
+		this.onDemandComputer = new OnDemandComputer(
+				configuration.typeOnDemandThreshold,
+				configuration.staticOnDemandThreshold);
+
+		this.conflictIdentifier = new ConflictIdentifier(
+				this.onDemandComputer,
+				new TypeConflictingSimpleNameFinder(javaProject, new SearchEngine()),
+				new StaticConflictingSimpleNameFinder(javaProject),
+				this.implicitImportContainerNames);
+
+		this.importsByNameIdentity = mapImportsByNameIdentity(this.originalImportEntries);
+
+		this.importDeclarationWriter = new ImportDeclarationWriter(shouldInsertSpaceBeforeSemicolon(javaProject));
+
+		this.lineDelimiter = cu.findRecommendedLineSeparator();
+
+		this.importEditor = new ImportEditor(
+				this.lineDelimiter,
+				configuration.originalImportHandling.shouldFixAllLineDelimiters(),
+				getBlankLinesBetweenImportGroups(javaProject) + 1,
+				importGroupComparator,
+				this.originalImportEntries,
+				determineRewriteSite(astRoot, this.originalImportEntries),
+				this.importDeclarationWriter);
+	}
+

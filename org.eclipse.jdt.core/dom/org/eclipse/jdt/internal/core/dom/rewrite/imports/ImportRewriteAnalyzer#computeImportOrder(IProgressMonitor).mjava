@@ -1,0 +1,39 @@
+	private List<ImportName> computeImportOrder(IProgressMonitor progressMonitor) throws JavaModelException {
+		Set<ImportName> importsWithAdditionsAndRemovals = new HashSet<ImportName>(this.originalImportsSet);
+		importsWithAdditionsAndRemovals.addAll(this.importsToAdd);
+		importsWithAdditionsAndRemovals.removeAll(this.importsToRemove);
+
+		Set<ImportName> touchedContainers = determineTouchedContainers();
+
+		Conflicts conflicts = this.conflictIdentifier.identifyConflicts(
+				importsWithAdditionsAndRemovals,
+				touchedContainers,
+				this.typeExplicitSimpleNames,
+				this.staticExplicitSimpleNames,
+				progressMonitor);
+
+		Set<String> allTypeExplicitSimpleNames = new HashSet<String>(this.typeExplicitSimpleNames);
+		allTypeExplicitSimpleNames.addAll(conflicts.typeConflicts);
+
+		Set<String> allStaticExplicitSimpleNames = new HashSet<String>(this.staticExplicitSimpleNames);
+		allStaticExplicitSimpleNames.addAll(conflicts.staticConflicts);
+
+		Set<ImportName> implicitImports = identifyImplicitImports(this.importsToAdd, allTypeExplicitSimpleNames);
+		List<ImportName> importsWithoutImplicits =
+				subtractImports(importsWithAdditionsAndRemovals, implicitImports);
+
+		Collection<OnDemandReduction> onDemandReductions = this.onDemandComputer.identifyPossibleReductions(
+				new HashSet<ImportName>(importsWithoutImplicits),
+				touchedContainers,
+				allTypeExplicitSimpleNames,
+				allStaticExplicitSimpleNames);
+
+		ImportsDelta delta = computeDelta(implicitImports, onDemandReductions);
+
+		List<ImportName> importsWithRemovals = subtractImports(this.originalImportsList, delta.importsToRemove);
+
+		List<ImportName> importsWithAdditions = this.importAdder.addImports(importsWithRemovals, delta.importsToAdd);
+
+		return importsWithAdditions;
+	}
+
