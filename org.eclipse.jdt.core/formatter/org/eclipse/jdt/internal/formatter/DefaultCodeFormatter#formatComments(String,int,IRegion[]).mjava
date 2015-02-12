@@ -1,0 +1,68 @@
+	private TextEdit formatComments(String source, int kind, IRegion[] regions) {
+		MultiTextEdit result = new MultiTextEdit();
+		if (!init(source))
+			return result;
+
+		CommentsPreparator commentsPreparator = new CommentsPreparator(this.tokenManager, this.workingOptions,
+				this.sourceLevel);
+		CommentWrapExecutor commentWrapper = new CommentWrapExecutor(this.tokenManager, this.workingOptions);
+		switch (kind) {
+			case K_JAVA_DOC:
+				ASTParser parser = ASTParser.newParser(AST.JLS8);
+				for (Token token : this.tokens) {
+					if (token.tokenType == TokenNameCOMMENT_JAVADOC) {
+						parser.setSourceRange(token.originalStart, token.countChars());
+						CompilationUnit cu = (CompilationUnit) parseSourceCode(parser, ASTParser.K_COMPILATION_UNIT,
+								true);
+						Javadoc javadoc = (Javadoc) cu.getCommentList().get(0);
+						javadoc.accept(commentsPreparator);
+						int startPosition = this.tokenManager.findSourcePositionInLine(token.originalStart);
+						commentWrapper.wrapMultiLineComment(token, startPosition, false, false);
+					}
+				}
+				break;
+			case K_MULTI_LINE_COMMENT:
+				for (int i = 0; i < this.tokens.size(); i++) {
+					Token token = this.tokens.get(i);
+					if (token.tokenType == TokenNameCOMMENT_BLOCK) {
+						commentsPreparator.handleBlockComment(i);
+						int startPosition = this.tokenManager.findSourcePositionInLine(token.originalStart);
+						commentWrapper.wrapMultiLineComment(token, startPosition, false, false);
+					}
+				}
+				break;
+			case K_SINGLE_LINE_COMMENT:
+				for (int i = 0; i < this.tokens.size(); i++) {
+					Token token = this.tokens.get(i);
+					if (token.tokenType == TokenNameCOMMENT_LINE) {
+						commentsPreparator.handleLineComment(i);
+						if (i >= this.tokens.size() || this.tokens.get(i) != token) {
+							// current token has been removed and merged with previous one
+							i--;
+							token = this.tokens.get(i);
+						}
+						int startPosition = this.tokenManager.findSourcePositionInLine(token.originalStart);
+						commentWrapper.wrapLineComment(token, startPosition);
+					}
+				}
+				break;
+			default:
+				throw new AssertionError(String.valueOf(kind));
+		}
+
+		this.tokenManager.applyFormatOff();
+
+		TextEditsBuilder resultBuilder = new TextEditsBuilder(source, regions, this.tokenManager, this.workingOptions);
+		resultBuilder.setAlignChar(DefaultCodeFormatterOptions.SPACE);
+		for (Token token : this.tokens) {
+			List<Token> structure = token.getInternalStructure();
+			if (structure != null && !structure.isEmpty())
+				resultBuilder.processComment(token);
+		}
+
+		for (TextEdit edit : resultBuilder.getEdits()) {
+			result.addChild(edit);
+		}
+		return result;
+	}
+

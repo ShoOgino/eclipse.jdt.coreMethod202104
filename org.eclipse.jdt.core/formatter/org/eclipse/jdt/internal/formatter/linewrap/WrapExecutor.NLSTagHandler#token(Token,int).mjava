@@ -1,0 +1,83 @@
+		@Override
+		protected boolean token(final Token token, final int index) {
+			if (token.hasNLSTag())
+				this.nlsTags.add(token.getNLSTag());
+
+			if (getLineBreaksAfter() > 0 || getNext() == null) {
+				// make sure there's a line comment with all necessary NLS tags
+				Token lineComment = token;
+				if (token.tokenType != TokenNameCOMMENT_LINE) {
+					if (this.nlsTags.isEmpty())
+						return true;
+					lineComment = new Token(token.originalEnd + 1, token.originalEnd + 1, TokenNameCOMMENT_LINE);
+					lineComment.breakAfter();
+					lineComment.spaceBefore();
+					lineComment.setAlign(WrapExecutor.this.tm.getNLSAlign(index));
+					lineComment.setInternalStructure(new ArrayList<Token>());
+					WrapExecutor.this.tm.insert(index + 1, lineComment);
+					structureChanged();
+					return true; // will fill the line comment structure in next step
+				}
+
+				List<Token> structure = lineComment.getInternalStructure();
+				if (structure == null) {
+					if (this.nlsTags.isEmpty())
+						return true;
+					structure = new ArrayList<Token>();
+					structure.add(lineComment);
+					lineComment.setInternalStructure(structure);
+				}
+
+				boolean isPrefixMissing = false;
+				for (int i = 0; i < structure.size(); i++) {
+					Token fragment = structure.get(i);
+					// remove NLS tags that are not associated with this line
+					// (these have been added on wrapped lines earlier)
+					if (fragment.hasNLSTag()) {
+						if (!this.nlsTags.remove(fragment)) {
+							if (i == 0)
+								isPrefixMissing = true;
+							structure.remove(i--);
+						} else {
+							isPrefixMissing = false;
+						}
+					} else if (isPrefixMissing) {
+						// remove trailing whitespace
+						int pos = fragment.originalStart;
+						while (pos <= fragment.originalEnd
+								&& ScannerHelper.isWhitespace(WrapExecutor.this.tm.charAt(pos)))
+							pos++;
+						if (pos > fragment.originalEnd) {
+							structure.remove(i--);
+							continue;
+						}
+						if (pos > fragment.originalStart) {
+							fragment = new Token(pos, fragment.originalEnd, TokenNameCOMMENT_LINE);
+							structure.set(i, fragment);
+						}
+
+						String fragmentString = WrapExecutor.this.tm.toString(fragment);
+						if (!fragmentString.startsWith("//")) { //$NON-NLS-1$
+							// forge a prefix
+							Token prefix = new Token(lineComment.originalStart, lineComment.originalStart + 1,
+									TokenNameCOMMENT_LINE);
+							prefix.spaceBefore();
+							structure.add(i, prefix);
+						}
+						isPrefixMissing = false;
+					}
+				}
+				// add all remaining tags in this line
+				// (these are currently in a future line comment but will be removed)
+				structure.addAll(this.nlsTags);
+
+				if (structure.isEmpty()) { // all the tags have been moved to other lines
+					WrapExecutor.this.tm.remove(index);
+					structureChanged();
+				}
+
+				this.nlsTags.clear();
+			}
+			return true;
+		}
+

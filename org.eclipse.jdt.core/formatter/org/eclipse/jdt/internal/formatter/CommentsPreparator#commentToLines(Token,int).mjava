@@ -1,0 +1,67 @@
+	private List<Token> commentToLines(Token commentToken, int commentStartPositionInLine) {
+		List<Token> lines = new ArrayList<Token>();
+
+		int tab = this.options.tab_size;
+		String commentText = this.tm.toString(commentToken);
+		int commentStartPosition = commentStartPositionInLine;
+		if (commentStartPosition < 0)
+			commentStartPosition = this.tm.findSourcePositionInLine(commentToken.originalStart);
+		int positionInLine = commentStartPosition;
+		int lineStart = 0;
+		int breaksBeforeFirstLine = 0;
+		boolean firstLine = true; // all lines except first will be NotAToken to disable asterisk adding
+		boolean emptyLine = true;
+
+		for (int i = 0; i < commentText.length(); i++) {
+			char c = commentText.charAt(i);
+			switch (c) {
+				case ' ':
+					if ((lineStart == i && positionInLine < commentStartPosition)
+							|| (emptyLine && positionInLine == commentToken.getIndent() - 1))
+						lineStart = i + 1;
+					positionInLine++;
+					break;
+				case '\t':
+					if ((lineStart == i && positionInLine < commentStartPosition)
+							|| (emptyLine && positionInLine == commentToken.getIndent() - 1))
+						lineStart = i + 1;
+					if (tab > 0)
+						positionInLine += tab - positionInLine % tab;
+					break;
+				case '\r':
+				case '\n':
+					if (lineStart < i) {
+						Token line = new Token(commentToken.originalStart + lineStart,
+								commentToken.originalStart + i - 1,
+								firstLine ? commentToken.tokenType : TokenNameNotAToken);
+						line.breakAfter();
+						if (lines.isEmpty())
+							line.putLineBreaksBefore(breaksBeforeFirstLine);
+						lines.add(line);
+					} else if (!lines.isEmpty()) {
+						Token previousLine = lines.get(lines.size() - 1);
+						previousLine.putLineBreaksAfter(previousLine.getLineBreaksAfter() + 1);
+					} else {
+						breaksBeforeFirstLine++;
+					}
+					if (i + 1 < commentText.length() && commentText.charAt(i + 1) == (c == '\r' ? '\n' : '\r'))
+						i++;
+					lineStart = i + 1;
+					positionInLine = 0;
+					firstLine = false;
+					emptyLine = true;
+					break;
+				default:
+					positionInLine++;
+					emptyLine = false;
+			}
+		}
+		if (lineStart < commentText.length()) {
+			Token line = new Token(commentToken.originalStart + lineStart, commentToken.originalEnd,
+					firstLine ? commentToken.tokenType : TokenNameNotAToken);
+			line.setWrapPolicy(WrapPolicy.DISABLE_WRAP);
+			lines.add(line);
+		}
+		return lines;
+	}
+

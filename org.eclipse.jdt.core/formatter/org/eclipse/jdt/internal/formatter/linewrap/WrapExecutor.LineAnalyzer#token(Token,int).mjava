@@ -1,0 +1,45 @@
+		@Override
+		protected boolean token(Token token, int index) {
+			if (token.tokenType == TokenNameCOMMENT_LINE)
+				return false;
+
+			if (token.hasNLSTag())
+				this.isNLSTagInLine = true;
+
+			if (token.isWrappable()) {
+				WrapPolicy wrapPolicy = token.getWrapPolicy();
+				if (wrapPolicy.isTopPriority() && getLineBreaksBefore() == 0
+						&& index > this.currentTopPriorityGroupEnd) {
+					this.topPriorityGroupStarts.add(index);
+					this.currentTopPriorityGroupEnd = wrapPolicy.topPriorityGroupEnd;
+				}
+				if (this.firstPotentialWrap < 0 && getWrapIndent(token) < this.counter)
+					this.firstPotentialWrap = index;
+			}
+
+			if (token.getAlign() > 0) {
+				this.counter = token.getAlign();
+			} else if (isSpaceBefore() && getLineBreaksBefore() == 0 && index > 0) {
+				this.counter++;
+			}
+
+			if (token.isComment()) {
+				this.counter = this.commentWrapper.wrapMultiLineComment(token, this.counter, true, this.isNLSTagInLine);
+				this.extraLines += this.commentWrapper.getLinesCount() - 1;
+				this.extraLinesPerComment.add(this.commentWrapper.getLinesCount() - 1);
+			} else {
+				this.counter += WrapExecutor.this.tm.getLength(token, this.counter);
+			}
+
+			this.lineExceeded = this.counter > WrapExecutor.this.options.page_width;
+			if (this.lineExceeded && this.firstPotentialWrap >= 0) {
+				return false;
+			}
+			if (!token.isNextLineOnWrap())
+				token.setIndent(this.lineIndent);
+
+			boolean isLineEnd = getLineBreaksAfter() > 0 || getNext() == null;
+			assert !(token.isNextLineOnWrap() && !isLineEnd);
+			return !isLineEnd;
+		}
+
