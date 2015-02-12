@@ -1,0 +1,32 @@
+private void setupExternalAnnotationProvider(IProject project, final IPath externalAnnotationPath,
+		ZipFile annotationZip, ClassFileReader reader, final String typeName)
+{
+	// try resolve path within the workspace:
+	IWorkspaceRoot root = project.getWorkspace().getRoot();
+	IResource resource = root.getFolder(externalAnnotationPath);
+	if (!resource.exists())
+		resource = root.getFile(externalAnnotationPath);
+	String resolvedPath = resource.exists()
+							? resource.getLocation().toString() // workspace lookup succeeded -> resolve it
+							: externalAnnotationPath.toString(); // not in workspace, use as is
+	try {
+		annotationZip = reader.setExternalAnnotationProvider(resolvedPath, typeName, annotationZip, new ClassFileReader.ZipFileProducer() {
+			@Override public ZipFile produce() throws IOException {
+				try {
+					return JavaModelManager.getJavaModelManager().getZipFile(externalAnnotationPath); // use (absolute, but) unresolved path here
+				} catch (CoreException e) {
+					throw new IOException("Failed to read annotation file for "+typeName+" from "+externalAnnotationPath.toString(), e); //$NON-NLS-1$ //$NON-NLS-2$
+				}
+			}});
+	} catch (IOException e) {
+		Util.log(e);
+		return;
+	}
+	if (annotationZip == null) {
+		// Additional change listening for individual types only when annotations are in individual files.
+		// Note that we also listen for classes that don't yet have an annotation file, to detect its creation
+		this.externalAnnotationBase = externalAnnotationPath; // remember so we can unregister later
+		ExternalAnnotationTracker.registerClassFile(externalAnnotationPath, new Path(typeName), this);
+	}
+}
+

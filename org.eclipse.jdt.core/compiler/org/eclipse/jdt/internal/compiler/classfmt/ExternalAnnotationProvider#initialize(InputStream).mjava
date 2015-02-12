@@ -1,0 +1,75 @@
+	private void initialize(InputStream input) throws IOException {
+		LineNumberReader reader = new LineNumberReader(new InputStreamReader(input));
+		try {
+			String line = reader.readLine().trim();
+			if (line.startsWith(CLASS_PREFIX)) {
+				line = line.substring(CLASS_PREFIX.length());
+			} else {
+				throw new IOException("missing class header in annotation file"); //$NON-NLS-1$
+			}
+			if (!trimTail(line).equals(this.typeName)) {
+				throw new IOException("mismatching class name in annotation file, expected "+this.typeName+", but header said "+line); //$NON-NLS-1$ //$NON-NLS-2$
+			}
+			if ((line = reader.readLine()) == null) {
+				return;
+			}
+			if (line.startsWith(TYPE_PARAMETER_PREFIX)) {
+				if ((line = reader.readLine()) == null) // skip first line, second line may contain type parameter annotations
+					return;
+				if (line.startsWith(TYPE_PARAMETER_PREFIX)) {
+					this.typeParametersAnnotationSource = line.substring(TYPE_PARAMETER_PREFIX.length());
+					if ((line = reader.readLine()) == null)
+						return;
+				} 
+			}
+			do {
+				line = line.trim();
+				if (line.isEmpty()) continue;
+				String rawSig = null, annotSig = null;
+				// selector:
+				String selector = line;
+				boolean isSuper = selector.startsWith(SUPER_PREFIX);
+				if (isSuper)
+					selector = selector.substring(SUPER_PREFIX.length());
+				int errLine = -1;
+				try {
+					// raw signature:
+					line = reader.readLine();
+					if (line != null && !line.isEmpty() && line.charAt(0) == ' ') // first signature line is mandatory
+						rawSig = line.substring(1);
+					else
+						errLine = reader.getLineNumber();
+					// annotated signature:
+					line = reader.readLine();
+					if (line == null || line.isEmpty())
+						continue; // skip since optional line with annotations is missing
+					if (line.charAt(0) == ' ')
+						annotSig = line.substring(1);
+				} catch (Exception ex) {
+					// continue to escalate below
+				}
+				if (rawSig == null || annotSig == null) {
+					if (errLine == -1) errLine = reader.getLineNumber();
+					throw new IOException("Illegal format for annotation file at line "+errLine); //$NON-NLS-1$
+				}
+				// discard optional meta data (separated by whitespace):
+				annotSig = trimTail(annotSig);
+				if (isSuper) {
+					if (this.supertypeAnnotationSources == null)
+						this.supertypeAnnotationSources = new HashMap<String, String>();
+					this.supertypeAnnotationSources.put('L'+selector+rawSig+';', annotSig);
+				} else if (rawSig.contains("(")) { //$NON-NLS-1$
+					if (this.methodAnnotationSources == null)
+						this.methodAnnotationSources = new HashMap<String, String>();
+					this.methodAnnotationSources.put(selector+rawSig, annotSig);
+				} else {
+					if (this.fieldAnnotationSources == null)
+						this.fieldAnnotationSources = new HashMap<String, String>();
+					this.fieldAnnotationSources.put(selector+':'+rawSig, annotSig);
+				}
+			} while ((line = reader.readLine()) != null);
+		} finally {
+			reader.close();
+		}
+	}
+

@@ -1,6 +1,7 @@
 private IBinaryType getJarBinaryTypeInfo(PackageFragment pkg, boolean fullyInitialize) throws CoreException, IOException, ClassFormatException {
 	JarPackageFragmentRoot root = (JarPackageFragmentRoot) pkg.getParent();
 	ZipFile zip = null;
+	ZipFile annotationZip = null;
 	try {
 		zip = root.getJar();
 		String entryName = Util.concatWith(pkg.names, getElementName(), '/');
@@ -8,10 +9,23 @@ private IBinaryType getJarBinaryTypeInfo(PackageFragment pkg, boolean fullyIniti
 		if (ze != null) {
 			byte contents[] = org.eclipse.jdt.internal.compiler.util.Util.getZipEntryByteContent(ze, zip);
 			String fileName = root.getHandleIdentifier() + IDependent.JAR_FILE_ENTRY_SEPARATOR + entryName;
-			return new ClassFileReader(contents, fileName.toCharArray(), fullyInitialize);
+			ClassFileReader reader = new ClassFileReader(contents, fileName.toCharArray(), fullyInitialize);
+			if (root.getKind() == IPackageFragmentRoot.K_BINARY) {
+				JavaProject javaProject = (JavaProject) getAncestor(IJavaElement.JAVA_PROJECT);
+				IClasspathEntry entry = javaProject.getClasspathEntryFor(getPath());
+				if (entry != null) {
+					IProject project = javaProject.getProject();
+					IPath externalAnnotationPath = ClasspathEntry.getExternalAnnotationPath(entry, project, false);
+					if (externalAnnotationPath != null)
+						setupExternalAnnotationProvider(project, externalAnnotationPath, annotationZip, reader, 
+								entryName.substring(0, entryName.length() - SuffixConstants.SUFFIX_CLASS.length));
+				}
+			} 
+			return reader;
 		}
 	} finally {
 		JavaModelManager.getJavaModelManager().closeZipFile(zip);
+		JavaModelManager.getJavaModelManager().closeZipFile(annotationZip);
 	}
 	return null;
 }

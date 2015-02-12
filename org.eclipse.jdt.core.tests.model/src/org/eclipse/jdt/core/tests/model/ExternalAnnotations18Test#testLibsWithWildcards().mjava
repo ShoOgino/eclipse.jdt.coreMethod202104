@@ -1,0 +1,70 @@
+	public void testLibsWithWildcards() throws Exception {
+		myCreateJavaProject("TestLibs");
+		addLibraryWithExternalAnnotations(this.project, "lib1.jar", "annots", new String[] {
+				"/UnannotatedLib/libs/Lib1.java",
+				"package libs;\n" + 
+				"\n" + 
+				"import java.util.Collection;\n" + 
+				"import java.util.Iterator;\n" + 
+				"\n" + 
+				"public interface Lib1 {\n" + 
+				"	Iterator<?> unconstrainedWildcard1(Collection<?> in);\n" + 
+				"	Iterator<?> unconstrainedWildcard2(Collection<?> in);\n" + 
+				"	Iterator<? extends CharSequence> constrainedWildcard1(Collection<? extends CharSequence> in);\n" + 
+				"	Iterator<? super CharSequence> constrainedWildcard2(Collection<? super CharSequence> in);\n" + 
+				"}\n"
+			}, null);
+		// annotations directly on a wildcard (*, +, -)
+		createFileInProject("annots/libs", "Lib1.eea",
+				"class libs/Lib1\n" + 
+				"\n" + 
+				"unconstrainedWildcard1\n" + 
+				" (Ljava/util/Collection<*>;)Ljava/util/Iterator<*>;\n" + 
+				" (Ljava/util/Collection<*>;)Ljava/util/Iterator<*1>;\n" +
+				"\n" + 
+				"unconstrainedWildcard2\n" + 
+				" (Ljava/util/Collection<*>;)Ljava/util/Iterator<*>;\n" + 
+				" (Ljava/util/Collection<*>;)Ljava/util/Iterator<*0>;\n" + 
+				"\n" + 
+				"constrainedWildcard1\n" + 
+				" (Ljava/util/Collection<+Ljava/lang/CharSequence;>;)Ljava/util/Iterator<+Ljava/lang/CharSequence;>;\n" + 
+				" (Ljava/util/Collection<+Ljava/lang/CharSequence;>;)Ljava/util/Iterator<+0Ljava/lang/CharSequence;>;\n" + 
+				"\n" + 
+				"constrainedWildcard2\n" + 
+				" (Ljava/util/Collection<-Ljava/lang/CharSequence;>;)Ljava/util/Iterator<-Ljava/lang/CharSequence;>;\n" + 
+				" (Ljava/util/Collection<-Ljava/lang/CharSequence;>;)Ljava/util/Iterator<-0Ljava/lang/CharSequence;>;\n" + 
+				"\n" + 
+				"\n");
+		IPackageFragment fragment = this.project.getPackageFragmentRoots()[0].createPackageFragment("tests", true, null);
+		ICompilationUnit unit = fragment.createCompilationUnit("Test1.java", 
+				"package tests;\n" + 
+				"import org.eclipse.jdt.annotation.*;\n" + 
+				"\n" + 
+				"import java.util.Collection;\n" + 
+				"\n" + 
+				"import libs.Lib1;\n" + 
+				"\n" + 
+				"public class Test1 {\n" + 
+				"	@NonNull Object test1(Lib1 lib, Collection<@Nullable String> coll) {\n" + 
+				"		 return lib.unconstrainedWildcard1(coll).next();\n" + // OK
+				"	}\n" + 
+				"	@NonNull Object test2(Lib1 lib, Collection<@Nullable String> coll) {\n" + 
+				"		 return lib.unconstrainedWildcard2(coll).next();\n" + // return is nullable -> error
+				"	}\n" + 
+				"	@NonNull CharSequence test3(Lib1 lib, Collection<@Nullable String> coll) {\n" + 
+				"		 return lib.constrainedWildcard1(coll).next();\n" + // '@Nullable ? extends CharSequence' -> error
+				"	}\n" + 
+				"	@NonNull Object test4(Lib1 lib, Collection<@Nullable CharSequence> coll) {\n" + 
+				"		 return lib.constrainedWildcard2(coll).next();\n" + // return is '@Nullable ? super CharSequence' -> error
+				"	}\n" + 
+				"}\n",
+				true, new NullProgressMonitor()).getWorkingCopy(new NullProgressMonitor());
+		CompilationUnit reconciled = unit.reconcile(AST.JLS8, true, null, new NullProgressMonitor());
+		IProblem[] problems = reconciled.getProblems();
+		assertProblems(problems, new String[] {
+				"Pb(953) Null type mismatch (type annotations): required '@NonNull Object' but this expression has type '@Nullable capture#of ?'",
+				"Pb(953) Null type mismatch (type annotations): required '@NonNull CharSequence' but this expression has type '@Nullable capture#of ? extends CharSequence'",
+				"Pb(953) Null type mismatch (type annotations): required '@NonNull Object' but this expression has type '@Nullable capture#of ? super CharSequence'"
+			}, new int[] { 13, 16, 19 });
+	}
+

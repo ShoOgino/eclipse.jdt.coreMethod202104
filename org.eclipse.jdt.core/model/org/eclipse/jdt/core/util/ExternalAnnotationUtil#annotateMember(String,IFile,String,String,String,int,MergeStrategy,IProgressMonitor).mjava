@@ -1,0 +1,100 @@
+	static void annotateMember(String typeName, IFile file, String selector, String originalSignature, String annotatedSignature,
+										int updatePosition, MergeStrategy mergeStrategy, IProgressMonitor monitor)
+			throws CoreException, IOException
+	{
+
+		if (!file.exists()) {
+			StringBuffer newContent= new StringBuffer();
+			// header:
+			newContent.append(ExternalAnnotationProvider.CLASS_PREFIX);
+			newContent.append(typeName).append('\n');
+			// new entry:
+			newContent.append(selector).append('\n');
+			newContent.append(' ').append(originalSignature).append('\n');
+			newContent.append(' ').append(annotatedSignature).append('\n');
+
+			createNewFile(file, newContent.toString(), monitor);
+		} else {
+			BufferedReader reader = new BufferedReader(new InputStreamReader(file.getContents()));
+			StringBuffer newContent = new StringBuffer();
+			try {
+				newContent.append(reader.readLine()).append('\n'); // skip class name
+				String line;
+				while ((line = reader.readLine()) != null) {
+					if (line.isEmpty()) {
+						newContent.append('\n');
+						continue;
+					}
+					if (!Character.isJavaIdentifierStart(line.charAt(0))) {
+						newContent.append(line).append('\n');
+						continue;
+					}
+					// compare selectors:
+					int relation = line.compareTo(selector);
+					if (relation > 0) { // past the insertion point
+						break;
+					}
+					if (relation < 0) {
+						newContent.append(line).append('\n');
+						continue;
+					}
+					if (relation == 0) {
+						StringBuffer pending = new StringBuffer(line).append('\n');
+						pending.append(line = reader.readLine());
+						// compare original signatures:
+						relation = line.trim().compareTo(originalSignature);
+						if (relation > 0) { // past the insertion point
+							// add new entry (below)
+							line = pending.toString(); // push back
+							break;
+						}
+						newContent.append(pending).append('\n');
+						if (relation < 0)
+							continue;
+						if (relation == 0) {
+							// update existing entry:
+							String nextLine = reader.readLine();
+							if (nextLine == null)
+								nextLine = line; // no annotated line yet, use unannotated line instead
+							if (nextLine.startsWith(" ")) { //$NON-NLS-1$
+								switch (mergeStrategy) {
+									case REPLACE_SIGNATURE:
+										break; // unconditionally use annotatedSignature
+									case OVERWRITE_ANNOTATIONS:
+									case ADD_ANNOTATIONS:
+										if (updatePosition == POSITION_FULL_SIGNATURE) {
+											annotatedSignature = addAnnotationsTo(annotatedSignature, nextLine.trim(), mergeStrategy);
+										} else if (updatePosition == POSITION_RETURN_TYPE) {
+											annotatedSignature = updateMethodReturnType(annotatedSignature, nextLine.trim(), mergeStrategy);
+										} else {
+											// parameter i
+										}
+										break;
+									default:
+										JavaCore.getJavaCore().getLog().log(new Status(IStatus.ERROR, JavaCore.PLUGIN_ID,
+																				"Unexpected value for enum MergeStrategy")); //$NON-NLS-1$
+								}
+								nextLine = null; // discard old annotated signature (may have been merged above)
+							}
+							writeFile(file, newContent, annotatedSignature, nextLine, reader, monitor);
+							return;
+						}
+					}
+				}
+				// add new entry:
+				newContent.append(selector).append('\n');
+				newContent.append(' ').append(originalSignature).append('\n');
+				if (updatePosition == POSITION_FULL_SIGNATURE) {
+					// annotatedSignature is already complete
+				} else if (updatePosition == POSITION_RETURN_TYPE) {
+					annotatedSignature = updateMethodReturnType(annotatedSignature, originalSignature, mergeStrategy);
+				} else {
+					// parameter i
+				}
+				writeFile(file, newContent, annotatedSignature, line, reader, monitor);
+			} finally {
+				reader.close();
+			}
+		}
+	}
+

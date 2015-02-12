@@ -1,0 +1,53 @@
+private void createFields(IBinaryField[] iFields, IBinaryType binaryType, long sourceLevel, char[][][] missingTypeNames) {
+	if (!isPrototype()) throw new IllegalStateException();
+	this.fields = Binding.NO_FIELDS;
+	if (iFields != null) {
+		int size = iFields.length;
+		if (size > 0) {
+			this.fields = new FieldBinding[size];
+			boolean use15specifics = sourceLevel >= ClassFileConstants.JDK1_5;
+			boolean hasRestrictedAccess = hasRestrictedAccess();
+			int firstAnnotatedFieldIndex = -1;
+			for (int i = 0; i < size; i++) {
+				IBinaryField binaryField = iFields[i];
+				char[] fieldSignature = use15specifics ? binaryField.getGenericSignature() : null;
+				ITypeAnnotationWalker walker = getTypeAnnotationWalker(binaryField.getTypeAnnotations());
+				if (sourceLevel >= ClassFileConstants.JDK1_8) { // below 1.8, external annotations will be attached later
+					walker = binaryType.enrichWithExternalAnnotationsFor(walker, iFields[i], this.environment);
+				}
+				walker = walker.toField();
+				TypeBinding type = fieldSignature == null
+					? this.environment.getTypeFromSignature(binaryField.getTypeName(), 0, -1, false, this, missingTypeNames, walker)
+					: this.environment.getTypeFromTypeSignature(new SignatureWrapper(fieldSignature), Binding.NO_TYPE_VARIABLES, this, missingTypeNames, walker);
+				FieldBinding field =
+					new FieldBinding(
+						binaryField.getName(),
+						type,
+						binaryField.getModifiers() | ExtraCompilerModifiers.AccUnresolved,
+						this,
+						binaryField.getConstant());
+				if (firstAnnotatedFieldIndex < 0
+						&& this.environment.globalOptions.storeAnnotations
+						&& binaryField.getAnnotations() != null) {
+					firstAnnotatedFieldIndex = i;
+				}
+				field.id = i; // ordinal
+				if (use15specifics)
+					field.tagBits |= binaryField.getTagBits();
+				if (hasRestrictedAccess)
+					field.modifiers |= ExtraCompilerModifiers.AccRestrictedAccess;
+				if (fieldSignature != null)
+					field.modifiers |= ExtraCompilerModifiers.AccGenericSignature;
+				this.fields[i] = field;
+			}
+			// second pass for reifying annotations, since may refer to fields being constructed (147875)
+			if (firstAnnotatedFieldIndex >= 0) {
+				for (int i = firstAnnotatedFieldIndex; i <size; i++) {
+					IBinaryField binaryField = iFields[i];
+					this.fields[i].setAnnotations(createAnnotations(binaryField.getAnnotations(), this.environment, missingTypeNames));
+				}
+			}
+		}
+	}
+}
+
