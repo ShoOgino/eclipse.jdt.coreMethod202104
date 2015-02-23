@@ -4,23 +4,39 @@
 	 * by the path of class files contained in the jar of this package fragment root.
 	 */
 	protected boolean computeChildren(OpenableElementInfo info, IResource underlyingResource) throws JavaModelException {
-		HashtableOfArrayToObject rawPackageInfo = new HashtableOfArrayToObject();
+		final HashtableOfArrayToObject rawPackageInfo = new HashtableOfArrayToObject();
 		IJavaElement[] children;
 		ZipFile jar = null;
 		try {
 			Object file = JavaModel.getTarget(getPath(), true);
 			long level = Util.getJdkLevel(file);
-			String compliance = CompilerOptions.versionFromJdkLevel(level);
-			jar = getJar();
+			final String compliance = CompilerOptions.versionFromJdkLevel(level);
 
 			// always create the default package
 			rawPackageInfo.put(CharOperation.NO_STRINGS, new ArrayList[] { EMPTY_LIST, EMPTY_LIST });
 
-			for (Enumeration e= jar.entries(); e.hasMoreElements();) {
-				ZipEntry member= (ZipEntry) e.nextElement();
-				initRawPackageInfo(rawPackageInfo, member.getName(), member.isDirectory(), compliance);
-			}
+			if (this.isJimage) {
+				org.eclipse.jdt.internal.compiler.util.Util.walkModuleImage(getPath().toFile(),
+								new org.eclipse.jdt.internal.compiler.util.Util.JimageVisitor<Path>() {
+					@Override
+					public FileVisitResult visitPackage(Path dir, BasicFileAttributes attrs) throws IOException {
+						initRawPackageInfo(rawPackageInfo, dir.toString(), true, compliance);
+						return FileVisitResult.CONTINUE;
+					}
 
+					@Override
+					public FileVisitResult visitFile(Path path, BasicFileAttributes attrs) throws IOException {
+						initRawPackageInfo(rawPackageInfo, path.toString(), false, compliance);
+						return FileVisitResult.CONTINUE;
+					}
+				});
+			} else {
+				jar = getJar();
+				for (Enumeration e= jar.entries(); e.hasMoreElements();) {
+					ZipEntry member= (ZipEntry) e.nextElement();
+					initRawPackageInfo(rawPackageInfo, member.getName(), member.isDirectory(), compliance);
+				}
+			}
 			// loop through all of referenced packages, creating package fragments if necessary
 			// and cache the entry names in the rawPackageInfo table
 			children = new IJavaElement[rawPackageInfo.size()];

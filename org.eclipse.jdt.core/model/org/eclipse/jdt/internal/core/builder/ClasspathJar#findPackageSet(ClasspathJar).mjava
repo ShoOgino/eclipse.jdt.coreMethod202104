@@ -5,29 +5,41 @@
  */
 static SimpleSet findPackageSet(ClasspathJar jar) {
 	String zipFileName = jar.zipFilename;
-	long lastModified = jar.lastModified();
-	long fileSize = new File(zipFileName).length();
-	PackageCacheEntry cacheEntry = (PackageCacheEntry) PackageCache.get(zipFileName);
-	if (cacheEntry != null && cacheEntry.lastModified == lastModified && cacheEntry.fileSize == fileSize)
-		return cacheEntry.packageSet;
+	final SimpleSet packageSet = new SimpleSet(41);
+	if (jar.isJimage) {
+		try {
+			org.eclipse.jdt.internal.compiler.util.Util.walkModuleImage(new File(jar.zipFilename), 
+					new org.eclipse.jdt.internal.compiler.util.Util.JimageVisitor<Path>() {
 
-	SimpleSet packageSet = new SimpleSet(41);
-	packageSet.add(""); //$NON-NLS-1$
-	nextEntry : for (Enumeration e = jar.zipFile.entries(); e.hasMoreElements(); ) {
-		String fileName = ((ZipEntry) e.nextElement()).getName();
+				@Override
+				public FileVisitResult visitPackage(Path dir, BasicFileAttributes attrs) throws IOException {
+					ClasspathJar.addToPackageSet(packageSet, dir.toString(), true);
+					return FileVisitResult.CONTINUE;
+				}
 
-		// add the package name & all of its parent packages
-		int last = fileName.lastIndexOf('/');
-		while (last > 0) {
-			// extract the package name
-			String packageName = fileName.substring(0, last);
-			if (packageSet.addIfNotIncluded(packageName) == null)
-				continue nextEntry; // already existed
-			last = packageName.lastIndexOf('/');
+				@Override
+				public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+					return FileVisitResult.CONTINUE;
+				}
+			});
+		} catch (JavaModelException e) {
+			e.printStackTrace();
 		}
+		// TODO: What about caching?
+	} else {
+		long lastModified = jar.lastModified();
+		long fileSize = new File(zipFileName).length();
+		PackageCacheEntry cacheEntry = (PackageCacheEntry) PackageCache.get(zipFileName);
+		if (cacheEntry != null && cacheEntry.lastModified == lastModified && cacheEntry.fileSize == fileSize)
+			return cacheEntry.packageSet;
+		packageSet.add(""); //$NON-NLS-1$
+		for (Enumeration e = jar.zipFile.entries(); e.hasMoreElements(); ) {
+			String fileName = ((ZipEntry) e.nextElement()).getName();
+			addToPackageSet(packageSet, fileName, false);
+		}
+		PackageCache.put(zipFileName, new PackageCacheEntry(lastModified, fileSize, packageSet));
 	}
 
-	PackageCache.put(zipFileName, new PackageCacheEntry(lastModified, fileSize, packageSet));
 	return packageSet;
 }
 

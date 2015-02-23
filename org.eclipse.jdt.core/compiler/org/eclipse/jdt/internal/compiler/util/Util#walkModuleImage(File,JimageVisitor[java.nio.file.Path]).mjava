@@ -1,0 +1,57 @@
+	/**
+	 * Given the path of a modular image file, this method walks the archive content and
+	 * notifies the supplied visitor about packages and files visited.
+	 * Note: At the moment, there's no way to open any arbitrary image. Currently,
+	 * this method uses the JRT file system provider to look inside the JRE.
+	 *   
+	 * @param image a java.io.File handle to the JRT image.
+	 * @param visitor an instance of JimageVisitor to be notified of the entries in the JRT image.
+	 * @throws JavaModelException
+	 */
+	public static void walkModuleImage(File image, final JimageVisitor<java.nio.file.Path> visitor) throws JavaModelException {
+		java.nio.file.FileSystem fs = FileSystems.getFileSystem(JRT_URI);
+		Iterable<java.nio.file.Path> roots = fs.getRootDirectories();
+		java.nio.file.Path basePath = null;
+		roots: for (java.nio.file.Path path : roots) {
+			try (DirectoryStream<java.nio.file.Path> stream = Files.newDirectoryStream(path)) {
+				for (java.nio.file.Path subdir: stream) {
+					if (subdir.toString().indexOf(JAVA_BASE_PATH) != -1) {
+						basePath = subdir;
+						break roots;
+					}
+			    }
+			} catch (Exception e) {
+				throw new JavaModelException(e, IJavaModelStatusConstants.IO_EXCEPTION);
+			}
+		}
+		try {
+			if (basePath != null) {
+				final java.nio.file.Path base = basePath;
+				Files.walkFileTree(basePath, new FileVisitor<java.nio.file.Path>() {
+
+					@Override
+					public FileVisitResult preVisitDirectory(java.nio.file.Path dir, BasicFileAttributes attrs) throws IOException {
+						return visitor.visitPackage(base.relativize(dir), attrs);
+					}
+
+					@Override
+					public FileVisitResult visitFile(java.nio.file.Path file, BasicFileAttributes attrs) throws IOException {
+						return visitor.visitFile(base.relativize(file), attrs);
+					}
+
+					@Override
+					public FileVisitResult visitFileFailed(java.nio.file.Path file, IOException exc) throws IOException {
+						return FileVisitResult.CONTINUE;
+					}
+
+					@Override
+					public FileVisitResult postVisitDirectory(java.nio.file.Path dir, IOException exc) throws IOException {
+						return FileVisitResult.CONTINUE;
+					}
+				});
+			}
+		} catch (IOException e) {
+			throw new JavaModelException(e, IJavaModelStatusConstants.IO_EXCEPTION);
+		}
+	}
+
