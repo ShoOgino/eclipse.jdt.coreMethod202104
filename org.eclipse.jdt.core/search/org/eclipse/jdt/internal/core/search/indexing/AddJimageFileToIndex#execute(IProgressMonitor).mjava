@@ -1,0 +1,141 @@
+	public boolean execute(IProgressMonitor progressMonitor) {
+
+		if (this.isCancelled || progressMonitor != null && progressMonitor.isCanceled()) return true;
+
+		if (hasPreBuiltIndex()) {
+			boolean added = this.manager.addIndex(this.containerPath, this.indexFileURL);
+			if (added) return true;	
+			this.indexFileURL = null;
+		}
+
+		try {
+			// if index is already cached, then do not perform any check
+			// MUST reset the IndexManager if a jar file is changed
+			if (this.manager.getIndexForUpdate(this.containerPath, false, /*do not reuse index file*/ false /*do not create if none*/) != null) {
+				if (JobManager.VERBOSE)
+					org.eclipse.jdt.internal.core.util.Util.verbose("-> no indexing required (index already exists) for " + this.containerPath); //$NON-NLS-1$
+				return true;
+			}
+
+			final Index index = this.manager.getIndexForUpdate(this.containerPath, true, /*reuse index file*/ true /*create if none*/);
+			if (index == null) {
+				if (JobManager.VERBOSE)
+					org.eclipse.jdt.internal.core.util.Util.verbose("-> index could not be created for " + this.containerPath); //$NON-NLS-1$
+				return true;
+			}
+			index.separator = JAR_SEPARATOR;
+			ReadWriteMonitor monitor = index.monitor;
+			if (monitor == null) {
+				if (JobManager.VERBOSE)
+					org.eclipse.jdt.internal.core.util.Util.verbose("-> index for " + this.containerPath + " just got deleted"); //$NON-NLS-1$//$NON-NLS-2$
+				return true; // index got deleted since acquired
+			}
+			try {
+				final String fileName;
+				final IPath container;
+				monitor.enterWrite(); // ask permission to write
+
+				if (this.resource != null) {
+					URI location = this.resource.getLocationURI();
+					if (location == null) return false;
+					if (JavaModelManager.JIMAGE_ACCESS_VERBOSE)
+						System.out.println("(" + Thread.currentThread() + ") [AddJimageFileToIndex.execute()] Creating ZipFile on " + location.getPath()); //$NON-NLS-1$	//$NON-NLS-2$
+					File file = null;
+					try {
+						file = org.eclipse.jdt.internal.core.util.Util.toLocalFile(location, progressMonitor);
+					} catch (CoreException e) {
+						if (JobManager.VERBOSE) {
+							org.eclipse.jdt.internal.core.util.Util.verbose("-> failed to index " + location.getPath() + " because of the following exception:"); //$NON-NLS-1$ //$NON-NLS-2$
+							e.printStackTrace();
+						}
+					}
+					if (file == null) {
+						if (JobManager.VERBOSE)
+							org.eclipse.jdt.internal.core.util.Util.verbose("-> failed to index " + location.getPath() + " because the file could not be fetched"); //$NON-NLS-1$ //$NON-NLS-2$
+						return false;
+					}
+					fileName = file.getAbsolutePath();
+					container =  this.resource.getFullPath().makeRelative();
+					// absolute path relative to the workspace
+				} else {
+					
+					fileName = this.containerPath.toOSString();
+					container = this.containerPath;
+				}
+
+
+				if (JobManager.VERBOSE)
+					org.eclipse.jdt.internal.core.util.Util.verbose("-> indexing " + fileName); //$NON-NLS-1$
+				long initialTime = System.currentTimeMillis();
+				String[] paths = index.queryDocumentNames(""); // all file names //$NON-NLS-1$
+				if (paths != null) {
+					int max = paths.length;
+					/* check integrity of the existing index file
+					 * if the length is equal to 0, we want to index the whole jimage again
+					 * If not, then we want to check that there is no missing entry, if
+					 * one entry is missing then we recreate the index
+					 */
+					
+					final SimpleLookupTable indexedFileNames = new SimpleLookupTable(max == 0 ? 33 : max + 11);
+					for (int i = 0; i < max; i++)
+						indexedFileNames.put(paths[i], FILE_INDEX_STATE.DELETED);
+					
+					org.eclipse.jdt.internal.compiler.util.Util.walkModuleImage(new File(fileName), 
+							new JimageTraverser(indexedFileNames));
+
+					boolean needToReindex = indexedFileNames.elementSize != max; // a new file was added
+					if (!needToReindex) {
+						Object[] valueTable = indexedFileNames.valueTable;
+						for (int i = 0, l = valueTable.length; i < l; i++) {
+							if (valueTable[i] == FILE_INDEX_STATE.DELETED) {
+								needToReindex = true; // a file was deleted so re-index
+								break;
+							}
+						}
+						if (!needToReindex) {
+							if (JobManager.VERBOSE)
+								org.eclipse.jdt.internal.core.util.Util.verbose("-> no indexing required (index is consistent with library) for " //$NON-NLS-1$
+								+ fileName + " (" //$NON-NLS-1$
+								+ (System.currentTimeMillis() - initialTime) + "ms)"); //$NON-NLS-1$
+							this.manager.saveIndex(index); // to ensure its placed into the saved state
+							return true;
+						}
+					}
+				}
+
+				// Index the jimage for the first time or reindex the jimage in case the previous index file has been corrupted
+				// index already existed: recreate it so that we forget about previous entries
+				if (!this.manager.resetIndex(this.containerPath)) {
+					// failed to recreate index, see 73330
+					this.manager.removeIndex(this.containerPath);
+					return false;
+				}
+				
+				
+				org.eclipse.jdt.internal.compiler.util.Util.walkModuleImage(new File(fileName), 
+						new JimageIndexer(SearchEngine.getDefaultSearchParticipant(), index, container, this.manager));
+
+				if(this.forceIndexUpdate) {
+					this.manager.savePreBuiltIndex(index);
+				}
+				else {
+					this.manager.saveIndex(index);
+				}
+				if (JobManager.VERBOSE)
+					org.eclipse.jdt.internal.core.util.Util.verbose("-> done indexing of " //$NON-NLS-1$
+						+ fileName + " (" //$NON-NLS-1$
+						+ (System.currentTimeMillis() - initialTime) + "ms)"); //$NON-NLS-1$
+			} finally {
+				monitor.exitWrite();
+			}
+		} catch (JavaModelException | IOException e ) {
+			if (JobManager.VERBOSE) {
+				org.eclipse.jdt.internal.core.util.Util.verbose("-> failed to index " + this.containerPath + " because of the following exception:"); //$NON-NLS-1$ //$NON-NLS-2$
+				e.printStackTrace();
+			}
+			this.manager.removeIndex(this.containerPath);
+			return false;
+		}
+		return true;
+	}
+
