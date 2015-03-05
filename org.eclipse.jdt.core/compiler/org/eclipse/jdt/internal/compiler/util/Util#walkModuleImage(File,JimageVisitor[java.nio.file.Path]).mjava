@@ -11,47 +11,39 @@
 	public static void walkModuleImage(File image, final JimageVisitor<java.nio.file.Path> visitor) throws JavaModelException {
 		java.nio.file.FileSystem fs = FileSystems.getFileSystem(JRT_URI);
 		Iterable<java.nio.file.Path> roots = fs.getRootDirectories();
-		java.nio.file.Path basePath = null;
-		roots: for (java.nio.file.Path path : roots) {
+		for (java.nio.file.Path path : roots) {
 			try (DirectoryStream<java.nio.file.Path> stream = Files.newDirectoryStream(path)) {
-				for (java.nio.file.Path subdir: stream) {
-					if (subdir.toString().indexOf(JAVA_BASE_PATH) != -1) {
-						basePath = subdir;
-						break roots;
-					}
+				for (final java.nio.file.Path subdir: stream) {
+					Files.walkFileTree(subdir, new FileVisitor<java.nio.file.Path>() {
+
+						@Override
+						public FileVisitResult preVisitDirectory(java.nio.file.Path dir, BasicFileAttributes attrs) throws IOException {
+							java.nio.file.Path relative = subdir.relativize(dir);
+							// This being a stop-gap solution, let's assume we don't have any types in a single level package
+							if (relative.getNameCount() <= 1) return FileVisitResult.CONTINUE;
+							cachePackage(relative.toString(), subdir.toString());
+							return visitor.visitPackage(relative, attrs);
+						}
+
+						@Override
+						public FileVisitResult visitFile(java.nio.file.Path file, BasicFileAttributes attrs) throws IOException {
+							return visitor.visitFile(subdir.relativize(file), attrs);
+						}
+
+						@Override
+						public FileVisitResult visitFileFailed(java.nio.file.Path file, IOException exc) throws IOException {
+							return FileVisitResult.CONTINUE;
+						}
+
+						@Override
+						public FileVisitResult postVisitDirectory(java.nio.file.Path dir, IOException exc) throws IOException {
+							return FileVisitResult.CONTINUE;
+						}
+					});
 			    }
 			} catch (Exception e) {
 				throw new JavaModelException(e, IJavaModelStatusConstants.IO_EXCEPTION);
 			}
-		}
-		try {
-			if (basePath != null) {
-				final java.nio.file.Path base = basePath;
-				Files.walkFileTree(basePath, new FileVisitor<java.nio.file.Path>() {
-
-					@Override
-					public FileVisitResult preVisitDirectory(java.nio.file.Path dir, BasicFileAttributes attrs) throws IOException {
-						return visitor.visitPackage(base.relativize(dir), attrs);
-					}
-
-					@Override
-					public FileVisitResult visitFile(java.nio.file.Path file, BasicFileAttributes attrs) throws IOException {
-						return visitor.visitFile(base.relativize(file), attrs);
-					}
-
-					@Override
-					public FileVisitResult visitFileFailed(java.nio.file.Path file, IOException exc) throws IOException {
-						return FileVisitResult.CONTINUE;
-					}
-
-					@Override
-					public FileVisitResult postVisitDirectory(java.nio.file.Path dir, IOException exc) throws IOException {
-						return FileVisitResult.CONTINUE;
-					}
-				});
-			}
-		} catch (IOException e) {
-			throw new JavaModelException(e, IJavaModelStatusConstants.IO_EXCEPTION);
 		}
 	}
 
