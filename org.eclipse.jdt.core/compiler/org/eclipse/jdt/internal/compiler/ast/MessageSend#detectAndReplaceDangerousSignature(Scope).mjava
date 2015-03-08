@@ -1,0 +1,72 @@
+// when targeting a well-known dangerous method, returns the "expected" signature plus the declaring type (as the last array element)
+TypeBinding[] detectAndReplaceDangerousSignature(Scope scope) {
+
+	// detecting only methods with a single argument, typed either as Object or as Collection:
+	TypeBinding[] parameters = this.binding.parameters;
+	if (parameters.length != 1)
+		return null;
+	int paramTypeId = parameters[0].original().id;
+	if (paramTypeId != TypeIds.T_JavaLangObject && paramTypeId != TypeIds.T_JavaUtilCollection)
+		return null;
+
+	// check selectors before typeBits as to avoid unnecessary super-traversals for the receiver type
+	DangerousMethod suspect = DangerousMethod.detectSelector(this.selector);
+	if (suspect == null) 
+		return null;
+
+	if (this.actualReceiverType.hasTypeBit(TypeIds.BitMap)) {
+		if (paramTypeId == TypeIds.T_JavaLangObject) {
+			switch (suspect) {
+				case ContainsKey:
+				case Get:
+				case Remove:
+					// map operations taking a key
+					ReferenceBinding mapType = this.actualReceiverType.findSuperTypeOriginatingFrom(TypeIds.T_JavaUtilMap, false);
+					if (mapType != null && mapType.isParameterizedType())
+						return new TypeBinding[] { ((ParameterizedTypeBinding)mapType).typeArguments()[0], mapType };
+					break;
+				case ContainsValue:
+					// map operation taking a value
+					mapType = this.actualReceiverType.findSuperTypeOriginatingFrom(TypeIds.T_JavaUtilMap, false);
+					if (mapType != null && mapType.isParameterizedType())
+						return new TypeBinding[] { ((ParameterizedTypeBinding)mapType).typeArguments()[1], mapType };
+			}
+		}
+	}
+	if (this.actualReceiverType.hasTypeBit(TypeIds.BitCollection)) {
+		if (paramTypeId == TypeIds.T_JavaLangObject) {
+			switch (suspect) {
+				case Remove:
+				case Contains:
+					// collection operations taking a single element
+					ReferenceBinding collectionType = this.actualReceiverType.findSuperTypeOriginatingFrom(TypeIds.T_JavaUtilCollection, false);
+					if (collectionType != null && collectionType.isParameterizedType())
+						return new TypeBinding[] { ((ParameterizedTypeBinding)collectionType).typeArguments()[0], collectionType };
+			}
+		} else if (paramTypeId == TypeIds.T_JavaUtilCollection) {
+			switch (suspect) {
+				case RemoveAll:
+				case ContainsAll:
+				case RetainAll:
+					// collection operations taking another collection
+					ReferenceBinding collectionType = this.actualReceiverType.findSuperTypeOriginatingFrom(TypeIds.T_JavaUtilCollection, false);
+					if (collectionType != null)
+						return new TypeBinding[] { collectionType, collectionType };
+			}
+		}
+		if (this.actualReceiverType.hasTypeBit(TypeIds.BitList)) {
+			if (paramTypeId == TypeIds.T_JavaLangObject) {
+				switch (suspect) {
+					case IndexOf:
+					case LastIndexOf:
+						// list operations taking a single element
+						ReferenceBinding listType = this.actualReceiverType.findSuperTypeOriginatingFrom(TypeIds.T_JavaUtilList, false);
+						if (listType != null && listType.isParameterizedType())
+							return new TypeBinding[] { ((ParameterizedTypeBinding)listType).typeArguments()[0], listType };
+				}
+			}
+		}
+	} 
+	return null; // not replacing
+}
+
