@@ -7,78 +7,95 @@
 			ArrayList endorsedDirClasspaths,
 			String customEncoding) {
 
-		ArrayList<FileSystem.Classpath> fileSystemClasspaths = new ArrayList<FileSystem.Classpath>();
-		EclipseFileManager javaFileManager = null;
+		ArrayList<FileSystem.Classpath> fileSystemClasspaths = new ArrayList<>();
+		EclipseFileManager eclipseJavaFileManager = null;
 		StandardJavaFileManager standardJavaFileManager = null;
+		JavaFileManager javaFileManager = null;
+		boolean havePlatformPaths = false;
+		boolean haveClassPaths = false;
 		if (this.fileManager instanceof EclipseFileManager) {
-			javaFileManager = (EclipseFileManager) this.fileManager;
+			eclipseJavaFileManager = (EclipseFileManager) this.fileManager;
 		}
 		if (this.fileManager instanceof StandardJavaFileManager) {
 			standardJavaFileManager = (StandardJavaFileManager) this.fileManager;
 		}
+		javaFileManager = this.fileManager;
 
-		if (javaFileManager != null) {
-			if ((javaFileManager.flags & EclipseFileManager.HAS_ENDORSED_DIRS) == 0
-					&& (javaFileManager.flags & EclipseFileManager.HAS_BOOTCLASSPATH) != 0) {
+		if (eclipseJavaFileManager != null) {
+			if ((eclipseJavaFileManager.flags & EclipseFileManager.HAS_ENDORSED_DIRS) == 0
+					&& (eclipseJavaFileManager.flags & EclipseFileManager.HAS_BOOTCLASSPATH) != 0) {
 				fileSystemClasspaths.addAll(this.handleEndorseddirs(null));
 			}
 		}
 		Iterable<? extends File> location = null;
 		if (standardJavaFileManager != null) {
 			location = standardJavaFileManager.getLocation(StandardLocation.PLATFORM_CLASS_PATH);
-		}
-		if (location != null) {
-			for (File file : location) {
-				Classpath classpath = FileSystem.getClasspath(
-					file.getAbsolutePath(),
-					null,
-					null);
-				if (classpath != null) {
-					fileSystemClasspaths.add(classpath);
+			if (location != null) {
+				for (File file : location) {
+					Classpath classpath = FileSystem.getClasspath(
+						file.getAbsolutePath(),
+						null,
+						null);
+					if (classpath != null) {
+						fileSystemClasspaths.add(classpath);
+						havePlatformPaths = true;
+					}
 				}
 			}
+		} else if (javaFileManager != null) {
+			Classpath classpath = new ClasspathJsr199(this.fileManager, StandardLocation.PLATFORM_CLASS_PATH);
+			fileSystemClasspaths.add(classpath);
+			havePlatformPaths = true;
 		}
-		if (javaFileManager != null) {
-			if ((javaFileManager.flags & EclipseFileManager.HAS_EXT_DIRS) == 0
-					&& (javaFileManager.flags & EclipseFileManager.HAS_BOOTCLASSPATH) != 0) {
+		if (eclipseJavaFileManager != null) {
+			if ((eclipseJavaFileManager.flags & EclipseFileManager.HAS_EXT_DIRS) == 0
+					&& (eclipseJavaFileManager.flags & EclipseFileManager.HAS_BOOTCLASSPATH) != 0) {
 				fileSystemClasspaths.addAll(this.handleExtdirs(null));
 			}
 		}
 		if (standardJavaFileManager != null) {
 			location = standardJavaFileManager.getLocation(StandardLocation.SOURCE_PATH);
-		} else {
-			location = null;
-		}
-		if (location != null) {
-			for (File file : location) {
-				Classpath classpath = FileSystem.getClasspath(
+			if (location != null) {
+				for (File file : location) {
+					Classpath classpath = FileSystem.getClasspath(
+							file.getAbsolutePath(),
+							null,
+							null);
+					if (classpath != null) {
+						fileSystemClasspaths.add(classpath);
+					}
+				}
+			}
+			location = standardJavaFileManager.getLocation(StandardLocation.CLASS_PATH);
+			if (location != null) {
+				for (File file : location) {
+					Classpath classpath = FileSystem.getClasspath(
 						file.getAbsolutePath(),
 						null,
 						null);
-				if (classpath != null) {
-					fileSystemClasspaths.add(classpath);
+					if (classpath != null) {
+						fileSystemClasspaths.add(classpath);
+						haveClassPaths = true;
+					}
 				}
 			}
-		}
-		if (standardJavaFileManager != null) {
-			location = standardJavaFileManager.getLocation(StandardLocation.CLASS_PATH);
-		} else {
-			location = null;
-		}
-		if (location != null) {
-			for (File file : location) {
-				Classpath classpath = FileSystem.getClasspath(
-					file.getAbsolutePath(),
-					null,
-					null);
-				if (classpath != null) {
-					fileSystemClasspaths.add(classpath);
-				}
+		} else if (javaFileManager != null) {
+			Classpath classpath = null;
+			if (this.fileManager.hasLocation(StandardLocation.SOURCE_PATH)) {
+				classpath = new ClasspathJsr199(this.fileManager, StandardLocation.SOURCE_PATH);
+				fileSystemClasspaths.add(classpath);
 			}
+			classpath = new ClasspathJsr199(this.fileManager, StandardLocation.CLASS_PATH);
+			fileSystemClasspaths.add(classpath);
+			haveClassPaths = true;
 		}
 		if (this.checkedClasspaths == null) {
-			fileSystemClasspaths.addAll(this.handleBootclasspath(null, null));
-			fileSystemClasspaths.addAll(this.handleClasspath(null, null));
+			// It appears to be necessary to handleBootclasspath() for IBM JVMs
+			// in order to have visibility to java.lang.String (not present in rt.jar).
+			// The jars returned by StandardFileManager.getLocation(PLATFORM_CLASS_PATH) are
+			// not sufficient to resolve all standard classes.
+			if (!havePlatformPaths) fileSystemClasspaths.addAll(this.handleBootclasspath(null, null));
+			if (!haveClassPaths) fileSystemClasspaths.addAll(this.handleClasspath(null, null));
 		}
 		fileSystemClasspaths = FileSystem.ClasspathNormalizer.normalize(fileSystemClasspaths);
 		final int size = fileSystemClasspaths.size();
