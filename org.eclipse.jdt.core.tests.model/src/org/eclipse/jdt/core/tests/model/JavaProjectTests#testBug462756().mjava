@@ -1,0 +1,44 @@
+/**
+ * Test that conflicting rules between refreshLocal and IProject.touch() invoked by
+ * JDT don't cause an IAE.
+ * 
+ * @see "https://bugs.eclipse.org/bugs/show_bug.cgi?id=462756"
+ */
+@SuppressWarnings("rawtypes")
+public void testBug462756() throws CoreException {
+	Hashtable javaCoreOptions = JavaCore.getOptions();
+	try {
+		IJavaProject proj = this.createJavaProject("P", new String[] {"src"}, new String[]{}, "bin");
+		proj.getProject().open(null);
+		createFolder("/P/.settings");
+		String content = "org.eclipse.jdt.core.compiler.codegen.targetPlatform=1.7\n" +
+				"org.eclipse.jdt.core.compiler.compliance=1.7\n" +
+				"org.eclipse.jdt.core.compiler.source=1.7\n";
+
+		IFile file = getFile("/P/.settings/org.eclipse.jdt.core.prefs");
+		try (BufferedWriter output = new BufferedWriter(new FileWriter(file.getLocation().toFile()))) {
+			output.write(content);
+			output.flush();
+		} catch(Exception e) {
+		}
+		final StringBuffer buffer = new StringBuffer();
+		RuntimeLog.addLogListener(new ILogListener() {
+			@Override
+			public void logging(IStatus status, String plugin) {
+				if (status.getSeverity() == IStatus.ERROR && status.toString().contains("java.lang.IllegalArgumentException")) {
+					buffer.append("Should not throw IllegalArgumentException");
+				}
+			}
+		});
+		proj.getProject().refreshLocal(IResource.DEPTH_INFINITE, null);
+		waitForManualRefresh();
+		if (buffer.length() > 0) {
+			fail(buffer.toString());
+		}
+		assertEquals("Compliance should be updated", "1.7", proj.getOption("org.eclipse.jdt.core.compiler.compliance", true));
+	} finally {
+		 this.deleteProject("P");
+		 JavaCore.setOptions(javaCoreOptions);
+	}
+}
+
