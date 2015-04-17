@@ -1,0 +1,41 @@
+	private IBinding getDeclaringMember(org.eclipse.jdt.internal.compiler.ast.ASTNode node, Scope currentScope) {
+		MethodScope methodScope = currentScope != null ? currentScope.methodScope() : null;
+		if (methodScope != null) {
+			if (methodScope.isInsideInitializer()) {
+				org.eclipse.jdt.internal.compiler.ast.TypeDeclaration enclosingType = methodScope.referenceType();
+				if (enclosingType.fields != null) {
+					for (int i = 0; i < enclosingType.fields.length; i++) {
+						FieldDeclaration field = enclosingType.fields[i];
+						if (field.declarationSourceStart <= node.sourceStart && node.sourceEnd <= field.declarationSourceEnd) {
+							if (field instanceof org.eclipse.jdt.internal.compiler.ast.Initializer)
+								return getMethodBinding(((org.eclipse.jdt.internal.compiler.ast.Initializer) field).getMethodBinding());
+							else
+								return getVariableBinding(field.binding);
+						}
+					}
+				}
+			} else {
+				if (methodScope.isLambdaScope()) {
+					org.eclipse.jdt.internal.compiler.ast.LambdaExpression lambdaExpression = (org.eclipse.jdt.internal.compiler.ast.LambdaExpression) methodScope.referenceContext;
+					IMethodBinding methodBinding = null;
+					if (lambdaExpression.descriptor != null) {
+						IBinding declaringMember = getDeclaringMember(lambdaExpression, lambdaExpression.enclosingScope);
+						if (declaringMember != null)
+							methodBinding = getMethodOrLambdaBinding(lambdaExpression.getMethodBinding(), lambdaExpression.descriptor, declaringMember);
+					}
+					if (methodBinding == null) {
+						return null;
+					}
+					String key = methodBinding.getKey();
+					if (key != null) {
+						this.bindingTables.bindingKeysToBindings.put(key, methodBinding);
+					}
+					return methodBinding;
+				} else {
+					return getMethodBinding(methodScope.referenceMethodBinding());
+				}
+			}
+		}
+		return null;
+	}
+
