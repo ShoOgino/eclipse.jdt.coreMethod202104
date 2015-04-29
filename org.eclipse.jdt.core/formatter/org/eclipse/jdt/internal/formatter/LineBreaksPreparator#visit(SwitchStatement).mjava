@@ -3,35 +3,41 @@
 		handleBracedCode(node, node.getExpression(), this.options.brace_position_for_switch,
 				this.options.indent_switchstatements_compare_to_switch, true);
 
+		List<Statement> statements = node.statements();
 		if (this.options.indent_switchstatements_compare_to_cases) {
-			int openBraceIndex = this.tm.firstIndexIn(node, TokenNameLBRACE);
-			this.tm.get(openBraceIndex + 1).indent();
-			int closeBraceIndex = this.tm.lastIndexIn(node, TokenNameRBRACE);
-			this.tm.get(closeBraceIndex).unindent();
+			int nonBreakStatementEnd = -1;
+			for (Statement statement : statements) {
+				if (statement instanceof SwitchCase) {
+					if (nonBreakStatementEnd >= 0) {
+						// indent only comments between previous and current statement
+						this.tm.get(nonBreakStatementEnd + 1).indent();
+						this.tm.firstTokenIn(statement, -1).unindent();
+					}
+				} else if (!(statement instanceof BreakStatement || statement instanceof Block)) {
+					indent(statement);
+				}
+				nonBreakStatementEnd = (statement instanceof BreakStatement || statement instanceof ReturnStatement)
+						? -1 : this.tm.lastIndexIn(statement, -1);
+			}
+			if (nonBreakStatementEnd >= 0) {
+				// indent comments between last statement and closing brace 
+				this.tm.get(nonBreakStatementEnd + 1).indent();
+				this.tm.lastTokenIn(node, TokenNameRBRACE).unindent();
+			}
+		}
+		if (this.options.indent_breaks_compare_to_cases) {
+			for (Statement statement : statements) {
+				if (statement instanceof BreakStatement)
+					indent(statement);
+			}
 		}
 
-		boolean isBreakStatement = false;
-		List<Statement> statements = node.statements();
 		for (Statement statement : statements) {
-			if (isBreakStatement) // actually, was break statement
-				this.tm.firstTokenIn(statement, -1).indent();
-			isBreakStatement = statement instanceof BreakStatement;
-			if (this.options.indent_switchstatements_compare_to_cases
-					&& (isBreakStatement || statement instanceof SwitchCase || statement instanceof Block)) {
-				unindent(statement);
-			}
 			if (statement instanceof Block)
 				continue; // will add break in visit(Block) if necessary
 			if (this.options.put_empty_statement_on_new_line || !(statement instanceof EmptyStatement))
 				breakLineBefore(statement);
-			if (isBreakStatement) {
-				if (this.options.indent_breaks_compare_to_cases)
-					indent(statement);
-				this.tm.firstTokenAfter(statement, -1).unindent();
-			}
 		}
-		if (isBreakStatement) // actually, was break statement
-			this.tm.lastTokenIn(node, -1).indent();
 
 		return true;
 	}
