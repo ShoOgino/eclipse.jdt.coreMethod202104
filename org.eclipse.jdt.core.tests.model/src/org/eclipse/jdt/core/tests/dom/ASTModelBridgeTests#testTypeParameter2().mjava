@@ -1,0 +1,47 @@
+	/*
+	 * Ensures that we can create a binding for an IJavaElement representing a type parameter (source type)
+	 * Bug 466279 - [hovering] IAE on hover when annotation-based null analysis is enabled
+	 */
+	public void testTypeParameter2() throws CoreException {
+		ICompilationUnit cu = null;
+		try {
+			ASTParser parser = ASTParser.newParser(JLS3_INTERNAL);
+			parser.setResolveBindings(true);
+			parser.setProject(getJavaProject("P"));
+			createFolder("/P/src/p");
+			createFile("/P/src/p/X.java",
+				"package p;\n" +
+				"public interface X<T> {\n" +
+				"  public T foo(int i, String s);\n" +
+				"}");
+			cu = (ICompilationUnit) getJavaProject("P").findElement(new Path("p/X.java"));
+			cu.becomeWorkingCopy(null);
+			IJavaElement[] elements = new IJavaElement[] {
+					cu.getType("X"),
+					cu.getType("X").getTypeParameters()[0],
+				};
+			IBinding[] bindings = parser.createBindings(elements, null);
+			assertBindingsEqual(
+				"Lp/X<TT;>;\n" +
+				"Lp/X;:TT;",
+				bindings);
+	
+			IJavaElement element = bindings[1].getJavaElement();
+			assertElementExists(
+				"Unexpected Java element",
+				"<T> [in X [in [Working copy] X.java [in p [in src [in P]]]]]",
+				element
+			);
+			assertEquals("Wrong type", IJavaElement.TYPE_PARAMETER, element.getElementType());
+			ITypeParameter typeParameter = (ITypeParameter) element;
+			ITypeRoot typeRoot = typeParameter.getTypeRoot();
+			assertNotNull("Not type root", typeRoot);
+			assertTrue("Invalid", typeRoot.exists());
+		} finally {
+			if (cu != null)
+				cu.discardWorkingCopy();
+			deleteFile("/P/src/p/X.java");
+			deleteFolder("/P/src/p");
+		}
+	}
+
