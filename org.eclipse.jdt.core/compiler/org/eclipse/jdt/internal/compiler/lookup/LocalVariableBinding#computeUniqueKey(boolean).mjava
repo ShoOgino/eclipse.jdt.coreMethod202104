@@ -1,6 +1,13 @@
 	/*
 	 * declaringUniqueKey # scopeIndex(0-based) # varName [# occurrenceCount(0-based)]
-	 * p.X { void foo() { int local; int local;} } --> Lp/X;.foo()V#1#local#1
+	 *    p.X { void foo() { int local; int local;} } --> Lp/X;.foo()V#1#local#1
+	 *
+	 * for method parameter, we have no scopeIndex, but instead we append the parameter rank:
+	 * declaringUniqueKey # varName # occurrenceCount(always 0) # argument rank (0-based)
+	 * with parameter names:
+	 *    p.X { void foo(int i0, int i1) { } } --> Lp/X;.foo()V#i1#0#1
+	 * without parameter names (see org.eclipse.jdt.internal.core.util.BindingKeyResolver.SyntheticLocalVariableBinding):
+	 *    p.X { void foo(int i0, int i1) { } } --> Lp/X;.foo()V#arg1#0#1
 	 */
 	public char[] computeUniqueKey(boolean isLeaf) {
 		StringBuffer buffer = new StringBuffer();
@@ -47,11 +54,26 @@
 		buffer.append('#');
 		buffer.append(this.name);
 
+		boolean addParameterRank = this.isParameter() && this.declaringScope != null;
 		// add occurence count to avoid same key for duplicate variables
 		// (see https://bugs.eclipse.org/bugs/show_bug.cgi?id=149590)
-		if (occurenceCount > 0) {
+		if (occurenceCount > 0 || addParameterRank) {
 			buffer.append('#');
 			buffer.append(occurenceCount);
+			if (addParameterRank) {
+				int pos = -1;
+				LocalVariableBinding[] params = this.declaringScope.locals;
+				for (int i = 0; i < params.length; i++) {
+					if (params[i] == this) {
+						pos = i;
+						break;
+					}
+				}
+				if (pos > -1) {
+					buffer.append('#');
+					buffer.append(pos);
+				}
+			}
 		}
 
 		int length = buffer.length();

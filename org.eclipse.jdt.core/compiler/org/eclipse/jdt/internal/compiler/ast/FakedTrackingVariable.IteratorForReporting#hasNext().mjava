@@ -1,0 +1,45 @@
+		@Override
+		public boolean hasNext() {
+			FakedTrackingVariable trackingVar;
+			switch (this.stage) {
+				case OuterLess:
+					while (this.iterator.hasNext()) {
+						trackingVar = this.iterator.next();
+						if (trackingVar.outerTracker == null)
+							return found(trackingVar);
+					}
+					setUpForStage(Stage.InnerOfProcessed);
+					//$FALL-THROUGH$
+				case InnerOfProcessed:
+					while (this.iterator.hasNext()) {
+						trackingVar = this.iterator.next();
+						FakedTrackingVariable outer = trackingVar.outerTracker;
+						if (outer.binding.declaringScope == this.scope && !this.varSet.contains(outer))
+							return found(trackingVar);
+					}
+					setUpForStage(Stage.InnerOfNotEnclosing);
+					//$FALL-THROUGH$
+				case InnerOfNotEnclosing:
+					searchAlien: while (this.iterator.hasNext()) {
+						trackingVar = this.iterator.next();
+						FakedTrackingVariable outer = trackingVar.outerTracker;
+						if (!this.varSet.contains(outer)) {
+							Scope outerTrackerScope = outer.binding.declaringScope;
+							Scope currentScope = this.scope;
+							while ((currentScope = currentScope.parent) instanceof BlockScope) {
+								if (outerTrackerScope == currentScope)
+									break searchAlien;
+							}
+							return found(trackingVar);
+						}
+					}
+					setUpForStage(Stage.AtExit);
+					//$FALL-THROUGH$
+				case AtExit:
+					if (this.atExit && this.iterator.hasNext())
+						return found(this.iterator.next());
+					return false;
+				default: throw new IllegalStateException("Unexpected Stage "+this.stage); //$NON-NLS-1$
+			}
+		}
+
