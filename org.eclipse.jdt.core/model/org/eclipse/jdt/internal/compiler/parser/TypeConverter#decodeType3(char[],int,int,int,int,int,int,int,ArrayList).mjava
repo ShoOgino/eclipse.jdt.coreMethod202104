@@ -1,0 +1,86 @@
+	/*
+	 * Method should be inlined.
+	 * 
+	 * Only extracted to work around https://bugs.eclipse.org/471835 :
+	 * Random crashes in PhaseIdealLoop::build_loop_late_post when C2 JIT tries to compile TypeConverter::decodeType
+	 */
+	private TypeReference decodeType3(char[] typeName, int length, int start, int end, int identCount, int dim,
+			int nameFragmentStart, int nameFragmentEnd, ArrayList fragments) {
+		if (nameFragmentEnd < 0) nameFragmentEnd = this.namePos-1;
+		if (fragments == null) { // non parameterized
+			/* rebuild identifiers and dimensions */
+			if (identCount == 1) { // simple type reference
+				if (dim == 0) {
+					char[] nameFragment;
+					if (nameFragmentStart != 0 || nameFragmentEnd >= 0) {
+						int nameFragmentLength = nameFragmentEnd - nameFragmentStart + 1;
+						System.arraycopy(typeName, nameFragmentStart, nameFragment = new char[nameFragmentLength], 0, nameFragmentLength);
+					} else {
+						nameFragment = typeName;
+					}
+					return new SingleTypeReference(nameFragment, ((long) start << 32) + end);
+				} else {
+					int nameFragmentLength = nameFragmentEnd - nameFragmentStart + 1;
+					char[] nameFragment = new char[nameFragmentLength];
+					System.arraycopy(typeName, nameFragmentStart, nameFragment, 0, nameFragmentLength);
+					return new ArrayTypeReference(nameFragment, dim, ((long) start << 32) + end);
+				}
+			} else { // qualified type reference
+				long[] positions = new long[identCount];
+				long pos = ((long) start << 32) + end;
+				for (int i = 0; i < identCount; i++) {
+					positions[i] = pos;
+				}
+				char[][] identifiers = CharOperation.splitOn('.', typeName, nameFragmentStart, nameFragmentEnd+1);
+				if (dim == 0) {
+					return new QualifiedTypeReference(identifiers, positions);
+				} else {
+					return new ArrayQualifiedTypeReference(identifiers, dim, positions);
+				}
+			}
+		} else { // parameterized
+			// rebuild type reference from available fragments: char[][], arguments, char[][], arguments...
+			// check trailing qualified name
+			if (nameFragmentStart > 0 && nameFragmentStart < length) {
+				char[][] identifiers = CharOperation.splitOn('.', typeName, nameFragmentStart, nameFragmentEnd+1);
+				fragments.add(identifiers);
+			}
+			int fragmentLength = fragments.size();
+			if (fragmentLength == 2) {
+				char[][] firstFragment = (char[][]) fragments.get(0);
+				if (firstFragment.length == 1) {
+					// parameterized single type
+					return new ParameterizedSingleTypeReference(firstFragment[0], (TypeReference[]) fragments.get(1), dim, ((long) start << 32) + end);
+				}
+			}
+			// parameterized qualified type
+			identCount = 0;
+			for (int i = 0; i < fragmentLength; i ++) {
+				Object element = fragments.get(i);
+				if (element instanceof char[][]) {
+					identCount += ((char[][])element).length;
+				}
+			}
+			char[][] tokens = new char[identCount][];
+			TypeReference[][] arguments = new TypeReference[identCount][];
+			int index = 0;
+			for (int i = 0; i < fragmentLength; i ++) {
+				Object element = fragments.get(i);
+				if (element instanceof char[][]) {
+					char[][] fragmentTokens = (char[][]) element;
+					int fragmentTokenLength = fragmentTokens.length;
+					System.arraycopy(fragmentTokens, 0, tokens, index, fragmentTokenLength);
+					index += fragmentTokenLength;
+				} else {
+					arguments[index-1] = (TypeReference[]) element;
+				}
+			}
+			long[] positions = new long[identCount];
+			long pos = ((long) start << 32) + end;
+			for (int i = 0; i < identCount; i++) {
+				positions[i] = pos;
+			}
+			return new ParameterizedQualifiedTypeReference(tokens, arguments, dim, positions);
+		}
+	}
+
