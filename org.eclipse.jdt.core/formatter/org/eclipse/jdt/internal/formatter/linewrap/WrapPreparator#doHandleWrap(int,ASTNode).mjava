@@ -1,0 +1,39 @@
+	private void doHandleWrap(int wrappingOption, ASTNode parentNode) {
+		if (this.wrapIndexes.isEmpty())
+			return;
+		assert this.wrapParentIndex >= 0 && this.wrapParentIndex < this.wrapIndexes.get(0);
+		assert this.wrapGroupEnd >= this.wrapIndexes.get(this.wrapIndexes.size() - 1);
+		float penalty = this.wrapPenalties.isEmpty() ? 1 : this.wrapPenalties.get(0);
+		WrapPolicy policy = getWrapPolicy(wrappingOption, penalty, true, parentNode);
+		if (policy == null)
+			return;
+
+		setTokenWrapPolicy(this.wrapIndexes.get(0), policy, true);
+
+		boolean wrapPreceedingComments = !(parentNode instanceof InfixExpression)
+				|| !this.options.wrap_before_binary_operator;
+		for (int i = 1; i < this.wrapIndexes.size(); i++) {
+			penalty = this.wrapPenalties.size() > i ? this.wrapPenalties.get(i) : 1;
+			if (penalty != policy.penaltyMultiplier || i == 1)
+				policy = getWrapPolicy(wrappingOption, penalty, false, parentNode);
+			setTokenWrapPolicy(this.wrapIndexes.get(i), policy, wrapPreceedingComments);
+		}
+
+		boolean forceWrap = (wrappingOption & Alignment.M_FORCE) != 0;
+		if (forceWrap) {
+			boolean satisfied = false;
+			for (int index : this.wrapIndexes) {
+				Token token = this.tm.get(index);
+				if (token.getWrapPolicy().isTopPriority()) {
+					token.breakBefore();
+					satisfied = true;
+				}
+			}
+			if (!satisfied) {
+				boolean canWrapFirst = (wrappingOption & Alignment.M_NEXT_PER_LINE_SPLIT) != Alignment.M_NEXT_PER_LINE_SPLIT;
+				if (canWrapFirst)
+					this.tm.get(this.wrapIndexes.get(0)).breakBefore();
+			}
+		}
+	}
+
