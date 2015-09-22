@@ -1,0 +1,50 @@
+	void walkModuleImage(final JimageUtil.JimageVisitor<java.nio.file.Path> visitor, boolean visitPackageMapping) throws IOException {
+		java.nio.file.FileSystem fs = FileSystems.getFileSystem(JimageUtil.JRT_URI);
+		Iterable<java.nio.file.Path> roots = fs.getRootDirectories();
+		for (java.nio.file.Path path : roots) {
+			try (DirectoryStream<java.nio.file.Path> stream = Files.newDirectoryStream(path)) {
+				for (final java.nio.file.Path subdir: stream) {
+					if (subdir.toString().equals(JimageUtil.MODULES_SUBDIR)) {
+						if (visitPackageMapping) continue;
+						Files.walkFileTree(subdir, new JimageUtil.AbstractFileVisitor<java.nio.file.Path>() {
+							@Override
+							public FileVisitResult preVisitDirectory(java.nio.file.Path dir, BasicFileAttributes attrs) throws IOException {
+								int count = dir.getNameCount();
+								if (count == 2) {
+									java.nio.file.Path mod = dir.getName(1);
+									if (JimageUtil.MODULES_ON_DEMAND != null && JimageUtil.MODULES_ON_DEMAND.indexOf(mod.toString()) == -1) {
+										return FileVisitResult.SKIP_SUBTREE;
+									}
+									return visitor.visitModule(mod);
+								}
+								if (dir == subdir || count < 3) return FileVisitResult.CONTINUE;
+								return visitor.visitPackage(dir.subpath(2, count), dir.getName(1), attrs);
+							}
+
+							@Override
+							public FileVisitResult visitFile(java.nio.file.Path file, BasicFileAttributes attrs) throws IOException {
+								int count = file.getNameCount();
+								// This happens when a file in a default package is present. E.g. /modules/some.module/file.name
+								if (count == 3) {
+									cachePackage(JimageUtil.DEFAULT_PACKAGE, file.getName(1).toString());
+								}
+								return visitor.visitFile(file.subpath(2, file.getNameCount()), file.getName(1), attrs);
+							}
+						});
+					} else if (visitPackageMapping) {
+						Files.walkFileTree(subdir, new JimageUtil.AbstractFileVisitor<java.nio.file.Path>() {
+							@Override
+							public FileVisitResult visitFile(java.nio.file.Path file, BasicFileAttributes attrs) throws IOException {
+								java.nio.file.Path relative = subdir.relativize(file);
+								cachePackage(relative.getParent().toString(), relative.getFileName().toString());
+								return FileVisitResult.CONTINUE;
+							}
+						});
+					}
+			    }
+			} catch (Exception e) {
+				throw new IOException(e.getMessage());
+			}
+		}
+	}
+

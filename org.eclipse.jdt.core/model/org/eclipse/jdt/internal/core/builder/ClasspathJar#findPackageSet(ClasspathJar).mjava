@@ -5,11 +5,17 @@
  */
 static SimpleSet findPackageSet(ClasspathJar jar) {
 	String zipFileName = jar.zipFilename;
+	PackageCacheEntry cacheEntry = (PackageCacheEntry) PackageCache.get(zipFileName);
+	long lastModified = jar.lastModified();
+	long fileSize = new File(zipFileName).length();
+	if (cacheEntry != null && cacheEntry.lastModified == lastModified && cacheEntry.fileSize == fileSize)
+		return cacheEntry.packageSet;
 	final SimpleSet packageSet = new SimpleSet(41);
+	packageSet.add(""); //$NON-NLS-1$
 	if (jar.isJimage) {
 		try {
-			org.eclipse.jdt.internal.compiler.util.Util.walkModuleImage(new File(jar.zipFilename), 
-					new org.eclipse.jdt.internal.compiler.util.Util.JimageVisitor<Path>() {
+			org.eclipse.jdt.internal.compiler.util.JimageUtil.walkModuleImage(new File(zipFileName), 
+					new org.eclipse.jdt.internal.compiler.util.JimageUtil.JimageVisitor<Path>() {
 
 				@Override
 				public FileVisitResult visitPackage(Path dir, Path mod, BasicFileAttributes attrs) throws IOException {
@@ -28,15 +34,10 @@ static SimpleSet findPackageSet(ClasspathJar jar) {
 				}
 			});
 		} catch (IOException e) {
-			// Move on
+			// TODO: Should report better
 		}
-		// TODO: What about caching?
+		PackageCache.put(zipFileName, new PackageCacheEntry(0, 0, packageSet));
 	} else {
-		long lastModified = jar.lastModified();
-		long fileSize = new File(zipFileName).length();
-		PackageCacheEntry cacheEntry = (PackageCacheEntry) PackageCache.get(zipFileName);
-		if (cacheEntry != null && cacheEntry.lastModified == lastModified && cacheEntry.fileSize == fileSize)
-			return cacheEntry.packageSet;
 		packageSet.add(""); //$NON-NLS-1$
 		for (Enumeration e = jar.zipFile.entries(); e.hasMoreElements(); ) {
 			String fileName = ((ZipEntry) e.nextElement()).getName();
@@ -44,7 +45,6 @@ static SimpleSet findPackageSet(ClasspathJar jar) {
 		}
 		PackageCache.put(zipFileName, new PackageCacheEntry(lastModified, fileSize, packageSet));
 	}
-
 	return packageSet;
 }
 

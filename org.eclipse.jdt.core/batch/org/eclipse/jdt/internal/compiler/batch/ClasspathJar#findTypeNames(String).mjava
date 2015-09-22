@@ -1,26 +1,59 @@
-public char[][][] findTypeNames(String qualifiedPackageName) {
+public char[][][] findTypeNames(final String qualifiedPackageName) {
 	if (!isPackage(qualifiedPackageName))
 		return null; // most common case
 
-	ArrayList answers = new ArrayList();
-	nextEntry : for (Enumeration e = this.zipFile.entries(); e.hasMoreElements(); ) {
-		String fileName = ((ZipEntry) e.nextElement()).getName();
+	final ArrayList answers = new ArrayList();
+	if (this.isJimage) {
+		try {
+			JimageUtil.walkModuleImage(this.file, new JimageUtil.JimageVisitor<java.nio.file.Path>() {
 
-		// add the package name & all of its parent packages
-		int last = fileName.lastIndexOf('/');
-		while (last > 0) {
-			// extract the package name
-			String packageName = fileName.substring(0, last);
-			if (!qualifiedPackageName.equals(packageName))
-				continue nextEntry;
-			int indexOfDot = fileName.lastIndexOf('.');
-			if (indexOfDot != -1) {
-				String typeName = fileName.substring(last + 1, indexOfDot);
-				char[] packageArray = packageName.toCharArray();
-				answers.add(
-					CharOperation.arrayConcat(
-						CharOperation.splitOn('/', packageArray),
-						typeName.toCharArray()));
+				@Override
+				public FileVisitResult visitPackage(java.nio.file.Path dir, java.nio.file.Path mod, BasicFileAttributes attrs) throws IOException {
+					if (!dir.toString().equals(qualifiedPackageName)) {
+						return FileVisitResult.SKIP_SUBTREE;
+					}
+					return FileVisitResult.CONTINUE;
+				}
+
+				@Override
+				public FileVisitResult visitFile(java.nio.file.Path dir, java.nio.file.Path mod, BasicFileAttributes attrs) throws IOException {
+					char[] packageArray = qualifiedPackageName.toCharArray();
+					answers.add(
+							CharOperation.arrayConcat(
+								CharOperation.splitOn('/', packageArray),
+								dir.toString().toCharArray()));
+					return FileVisitResult.CONTINUE;
+				}
+
+				@Override
+				public FileVisitResult visitModule(java.nio.file.Path mod) throws IOException {
+					return FileVisitResult.CONTINUE;
+				}
+
+			});
+		} catch (IOException e) {
+			// Ignore and move on
+		}
+	} else {
+		nextEntry : for (Enumeration e = this.zipFile.entries(); e.hasMoreElements(); ) {
+			String fileName = ((ZipEntry) e.nextElement()).getName();
+
+			// add the package name & all of its parent packages
+			int last = fileName.lastIndexOf('/');
+			while (last > 0) {
+				// extract the package name
+				String packageName = fileName.substring(0, last);
+				if (!qualifiedPackageName.equals(packageName))
+					continue nextEntry;
+				int indexOfDot = fileName.lastIndexOf('.');
+				if (indexOfDot != -1) {
+					String typeName = fileName.substring(last + 1, indexOfDot);
+					char[] packageArray = packageName.toCharArray();
+					answers.add(
+						CharOperation.arrayConcat(
+							CharOperation.splitOn('/', packageArray),
+							typeName.toCharArray()));
+				}
 			}
 		}
 	}
