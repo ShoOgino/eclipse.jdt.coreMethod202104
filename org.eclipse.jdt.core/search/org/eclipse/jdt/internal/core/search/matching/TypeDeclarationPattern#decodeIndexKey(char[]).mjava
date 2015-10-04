@@ -1,17 +1,19 @@
 /*
  * Type entries are encoded as:
- * 	simpleTypeName / packageName / enclosingTypeName / modifiers
- *			e.g. Object/java.lang//0
- * 		e.g. Cloneable/java.lang//512
- * 		e.g. LazyValue/javax.swing/UIDefaults/0
+ * 	simpleTypeName / packageName / enclosingTypeName / modifiers / moduleName / 'P'
+ *			e.g. Object/java.lang//0/P/java.base
+ * 		e.g. Cloneable/java.lang//512/P/java.base
+ * 		e.g. LazyValue/javax.swing/UIDefaults/0/<module_name>/P
  * or for secondary types as:
- * 	simpleTypeName / packageName / enclosingTypeName / modifiers / S
+ * 	simpleTypeName / packageName / enclosingTypeName / modifiers / moduleName / 'S'
  */
 public void decodeIndexKey(char[] key) {
 	int slash = CharOperation.indexOf(SEPARATOR, key, 0);
 	this.simpleName = CharOperation.subarray(key, 0, slash);
 
 	int start = ++slash;
+
+	// read package
 	if (key[start] == SEPARATOR) {
 		this.pkg = CharOperation.NO_CHAR;
 	} else {
@@ -19,26 +21,31 @@ public void decodeIndexKey(char[] key) {
 		this.pkg = internedPackageNames.add(CharOperation.subarray(key, start, slash));
 	}
 
-	// Continue key read by the end to decode modifiers
-	int last = key.length-1;
-	this.secondary = key[last] == 'S';
-	if (this.secondary) {
-		last -= 2;
+	// read enclosingtype
+	start = ++slash;
+	int last;
+	if (key[start] == SEPARATOR) {
+		this.enclosingTypeNames = CharOperation.NO_CHAR_CHAR;		
+	} else {
+		last = slash = CharOperation.indexOf(SEPARATOR, key, start);
+		this.enclosingTypeNames = last == (start+1) && key[start] == ZERO_CHAR ? ONE_ZERO_CHAR : CharOperation.splitOn('.', key, start, last);
 	}
+
+	// read modifiers
+	start = slash + 1;
+	slash = CharOperation.indexOf(SEPARATOR, key, start);
+	last = slash - 1;
 	this.modifiers = key[last-1] + (key[last]<<16);
 	decodeModifiers();
 
-	// Retrieve enclosing type names
+	// module name
+	start = slash + 1; // beginning of module name;
+	slash = CharOperation.indexOf(SEPARATOR, key, start); // should be start + 1 if not corrupted
+	this.moduleName = start == slash ? CharOperation.NO_CHAR : CharOperation.subarray(key, start, slash);
+
+	// Primary or Secondary
 	start = slash + 1;
-	last -= 2; // position of ending slash
-	if (start == last) {
-		this.enclosingTypeNames = CharOperation.NO_CHAR_CHAR;
-	} else {
-		if (last == (start+1) && key[start] == ZERO_CHAR) {
-			this.enclosingTypeNames = ONE_ZERO_CHAR;
-		} else {
-			this.enclosingTypeNames = CharOperation.splitOn('.', key, start, last);
-		}
-	}
+	this.secondary = key[start] == 'S';
+	
 }
 
