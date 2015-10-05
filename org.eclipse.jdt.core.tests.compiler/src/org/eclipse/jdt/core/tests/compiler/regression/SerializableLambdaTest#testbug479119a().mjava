@@ -1,0 +1,63 @@
+	public void testbug479119a() {
+		this.runConformTest(
+			new String[]{
+				"Testbed.java",
+				"import java.io.ObjectStreamClass;\n" + 
+				"import java.io.Serializable;\n" + 
+				"import java.lang.invoke.SerializedLambda;\n" + 
+				"import java.lang.reflect.Constructor;\n" + 
+				"import java.lang.reflect.Executable;\n" + 
+				"import java.lang.reflect.Method;\n" + 
+				"import java.util.function.IntFunction;\n" + 
+				"import java.util.stream.Stream;\n" + 
+				"public class Testbed {\n" + 
+				"	public static void main(String[] args) {\n" + 
+				"		System.out.println(getMethod(Testbed::foo).equals(getMethod(Testbed::foo)));\n" + 
+				"		System.out.println(getMethod(new Foo()::method).equals(getMethod(new Bar()::method)));\n" + 
+				"		System.out.println(getMethod(MethodRefImpl::new).equals(getMethod(MethodRefImpl::new)));\n" + 
+				"	}\n" + 
+				"	static class MethodRefImpl implements MethodRef {\n" + 
+				"		@Override\n" + 
+				"		public void run() {}\n" + 
+				"	}\n" + 
+				"	public static class Base {\n" + 
+				"        public void method () {}\n" + 
+				"    }\n" + 
+				"    public static class Foo extends Base {}\n" + 
+				"    public static class Bar extends Base {}\n" + 
+				"	private static void foo() { }\n" + 
+				"	static interface MethodRef extends Runnable, Serializable { }\n" + 
+				"	private static Executable getMethod(MethodRef methodRef) {\n" + 
+				"		try {\n" + 
+				"			final Method invokeWriteReplaceMethod = ObjectStreamClass.class.getDeclaredMethod(\"invokeWriteReplace\", Object.class);\n" + 
+				"			invokeWriteReplaceMethod.setAccessible(true);\n" + 
+				"			final SerializedLambda l = (SerializedLambda)invokeWriteReplaceMethod.invoke(\n" + 
+				"					ObjectStreamClass.lookupAny(methodRef.getClass()),\n" + 
+				"					methodRef\n" + 
+				"				);\n" + 
+				"			System.out.println(\"Looking for \" + l.getImplClass() + \".\" + l.getImplMethodName());\n" + 
+				"			boolean isConstructor = l.getImplMethodName().indexOf(\"<init>\") >= 0;\n" + 
+				"			final Executable[] methods = Stream.of(isConstructor ? Class.forName(l.getImplClass()).getDeclaredConstructors() : Class.forName(l.getImplClass()).getDeclaredMethods()).\n" + 
+				"				filter(m -> m.getName().equals(isConstructor ? l.getImplClass() : l.getImplMethodName())).\n" + 
+				"				toArray(isConstructor ? Constructor[]::new : Method[]::new);\n" + 
+				"			if(methods.length != 1) throw new AssertionError(\"TODO: check signature\");\n" + 
+				"			return methods[0];\n" + 
+				"		} catch(Exception e) {\n" + 
+				"			throw new RuntimeException(e);\n" + 
+				"		}\n" + 
+				"	}\n" + 
+				"}\n"
+		},
+		"Looking for Testbed.foo\n" +
+		"Looking for Testbed.foo\n" +
+		"true\n" +
+		"Looking for Testbed$Base.method\n" +
+		"Looking for Testbed$Base.method\n" +
+		"true\n" +
+		"Looking for Testbed$MethodRefImpl.<init>\n" +
+		"Looking for Testbed$MethodRefImpl.<init>\n" +
+		"true",
+		null,true,
+		new String[]{"-Ddummy"});
+	}
+
