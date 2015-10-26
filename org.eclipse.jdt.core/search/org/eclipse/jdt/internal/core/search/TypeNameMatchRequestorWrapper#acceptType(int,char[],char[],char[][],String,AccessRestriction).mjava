@@ -4,61 +4,29 @@
 public void acceptType(int modifiers, char[] packageName, char[] simpleTypeName, char[][] enclosingTypeNames, String path, AccessRestriction access) {
 
 	// Get type
-	try {
-		IType type = null;
-		if (this.handleFactory != null) {
-			Openable openable = this.handleFactory.createOpenable(path, this.scope);
-			if (openable == null) return;
-			switch (openable.getElementType()) {
-				case IJavaElement.COMPILATION_UNIT:
-					ICompilationUnit cu = (ICompilationUnit) openable;
-					if (enclosingTypeNames != null && enclosingTypeNames.length > 0) {
-						type = cu.getType(new String(enclosingTypeNames[0]));
-						for (int j=1, l=enclosingTypeNames.length; j<l; j++) {
-							type = type.getType(new String(enclosingTypeNames[j]));
-						}
-						type = type.getType(new String(simpleTypeName));
-					} else {
-						type = cu.getType(new String(simpleTypeName));
-					}
-					break;
-				case IJavaElement.CLASS_FILE:
-					type = ((IClassFile)openable).getType();
-					break;
-			}
-		} else {
-			int separatorIndex= path.indexOf(IJavaSearchScope.JAR_FILE_ENTRY_SEPARATOR);
-			type = separatorIndex == -1
-				? createTypeFromPath(path, new String(simpleTypeName), enclosingTypeNames)
-				: createTypeFromJar(path, separatorIndex);
-		}
+	IType type = getType(modifiers, packageName, simpleTypeName, enclosingTypeNames, path, access);
+	// Accept match if the type has been found
+	if (type != null) {
+		// hierarchy scopes require one more check:
+		if (!(this.scope instanceof HierarchyScope) || ((HierarchyScope)this.scope).enclosesFineGrained(type)) {
 
-		// Accept match if the type has been found
-		if (type != null) {
-			// hierarchy scopes require one more check:
-			if (!(this.scope instanceof HierarchyScope) || ((HierarchyScope)this.scope).enclosesFineGrained(type)) {
+			// Create the match
+			final JavaSearchTypeNameMatch match = new JavaSearchTypeNameMatch(type, modifiers);
 
-				// Create the match
-				final JavaSearchTypeNameMatch match = new JavaSearchTypeNameMatch(type, modifiers);
-
-				// Update match accessibility
-				if(access != null) {
-					switch (access.getProblemId()) {
-						case IProblem.ForbiddenReference:
-							match.setAccessibility(IAccessRule.K_NON_ACCESSIBLE);
-							break;
-						case IProblem.DiscouragedReference:
-							match.setAccessibility(IAccessRule.K_DISCOURAGED);
-							break;
-					}
+			// Update match accessibility
+			if(access != null) {
+				switch (access.getProblemId()) {
+					case IProblem.ForbiddenReference:
+						match.setAccessibility(IAccessRule.K_NON_ACCESSIBLE);
+						break;
+					case IProblem.DiscouragedReference:
+						match.setAccessibility(IAccessRule.K_DISCOURAGED);
+						break;
 				}
-
-				// Accept match
-				this.requestor.acceptTypeNameMatch(match);
 			}
+			// Accept match
+			this.requestor.acceptTypeNameMatch(match);
 		}
-	} catch (JavaModelException e) {
-		// skip
 	}
 }
 
