@@ -1,0 +1,32 @@
+	private void handleFieldAccess(Expression node) {
+		boolean isAccessChainRoot = !FieldAccessAdapter.isFieldAccess(node.getParent());
+		if (!isAccessChainRoot)
+			return;
+
+		Expression expression = node;
+		FieldAccessAdapter access = null;
+		while (FieldAccessAdapter.isFieldAccess(expression)) {
+			access = new FieldAccessAdapter(expression);
+			int nameIndex = access.getIdentifierIndex(this.tm);
+			// find a dot preceding the name, may not be there
+			for (int i = nameIndex - 1; i > this.tm.firstIndexIn(node, -1); i--) {
+				Token t = this.tm.get(i);
+				if (t.tokenType == TokenNameDOT) {
+					this.wrapIndexes.add(i);
+					this.secondaryWrapIndexes.add(nameIndex);
+				}
+				if (!t.isComment() && t.tokenType != TokenNamesuper)
+					break;
+			}
+			expression = access.getExpression();
+		}
+		Collections.reverse(this.wrapIndexes);
+		this.wrapParentIndex = this.tm.lastIndexIn(expression != null ? expression : access.accessExpression, -1);
+		boolean isFollowedByInvocation = node.getParent() instanceof MethodInvocation
+				&& node.getLocationInParent() == MethodInvocation.EXPRESSION_PROPERTY;
+		this.wrapGroupEnd = isFollowedByInvocation ? this.tm.lastIndexIn(node.getParent(), -1)
+				: new FieldAccessAdapter(node).getIdentifierIndex(this.tm);
+		// TODO need configuration for this, now only handles line breaks that cannot be removed
+		handleWrap(Alignment.M_NO_ALIGNMENT);
+	}
+

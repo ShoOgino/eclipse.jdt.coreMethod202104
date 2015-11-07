@@ -1,72 +1,20 @@
 	public void executeWraps() {
 		int index = 0;
-		mainLoop: while (index < this.tm.size()) {
+		while (index < this.tm.size()) {
 			Token token = this.tm.get(index);
-			handleOnColumnIndent(index, token.getWrapPolicy());
-			// this might be a pre-existing wrap that should trigger other top priority wraps
-			int jumpToIndex = handleTopPriorityWraps(index);
-			if (jumpToIndex >= 0) {
-				index = jumpToIndex;
-				continue mainLoop;
+			while (true) {
+				try {
+					int currentIndent = getWrapIndent(token);
+					this.wrapSearchResults.clear();
+					index = applyWraps(index, currentIndent);
+					break;
+				} catch (WrapRestartException e) {
+					handleTopPriorityWraps(e);
+				}
 			}
-
-			// determine wraps for incoming line
-			int currentIndent = getWrapIndent(token);
-			boolean isLineWrapped = token.isWrappable();
 			this.wrapSearchResults.clear();
-			WrapResult wrapResult = findWraps(index, currentIndent);
-			if (wrapResult == WrapResult.TOP_PRIORITY_WRAP_MET) {
-				jumpToIndex = handleTopPriorityWraps(this.topPriorityWrapIndex);
-				assert jumpToIndex >= 0;
-				index = Math.min(index, jumpToIndex);
-				continue mainLoop;
-			}
-
-			// apply wraps and indents
-			WrapInfo wrapInfo = wrapResult.nextWrap;
-			while (wrapInfo != null) {
-				isLineWrapped = true;
-				for (; index < wrapInfo.wrapTokenIndex; index++) {
-					token = this.tm.get(index);
-					if (shouldForceWrap(token, currentIndent)) {
-						currentIndent = token.getIndent();
-						wrapInfo = new WrapInfo(index, currentIndent);
-						findWrapsCached(index, currentIndent);
-						break;
-					}
-					currentIndent = Math.max(currentIndent, token.getAlign());
-					token.setIndent(currentIndent);
-				}
-				token = this.tm.get(index);
-				token.breakBefore();
-				token.setIndent(currentIndent = wrapInfo.indent);
-				handleOnColumnIndent(index, token.getWrapPolicy());
-				jumpToIndex = handleTopPriorityWraps(index);
-				if (jumpToIndex >= 0) {
-					index = jumpToIndex;
-					continue mainLoop;
-				}
-				wrapInfo = this.wrapSearchResults.get(wrapInfo).nextWrap;
-			}
-
-			// apply indent until the beginning of the next line
-			token.setIndent(currentIndent);
-			for (index++; index < this.tm.size(); index++) {
-				if (token.getLineBreaksAfter() > 0)
-					break;
-				token = this.tm.get(index);
-				if (token.isNextLineOnWrap() && isLineWrapped)
-					token.breakBefore();
-				if (token.getLineBreaksBefore() > 0)
-					break;
-				if (shouldForceWrap(token, currentIndent))
-					currentIndent = token.getIndent();
-				currentIndent = Math.max(currentIndent, token.getAlign());
-				token.setIndent(currentIndent);
-			}
+			this.usedTopPriorityWraps.clear();
 		}
-		this.wrapSearchResults.clear();
-		this.usedTopPriorityWraps.clear();
 
 		this.tm.traverse(0, new NLSTagHandler());
 	}
