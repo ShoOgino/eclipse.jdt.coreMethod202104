@@ -116,83 +116,65 @@
 			}
 		};
 
-		try {
-			if (progressMonitor != null) {
-				progressMonitor.beginTask(Messages.engine_searching, 1000);
-			}
-			// add type names from indexes
-			indexManager.performConcurrentJob(
-				new PatternSearchJob(
-					pattern,
-					getDefaultSearchParticipant(), // Java search only
-					scope,
-					searchRequestor),
-				waitingPolicy,
-				progressMonitor == null ? null : new SubProgressMonitor(progressMonitor, 1000-copiesLength));
+		SubMonitor subMonitor = SubMonitor.convert(progressMonitor, Messages.engine_searching, 1000);
+		// add type names from indexes
+		indexManager.performConcurrentJob(
+			new PatternSearchJob(
+				pattern,
+				getDefaultSearchParticipant(), // Java search only
+				scope,
+				searchRequestor),
+			waitingPolicy,
+			subMonitor.split(Math.max(1000-copiesLength, 0)));
 
-			// add type names from working copies
-			if (copies != null) {
-				for (int i = 0; i < copiesLength; i++) {
-					final ICompilationUnit workingCopy = copies[i];
-					if (scope instanceof HierarchyScope) {
-						if (!((HierarchyScope)scope).encloses(workingCopy, progressMonitor)) continue;
-					} else {
-						if (!scope.encloses(workingCopy)) continue;
-					}
-					
-					final String path = workingCopy.getPath().toString();
-					if (workingCopy.isConsistent()) {
-						IPackageDeclaration[] packageDeclarations = workingCopy.getPackageDeclarations();
-						char[] packageDeclaration = packageDeclarations.length == 0 ? CharOperation.NO_CHAR : packageDeclarations[0].getElementName().toCharArray();
-						IType[] allTypes = workingCopy.getAllTypes();
-						for (int j = 0, allTypesLength = allTypes.length; j < allTypesLength; j++) {
-							IType type = allTypes[j];
-							char[] simpleName = type.getElementName().toCharArray();
-							if (match(NoSuffix, packageName, pkgMatchRule, typeName, validatedTypeMatchRule, 0/*no kind*/, packageDeclaration, simpleName) && !type.isMember()) {
-								
-								int extraFlags = ExtraFlags.getExtraFlags(type);
-								
-								boolean hasConstructor = false;
-								
-								IMethod[] methods = type.getMethods();
-								for (int k = 0; k < methods.length; k++) {
-									IMethod method = methods[k];
-									if (method.isConstructor()) {
-										hasConstructor = true;
-										
-										String[] stringParameterNames = method.getParameterNames();
-										String[] stringParameterTypes = method.getParameterTypes();
-										int length = stringParameterNames.length;
-										char[][] parameterNames = new char[length][];
-										char[][] parameterTypes = new char[length][];
-										for (int l = 0; l < length; l++) {
-											parameterNames[l] = stringParameterNames[l].toCharArray();
-											parameterTypes[l] = Signature.toCharArray(Signature.getTypeErasure(stringParameterTypes[l]).toCharArray());
-										}
-										
-										nameRequestor.acceptConstructor(
-												method.getFlags(),
-												simpleName,
-												parameterNames.length,
-												null,// signature is not used for source type
-												parameterTypes, 
-												parameterNames,
-												type.getFlags(),
-												packageDeclaration,
-												extraFlags,
-												path,
-												null);
+		// add type names from working copies
+		if (copies != null) {
+			for (int i = 0; i < copiesLength; i++) {
+				SubMonitor iterationMonitor = subMonitor.split(1);
+				final ICompilationUnit workingCopy = copies[i];
+				if (scope instanceof HierarchyScope) {
+					if (!((HierarchyScope)scope).encloses(workingCopy, iterationMonitor)) continue;
+				} else {
+					if (!scope.encloses(workingCopy)) continue;
+				}
+				
+				final String path = workingCopy.getPath().toString();
+				if (workingCopy.isConsistent()) {
+					IPackageDeclaration[] packageDeclarations = workingCopy.getPackageDeclarations();
+					char[] packageDeclaration = packageDeclarations.length == 0 ? CharOperation.NO_CHAR : packageDeclarations[0].getElementName().toCharArray();
+					IType[] allTypes = workingCopy.getAllTypes();
+					for (int j = 0, allTypesLength = allTypes.length; j < allTypesLength; j++) {
+						IType type = allTypes[j];
+						char[] simpleName = type.getElementName().toCharArray();
+						if (match(NoSuffix, packageName, pkgMatchRule, typeName, validatedTypeMatchRule, 0/*no kind*/, packageDeclaration, simpleName) && !type.isMember()) {
+							
+							int extraFlags = ExtraFlags.getExtraFlags(type);
+							
+							boolean hasConstructor = false;
+							
+							IMethod[] methods = type.getMethods();
+							for (int k = 0; k < methods.length; k++) {
+								IMethod method = methods[k];
+								if (method.isConstructor()) {
+									hasConstructor = true;
+									
+									String[] stringParameterNames = method.getParameterNames();
+									String[] stringParameterTypes = method.getParameterTypes();
+									int length = stringParameterNames.length;
+									char[][] parameterNames = new char[length][];
+									char[][] parameterTypes = new char[length][];
+									for (int l = 0; l < length; l++) {
+										parameterNames[l] = stringParameterNames[l].toCharArray();
+										parameterTypes[l] = Signature.toCharArray(Signature.getTypeErasure(stringParameterTypes[l]).toCharArray());
 									}
-								}
-								
-								if (!hasConstructor) {
+									
 									nameRequestor.acceptConstructor(
-											Flags.AccPublic,
+											method.getFlags(),
 											simpleName,
-											-1,
-											null, // signature is not used for source type
-											CharOperation.NO_CHAR_CHAR,
-											CharOperation.NO_CHAR_CHAR,
+											parameterNames.length,
+											null,// signature is not used for source type
+											parameterTypes, 
+											parameterNames,
 											type.getFlags(),
 											packageDeclaration,
 											extraFlags,
@@ -200,136 +182,143 @@
 											null);
 								}
 							}
+							
+							if (!hasConstructor) {
+								nameRequestor.acceptConstructor(
+										Flags.AccPublic,
+										simpleName,
+										-1,
+										null, // signature is not used for source type
+										CharOperation.NO_CHAR_CHAR,
+										CharOperation.NO_CHAR_CHAR,
+										type.getFlags(),
+										packageDeclaration,
+										extraFlags,
+										path,
+										null);
+							}
 						}
-					} else {
-						Parser basicParser = getParser();
-						org.eclipse.jdt.internal.compiler.env.ICompilationUnit unit = (org.eclipse.jdt.internal.compiler.env.ICompilationUnit) workingCopy;
-						CompilationResult compilationUnitResult = new CompilationResult(unit, 0, 0, this.compilerOptions.maxProblemsPerUnit);
-						CompilationUnitDeclaration parsedUnit = basicParser.dietParse(unit, compilationUnitResult);
-						if (parsedUnit != null) {
-							final char[] packageDeclaration = parsedUnit.currentPackage == null ? CharOperation.NO_CHAR : CharOperation.concatWith(parsedUnit.currentPackage.getImportName(), '.');
-							class AllConstructorDeclarationsVisitor extends ASTVisitor {
-								private TypeDeclaration[] declaringTypes = new TypeDeclaration[0];
-								private int declaringTypesPtr = -1;
+					}
+				} else {
+					Parser basicParser = getParser();
+					org.eclipse.jdt.internal.compiler.env.ICompilationUnit unit = (org.eclipse.jdt.internal.compiler.env.ICompilationUnit) workingCopy;
+					CompilationResult compilationUnitResult = new CompilationResult(unit, 0, 0, this.compilerOptions.maxProblemsPerUnit);
+					CompilationUnitDeclaration parsedUnit = basicParser.dietParse(unit, compilationUnitResult);
+					if (parsedUnit != null) {
+						final char[] packageDeclaration = parsedUnit.currentPackage == null ? CharOperation.NO_CHAR : CharOperation.concatWith(parsedUnit.currentPackage.getImportName(), '.');
+						class AllConstructorDeclarationsVisitor extends ASTVisitor {
+							private TypeDeclaration[] declaringTypes = new TypeDeclaration[0];
+							private int declaringTypesPtr = -1;
+							
+							private void endVisit(TypeDeclaration typeDeclaration) {
+								if (!hasConstructor(typeDeclaration) && typeDeclaration.enclosingType == null) {
 								
-								private void endVisit(TypeDeclaration typeDeclaration) {
-									if (!hasConstructor(typeDeclaration) && typeDeclaration.enclosingType == null) {
-									
-										if (match(NoSuffix, packageName, pkgMatchRule, typeName, validatedTypeMatchRule, 0/*no kind*/, packageDeclaration, typeDeclaration.name)) {
-											nameRequestor.acceptConstructor(
-													Flags.AccPublic,
-													typeName,
-													-1,
-													null, // signature is not used for source type
-													CharOperation.NO_CHAR_CHAR,
-													CharOperation.NO_CHAR_CHAR,
-													typeDeclaration.modifiers,
-													packageDeclaration,
-													ExtraFlags.getExtraFlags(typeDeclaration),
-													path,
-													null);
-										}
-									}
-									
-									this.declaringTypes[this.declaringTypesPtr] = null;
-									this.declaringTypesPtr--;
-								}
-								
-								public void endVisit(TypeDeclaration typeDeclaration, CompilationUnitScope s) {
-									endVisit(typeDeclaration);
-								}
-								
-								public void endVisit(TypeDeclaration memberTypeDeclaration, ClassScope s) {
-									endVisit(memberTypeDeclaration);
-								}
-								
-								private boolean hasConstructor(TypeDeclaration typeDeclaration) {
-									AbstractMethodDeclaration[] methods = typeDeclaration.methods;
-									int length = methods == null ? 0 : methods.length;
-									for (int j = 0; j < length; j++) {
-										if (methods[j].isConstructor()) {
-											return true;
-										}
-									}
-									
-									return false;
-								}
-								public boolean visit(ConstructorDeclaration constructorDeclaration, ClassScope classScope) {
-									TypeDeclaration typeDeclaration = this.declaringTypes[this.declaringTypesPtr];
 									if (match(NoSuffix, packageName, pkgMatchRule, typeName, validatedTypeMatchRule, 0/*no kind*/, packageDeclaration, typeDeclaration.name)) {
-										Argument[] arguments = constructorDeclaration.arguments;
-										int length = arguments == null ? 0 : arguments.length;
-										char[][] parameterNames = new char[length][];
-										char[][] parameterTypes = new char[length][];
-										for (int l = 0; l < length; l++) {
-											Argument argument = arguments[l];
-											parameterNames[l] = argument.name;
-											if (argument.type instanceof SingleTypeReference) {
-												parameterTypes[l] = ((SingleTypeReference)argument.type).token;
-											} else {
-												parameterTypes[l] = CharOperation.concatWith(((QualifiedTypeReference)argument.type).tokens, '.');
-											}
-										}
-										
-										TypeDeclaration enclosing = typeDeclaration.enclosingType;
-										char[][] enclosingTypeNames = CharOperation.NO_CHAR_CHAR;
-										while (enclosing != null) {
-											enclosingTypeNames = CharOperation.arrayConcat(new char[][] {enclosing.name}, enclosingTypeNames);
-											if ((enclosing.bits & ASTNode.IsMemberType) != 0) {
-												enclosing = enclosing.enclosingType;
-											} else {
-												enclosing = null;
-											}
-										}
-										
 										nameRequestor.acceptConstructor(
-												constructorDeclaration.modifiers,
+												Flags.AccPublic,
 												typeName,
-												parameterNames.length,
+												-1,
 												null, // signature is not used for source type
-												parameterTypes,
-												parameterNames,
+												CharOperation.NO_CHAR_CHAR,
+												CharOperation.NO_CHAR_CHAR,
 												typeDeclaration.modifiers,
 												packageDeclaration,
 												ExtraFlags.getExtraFlags(typeDeclaration),
 												path,
 												null);
 									}
-									return false; // no need to find constructors from local/anonymous type
-								}
-								public boolean visit(TypeDeclaration typeDeclaration, BlockScope blockScope) {
-									return false; 
 								}
 								
-								private boolean visit(TypeDeclaration typeDeclaration) {
-									if(this.declaringTypes.length <= ++this.declaringTypesPtr) {
-										int length = this.declaringTypesPtr;
-										System.arraycopy(this.declaringTypes, 0, this.declaringTypes = new TypeDeclaration[length * 2 + 1], 0, length);
-									}
-									this.declaringTypes[this.declaringTypesPtr] = typeDeclaration;
-									return true;
-								}
-								
-								public boolean visit(TypeDeclaration typeDeclaration, CompilationUnitScope s) {
-									return visit(typeDeclaration);
-								}
-								
-								public boolean visit(TypeDeclaration memberTypeDeclaration, ClassScope s) {
-									return visit(memberTypeDeclaration);
-								}
+								this.declaringTypes[this.declaringTypesPtr] = null;
+								this.declaringTypesPtr--;
 							}
-							parsedUnit.traverse(new AllConstructorDeclarationsVisitor(), parsedUnit.scope);
+							
+							public void endVisit(TypeDeclaration typeDeclaration, CompilationUnitScope s) {
+								endVisit(typeDeclaration);
+							}
+							
+							public void endVisit(TypeDeclaration memberTypeDeclaration, ClassScope s) {
+								endVisit(memberTypeDeclaration);
+							}
+							
+							private boolean hasConstructor(TypeDeclaration typeDeclaration) {
+								AbstractMethodDeclaration[] methods = typeDeclaration.methods;
+								int length = methods == null ? 0 : methods.length;
+								for (int j = 0; j < length; j++) {
+									if (methods[j].isConstructor()) {
+										return true;
+									}
+								}
+								
+								return false;
+							}
+							public boolean visit(ConstructorDeclaration constructorDeclaration, ClassScope classScope) {
+								TypeDeclaration typeDeclaration = this.declaringTypes[this.declaringTypesPtr];
+								if (match(NoSuffix, packageName, pkgMatchRule, typeName, validatedTypeMatchRule, 0/*no kind*/, packageDeclaration, typeDeclaration.name)) {
+									Argument[] arguments = constructorDeclaration.arguments;
+									int length = arguments == null ? 0 : arguments.length;
+									char[][] parameterNames = new char[length][];
+									char[][] parameterTypes = new char[length][];
+									for (int l = 0; l < length; l++) {
+										Argument argument = arguments[l];
+										parameterNames[l] = argument.name;
+										if (argument.type instanceof SingleTypeReference) {
+											parameterTypes[l] = ((SingleTypeReference)argument.type).token;
+										} else {
+											parameterTypes[l] = CharOperation.concatWith(((QualifiedTypeReference)argument.type).tokens, '.');
+										}
+									}
+									
+									TypeDeclaration enclosing = typeDeclaration.enclosingType;
+									char[][] enclosingTypeNames = CharOperation.NO_CHAR_CHAR;
+									while (enclosing != null) {
+										enclosingTypeNames = CharOperation.arrayConcat(new char[][] {enclosing.name}, enclosingTypeNames);
+										if ((enclosing.bits & ASTNode.IsMemberType) != 0) {
+											enclosing = enclosing.enclosingType;
+										} else {
+											enclosing = null;
+										}
+									}
+									
+									nameRequestor.acceptConstructor(
+											constructorDeclaration.modifiers,
+											typeName,
+											parameterNames.length,
+											null, // signature is not used for source type
+											parameterTypes,
+											parameterNames,
+											typeDeclaration.modifiers,
+											packageDeclaration,
+											ExtraFlags.getExtraFlags(typeDeclaration),
+											path,
+											null);
+								}
+								return false; // no need to find constructors from local/anonymous type
+							}
+							public boolean visit(TypeDeclaration typeDeclaration, BlockScope blockScope) {
+								return false; 
+							}
+							
+							private boolean visit(TypeDeclaration typeDeclaration) {
+								if(this.declaringTypes.length <= ++this.declaringTypesPtr) {
+									int length = this.declaringTypesPtr;
+									System.arraycopy(this.declaringTypes, 0, this.declaringTypes = new TypeDeclaration[length * 2 + 1], 0, length);
+								}
+								this.declaringTypes[this.declaringTypesPtr] = typeDeclaration;
+								return true;
+							}
+							
+							public boolean visit(TypeDeclaration typeDeclaration, CompilationUnitScope s) {
+								return visit(typeDeclaration);
+							}
+							
+							public boolean visit(TypeDeclaration memberTypeDeclaration, ClassScope s) {
+								return visit(memberTypeDeclaration);
+							}
 						}
-					}
-					if (progressMonitor != null) {
-						if (progressMonitor.isCanceled()) throw new OperationCanceledException();
-						progressMonitor.worked(1);
+						parsedUnit.traverse(new AllConstructorDeclarationsVisitor(), parsedUnit.scope);
 					}
 				}
-			}
-		} finally {
-			if (progressMonitor != null) {
-				progressMonitor.done();
 			}
 		}
 	}

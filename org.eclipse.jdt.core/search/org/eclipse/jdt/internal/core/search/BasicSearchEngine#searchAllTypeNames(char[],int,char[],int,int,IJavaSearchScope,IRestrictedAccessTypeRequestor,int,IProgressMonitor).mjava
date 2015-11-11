@@ -148,124 +148,113 @@
 			}
 		};
 
-		try {
-			if (progressMonitor != null) {
-				progressMonitor.beginTask(Messages.engine_searching, 1000);
-			}
-			// add type names from indexes
-			indexManager.performConcurrentJob(
-				new PatternSearchJob(
-					pattern,
-					getDefaultSearchParticipant(), // Java search only
-					scope,
-					searchRequestor),
-				waitingPolicy,
-				progressMonitor == null ? null : new SubProgressMonitor(progressMonitor, 1000-copiesLength));
+		SubMonitor subMonitor = SubMonitor.convert(progressMonitor, Messages.engine_searching, 1000);
+		// add type names from indexes
+		indexManager.performConcurrentJob(
+			new PatternSearchJob(
+				pattern,
+				getDefaultSearchParticipant(), // Java search only
+				scope,
+				searchRequestor),
+			waitingPolicy,
+			subMonitor.split(Math.max(1000-copiesLength, 0)));
 
-			// add type names from working copies
-			if (copies != null) {
-				for (int i = 0; i < copiesLength; i++) {
-					final ICompilationUnit workingCopy = copies[i];
-					if (scope instanceof HierarchyScope) {
-						if (!((HierarchyScope)scope).encloses(workingCopy, progressMonitor)) continue;
-					} else {
-						if (!scope.encloses(workingCopy)) continue;
-					}
-					final String path = workingCopy.getPath().toString();
-					if (workingCopy.isConsistent()) {
-						IPackageDeclaration[] packageDeclarations = workingCopy.getPackageDeclarations();
-						char[] packageDeclaration = packageDeclarations.length == 0 ? CharOperation.NO_CHAR : packageDeclarations[0].getElementName().toCharArray();
-						IType[] allTypes = workingCopy.getAllTypes();
-						for (int j = 0, allTypesLength = allTypes.length; j < allTypesLength; j++) {
-							IType type = allTypes[j];
-							IJavaElement parent = type.getParent();
-							char[][] enclosingTypeNames;
-							if (parent instanceof IType) {
-								char[] parentQualifiedName = ((IType)parent).getTypeQualifiedName('.').toCharArray();
-								enclosingTypeNames = CharOperation.splitOn('.', parentQualifiedName);
+		// add type names from working copies
+		if (copies != null) {
+			for (int i = 0; i < copiesLength; i++) {
+				SubMonitor iterationMonitor = subMonitor.split(i);
+				final ICompilationUnit workingCopy = copies[i];
+				if (scope instanceof HierarchyScope) {
+					if (!((HierarchyScope)scope).encloses(workingCopy, iterationMonitor)) continue;
+				} else {
+					if (!scope.encloses(workingCopy)) continue;
+				}
+				final String path = workingCopy.getPath().toString();
+				if (workingCopy.isConsistent()) {
+					IPackageDeclaration[] packageDeclarations = workingCopy.getPackageDeclarations();
+					char[] packageDeclaration = packageDeclarations.length == 0 ? CharOperation.NO_CHAR : packageDeclarations[0].getElementName().toCharArray();
+					IType[] allTypes = workingCopy.getAllTypes();
+					for (int j = 0, allTypesLength = allTypes.length; j < allTypesLength; j++) {
+						IType type = allTypes[j];
+						IJavaElement parent = type.getParent();
+						char[][] enclosingTypeNames;
+						if (parent instanceof IType) {
+							char[] parentQualifiedName = ((IType)parent).getTypeQualifiedName('.').toCharArray();
+							enclosingTypeNames = CharOperation.splitOn('.', parentQualifiedName);
+						} else {
+							enclosingTypeNames = CharOperation.NO_CHAR_CHAR;
+						}
+						char[] simpleName = type.getElementName().toCharArray();
+						int kind;
+						if (type.isEnum()) {
+							kind = TypeDeclaration.ENUM_DECL;
+						} else if (type.isAnnotation()) {
+							kind = TypeDeclaration.ANNOTATION_TYPE_DECL;
+						}	else if (type.isClass()) {
+							kind = TypeDeclaration.CLASS_DECL;
+						} else /*if (type.isInterface())*/ {
+							kind = TypeDeclaration.INTERFACE_DECL;
+						}
+						if (match(typeSuffix, packageName, packageMatchRule, typeName, validatedTypeMatchRule, kind, packageDeclaration, simpleName)) {
+							if (nameRequestor instanceof TypeNameMatchRequestorWrapper) {
+								((TypeNameMatchRequestorWrapper)nameRequestor).requestor.acceptTypeNameMatch(new JavaSearchTypeNameMatch(type, type.getFlags()));
 							} else {
-								enclosingTypeNames = CharOperation.NO_CHAR_CHAR;
+								nameRequestor.acceptType(type.getFlags(), packageDeclaration, simpleName, enclosingTypeNames, path, null);
 							}
-							char[] simpleName = type.getElementName().toCharArray();
-							int kind;
-							if (type.isEnum()) {
-								kind = TypeDeclaration.ENUM_DECL;
-							} else if (type.isAnnotation()) {
-								kind = TypeDeclaration.ANNOTATION_TYPE_DECL;
-							}	else if (type.isClass()) {
-								kind = TypeDeclaration.CLASS_DECL;
-							} else /*if (type.isInterface())*/ {
-								kind = TypeDeclaration.INTERFACE_DECL;
-							}
-							if (match(typeSuffix, packageName, packageMatchRule, typeName, validatedTypeMatchRule, kind, packageDeclaration, simpleName)) {
-								if (nameRequestor instanceof TypeNameMatchRequestorWrapper) {
-									((TypeNameMatchRequestorWrapper)nameRequestor).requestor.acceptTypeNameMatch(new JavaSearchTypeNameMatch(type, type.getFlags()));
-								} else {
-									nameRequestor.acceptType(type.getFlags(), packageDeclaration, simpleName, enclosingTypeNames, path, null);
-								}
-							}
-						}
-					} else {
-						Parser basicParser = getParser();
-						org.eclipse.jdt.internal.compiler.env.ICompilationUnit unit = (org.eclipse.jdt.internal.compiler.env.ICompilationUnit) workingCopy;
-						CompilationResult compilationUnitResult = new CompilationResult(unit, 0, 0, this.compilerOptions.maxProblemsPerUnit);
-						CompilationUnitDeclaration parsedUnit = basicParser.dietParse(unit, compilationUnitResult);
-						if (parsedUnit != null) {
-							final char[] packageDeclaration = parsedUnit.currentPackage == null ? CharOperation.NO_CHAR : CharOperation.concatWith(parsedUnit.currentPackage.getImportName(), '.');
-							class AllTypeDeclarationsVisitor extends ASTVisitor {
-								public boolean visit(TypeDeclaration typeDeclaration, BlockScope blockScope) {
-									return false; // no local/anonymous type
-								}
-								public boolean visit(TypeDeclaration typeDeclaration, CompilationUnitScope compilationUnitScope) {
-									if (match(typeSuffix, packageName, packageMatchRule, typeName, validatedTypeMatchRule, TypeDeclaration.kind(typeDeclaration.modifiers), packageDeclaration, typeDeclaration.name)) {
-										if (nameRequestor instanceof TypeNameMatchRequestorWrapper) {
-											IType type = workingCopy.getType(new String(typeName));
-											((TypeNameMatchRequestorWrapper)nameRequestor).requestor.acceptTypeNameMatch(new JavaSearchTypeNameMatch(type, typeDeclaration.modifiers));
-										} else {
-											nameRequestor.acceptType(typeDeclaration.modifiers, packageDeclaration, typeDeclaration.name, CharOperation.NO_CHAR_CHAR, path, null);
-										}
-									}
-									return true;
-								}
-								public boolean visit(TypeDeclaration memberTypeDeclaration, ClassScope classScope) {
-									if (match(typeSuffix, packageName, packageMatchRule, typeName, validatedTypeMatchRule, TypeDeclaration.kind(memberTypeDeclaration.modifiers), packageDeclaration, memberTypeDeclaration.name)) {
-										// compute enclosing type names
-										TypeDeclaration enclosing = memberTypeDeclaration.enclosingType;
-										char[][] enclosingTypeNames = CharOperation.NO_CHAR_CHAR;
-										while (enclosing != null) {
-											enclosingTypeNames = CharOperation.arrayConcat(new char[][] {enclosing.name}, enclosingTypeNames);
-											if ((enclosing.bits & ASTNode.IsMemberType) != 0) {
-												enclosing = enclosing.enclosingType;
-											} else {
-												enclosing = null;
-											}
-										}
-										// report
-										if (nameRequestor instanceof TypeNameMatchRequestorWrapper) {
-											IType type = workingCopy.getType(new String(enclosingTypeNames[0]));
-											for (int j=1, l=enclosingTypeNames.length; j<l; j++) {
-												type = type.getType(new String(enclosingTypeNames[j]));
-											}
-											((TypeNameMatchRequestorWrapper)nameRequestor).requestor.acceptTypeNameMatch(new JavaSearchTypeNameMatch(type, 0));
-										} else {
-											nameRequestor.acceptType(memberTypeDeclaration.modifiers, packageDeclaration, memberTypeDeclaration.name, enclosingTypeNames, path, null);
-										}
-									}
-									return true;
-								}
-							}
-							parsedUnit.traverse(new AllTypeDeclarationsVisitor(), parsedUnit.scope);
 						}
 					}
-					if (progressMonitor != null) {
-						if (progressMonitor.isCanceled()) throw new OperationCanceledException();
-						progressMonitor.worked(1);
+				} else {
+					Parser basicParser = getParser();
+					org.eclipse.jdt.internal.compiler.env.ICompilationUnit unit = (org.eclipse.jdt.internal.compiler.env.ICompilationUnit) workingCopy;
+					CompilationResult compilationUnitResult = new CompilationResult(unit, 0, 0, this.compilerOptions.maxProblemsPerUnit);
+					CompilationUnitDeclaration parsedUnit = basicParser.dietParse(unit, compilationUnitResult);
+					if (parsedUnit != null) {
+						final char[] packageDeclaration = parsedUnit.currentPackage == null ? CharOperation.NO_CHAR : CharOperation.concatWith(parsedUnit.currentPackage.getImportName(), '.');
+						class AllTypeDeclarationsVisitor extends ASTVisitor {
+							public boolean visit(TypeDeclaration typeDeclaration, BlockScope blockScope) {
+								return false; // no local/anonymous type
+							}
+							public boolean visit(TypeDeclaration typeDeclaration, CompilationUnitScope compilationUnitScope) {
+								if (match(typeSuffix, packageName, packageMatchRule, typeName, validatedTypeMatchRule, TypeDeclaration.kind(typeDeclaration.modifiers), packageDeclaration, typeDeclaration.name)) {
+									if (nameRequestor instanceof TypeNameMatchRequestorWrapper) {
+										IType type = workingCopy.getType(new String(typeName));
+										((TypeNameMatchRequestorWrapper)nameRequestor).requestor.acceptTypeNameMatch(new JavaSearchTypeNameMatch(type, typeDeclaration.modifiers));
+									} else {
+										nameRequestor.acceptType(typeDeclaration.modifiers, packageDeclaration, typeDeclaration.name, CharOperation.NO_CHAR_CHAR, path, null);
+									}
+								}
+								return true;
+							}
+							public boolean visit(TypeDeclaration memberTypeDeclaration, ClassScope classScope) {
+								if (match(typeSuffix, packageName, packageMatchRule, typeName, validatedTypeMatchRule, TypeDeclaration.kind(memberTypeDeclaration.modifiers), packageDeclaration, memberTypeDeclaration.name)) {
+									// compute enclosing type names
+									TypeDeclaration enclosing = memberTypeDeclaration.enclosingType;
+									char[][] enclosingTypeNames = CharOperation.NO_CHAR_CHAR;
+									while (enclosing != null) {
+										enclosingTypeNames = CharOperation.arrayConcat(new char[][] {enclosing.name}, enclosingTypeNames);
+										if ((enclosing.bits & ASTNode.IsMemberType) != 0) {
+											enclosing = enclosing.enclosingType;
+										} else {
+											enclosing = null;
+										}
+									}
+									// report
+									if (nameRequestor instanceof TypeNameMatchRequestorWrapper) {
+										IType type = workingCopy.getType(new String(enclosingTypeNames[0]));
+										for (int j=1, l=enclosingTypeNames.length; j<l; j++) {
+											type = type.getType(new String(enclosingTypeNames[j]));
+										}
+										((TypeNameMatchRequestorWrapper)nameRequestor).requestor.acceptTypeNameMatch(new JavaSearchTypeNameMatch(type, 0));
+									} else {
+										nameRequestor.acceptType(memberTypeDeclaration.modifiers, packageDeclaration, memberTypeDeclaration.name, enclosingTypeNames, path, null);
+									}
+								}
+								return true;
+							}
+						}
+						parsedUnit.traverse(new AllTypeDeclarationsVisitor(), parsedUnit.scope);
 					}
 				}
-			}
-		} finally {
-			if (progressMonitor != null) {
-				progressMonitor.done();
 			}
 		}
 	}

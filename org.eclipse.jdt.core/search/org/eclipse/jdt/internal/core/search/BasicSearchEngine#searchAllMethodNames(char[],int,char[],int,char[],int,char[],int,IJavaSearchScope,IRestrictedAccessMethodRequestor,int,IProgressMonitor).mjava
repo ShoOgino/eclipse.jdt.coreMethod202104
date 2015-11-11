@@ -123,145 +123,134 @@
 				}
 			};
 
-			try {
-				if (progressMonitor != null) {
-					progressMonitor.beginTask(Messages.engine_searching, 1000);
-				}
-				// add type names from indexes
-				indexManager.performConcurrentJob(
-					new PatternSearchJob(
-						pattern,
-						getDefaultSearchParticipant(), // Java search only
-						scope,
-						searchRequestor),
-					waitingPolicy,
-					progressMonitor == null ? null : new SubProgressMonitor(progressMonitor, 1000-copiesLength));
+			SubMonitor subMonitor = SubMonitor.convert(progressMonitor, Messages.engine_searching, 1000);
+			// add type names from indexes
+			indexManager.performConcurrentJob(
+				new PatternSearchJob(
+					pattern,
+					getDefaultSearchParticipant(), // Java search only
+					scope,
+					searchRequestor),
+				waitingPolicy,
+				subMonitor.split(Math.max(1000-copiesLength, 0)));
 
-				// add type names from working copies
-				if (copies != null) {
-					boolean isPkgCaseSensitive = (pkgMatchRule & SearchPattern.R_CASE_SENSITIVE) != 0; 
-					for (int i = 0; i < copiesLength; i++) {
-						final ICompilationUnit workingCopy = copies[i];
-						if (scope instanceof HierarchyScope) {
-							if (!((HierarchyScope)scope).encloses(workingCopy, progressMonitor)) continue;
-						} else {
-							if (!scope.encloses(workingCopy)) continue;
-						}
+			// add type names from working copies
+			if (copies != null) {
+				boolean isPkgCaseSensitive = (pkgMatchRule & SearchPattern.R_CASE_SENSITIVE) != 0; 
+				for (int i = 0; i < copiesLength; i++) {
+					SubMonitor iterationMonitor = subMonitor.split(1);
+					final ICompilationUnit workingCopy = copies[i];
+					if (scope instanceof HierarchyScope) {
+						if (!((HierarchyScope)scope).encloses(workingCopy, iterationMonitor)) continue;
+					} else {
+						if (!scope.encloses(workingCopy)) continue;
+					}
 
-						final String path = workingCopy.getPath().toString();
-						if (workingCopy.isConsistent()) {
-							IPackageDeclaration[] packageDeclarations = workingCopy.getPackageDeclarations();
-							char[] packageDeclaration = packageDeclarations.length == 0 ? CharOperation.NO_CHAR : packageDeclarations[0].getElementName().toCharArray();
-							if (packageName != null && !CharOperation.equals(packageName, packageDeclaration, isPkgCaseSensitive))
+					final String path = workingCopy.getPath().toString();
+					if (workingCopy.isConsistent()) {
+						IPackageDeclaration[] packageDeclarations = workingCopy.getPackageDeclarations();
+						char[] packageDeclaration = packageDeclarations.length == 0 ? CharOperation.NO_CHAR : packageDeclarations[0].getElementName().toCharArray();
+						if (packageName != null && !CharOperation.equals(packageName, packageDeclaration, isPkgCaseSensitive))
+							continue;
+						
+						IType[] allTypes = workingCopy.getAllTypes();
+						for (int j = 0, allTypesLength = allTypes.length; j < allTypesLength; j++) {
+							IType type = allTypes[j];
+							IJavaElement parent = type.getParent();
+							char[] rDeclaringQualification = parent instanceof IType ? ((IType) parent).getTypeQualifiedName('.').toCharArray() : CharOperation.NO_CHAR;
+							char[] rSimpleName = type.getElementName().toCharArray();
+							if (!match(declaringQualification, declQualificationMatchRule, rDeclaringQualification) ||
+									!match(declaringSimpleName, declSimpleNameMatchRule, rSimpleName))
 								continue;
-							
-							IType[] allTypes = workingCopy.getAllTypes();
-							for (int j = 0, allTypesLength = allTypes.length; j < allTypesLength; j++) {
-								IType type = allTypes[j];
-								IJavaElement parent = type.getParent();
-								char[] rDeclaringQualification = parent instanceof IType ? ((IType) parent).getTypeQualifiedName('.').toCharArray() : CharOperation.NO_CHAR;
-								char[] rSimpleName = type.getElementName().toCharArray();
-								if (!match(declaringQualification, declQualificationMatchRule, rDeclaringQualification) ||
-										!match(declaringSimpleName, declSimpleNameMatchRule, rSimpleName))
-									continue;
-								reportMatchingMethods(methodName, methodMatchRule, nameRequestor, path,
-										packageDeclaration, type, rDeclaringQualification, rSimpleName); 
-							}
-						} else {
-							Parser basicParser = getParser();
-							org.eclipse.jdt.internal.compiler.env.ICompilationUnit unit = (org.eclipse.jdt.internal.compiler.env.ICompilationUnit) workingCopy;
-							CompilationResult compilationUnitResult = new CompilationResult(unit, 0, 0, this.compilerOptions.maxProblemsPerUnit);
-							CompilationUnitDeclaration parsedUnit = basicParser.dietParse(unit, compilationUnitResult);
-							if (parsedUnit != null) {
-								final char[] packageDeclaration = parsedUnit.currentPackage == null ? CharOperation.NO_CHAR : CharOperation.concatWith(parsedUnit.currentPackage.getImportName(), '.');
-								class AllMethodDeclarationVisitor extends ASTVisitor {
+							reportMatchingMethods(methodName, methodMatchRule, nameRequestor, path,
+									packageDeclaration, type, rDeclaringQualification, rSimpleName); 
+						}
+					} else {
+						Parser basicParser = getParser();
+						org.eclipse.jdt.internal.compiler.env.ICompilationUnit unit = (org.eclipse.jdt.internal.compiler.env.ICompilationUnit) workingCopy;
+						CompilationResult compilationUnitResult = new CompilationResult(unit, 0, 0, this.compilerOptions.maxProblemsPerUnit);
+						CompilationUnitDeclaration parsedUnit = basicParser.dietParse(unit, compilationUnitResult);
+						if (parsedUnit != null) {
+							final char[] packageDeclaration = parsedUnit.currentPackage == null ? CharOperation.NO_CHAR : CharOperation.concatWith(parsedUnit.currentPackage.getImportName(), '.');
+							class AllMethodDeclarationVisitor extends ASTVisitor {
 
-									class TypeInfo {
-										public TypeDeclaration typeDecl;
-										public IType type;
-										public boolean visitMethods;
-										public char[] enclosingTypeName;
-										
-										TypeInfo(TypeDeclaration typeDecl, boolean visitMethods, char[] enclosingTypeName) {
-											this.typeDecl = typeDecl;
-											this.type = workingCopy.getType(new String(typeDecl.name));
-											this.visitMethods = visitMethods;
-											this.enclosingTypeName = enclosingTypeName;
-										}
-									}
-									Stack<TypeInfo> typeInfoStack = new Stack<>();
-									IType getCurrentType() {
-										int l = this.typeInfoStack.size();
-										if (l <= 0) return null;
-										TypeInfo typeInfo = this.typeInfoStack.get(0);
-										IType type = typeInfo.type;
-										if (type == null) {
-											TypeInfo ti = this.typeInfoStack.get(0);
-											ti.type = ti.type == null ? workingCopy.getType(new String(ti.typeDecl.name)) : ti.type;
-											type = ti.type;
-											for (int j = 1; j < l && type != null; ++j) {
-												ti = this.typeInfoStack.get(j);
-												if (ti.type == null) {
-													ti.type = type.getType(new String(ti.typeDecl.name));
-												}
-												type = ti.type;
-											}
-										}
-										return type;
-									}
-
-									private void addStackEntry(TypeDeclaration typeDeclaration, char[] enclosingTypeName) {
-										boolean visitMethods = match(declaringQualification, declQualificationMatchRule, enclosingTypeName) &&
-												match(declaringSimpleName, declSimpleNameMatchRule, typeDeclaration.name);
-										this.typeInfoStack.push(new TypeInfo(typeDeclaration, visitMethods, enclosingTypeName));
-									}
-									public void endVisit(TypeDeclaration typeDeclaration, CompilationUnitScope s) {
-										this.typeInfoStack.pop();
-									}
-									public void endVisit(TypeDeclaration memberTypeDeclaration, ClassScope s) {
-										this.typeInfoStack.pop();
-									}
-									public boolean visit(MethodDeclaration methodDeclaration, ClassScope classScope) {
-										TypeInfo typeInfo = this.typeInfoStack.peek();
-										if (typeInfo.visitMethods &&
-											match(methodName, methodMatchRule, methodDeclaration.selector)) {
-											reportMatchingMethod(path, packageDeclaration,
-													typeInfo.enclosingTypeName, 
-													typeInfo.typeDecl, 
-													methodDeclaration,
-													getCurrentType(),
-													nameRequestor);
-										}
-										
-										return false; // no need to find methods from local/anonymous type
-									}
-									public boolean visit(TypeDeclaration typeDeclaration, BlockScope blockScope) {
-										return false; // do not visit local/anonymous types
-									}
-									public boolean visit(TypeDeclaration typeDeclaration, CompilationUnitScope s) {
-										addStackEntry(typeDeclaration, CharOperation.NO_CHAR);
-										return true;
-									}
-									public boolean visit(TypeDeclaration memberTypeDeclaration, ClassScope s) {
-										TypeInfo typeInfo = this.typeInfoStack.peek();
-										addStackEntry(memberTypeDeclaration, typeInfo.enclosingTypeName == CharOperation.NO_CHAR ? typeInfo.typeDecl.name :
-												CharOperation.concat(typeInfo.enclosingTypeName, typeInfo.typeDecl.name, '.'));
-										return true;
+								class TypeInfo {
+									public TypeDeclaration typeDecl;
+									public IType type;
+									public boolean visitMethods;
+									public char[] enclosingTypeName;
+									
+									TypeInfo(TypeDeclaration typeDecl, boolean visitMethods, char[] enclosingTypeName) {
+										this.typeDecl = typeDecl;
+										this.type = workingCopy.getType(new String(typeDecl.name));
+										this.visitMethods = visitMethods;
+										this.enclosingTypeName = enclosingTypeName;
 									}
 								}
-								if (match(packageName, pkgMatchRule, packageDeclaration))
-									parsedUnit.traverse(new AllMethodDeclarationVisitor(), parsedUnit.scope);
+								Stack<TypeInfo> typeInfoStack = new Stack<>();
+								IType getCurrentType() {
+									int l = this.typeInfoStack.size();
+									if (l <= 0) return null;
+									TypeInfo typeInfo = this.typeInfoStack.get(0);
+									IType type = typeInfo.type;
+									if (type == null) {
+										TypeInfo ti = this.typeInfoStack.get(0);
+										ti.type = ti.type == null ? workingCopy.getType(new String(ti.typeDecl.name)) : ti.type;
+										type = ti.type;
+										for (int j = 1; j < l && type != null; ++j) {
+											ti = this.typeInfoStack.get(j);
+											if (ti.type == null) {
+												ti.type = type.getType(new String(ti.typeDecl.name));
+											}
+											type = ti.type;
+										}
+									}
+									return type;
+								}
+
+								private void addStackEntry(TypeDeclaration typeDeclaration, char[] enclosingTypeName) {
+									boolean visitMethods = match(declaringQualification, declQualificationMatchRule, enclosingTypeName) &&
+											match(declaringSimpleName, declSimpleNameMatchRule, typeDeclaration.name);
+									this.typeInfoStack.push(new TypeInfo(typeDeclaration, visitMethods, enclosingTypeName));
+								}
+								public void endVisit(TypeDeclaration typeDeclaration, CompilationUnitScope s) {
+									this.typeInfoStack.pop();
+								}
+								public void endVisit(TypeDeclaration memberTypeDeclaration, ClassScope s) {
+									this.typeInfoStack.pop();
+								}
+								public boolean visit(MethodDeclaration methodDeclaration, ClassScope classScope) {
+									TypeInfo typeInfo = this.typeInfoStack.peek();
+									if (typeInfo.visitMethods &&
+										match(methodName, methodMatchRule, methodDeclaration.selector)) {
+										reportMatchingMethod(path, packageDeclaration,
+												typeInfo.enclosingTypeName, 
+												typeInfo.typeDecl, 
+												methodDeclaration,
+												getCurrentType(),
+												nameRequestor);
+									}
+									
+									return false; // no need to find methods from local/anonymous type
+								}
+								public boolean visit(TypeDeclaration typeDeclaration, BlockScope blockScope) {
+									return false; // do not visit local/anonymous types
+								}
+								public boolean visit(TypeDeclaration typeDeclaration, CompilationUnitScope s) {
+									addStackEntry(typeDeclaration, CharOperation.NO_CHAR);
+									return true;
+								}
+								public boolean visit(TypeDeclaration memberTypeDeclaration, ClassScope s) {
+									TypeInfo typeInfo = this.typeInfoStack.peek();
+									addStackEntry(memberTypeDeclaration, typeInfo.enclosingTypeName == CharOperation.NO_CHAR ? typeInfo.typeDecl.name :
+											CharOperation.concat(typeInfo.enclosingTypeName, typeInfo.typeDecl.name, '.'));
+									return true;
+								}
 							}
-						}
-						if (progressMonitor != null) {
-							if (progressMonitor.isCanceled()) throw new OperationCanceledException();
-							progressMonitor.worked(1);
+							if (match(packageName, pkgMatchRule, packageDeclaration))
+								parsedUnit.traverse(new AllMethodDeclarationVisitor(), parsedUnit.scope);
 						}
 					}
-				}
-			} finally {
-				if (progressMonitor != null) {
-					progressMonitor.done();
 				}
 			}
 		}
