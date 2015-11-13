@@ -1,0 +1,81 @@
+/**
+ * @see org.eclipse.jdt.core.eval.IEvaluationContext
+ * @exception org.eclipse.jdt.internal.eval.InstallException if the code snippet class files could not be deployed.
+ */
+public void evaluate(
+	char[] codeSnippet,
+	char[][] contextLocalVariableTypeNames,
+	char[][] contextLocalVariableNames,
+	int[] contextLocalVariableModifiers,
+	char[] contextDeclaringTypeName,
+	boolean contextIsStatic,
+	boolean contextIsConstructorCall,
+	INameEnvironment environment,
+	Map<String, String> options,
+	final IRequestor requestor,
+	IProblemFactory problemFactory) throws InstallException {
+
+	// Initialialize context
+	this.localVariableTypeNames = contextLocalVariableTypeNames;
+	this.localVariableNames = contextLocalVariableNames;
+	this.localVariableModifiers = contextLocalVariableModifiers;
+	this.declaringTypeName = contextDeclaringTypeName;
+	this.isStatic = contextIsStatic;
+	this.isConstructorCall = contextIsConstructorCall;
+
+	deployCodeSnippetClassIfNeeded(requestor);
+
+	try {
+		// Install new variables if needed
+		class ForwardingRequestor implements IRequestor {
+			boolean hasErrors = false;
+			public boolean acceptClassFiles(ClassFile[] classFiles, char[] codeSnippetClassName) {
+				return requestor.acceptClassFiles(classFiles, codeSnippetClassName);
+			}
+			public void acceptProblem(CategorizedProblem problem, char[] fragmentSource, int fragmentKind) {
+				requestor.acceptProblem(problem, fragmentSource, fragmentKind);
+				if (problem.isError()) {
+					this.hasErrors = true;
+				}
+			}
+		}
+		ForwardingRequestor forwardingRequestor = new ForwardingRequestor();
+		if (this.varsChanged) {
+			evaluateVariables(environment, options, forwardingRequestor, problemFactory);
+		}
+
+		// Compile code snippet if there was no errors while evaluating the variables
+		if (!forwardingRequestor.hasErrors) {
+			Evaluator evaluator =
+				new CodeSnippetEvaluator(
+					codeSnippet,
+					this,
+					environment,
+					options,
+					requestor,
+					problemFactory);
+			ClassFile[] classes = evaluator.getClasses();
+			// Send code snippet on target
+			if (classes != null && classes.length > 0) {
+				char[] simpleClassName = evaluator.getClassName();
+				char[] pkgName = getPackageName();
+				char[] qualifiedClassName =
+					pkgName.length == 0 ?
+						simpleClassName :
+						CharOperation.concat(pkgName, simpleClassName, '.');
+				CODE_SNIPPET_COUNTER++;
+				if (!requestor.acceptClassFiles(classes, qualifiedClassName))
+					throw new InstallException();
+			}
+		}
+	} finally {
+		// Reinitialize context to default values
+		this.localVariableTypeNames = null;
+		this.localVariableNames = null;
+		this.localVariableModifiers = null;
+		this.declaringTypeName = null;
+		this.isStatic = true;
+		this.isConstructorCall = false;
+	}
+}
+

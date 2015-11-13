@@ -1,0 +1,42 @@
+/**
+ * @see org.eclipse.jdt.core.eval.IEvaluationContext
+ * @exception org.eclipse.jdt.internal.eval.InstallException if the code snippet class files could not be deployed.
+ */
+public void evaluateVariables(INameEnvironment environment, Map<String, String> options, IRequestor requestor, IProblemFactory problemFactory) throws InstallException {
+	deployCodeSnippetClassIfNeeded(requestor);
+	VariablesEvaluator evaluator = new VariablesEvaluator(this, environment, options, requestor, problemFactory);
+	ClassFile[] classes = evaluator.getClasses();
+	if (classes != null) {
+		if (classes.length > 0) {
+			// Sort classes so that enclosing types are cached before nested types
+			// otherwise an AbortCompilation is thrown in 1.5 mode since the enclosing type
+			// is needed to resolve a nested type
+			Util.sort(classes, new Util.Comparer() {
+				public int compare(Object a, Object b) {
+					if (a == b) return 0;
+					ClassFile enclosing = ((ClassFile) a).enclosingClassFile;
+					while (enclosing != null) {
+						if (enclosing == b)
+							return 1;
+						enclosing = enclosing.enclosingClassFile;
+					}
+					return -1;
+				}
+			});
+
+			// Send classes
+			if (!requestor.acceptClassFiles(classes, null)) {
+				throw new InstallException();
+			}
+
+			// Remember that the variables have been installed
+			int count = this.variableCount;
+			GlobalVariable[] variablesCopy = new GlobalVariable[count];
+			System.arraycopy(this.variables, 0, variablesCopy, 0, count);
+			this.installedVars = new VariablesInfo(evaluator.getPackageName(), evaluator.getClassName(), classes, variablesCopy, count);
+			VAR_CLASS_COUNTER++;
+		}
+		this.varsChanged = false;
+	}
+}
+
