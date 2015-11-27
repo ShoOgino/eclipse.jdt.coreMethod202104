@@ -1,0 +1,94 @@
+	private long insert(Chunk pChunk, long parent, int iParent, long node, long record) throws IndexException {
+		Chunk chunk = db.getChunk(node);
+
+		// If this node is full (last record isn't null), split it.
+		if (getRecord(chunk, node, MAX_RECORDS - 1) != 0) {
+			long median = getRecord(chunk, node, MEDIAN_RECORD); 
+			if (median == record) {
+				// Found it, never mind.
+				return median;
+			} else {
+				// Split it.
+				// Create the new node and move the larger records over.
+				long newnode = allocateNode();
+				Chunk newchunk = db.getChunk(newnode);
+				for (int i = 0; i < MEDIAN_RECORD; ++i) {
+					putRecord(newchunk, newnode, i, getRecord(chunk, node, MEDIAN_RECORD + 1 + i));
+					putRecord(chunk, node, MEDIAN_RECORD + 1 + i, 0);
+					putChild(newchunk, newnode, i, getChild(chunk, node, MEDIAN_RECORD + 1 + i));
+					putChild(chunk, node, MEDIAN_RECORD + 1 + i, 0);
+				}
+				putChild(newchunk, newnode, MEDIAN_RECORD, getChild(chunk, node, MAX_RECORDS));
+				putChild(chunk, node, MAX_RECORDS, 0);
+
+				if (parent == 0) {
+					// Create a new root
+					parent = allocateNode();
+					pChunk = db.getChunk(parent);
+					db.putRecPtr(rootPointer, parent);
+					putChild(pChunk, parent, 0, node);
+				} else {
+					// Insert the median into the parent.
+					for (int i = MAX_RECORDS - 2; i >= iParent; --i) {
+						long r = getRecord(pChunk, parent, i);
+						if (r != 0) {
+							putRecord(pChunk, parent, i + 1, r);
+							putChild(pChunk, parent, i + 2, getChild(pChunk, parent, i + 1));
+						}
+					}
+				}
+				putRecord(pChunk, parent, iParent, median);
+				putChild(pChunk, parent, iParent + 1, newnode);
+
+				putRecord(chunk, node, MEDIAN_RECORD, 0);
+
+				// Set the node to the correct one to follow.
+				if (cmp.compare(pdom, record, median) > 0) {
+					node = newnode;
+					chunk = newchunk;
+				}
+			}
+		}
+
+		// Binary search to find the insert point.
+		int lower= 0; 
+		int upper= MAX_RECORDS - 1;
+		while (lower < upper && getRecord(chunk, node, upper - 1) == 0) {
+			upper--;
+		}
+
+		while (lower < upper) {
+			int middle= (lower + upper) / 2;
+			long checkRec= getRecord(chunk, node, middle);
+			if (checkRec == 0) {
+				upper= middle;
+			} else {
+				int compare= cmp.compare(pdom, checkRec, record);
+				if (compare > 0) {
+					upper= middle;
+				} else if (compare < 0) {
+					lower= middle + 1;
+				} else {
+					// Found it, no insert, just return the matched record.
+					return checkRec;
+				}
+			}
+		}
+		final int i= lower;
+		long child = getChild(chunk, node, i);
+		if (child != 0) {
+			// Visit the children.
+			return insert(chunk, node, i, child, record);
+		} else {
+			// We are at the leaf, add us in.
+			// First copy everything after over one.
+			for (int j = MAX_RECORDS - 2; j >= i; --j) {
+				long r = getRecord(chunk, node, j);
+				if (r != 0)
+					putRecord(chunk, node, j + 1, r);
+			}
+			putRecord(chunk, node, i, record);
+			return record;
+		}
+	}
+

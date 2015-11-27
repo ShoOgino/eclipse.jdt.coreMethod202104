@@ -1,0 +1,39 @@
+	public void giveUpExclusiveLock(final boolean flush) throws IndexException {
+		if (fExclusiveLock) {
+			try {
+				ArrayList<Chunk> dirtyChunks= new ArrayList<>();
+				synchronized (fCache) {
+					for (int i= 1; i < fChunksUsed; i++) {
+						Chunk chunk= fChunks[i];
+						if (chunk != null) {
+							if (chunk.fCacheIndex < 0) {
+								// Locked chunk that has been removed from cache.
+								if (chunk.fDirty) {
+									dirtyChunks.add(chunk); // Keep in fChunks until it is flushed.
+								} else {
+									chunk.fLocked= false;
+									fChunks[i]= null;
+								}
+							} else if (chunk.fLocked) {
+								// Locked chunk, still in cache.
+								if (chunk.fDirty) {
+									if (flush) {
+										dirtyChunks.add(chunk);
+									}
+								} else {
+									chunk.fLocked= false;
+								}
+							} else {
+								assert !chunk.fDirty; // Dirty chunks must be locked.
+							}
+						}
+					}
+				}
+				// Also handles header chunk.
+				flushAndUnlockChunks(dirtyChunks, flush);
+			} finally {
+				fExclusiveLock= false;
+			}
+		}
+	}
+

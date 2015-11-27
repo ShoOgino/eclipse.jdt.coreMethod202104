@@ -1,0 +1,61 @@
+	/**
+	 * Ensures that the array contains at least enough space allocated to fit the given number of new elements.
+	 */
+	public void ensureCapacity(PDOM pdom, long address, int desiredSize) {
+		int growableBlockNeededSize = desiredSize - this.inlineSize;
+		long growableBlockAddress = GROWABLE_BLOCK_ADDRESS.get(pdom, address);
+		int growableBlockCurrentSize = growableBlockAddress == 0 ? 0
+				: GrowableBlockHeader.ALLOCATED_SIZE.get(pdom, growableBlockAddress);
+
+		// The growable region is already large enough.
+		if (growableBlockNeededSize <= growableBlockCurrentSize) {
+			return;
+		}
+
+		Database db = pdom.getDB();
+
+		int neededBlockSize = getGrowableRegionSizeFor(desiredSize); 
+		if (neededBlockSize > GrowableBlockHeader.MAX_GROWABLE_SIZE) {
+			// We need a metablock.
+			long metablockAddress = growableBlockAddress;
+
+			if (!(growableBlockCurrentSize > GrowableBlockHeader.MAX_GROWABLE_SIZE)) {
+				// We weren't using a metablock previously
+				int currentSize = size(pdom, address);
+				// Need to convert to using metablocks.
+				long firstGrowableBlockAddress = resizeBlock(pdom, address, GrowableBlockHeader.MAX_GROWABLE_SIZE);
+
+				metablockAddress = db.malloc(computeBlockBytes(GrowableBlockHeader.MAX_GROWABLE_SIZE));
+				GrowableBlockHeader.ARRAY_SIZE.put(pdom, metablockAddress, currentSize);
+				GrowableBlockHeader.ALLOCATED_SIZE.put(pdom, metablockAddress,
+						GrowableBlockHeader.MAX_GROWABLE_SIZE);
+
+				// Link the first block into the metablock.
+				db.putRecPtr(metablockAddress + GrowableBlockHeader.GROWABLE_BLOCK_HEADER_BYTES,
+						firstGrowableBlockAddress);
+				GROWABLE_BLOCK_ADDRESS.put(pdom, address, metablockAddress);
+			}
+
+			// neededBlockSize should always be a multiple of the max block size when metablocks are in use
+			assert neededBlockSize % GrowableBlockHeader.MAX_GROWABLE_SIZE == 0;
+			// Create extra growable blocks if necessary.
+			int requiredBlockCount = neededBlockSize / GrowableBlockHeader.MAX_GROWABLE_SIZE;
+			int currentAllocatedSize = GrowableBlockHeader.ALLOCATED_SIZE.get(pdom, metablockAddress);
+			assert currentAllocatedSize % GrowableBlockHeader.MAX_GROWABLE_SIZE == 0;
+			int currentBlockCount = currentAllocatedSize / GrowableBlockHeader.MAX_GROWABLE_SIZE;
+
+			for (int nextBlock = currentBlockCount; nextBlock < requiredBlockCount; nextBlock++) {
+				long nextBlockAddress = db.malloc(computeBlockBytes(GrowableBlockHeader.MAX_GROWABLE_SIZE));
+
+				db.putRecPtr(metablockAddress + GrowableBlockHeader.GROWABLE_BLOCK_HEADER_BYTES
+						+ nextBlock * Database.PTR_SIZE, nextBlockAddress);
+			}
+
+			GrowableBlockHeader.ALLOCATED_SIZE.put(pdom, metablockAddress, neededBlockSize);
+		} else {
+			long newBlockAddress = resizeBlock(pdom, address, neededBlockSize);
+
+			GROWABLE_BLOCK_ADDRESS.put(pdom, address, newBlockAddress);
+		}
+	}
+

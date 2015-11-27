@@ -1,0 +1,33 @@
+	@SuppressWarnings("nls")
+	public void releaseWriteLock(int establishReadLocks, boolean flush) {
+		// When all locks are released we can clear the result cache.
+		if (establishReadLocks == 0) {
+			clearResultCache();
+		}
+		try {
+			this.db.giveUpExclusiveLock(flush);
+		} catch (IndexException e) {
+			Package.log(e);
+		}
+		assert lockCount == -1;
+		if (!fEvent.isTrivial())
+			lastWriteAccess= System.currentTimeMillis();
+		final ChangeEvent event= fEvent;
+		fEvent= new ChangeEvent();
+		synchronized (mutex) {
+			if (sDEBUG_LOCKS) {
+				long timeHeld = lastWriteAccess - timeWriteLockAcquired;
+				if (timeHeld >= LONG_WRITE_LOCK_REPORT_THRESHOLD) {
+					System.out.println("Index write lock held for " + timeHeld + " ms");
+				}
+				decWriteLock(establishReadLocks);
+			}
+
+			if (lockCount < 0)
+				lockCount= establishReadLocks;
+			mutex.notifyAll();
+			db.setLocked(lockCount != 0);
+		}
+		//fireChange(event);
+	}
+

@@ -1,0 +1,47 @@
+	protected void rescan(IProgressMonitor monitor) throws CoreException {
+		SubMonitor subMonitor = SubMonitor.convert(monitor, 100);
+
+		long startTimeNs = System.nanoTime();
+		Package.logInfo("Indexer running rescan");
+
+		// Gather all the IPackageFragmentRoots in the workspace
+		List<IJavaElement> allRoots = getAllIndexableObjectsInWorkspace(subMonitor.split(3));
+
+		int totalRoots = allRoots.size();
+		// Remove all duplicate roots (jars which are referenced by more than one project)
+		allRoots = removeDuplicatePaths(allRoots);
+
+		long startGarbageCollectionNs = System.nanoTime();
+		
+		// Remove all files in the index which aren't referenced in the workspace
+		cleanGarbage(allRoots, subMonitor.split(4));
+
+		long startFingerprintTestNs = System.nanoTime();
+		
+		Map<IJavaElement, FingerprintTestResult> fingerprints = testFingerprints(allRoots, subMonitor.split(7));
+		List<IJavaElement> rootsWithChanges = getRootsThatHaveChanged(allRoots, fingerprints);
+
+		long startIndexingNs = System.nanoTime();
+		
+		int classesIndexed = 0;
+		SubMonitor loopMonitor = subMonitor.split(85).setWorkRemaining(rootsWithChanges.size());
+		for (IJavaElement next : rootsWithChanges) {
+			classesIndexed += rescanArchive(next, fingerprints.get(next).getNewFingerprint(), loopMonitor.split(1));
+		}
+
+		long endIndexingNs = System.nanoTime();
+		
+		long fingerprintTimeMs = (startIndexingNs - startFingerprintTestNs) / MS_TO_NS;
+		long locateRootsTimeMs = (startGarbageCollectionNs - startTimeNs) / MS_TO_NS;
+		long indexingTimeMs = (endIndexingNs - startIndexingNs) / MS_TO_NS;
+
+		double averageIndexTimeMs = classesIndexed == 0 ? 0 : (double)indexingTimeMs / (double)classesIndexed;
+		double averageFingerprintTimeMs = allRoots.size() == 0 ? 0 : (double)fingerprintTimeMs / (double)allRoots.size(); 
+
+		Package.logInfo(
+				"Indexing done.\n"
+				+ "  Located " + totalRoots + " roots in " + locateRootsTimeMs + "ms\n"
+				+ "  Tested " + allRoots.size() + " fingerprints in " + fingerprintTimeMs + "ms, average time = " + averageFingerprintTimeMs + "ms\n"
+				+ "  Indexed " + classesIndexed + " classes in " + indexingTimeMs + "ms, average time = " + averageIndexTimeMs + "ms\n");
+	}
+

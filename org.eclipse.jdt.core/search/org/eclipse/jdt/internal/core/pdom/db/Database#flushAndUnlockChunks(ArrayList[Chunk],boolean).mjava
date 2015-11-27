@@ -1,0 +1,35 @@
+	private void flushAndUnlockChunks(final ArrayList<Chunk> dirtyChunks, boolean isComplete) throws IndexException {
+		assert !Thread.holdsLock(fCache);
+		synchronized (fHeaderChunk) {
+			final boolean haveDirtyChunks = !dirtyChunks.isEmpty();
+			if (haveDirtyChunks || fHeaderChunk.fDirty) {
+				markFileIncomplete();
+			}
+			if (haveDirtyChunks) {
+				for (Chunk chunk : dirtyChunks) {
+					if (chunk.fDirty) {
+						chunk.flush();
+					}
+				}
+
+				// Only after the chunks are flushed we may unlock and release them.
+				synchronized (fCache) {
+					for (Chunk chunk : dirtyChunks) {
+						chunk.fLocked= false;
+						if (chunk.fCacheIndex < 0) {
+							fChunks[chunk.fSequenceNumber]= null;
+						}
+					}
+				}
+			}
+
+			if (isComplete) {
+				if (fHeaderChunk.fDirty || fIsMarkedIncomplete) {
+					fHeaderChunk.putInt(VERSION_OFFSET, fVersion);
+					fHeaderChunk.flush();
+					fIsMarkedIncomplete= false;
+				}
+			}
+		}
+	}
+

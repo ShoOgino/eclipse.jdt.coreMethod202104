@@ -1,0 +1,35 @@
+	/**
+	 * Allocates a new normal block, copies the contents of the old block to it, and deletes the old block. Should not
+	 * be used if the array is using metablocks. Returns the address of the newly-allocated block.
+	 */
+	private long resizeBlock(PDOM pdom, long address, int newBlockSize) {
+		Database db = pdom.getDB();
+		long oldGrowableBlockAddress = GROWABLE_BLOCK_ADDRESS.get(pdom, address);
+
+		// Check if the existing block is already exactly the right size
+		if (oldGrowableBlockAddress != 0) {
+			if (newBlockSize == 0) {
+				db.free(oldGrowableBlockAddress);
+				return 0;
+			}
+
+			int oldAllocatedSize = GrowableBlockHeader.ALLOCATED_SIZE.get(pdom, oldGrowableBlockAddress);
+			if (oldAllocatedSize == newBlockSize) {
+				return oldGrowableBlockAddress;
+			}
+		}
+
+		int arraySize = size(pdom, address);
+		int numToCopySize = Math.min(Math.max(0, arraySize - this.inlineSize), newBlockSize);
+		long newGrowableBlockAddress = db.malloc(computeBlockBytes(newBlockSize));
+
+		if (oldGrowableBlockAddress != 0) {
+			db.memcpy(newGrowableBlockAddress, oldGrowableBlockAddress, computeBlockBytes(numToCopySize));
+			db.free(oldGrowableBlockAddress);
+		}
+
+		GrowableBlockHeader.ARRAY_SIZE.put(pdom, newGrowableBlockAddress, arraySize);
+		GrowableBlockHeader.ALLOCATED_SIZE.put(pdom, newGrowableBlockAddress, newBlockSize);
+		return newGrowableBlockAddress;
+	}
+

@@ -1,0 +1,38 @@
+	private long createNewChunk() throws IndexException {
+		assert fExclusiveLock;
+		synchronized (fCache) {
+			final int newChunkIndex = fChunksUsed; // fChunks.length;
+
+			final Chunk chunk = new Chunk(this, newChunkIndex);
+			chunk.fDirty = true;
+
+			if (newChunkIndex >= fChunksAllocated) {
+				int increment = Math.max(1024, fChunksAllocated / 20);
+				Chunk[] newchunks = new Chunk[fChunksAllocated + increment];
+				System.arraycopy(fChunks, 0, newchunks, 0, fChunksAllocated);
+
+				fChunks = newchunks;
+				fChunksAllocated += increment;
+			}
+			fChunksUsed += 1;
+			fChunks[newChunkIndex] = chunk;
+
+			fCache.add(chunk, true);
+			long address = (long) newChunkIndex * CHUNK_SIZE;
+
+			/*
+			 * Non-dense pointers are at most 31 bits dense pointers are at most 35 bits Check the sizes here and throw
+			 * an exception if the address is too large. By throwing the IndexException with the special status, the
+			 * indexing operation should be stopped. This is desired since generally, once the max size is exceeded,
+			 * there are lots of errors.
+			 */
+			if (address >= MAX_DB_SIZE) {
+				Object bindings[] = { this.getLocation().getAbsolutePath(), MAX_DB_SIZE };
+				throw new IndexException(new Status(IStatus.ERROR, Package.PLUGIN_ID, Package.STATUS_PDOM_TOO_LARGE,
+						NLS.bind("Database too large! Address = " + address + ", max size = " + MAX_DB_SIZE, bindings), //$NON-NLS-1$ //$NON-NLS-2$
+						null));
+			}
+			return address;
+		}
+	}
+

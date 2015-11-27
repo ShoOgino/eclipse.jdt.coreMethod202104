@@ -1,0 +1,56 @@
+	/**
+	 * Rescans an archive (a jar, zip, or class file on the filesystem). Returns the number of classes indexed.
+	 * 
+	 * @param element
+	 * @param fingerprint
+	 * @param monitor
+	 * @return
+	 * @throws JavaModelException
+	 */
+	private int rescanArchive(IJavaElement element, FileFingerprint fingerprint, IProgressMonitor monitor)
+			throws JavaModelException {
+		SubMonitor subMonitor = SubMonitor.convert(monitor, 100);
+
+		IPath thePath = getFilesystemPathForRoot(element);
+		String pathString = thePath.toString();
+		JavaIndex javaIndex = JavaIndex.getIndex(this.pdom);
+
+		File theFile = thePath.toFile();
+		if (!(theFile.exists() && theFile.isFile())) {
+			Package.log("the file " + pathString + " does not exist", null);
+			return 0;
+		}
+
+		PDOMResourceFile resourceFile;
+
+		this.pdom.acquireWriteLock(subMonitor.newChild(5));
+		try {
+			resourceFile = new PDOMResourceFile(this.pdom);
+			resourceFile.setFilename(pathString);
+		} finally {
+			this.pdom.releaseWriteLock();
+		}
+
+		Package.logInfo("rescanning " + thePath.toString());
+		int result = addElement(resourceFile, element, subMonitor.newChild(90));
+
+		// Now update the timestamp and delete all older versions of this resource that exist in the index
+		this.pdom.acquireWriteLock(subMonitor.newChild(5));
+		try {
+			if (resourceFile.isInIndex()) {
+				resourceFile.setFingerprint(fingerprint);
+				List<PDOMResourceFile> resourceFiles = javaIndex.getAllResourceFiles(pathString);
+	
+				for (PDOMResourceFile next : resourceFiles) {
+					if (!next.equals(resourceFile)) {
+						next.delete();
+					}
+				}
+			}
+		} finally {
+			this.pdom.releaseWriteLock();
+		}
+
+		return result;
+	}
+

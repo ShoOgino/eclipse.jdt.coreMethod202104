@@ -1,0 +1,36 @@
+	/**
+	 * Determines whether this file is still in the index. If a PDOMResourceFile instance is retained while the database
+	 * lock is released and reobtained, this method should be invoked to ensure that the PDOMResourceFile has not been
+	 * deleted in the meantime.
+	 */
+	public boolean isInIndex() {
+		try {
+			PDOM pdom = getPDOM();
+			// In the common case where the resource file was deleted and the memory hasn't yet been reused,
+			// this will fail.
+			if (NODE_TYPE.get(pdom, this.address) != pdom.getNodeType(getClass())) {
+				return false;
+			}
+
+			char[] filename = FILENAME.get(getPDOM(), this.address).getChars();
+
+			PDOMResourceFile result = JavaIndex.FILES.findBest(pdom, Database.DATA_AREA,
+					SearchCriteria.create(filename), new IResultRank() {
+						@Override
+						public long getRank(PDOM testPdom, long testAddress) {
+							if (testAddress == PDOMResourceFile.this.address) {
+								return 1;
+							}
+							return -1;
+						}
+					});
+
+			return (this.equals(result));
+		} catch (IndexException e) {
+			// Read errors are expected here. It's possible that the resource file has been deleted and something
+			// new was written to this address, in which case we may be reading random gibberish from the database.
+			// This is likely to cause an exception.
+			return false;
+		}
+	}
+
