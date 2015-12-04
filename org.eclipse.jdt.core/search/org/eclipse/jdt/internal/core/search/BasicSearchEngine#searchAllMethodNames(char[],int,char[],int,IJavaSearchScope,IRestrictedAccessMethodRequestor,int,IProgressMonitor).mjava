@@ -5,16 +5,12 @@
 	 * comment is removed.
 	 * </p>
 	 * 
-	 * @see SearchEngine#searchAllMethodNames(char[], int, char[], int, char[], int, char[], int, IJavaSearchScope, MethodNameMatchRequestor, int, IProgressMonitor)
+	 * @see SearchEngine#searchAllMethodNames(char[], int, char[], int, IJavaSearchScope, MethodNameMatchRequestor, int, IProgressMonitor)
 	 * for detailed comments
 	 */
 	public void searchAllMethodNames(
-			final char[] packageName,
-			final int pkgMatchRule,
-			final char[] declaringQualification,
-			final int declQualificationMatchRule,
-			final char[] declaringSimpleName,
-			final int declSimpleNameMatchRule,
+			final char[] qualifier,
+			final int qualifierMatchRule,
 			final char[] methodName,
 			final int methodMatchRule,
 			IJavaSearchScope scope,
@@ -26,11 +22,9 @@
 			final int validatedMethodMatchRule = SearchPattern.validateMatchRule(methodName == null ? null : new String (methodName), methodMatchRule);
 			// Debug
 			if (VERBOSE) {
-				Util.verbose("BasicSearchEngine.searchAllMethodDeclarations(char[] packageName, char[] declaringQualification, char[] declaringSimpleName, "//$NON-NLS-1$
+				Util.verbose("BasicSearchEngine.searchAllMethodDeclarations(char[] qualifier,  "//$NON-NLS-1$
 						+ "char[] methodName, int methodMatchRule, IJavaSearchScope, IRestrictedAccessConstructorRequestor, int waitingPolicy, IProgressMonitor)"); //$NON-NLS-1$
-				Util.verbose("	- package name: "+(packageName==null?"null":new String(packageName))); //$NON-NLS-1$ //$NON-NLS-2$
-				Util.verbose("	- declaringQualification name: "+(declaringQualification==null?"null":new String(declaringQualification))); //$NON-NLS-1$ //$NON-NLS-2$
-				Util.verbose("	- declaringSimple name: "+(declaringSimpleName==null?"null":new String(declaringSimpleName))); //$NON-NLS-1$ //$NON-NLS-2$
+				Util.verbose("	- qualifier name: "+(qualifier==null?"null":new String(qualifier))); //$NON-NLS-1$ //$NON-NLS-2$
 				Util.verbose("	- method name: "+(methodName==null?"null":new String(methodName))); //$NON-NLS-1$ //$NON-NLS-2$
 				Util.verbose("	- method match rule: "+getMatchRuleString(methodMatchRule)); //$NON-NLS-1$
 				if (validatedMethodMatchRule != methodMatchRule) {
@@ -42,7 +36,7 @@
 
 			// Create pattern
 			IndexManager indexManager = JavaModelManager.getIndexManager();
-			final MethodDeclarationPattern pattern = new MethodDeclarationPattern(packageName, declaringQualification, declaringSimpleName, methodName, methodMatchRule);
+			final MethodDeclarationPattern pattern = new MethodDeclarationPattern(qualifier, methodName, methodMatchRule);
 
 			// Get working copy path(s). Store in a single string in case of only one to optimize comparison in requestor
 			final HashSet workingCopyPaths = new HashSet();
@@ -111,7 +105,7 @@
 							accessRestriction = access.getViolatedRestriction(path);
 						}
 					}
-					if (match(packageName, pkgMatchRule, declaringQualification, declQualificationMatchRule, declaringSimpleName, declSimpleNameMatchRule, methodName, methodMatchRule, 
+					if (match(qualifier, qualifierMatchRule, methodName, methodMatchRule, 
 							record.declaringPackageName, record.declaringQualification, record.declaringSimpleName, record.selector)) {
 						nameRequestor.acceptMethod(
 								record.selector, 
@@ -146,7 +140,6 @@
 
 			// add type names from working copies
 			if (copies != null) {
-				boolean isPkgCaseSensitive = (pkgMatchRule & SearchPattern.R_CASE_SENSITIVE) != 0; 
 				for (int i = 0; i < copiesLength; i++) {
 					SubMonitor iterationMonitor = subMonitor.split(1);
 					final ICompilationUnit workingCopy = copies[i];
@@ -160,8 +153,6 @@
 					if (workingCopy.isConsistent()) {
 						IPackageDeclaration[] packageDeclarations = workingCopy.getPackageDeclarations();
 						char[] packageDeclaration = packageDeclarations.length == 0 ? CharOperation.NO_CHAR : packageDeclarations[0].getElementName().toCharArray();
-						if (packageName != null && !CharOperation.equals(packageName, packageDeclaration, isPkgCaseSensitive))
-							continue;
 						
 						IType[] allTypes = workingCopy.getAllTypes();
 						for (int j = 0, allTypesLength = allTypes.length; j < allTypesLength; j++) {
@@ -169,8 +160,8 @@
 							IJavaElement parent = type.getParent();
 							char[] rDeclaringQualification = parent instanceof IType ? ((IType) parent).getTypeQualifiedName('.').toCharArray() : CharOperation.NO_CHAR;
 							char[] rSimpleName = type.getElementName().toCharArray();
-							if (!match(declaringQualification, declQualificationMatchRule, rDeclaringQualification) ||
-									!match(declaringSimpleName, declSimpleNameMatchRule, rSimpleName))
+							char[] q = CharOperation.concatNonEmpty(packageDeclaration, '.', rDeclaringQualification, '.', rSimpleName);
+							if (!match(qualifier, qualifierMatchRule, q))
 								continue;
 							reportMatchingMethods(methodName, methodMatchRule, nameRequestor, path,
 									packageDeclaration, type, rDeclaringQualification, rSimpleName); 
@@ -219,8 +210,8 @@
 								}
 
 								private void addStackEntry(TypeDeclaration typeDeclaration, char[] enclosingTypeName) {
-									boolean visitMethods = match(declaringQualification, declQualificationMatchRule, enclosingTypeName) &&
-											match(declaringSimpleName, declSimpleNameMatchRule, typeDeclaration.name);
+									char[] q = CharOperation.concatNonEmpty(packageDeclaration, '.', enclosingTypeName, '.', typeDeclaration.name);
+									boolean visitMethods = match(qualifier, qualifierMatchRule, q);
 									this.typeInfoStack.push(new TypeInfo(typeDeclaration, visitMethods, enclosingTypeName));
 								}
 								public void endVisit(TypeDeclaration typeDeclaration, CompilationUnitScope s) {
@@ -257,8 +248,7 @@
 									return true;
 								}
 							}
-							if (match(packageName, pkgMatchRule, packageDeclaration))
-								parsedUnit.traverse(new AllMethodDeclarationVisitor(), parsedUnit.scope);
+							parsedUnit.traverse(new AllMethodDeclarationVisitor(), parsedUnit.scope);
 						}
 					}
 				}
