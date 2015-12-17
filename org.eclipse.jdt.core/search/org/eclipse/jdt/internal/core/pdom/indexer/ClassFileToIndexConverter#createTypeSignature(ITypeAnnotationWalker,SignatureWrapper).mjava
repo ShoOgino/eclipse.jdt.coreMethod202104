@@ -1,0 +1,65 @@
+	/**
+	 * Reads a type signature from the given {@link SignatureWrapper}, starting at the character pointed to by
+	 * wrapper.start. On return, wrapper.start will point to the first character following the type signature.
+	 * 
+	 * @param supertypeAnnotations
+	 * @param superclassName
+	 * @param genericSignature
+	 * @return
+	 * @throws CoreException 
+	 */
+	private PDOMTypeSignature createTypeSignature(ITypeAnnotationWalker annotations, SignatureWrapper wrapper) throws CoreException {
+		char[] genericSignature = wrapper.signature;
+
+		if (genericSignature == null || genericSignature.length == 0) {
+			return null;
+		}
+
+		char firstChar = genericSignature[wrapper.start];
+		switch (firstChar) {
+			case 'T': {
+				// Skip the 'T' prefix
+				wrapper.start++;
+				PDOMComplexTypeSignature typeSignature = new PDOMComplexTypeSignature(getPDOM());
+				typeSignature.setVariableIdentifier(new String(wrapper.nextWord()));
+				attachAnnotations(typeSignature, annotations);
+				// Skip the trailing semicolon
+				wrapper.start++;
+				return typeSignature;
+			}
+			case '[': {
+				// Skip the '[' prefix
+				wrapper.start++;
+				// We encode arrays as though they were a one-argument generic type called '[' whose element
+				// type is the generic argument.
+				PDOMComplexTypeSignature typeSignature = new PDOMComplexTypeSignature(getPDOM());
+				typeSignature.setRawType(createTypeIdFromFieldDescriptor(new char[] {'['}));
+				PDOMTypeArgument typeArgument = new PDOMTypeArgument(getPDOM(), typeSignature);
+				PDOMTypeSignature elementType = createTypeSignature(annotations.toNextArrayDimension(), wrapper);
+				typeArgument.setType(elementType);
+				attachAnnotations(typeSignature, annotations);
+				return typeSignature;
+			}
+			case 'B':
+			case 'C':
+			case 'D':
+			case 'F':
+			case 'I':
+			case 'J':
+			case 'S':
+			case 'Z':
+				wrapper.start++;
+				return createTypeIdFromFieldDescriptor(new char[]{firstChar});
+			case 'L':
+				return parseClassTypeSignature(null, annotations, wrapper);
+			case '+':
+			case '-':
+			case '*':
+				throw new CoreException(Package.createStatus("Unexpected wildcard in top-level of generic signature: " //$NON-NLS-1$
+						+ genericSignature.toString()));
+			default:
+				throw new CoreException(Package.createStatus("Generic signature starts with unknow character: " //$NON-NLS-1$
+						+ genericSignature.toString()));
+		}
+	}
+

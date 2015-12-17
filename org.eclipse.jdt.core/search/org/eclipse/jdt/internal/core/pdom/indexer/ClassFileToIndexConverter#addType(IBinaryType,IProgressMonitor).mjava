@@ -1,4 +1,4 @@
-	public PDOMType addType(IBinaryType binaryType, IProgressMonitor monitor) {
+	public PDOMType addType(IBinaryType binaryType, IProgressMonitor monitor) throws CoreException {
 		char[] binaryName = binaryType.getName();
 		logInfo("adding binary type " + new String(binaryName));
 
@@ -9,10 +9,69 @@
 			type = new PDOMType(getPDOM(), this.resource);
 		}
 
+		ITypeAnnotationWalker typeAnnotations = getTypeAnnotationWalker(binaryType.getTypeAnnotations());
+		ITypeAnnotationWalker supertypeAnnotations = typeAnnotations.toSupertype((short)-1, binaryType.getSuperclassName());
+
 		type.setTypeId(name);
-		type.setSuperclass(createTypeIdFromBinaryName(binaryType.getSuperclassName()));
+
+		char[][] interfaces = binaryType.getInterfaceNames();
+		if (interfaces == null) {
+			interfaces = EMPTY_CHAR_ARRAY_ARRAY;
+		}
+		// Create the default generic signature if the .class file didn't supply one
+		char[] genericSignature = binaryType.getGenericSignature();
+		if (genericSignature == null) {
+			int startIndex = binaryType.getSuperclassName() != null ? 3 : 0; 
+			char[][] toCatenate = new char[startIndex + (interfaces.length * 3)][];
+			char[] prefix = new char[]{'L'};
+			char[] suffix = new char[]{';'};
+
+			if (binaryType.getSuperclassName() != null) {
+				toCatenate[0] = prefix;
+				toCatenate[1] = binaryType.getSuperclassName();
+				toCatenate[2] = suffix;
+			}
+
+			for (int idx = 0; idx < interfaces.length; idx++) {
+				int catIndex = startIndex + idx * 3;
+				toCatenate[catIndex] = prefix;
+				toCatenate[catIndex + 1] = interfaces[idx];
+				toCatenate[catIndex + 2] = suffix;
+			}
+
+			genericSignature = CharUtil.concat(toCatenate);
+		}
+
 		type.setModifiers(binaryType.getModifiers());
-		type.setDeclaringType(createTypeIdFromBinaryName(binaryType.getEnclosingTypeName()));
+ 
+		char[] enclosingTypeName = binaryType.getEnclosingTypeName();
+		// TODO(sxenos): There are some classes for which enclosingTypeName is null but which have classnames that
+		// resemble inner classes (ie: the classnames contain a '$'). Figure out what this means.
+//		assertThat((enclosingTypeName == null) == (name.getDeclaringType() == null), 
+//				"Declaring type should be null if and only if there is no enclosing type"); //$NON-NLS-1$
+		if (enclosingTypeName != null) {
+			String realEnclosingFieldDescriptor = JavaNames.binaryNameToFieldDescriptor(new String(enclosingTypeName));
+			String indexedFieldDescriptor = name.getDeclaringType().getRawType().getFieldDescriptor().getString();
+			assertThat(Objects.equals(realEnclosingFieldDescriptor, indexedFieldDescriptor),
+				"Incorrect field descriptor for declaring type"); //$NON-NLS-1$
+		}
+
+		SignatureWrapper signatureWrapper = new SignatureWrapper(genericSignature);
+		readTypeParameters(type, typeAnnotations, signatureWrapper);
+		type.setSuperclass(createTypeSignature(supertypeAnnotations, signatureWrapper));
+
+		short interfaceIdx = 0;
+		while (signatureWrapper.start < signatureWrapper.signature.length) {
+			// Note that there may be more interfaces listed in the generic signature than in the interfaces list.
+			// Although the VM spec doesn't discuss this case specifically, there are .class files in the wild with
+			// this characteristic. In such cases, we take what's in the generic signature and discard what's in the
+			// interfaces list.
+			char[] interfaceSpec = interfaceIdx < interfaces.length ? interfaces[interfaceIdx] : EMPTY_CHAR_ARRAY;
+			new PDOMTypeInterface(getPDOM(), type, createTypeSignature(
+					typeAnnotations.toSupertype(interfaceIdx, interfaceSpec),
+					signatureWrapper));
+			interfaceIdx++;
+		}
 
 		IBinaryAnnotation[] annotations = binaryType.getAnnotations();
 		if (annotations != null) {
@@ -43,15 +102,6 @@
 				variable.setModifiers(nextField.getModifiers());
 
 				// TODO(sxenos): Finish pulling in the rest of the fields from IBinaryField
-			}
-		}
-
-		// genericSignature = binaryType.getGenericSignature();
-
-		char[][] interfaces = binaryType.getInterfaceNames();
-		if (interfaces != null) {
-			for (char[] next : interfaces) {
-				new PDOMTypeInterface(getPDOM(), type, createTypeIdFromBinaryName(next));
 			}
 		}
 
