@@ -21,11 +21,16 @@
 					return NullAnnotationMatching.NULL_ANNOTATIONS_OK_NONNULL;
 				return okStatus;
 			}
-			if (requiredType instanceof TypeVariableBinding && substitution != null && (mode == CheckMode.EXACT || mode == CheckMode.COMPATIBLE)) {
+			if (requiredType instanceof TypeVariableBinding && substitution != null && (mode == CheckMode.EXACT || mode == CheckMode.COMPATIBLE || mode == CheckMode.BOUND_SUPER_CHECK)) {
 				requiredType.exitRecursiveFunction();
 				requiredType = Scope.substitute(substitution, requiredType);
 				if (!requiredType.enterRecursiveFunction())
 					return NullAnnotationMatching.NULL_ANNOTATIONS_OK;
+				if (areSameTypes(requiredType, providedType, providedSubstitute)) {
+					if ((requiredType.tagBits & TagBits.AnnotationNonNull) != 0)
+						return NullAnnotationMatching.NULL_ANNOTATIONS_OK_NONNULL;
+					return okStatus;
+				}
 			}
 			if (mode == CheckMode.BOUND_CHECK && requiredType instanceof TypeVariableBinding) {
 				boolean passedBoundCheck = (substitution instanceof ParameterizedTypeBinding) && (((ParameterizedTypeBinding) substitution).tagBits & TagBits.PassedBoundCheck) != 0;
@@ -33,7 +38,7 @@
 					// during bound check against a type variable check the provided type against all upper bounds:
 					TypeBinding superClass = requiredType.superclass();
 					if (superClass != null && (superClass.hasNullTypeAnnotations() || substitution != null)) { // annotations may enter when substituting a nested type variable
-						NullAnnotationMatching status = analyse(superClass, providedType, null, substitution, nullStatus, CheckMode.COMPATIBLE);
+						NullAnnotationMatching status = analyse(superClass, providedType, null, substitution, nullStatus, CheckMode.BOUND_SUPER_CHECK);
 						severity = Math.max(severity, status.severity);
 						if (severity == 2)
 							return new NullAnnotationMatching(severity, nullStatus, superTypeHint);
@@ -42,7 +47,7 @@
 					if (superInterfaces != null) {
 						for (int i = 0; i < superInterfaces.length; i++) {
 							if (superInterfaces[i].hasNullTypeAnnotations() || substitution != null) { // annotations may enter when substituting a nested type variable
-								NullAnnotationMatching status = analyse(superInterfaces[i], providedType, null, substitution, nullStatus, CheckMode.COMPATIBLE);
+								NullAnnotationMatching status = analyse(superInterfaces[i], providedType, null, substitution, nullStatus, CheckMode.BOUND_SUPER_CHECK);
 								severity = Math.max(severity, status.severity);
 								if (severity == 2)
 									return new NullAnnotationMatching(severity, nullStatus, superTypeHint);
@@ -94,6 +99,9 @@
 				if (severity < 2) {
 					TypeBinding providedSuper = providedType.findSuperTypeOriginatingFrom(requiredType);
 					TypeBinding providedSubstituteSuper = providedSubstitute != null ? providedSubstitute.findSuperTypeOriginatingFrom(requiredType) : null;
+					if(severity == 1 && requiredType.isTypeVariable() && providedType.isTypeVariable() && (providedSuper == requiredType || providedSubstituteSuper == requiredType)) { //$IDENTITY-COMPARISON$
+						severity = 0;
+					}
 					if (providedSuper != providedType) //$IDENTITY-COMPARISON$
 						superTypeHint = providedSuper;
 					if (requiredType.isParameterizedType()  && providedSuper instanceof ParameterizedTypeBinding) { // TODO(stephan): handle providedType.isRaw()
