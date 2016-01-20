@@ -1,0 +1,44 @@
+public static void loadModules(final ClasspathJimage jimage) {
+	String zipFileName = jimage.zipFilename;
+	Set<IModule> cache = ModulesCache.get(zipFileName);
+
+	if (cache == null) {
+		try {
+			final File imageFile = new File(zipFileName);
+			org.eclipse.jdt.internal.compiler.util.JimageUtil.walkModuleImage(imageFile,
+					new org.eclipse.jdt.internal.compiler.util.JimageUtil.JimageVisitor<Path>() {
+				SimpleSet packageSet = null;
+
+				@Override
+				public FileVisitResult visitPackage(Path dir, Path mod, BasicFileAttributes attrs)
+						throws IOException {
+					ClasspathJar.addToPackageSet(this.packageSet, dir.toString(), true);
+					return FileVisitResult.CONTINUE;
+				}
+
+				@Override
+				public FileVisitResult visitFile(Path file, Path mod, BasicFileAttributes attrs)
+						throws IOException {
+					return FileVisitResult.CONTINUE;
+				}
+
+				@Override
+				public FileVisitResult visitModule(Path mod) throws IOException {
+					try {
+						jimage.acceptModule(JimageUtil.getClassfileContent(imageFile, MODULE_INFO_CLASS, mod.toString()));
+					} catch (ClassFormatException e) {
+						e.printStackTrace();
+					}
+					return FileVisitResult.SKIP_SUBTREE;
+				}
+			}, JimageUtil.NOTIFY_MODULES);
+		} catch (IOException e) {
+			// TODO: BETA_JAVA9 Should report better
+		}
+	} else {
+		for (IModule iModule : cache) {
+			jimage.env.acceptModule(iModule, jimage);
+		}
+	}
+}
+

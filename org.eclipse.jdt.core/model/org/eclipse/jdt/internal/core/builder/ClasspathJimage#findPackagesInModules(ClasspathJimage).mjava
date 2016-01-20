@@ -1,0 +1,49 @@
+/**
+ * Calculate and cache the package list available in the zipFile.
+ * @param jimage The ClasspathJar to use
+ * @return A SimpleSet with the all the package names in the zipFile.
+ */
+static HashMap<String, SimpleSet> findPackagesInModules(final ClasspathJimage jimage) {
+	String zipFileName = jimage.zipFilename;
+	HashMap<String, SimpleSet> cache = PackageCache.get(zipFileName);
+	if (cache != null) {
+		return cache;
+	}
+	final HashMap<String, SimpleSet> packagesInModule = new HashMap<>();
+	PackageCache.put(zipFileName, packagesInModule);
+	try {
+		final File imageFile = new File(zipFileName);
+		org.eclipse.jdt.internal.compiler.util.JimageUtil.walkModuleImage(imageFile, 
+				new org.eclipse.jdt.internal.compiler.util.JimageUtil.JimageVisitor<Path>() {
+			SimpleSet packageSet = null;
+			@Override
+			public FileVisitResult visitPackage(Path dir, Path mod, BasicFileAttributes attrs) throws IOException {
+				ClasspathJar.addToPackageSet(this.packageSet, dir.toString(), true);
+				return FileVisitResult.CONTINUE;
+			}
+
+			@Override
+			public FileVisitResult visitFile(Path file, Path mod, BasicFileAttributes attrs) throws IOException {
+				return FileVisitResult.CONTINUE;
+			}
+
+			@Override
+			public FileVisitResult visitModule(Path mod) throws IOException {
+				String name = mod.toString();
+				try {
+					jimage.acceptModule(JimageUtil.getClassfileContent(imageFile, MODULE_INFO_CLASS, name));
+				} catch (ClassFormatException e) {
+					e.printStackTrace();
+				}
+				this.packageSet = new SimpleSet(41);
+				this.packageSet.add(""); //$NON-NLS-1$
+				packagesInModule.put(name, this.packageSet);
+				return FileVisitResult.CONTINUE;
+			}
+		}, JimageUtil.NOTIFY_PACKAGES | JimageUtil.NOTIFY_MODULES);
+	} catch (IOException e) {
+		// TODO: BETA_JAVA9 Should report better
+	}
+	return packagesInModule;
+}
+
