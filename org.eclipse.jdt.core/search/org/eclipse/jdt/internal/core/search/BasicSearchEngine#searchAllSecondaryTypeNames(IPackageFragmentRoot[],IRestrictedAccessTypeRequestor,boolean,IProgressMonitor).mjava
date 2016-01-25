@@ -9,112 +9,118 @@
 			boolean waitForIndexes,
 			IProgressMonitor progressMonitor)  throws JavaModelException {
 
-		if (VERBOSE) {
-			Util.verbose("BasicSearchEngine.searchAllSecondaryTypeNames(IPackageFragmentRoot[], IRestrictedAccessTypeRequestor, boolean, IProgressMonitor)"); //$NON-NLS-1$
-			StringBuffer buffer = new StringBuffer("	- source folders: "); //$NON-NLS-1$
-			int length = sourceFolders.length;
-			for (int i=0; i<length; i++) {
-				if (i==0) {
-					buffer.append('[');
-				} else {
-					buffer.append(',');
-				}
-				buffer.append(sourceFolders[i].getElementName());
-			}
-			buffer.append("]\n	- waitForIndexes: "); //$NON-NLS-1$
-			buffer.append(waitForIndexes);
-			Util.verbose(buffer.toString());
-		}
-
-		IndexManager indexManager = JavaModelManager.getIndexManager();
-		final TypeDeclarationPattern pattern = new SecondaryTypeDeclarationPattern();
-
-		// Get working copy path(s). Store in a single string in case of only one to optimize comparison in requestor
-		final HashSet workingCopyPaths = new HashSet();
-		String workingCopyPath = null;
-		ICompilationUnit[] copies = getWorkingCopies();
-		final int copiesLength = copies == null ? 0 : copies.length;
-		if (copies != null) {
-			if (copiesLength == 1) {
-				workingCopyPath = copies[0].getPath().toString();
-			} else {
-				for (int i = 0; i < copiesLength; i++) {
-					ICompilationUnit workingCopy = copies[i];
-					workingCopyPaths.add(workingCopy.getPath().toString());
-				}
-			}
-		}
-		final String singleWkcpPath = workingCopyPath;
-
-		// Index requestor
-		IndexQueryRequestor searchRequestor = new IndexQueryRequestor(){
-			public boolean acceptIndexMatch(String documentPath, SearchPattern indexRecord, SearchParticipant participant, AccessRuleSet access) {
-				// Filter unexpected types
-				TypeDeclarationPattern record = (TypeDeclarationPattern)indexRecord;
-				if (!record.secondary) {
-					return true; // filter maint types
-				}
-				if (record.enclosingTypeNames == IIndexConstants.ONE_ZERO_CHAR) {
-					return true; // filter out local and anonymous classes
-				}
-				switch (copiesLength) {
-					case 0:
-						break;
-					case 1:
-						if (singleWkcpPath.equals(documentPath)) {
-							return true; // fliter out *the* working copy
-						}
-						break;
-					default:
-						if (workingCopyPaths.contains(documentPath)) {
-							return true; // filter out working copies
-						}
-						break;
-				}
-
-				// Accept document path
-				AccessRestriction accessRestriction = null;
-				if (access != null) {
-					// Compute document relative path
-					int pkgLength = (record.pkg==null || record.pkg.length==0) ? 0 : record.pkg.length+1;
-					int nameLength = record.simpleName==null ? 0 : record.simpleName.length;
-					char[] path = new char[pkgLength+nameLength];
-					int pos = 0;
-					if (pkgLength > 0) {
-						System.arraycopy(record.pkg, 0, path, pos, pkgLength-1);
-						CharOperation.replace(path, '.', '/');
-						path[pkgLength-1] = '/';
-						pos += pkgLength;
-					}
-					if (nameLength > 0) {
-						System.arraycopy(record.simpleName, 0, path, pos, nameLength);
-						pos += nameLength;
-					}
-					// Update access restriction if path is not empty
-					if (pos > 0) {
-						accessRestriction = access.getViolatedRestriction(path);
-					}
-				}
-				nameRequestor.acceptType(record.modifiers, record.pkg, record.simpleName, record.enclosingTypeNames, documentPath, accessRestriction);
-				return true;
-			}
-		};
-
-		// add type names from indexes
 		try {
-			SubMonitor subMonitor = SubMonitor.convert(progressMonitor, Messages.engine_searching, 100);
-			indexManager.performConcurrentJob(
-				new PatternSearchJob(
-					pattern,
-					getDefaultSearchParticipant(), // Java search only
-					createJavaSearchScope(sourceFolders),
-					searchRequestor),
-				waitForIndexes
-					? IJavaSearchConstants.WAIT_UNTIL_READY_TO_SEARCH
-					: IJavaSearchConstants.FORCE_IMMEDIATE_SEARCH,
-				subMonitor.split(100));
-		} catch (OperationCanceledException oce) {
-			// do nothing
+			if (VERBOSE) {
+				Util.verbose("BasicSearchEngine.searchAllSecondaryTypeNames(IPackageFragmentRoot[], IRestrictedAccessTypeRequestor, boolean, IProgressMonitor)"); //$NON-NLS-1$
+				StringBuffer buffer = new StringBuffer("	- source folders: "); //$NON-NLS-1$
+				int length = sourceFolders.length;
+				for (int i=0; i<length; i++) {
+					if (i==0) {
+						buffer.append('[');
+					} else {
+						buffer.append(',');
+					}
+					buffer.append(sourceFolders[i].getElementName());
+				}
+				buffer.append("]\n	- waitForIndexes: "); //$NON-NLS-1$
+				buffer.append(waitForIndexes);
+				Util.verbose(buffer.toString());
+			}
+	
+			IndexManager indexManager = JavaModelManager.getIndexManager();
+			final TypeDeclarationPattern pattern = new SecondaryTypeDeclarationPattern();
+	
+			// Get working copy path(s). Store in a single string in case of only one to optimize comparison in requestor
+			final HashSet workingCopyPaths = new HashSet();
+			String workingCopyPath = null;
+			ICompilationUnit[] copies = getWorkingCopies();
+			final int copiesLength = copies == null ? 0 : copies.length;
+			if (copies != null) {
+				if (copiesLength == 1) {
+					workingCopyPath = copies[0].getPath().toString();
+				} else {
+					for (int i = 0; i < copiesLength; i++) {
+						ICompilationUnit workingCopy = copies[i];
+						workingCopyPaths.add(workingCopy.getPath().toString());
+					}
+				}
+			}
+			final String singleWkcpPath = workingCopyPath;
+	
+			// Index requestor
+			IndexQueryRequestor searchRequestor = new IndexQueryRequestor(){
+				public boolean acceptIndexMatch(String documentPath, SearchPattern indexRecord, SearchParticipant participant, AccessRuleSet access) {
+					// Filter unexpected types
+					TypeDeclarationPattern record = (TypeDeclarationPattern)indexRecord;
+					if (!record.secondary) {
+						return true; // filter maint types
+					}
+					if (record.enclosingTypeNames == IIndexConstants.ONE_ZERO_CHAR) {
+						return true; // filter out local and anonymous classes
+					}
+					switch (copiesLength) {
+						case 0:
+							break;
+						case 1:
+							if (singleWkcpPath.equals(documentPath)) {
+								return true; // fliter out *the* working copy
+							}
+							break;
+						default:
+							if (workingCopyPaths.contains(documentPath)) {
+								return true; // filter out working copies
+							}
+							break;
+					}
+	
+					// Accept document path
+					AccessRestriction accessRestriction = null;
+					if (access != null) {
+						// Compute document relative path
+						int pkgLength = (record.pkg==null || record.pkg.length==0) ? 0 : record.pkg.length+1;
+						int nameLength = record.simpleName==null ? 0 : record.simpleName.length;
+						char[] path = new char[pkgLength+nameLength];
+						int pos = 0;
+						if (pkgLength > 0) {
+							System.arraycopy(record.pkg, 0, path, pos, pkgLength-1);
+							CharOperation.replace(path, '.', '/');
+							path[pkgLength-1] = '/';
+							pos += pkgLength;
+						}
+						if (nameLength > 0) {
+							System.arraycopy(record.simpleName, 0, path, pos, nameLength);
+							pos += nameLength;
+						}
+						// Update access restriction if path is not empty
+						if (pos > 0) {
+							accessRestriction = access.getViolatedRestriction(path);
+						}
+					}
+					nameRequestor.acceptType(record.modifiers, record.pkg, record.simpleName, record.enclosingTypeNames, documentPath, accessRestriction);
+					return true;
+				}
+			};
+	
+			// add type names from indexes
+			try {
+				SubMonitor subMonitor = SubMonitor.convert(progressMonitor, Messages.engine_searching, 100);
+				indexManager.performConcurrentJob(
+					new PatternSearchJob(
+						pattern,
+						getDefaultSearchParticipant(), // Java search only
+						createJavaSearchScope(sourceFolders),
+						searchRequestor),
+					waitForIndexes
+						? IJavaSearchConstants.WAIT_UNTIL_READY_TO_SEARCH
+						: IJavaSearchConstants.FORCE_IMMEDIATE_SEARCH,
+					subMonitor.split(100));
+			} catch (OperationCanceledException oce) {
+				// do nothing
+			}
+		} finally {
+			if (progressMonitor != null) {
+				progressMonitor.done();
+			}
 		}
 	}
 
