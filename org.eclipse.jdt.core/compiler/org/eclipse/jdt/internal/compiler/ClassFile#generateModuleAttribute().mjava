@@ -1,0 +1,122 @@
+	private int generateModuleAttribute() {
+		ModuleDeclaration module = (ModuleDeclaration)this.referenceBinding.scope.referenceContext;
+		int localContentsOffset = this.contentsOffset;
+		if (localContentsOffset + 18 >= this.contents.length) {
+			resizeContents(18);
+		}
+		int moduleAttributeNameIndex =
+			this.constantPool.literalIndex(AttributeNamesConstants.ModuleName);
+		this.contents[localContentsOffset++] = (byte) (moduleAttributeNameIndex >> 8);
+		this.contents[localContentsOffset++] = (byte) moduleAttributeNameIndex;
+		int attrLengthOffset = localContentsOffset;
+		int attrLength = 0;
+		localContentsOffset += 4;
+		// ================= requires section =================
+		/** u2 requires_count;
+	    	{   u2 requires_index;
+	        	u2 requires_flags;
+	    	} requires[requires_count];
+	    **/
+		int requiresCountOffset = localContentsOffset;
+		localContentsOffset += 2;
+		boolean javabaseSeen = false;
+		for(int i = 0; i < module.requiresCount; i++) {
+			ModuleReference ref = module.requires[i];
+			if (CharOperation.equals(ref.moduleName, TypeConstants.JAVA_BASE)) {
+				javabaseSeen = true;
+			}
+			int nameIndex = this.constantPool.literalIndex(ref.moduleName);
+			this.contents[localContentsOffset++] = (byte) (nameIndex >> 8);
+			this.contents[localContentsOffset++] = (byte) (nameIndex);
+			int flags = ref.isPublic() ? ClassFileConstants.ACC_PUBLIC : ClassFileConstants.AccDefault;
+			this.contents[localContentsOffset++] = (byte) (flags >> 8);
+			this.contents[localContentsOffset++] = (byte) (flags);
+		}
+		if (!javabaseSeen) {
+			int javabase_index = this.constantPool.literalIndex(TypeConstants.JAVA_BASE);
+			this.contents[localContentsOffset++] = (byte) (javabase_index >> 8);
+			this.contents[localContentsOffset++] = (byte) (javabase_index);
+			int flags = ClassFileConstants.AccMandated;
+			this.contents[localContentsOffset++] = (byte) (flags >> 8);
+			this.contents[localContentsOffset++] = (byte) flags;
+		}
+		int requiresCount = javabaseSeen ? module.requiresCount : module.requiresCount + 1;
+		this.contents[requiresCountOffset++] = (byte) (requiresCount >> 8);
+		this.contents[requiresCountOffset++] = (byte) requiresCount;
+		attrLength += 2 + 4 * requiresCount;
+		// ================= end requires section =================
+
+		// ================= exports section =================
+		/**
+		 * u2 exports_count;
+		 * {   u2 exports_index;
+		 *     u2 exports_to_count;
+		 *     u2 exports_to_index[exports_to_count];
+		 * } exports[exports_count];
+		 */
+		this.contents[localContentsOffset++] = (byte) (module.exportsCount >> 8);
+		this.contents[localContentsOffset++] = (byte) module.exportsCount;
+		for (int i = 0; i < module.exportsCount; i++) {
+			ExportReference ref = module.exports[i];
+			int nameIndex = this.constantPool.literalIndex(ref.pkgName);
+			this.contents[localContentsOffset++] = (byte) (nameIndex >> 8);
+			this.contents[localContentsOffset++] = (byte) (nameIndex);
+			
+			int exportsToCount = ref.isTargeted() ? ref.targets.length : 0; 
+			this.contents[localContentsOffset++] = (byte) (exportsToCount >> 8);
+			this.contents[localContentsOffset++] = (byte) (exportsToCount);
+			if (exportsToCount > 0) {
+				for(int j = 0; j < exportsToCount; j++) {
+					nameIndex = this.constantPool.literalIndex(ref.targets[j].moduleName);
+					this.contents[localContentsOffset++] = (byte) (nameIndex >> 8);
+					this.contents[localContentsOffset++] = (byte) (nameIndex);
+				}
+				attrLength += 2 * exportsToCount;
+			}
+		}
+		attrLength += 2 + 4 * module.exportsCount;
+		// ================= end exports section =================
+
+		// ================= uses section =================
+		/**
+		 * u2 uses_count;
+		 * u2 uses_index[uses_count];
+		 */
+		this.contents[localContentsOffset++] = (byte) (module.usesCount >> 8);
+		this.contents[localContentsOffset++] = (byte) module.usesCount;
+		for(int i = 0; i < module.usesCount; i++) {
+			int nameIndex = this.constantPool.literalIndex(module.uses[i].resolvedType);
+			this.contents[localContentsOffset++] = (byte) (nameIndex >> 8);
+			this.contents[localContentsOffset++] = (byte) (nameIndex);
+		}
+		attrLength += 2 + 2 * module.usesCount;
+		// ================= end uses section =================
+
+		// ================= provides section =================
+		/**
+		 * u2 provides_count;
+		 * {   u2 provides_index;
+		 *     u2 with_index;
+		 * } provides[provides_count];
+		 */
+		this.contents[localContentsOffset++] = (byte) (module.servicesCount >> 8);
+		this.contents[localContentsOffset++] = (byte) module.servicesCount;
+		for(int i = 0; i < module.servicesCount; i++) {
+			int nameIndex = this.constantPool.literalIndex(module.interfaces[i].resolvedType);
+			this.contents[localContentsOffset++] = (byte) (nameIndex >> 8);
+			this.contents[localContentsOffset++] = (byte) (nameIndex);
+			nameIndex = this.constantPool.literalIndex(module.implementations[i].resolvedType);
+			this.contents[localContentsOffset++] = (byte) (nameIndex >> 8);
+			this.contents[localContentsOffset++] = (byte) (nameIndex);
+		}
+		attrLength += 2 + 4 * module.servicesCount;
+		// ================= end provides section =================
+
+		this.contents[attrLengthOffset++] = (byte)(attrLength >> 24);
+		this.contents[attrLengthOffset++] = (byte)(attrLength >> 16);
+		this.contents[attrLengthOffset++] = (byte)(attrLength >> 8);
+		this.contents[attrLengthOffset++] = (byte)attrLength;
+		this.contentsOffset = localContentsOffset;
+		return 1;
+	}
+
