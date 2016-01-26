@@ -1,0 +1,55 @@
+	/**
+	 * Adds the given method to the given type
+	 * @throws CoreException
+	 */
+	private void addMethod(PDOMType type, IBinaryMethod next, char[] binaryTypeName) throws CoreException {
+		PDOMMethod method = new PDOMMethod(type);
+
+		attachAnnotations(method, next.getAnnotations());
+
+		ITypeAnnotationWalker typeAnnotations = getTypeAnnotationWalker(next.getTypeAnnotations());
+		SignatureWrapper signature = GenericSignatures.getGenericSignature(next);
+		readTypeParameters(method, typeAnnotations, signature);
+
+		if (signature.charAtStart() == '(') {
+			signature.start++;
+		}
+
+		char[][] parameterNames = next.getArgumentNames();
+		short parameterIdx = 0;
+		while (!signature.atEnd()) {
+			if (signature.charAtStart() == ')') {
+				signature.start++;
+				break;
+			}
+			PDOMMethodParameter parameter = new PDOMMethodParameter(method,
+					createTypeSignature(typeAnnotations.toMethodParameter(parameterIdx),
+					signature));
+
+			if (parameterNames != null && parameterNames.length > parameterIdx) {
+				parameter.setName(parameterNames[parameterIdx]);
+			}
+			parameterIdx++;
+		}
+
+		method.setReturnType(createTypeSignature(typeAnnotations.toMethodReturn(), signature));
+
+		int throwsIdx = 0;
+		while (!signature.atEnd() && signature.charAtStart() == '^') {
+			signature.start++;
+			new PDOMMethodException(method,
+					createTypeSignature(typeAnnotations.toThrows(throwsIdx), signature));
+			throwsIdx++;
+		}
+
+		Object defaultValue = next.getDefaultValue();
+		if (defaultValue != null) {
+			method.setDefaultValue(createFromMixedType(defaultValue));
+		}
+
+		method.setMethodId(
+				createMethodId(binaryTypeName, next.getSelector(), next.getMethodDescriptor()));
+
+		method.setModifiers(next.getModifiers());
+	}
+
