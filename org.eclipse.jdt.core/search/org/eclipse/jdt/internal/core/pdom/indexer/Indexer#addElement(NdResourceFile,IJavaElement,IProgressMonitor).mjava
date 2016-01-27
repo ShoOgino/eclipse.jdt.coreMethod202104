@@ -1,0 +1,46 @@
+	/**
+	 * Adds an archive to the index, under the given PDOMResourceFile.
+	 * 
+	 * @param resourceFile
+	 * @param element
+	 * @param monitor
+	 * @return the number of classes indexed
+	 * @throws JavaModelException
+	 */
+	private int addElement(NdResourceFile resourceFile, IJavaElement element, IProgressMonitor monitor)
+			throws JavaModelException {
+		SubMonitor subMonitor = SubMonitor.convert(monitor, 100);
+		List<IJavaElement> bindableElements = getBindableElements(element, subMonitor.newChild(10));
+		List<IClassFile> classFiles = getClassFiles(bindableElements);
+		IJavaProject javaProject = element.getJavaProject();
+
+		ASTParser parser = ASTParser.newParser(AST.JLS8);
+		parser.setProject(javaProject);
+		parser.setResolveBindings(true);
+
+		subMonitor.setWorkRemaining(classFiles.size());
+
+		int classesIndexed = 0;
+		ClassFileToIndexConverter converter = new ClassFileToIndexConverter(resourceFile);
+		for (IClassFile next : classFiles) {
+			SubMonitor iterationMonitor = subMonitor.split(1).setWorkRemaining(100);
+
+			this.pdom.acquireWriteLock(iterationMonitor.split(5));
+			try {
+				if (!resourceFile.isInIndex()) {
+					return classesIndexed;
+				}
+
+				IBinaryType binaryType = ClassFileToIndexConverter.getTypeFromClassFile(next, iterationMonitor.split(50));
+				converter.addType(binaryType, iterationMonitor.split(45));
+				classesIndexed++;
+			} catch (CoreException e) {
+				Package.log("Unable to index " + next.toString(), e); //$NON-NLS-1$
+			} finally {
+				this.pdom.releaseWriteLock();
+			}
+		}
+
+		return classesIndexed;
+	}
+
