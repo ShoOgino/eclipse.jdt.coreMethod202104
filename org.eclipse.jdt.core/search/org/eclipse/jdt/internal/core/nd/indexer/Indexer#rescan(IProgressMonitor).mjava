@@ -5,43 +5,60 @@
 		Package.logInfo("Indexer running rescan"); //$NON-NLS-1$
 
 		// Gather all the IPackageFragmentRoots in the workspace
-		List<IJavaElement> allRoots = getAllIndexableObjectsInWorkspace(subMonitor.split(3));
+		List<IJavaElement> unfilteredRoots = getAllIndexableObjectsInWorkspace(subMonitor.split(3));
 
-		int totalRoots = allRoots.size();
+		int totalRoots = unfilteredRoots.size();
 		// Remove all duplicate roots (jars which are referenced by more than one project)
-		allRoots = removeDuplicatePaths(allRoots);
+		Map<IPath, List<IJavaElement>> allRoots = removeDuplicatePaths(unfilteredRoots);
 
 		long startGarbageCollectionNs = System.nanoTime();
 
 		// Remove all files in the index which aren't referenced in the workspace
-		cleanGarbage(allRoots, subMonitor.split(4));
+		cleanGarbage(allRoots.keySet(), subMonitor.split(4));
 
 		long startFingerprintTestNs = System.nanoTime();
 
-		Map<IJavaElement, FingerprintTestResult> fingerprints = testFingerprints(allRoots, subMonitor.split(7));
-		List<IJavaElement> rootsWithChanges = getRootsThatHaveChanged(allRoots, fingerprints);
+		Map<IPath, FingerprintTestResult> fingerprints = testFingerprints(allRoots.keySet(), subMonitor.split(7));
+		Set<IPath> rootsWithChanges = new HashSet<>(getRootsThatHaveChanged(allRoots.keySet(), fingerprints));
 
 		long startIndexingNs = System.nanoTime();
 
 		int classesIndexed = 0;
-		SubMonitor loopMonitor = subMonitor.split(85).setWorkRemaining(rootsWithChanges.size());
-		for (IJavaElement next : rootsWithChanges) {
-			classesIndexed += rescanArchive(next, fingerprints.get(next).getNewFingerprint(), loopMonitor.split(1));
+		SubMonitor loopMonitor = subMonitor.split(80).setWorkRemaining(rootsWithChanges.size());
+		for (IPath next : rootsWithChanges) {
+			classesIndexed += rescanArchive(next, allRoots.get(next), fingerprints.get(next).getNewFingerprint(),
+					loopMonitor.split(1));
 		}
 
 		long endIndexingNs = System.nanoTime();
 
+		Map<IPath, List<IJavaElement>> pathsToUpdate = new HashMap<>();
+
+		for (IPath next : allRoots.keySet()) {
+			if (!rootsWithChanges.contains(next)) {
+				pathsToUpdate.put(next, allRoots.get(next));
+				continue;
+			}
+		}
+
+		updateResourceMappings(pathsToUpdate, subMonitor.split(5));
+
+		long endResourceMappingNs = System.nanoTime();
+
 		long fingerprintTimeMs = (startIndexingNs - startFingerprintTestNs) / MS_TO_NS;
 		long locateRootsTimeMs = (startGarbageCollectionNs - startTimeNs) / MS_TO_NS;
 		long indexingTimeMs = (endIndexingNs - startIndexingNs) / MS_TO_NS;
+		long resourceMappingTimeMs = (endResourceMappingNs - endIndexingNs) / MS_TO_NS;
 
 		double averageIndexTimeMs = classesIndexed == 0 ? 0 : (double)indexingTimeMs / (double)classesIndexed;
 		double averageFingerprintTimeMs = allRoots.size() == 0 ? 0 : (double)fingerprintTimeMs / (double)allRoots.size();
+		double averageResourceMappingMs = pathsToUpdate.size() == 0 ? 0 : (double)resourceMappingTimeMs / (double)pathsToUpdate.size();
 
 		Package.logInfo(
 				"Indexing done.\n" //$NON-NLS-1$
 				+ "  Located " + totalRoots + " roots in " + locateRootsTimeMs + "ms\n" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
 				+ "  Tested " + allRoots.size() + " fingerprints in " + fingerprintTimeMs + "ms, average time = " + averageFingerprintTimeMs + "ms\n" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
-				+ "  Indexed " + classesIndexed + " classes in " + indexingTimeMs + "ms, average time = " + averageIndexTimeMs + "ms\n"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+				+ "  Indexed " + classesIndexed + " classes in " + indexingTimeMs + "ms, average time = " + averageIndexTimeMs + "ms\n" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+				+ "  Updated " + pathsToUpdate.size() + " paths in " + resourceMappingTimeMs + "ms, average time = " + averageResourceMappingMs + "ms\n"); //$NON-NLS-1$//$NON-NLS-2$//$NON-NLS-3$//$NON-NLS-4$
 	}
 
