@@ -1,0 +1,64 @@
+	/**
+	 * Evaluate problem severity from the given details:
+	 * @param requiredBits null tagBits of the required type
+	 * @param providedBits null tagBits of the provided type
+	 * @param nullStatus -1 means: don't use, other values see constants in FlowInfo
+	 * @param mode check mode (see {@link CheckMode})
+	 * @param requiredIsTypeVariable is the required type a type variable (possibly: "free type variable")?
+	 * @return see {@link #severity} for interpretation of values
+	 */
+	private static int computeNullProblemSeverity(long requiredBits, long providedBits, int nullStatus, CheckMode mode, boolean requiredIsTypeVariable) {
+		if (requiredBits == providedBits)
+			return 0;
+		if (requiredBits == 0) { 
+			switch (mode) {
+				case COMPATIBLE:
+				case BOUND_CHECK:
+				case BOUND_SUPER_CHECK:
+				case EXACT:
+					return 0;
+				case OVERRIDE_RETURN:
+					if (providedBits == TagBits.AnnotationNonNull)
+						return 0; // covariant redefinition to nonnull is good
+					if (!requiredIsTypeVariable)
+						return 0; // refining an unconstrained non-TVB return to nullable is also legal
+					return 1;
+				case OVERRIDE:
+					return 1; // warn about dropped annotation
+			}
+		} else if (requiredBits == TagBits.AnnotationNullMASK) {
+			return 0; // OK since LHS accepts either
+		} else if (requiredBits == TagBits.AnnotationNonNull) {
+			switch (mode) {
+				case COMPATIBLE:
+				case BOUND_SUPER_CHECK:
+					if (nullStatus == FlowInfo.NON_NULL)
+						return 0; // OK by flow analysis
+					//$FALL-THROUGH$
+				case BOUND_CHECK:
+				case EXACT:
+				case OVERRIDE_RETURN:
+				case OVERRIDE:
+					if (providedBits == 0)
+						return 1;
+					return 2;
+			}
+			
+		} else if (requiredBits == TagBits.AnnotationNullable) {
+			switch (mode) {
+				case COMPATIBLE:
+				case OVERRIDE_RETURN:
+				case BOUND_SUPER_CHECK:
+					return 0; // in these modes everything is compatible to nullable
+				case BOUND_CHECK:
+				case EXACT:
+					if (providedBits == 0)
+						return 1;
+					return 2;
+				case OVERRIDE:
+					return 2;
+			}
+		}
+		return 0; // shouldn't get here, requiredBits should be one of the listed cases
+	}
+

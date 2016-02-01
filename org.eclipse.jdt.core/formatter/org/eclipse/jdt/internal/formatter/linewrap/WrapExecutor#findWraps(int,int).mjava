@@ -2,7 +2,7 @@
 	 * The main algorithm that looks for optimal places to wrap.
 	 * Calls itself recursively to get results for wrapped sub-lines.  
 	 */
-	private WrapResult findWraps(int wrapTokenIndex, int indent) {
+	private WrapResult findWraps(int wrapTokenIndex, int indent) throws WrapRestartThrowable {
 		final int lastIndex = this.lineAnalyzer.analyzeLine(wrapTokenIndex, indent);
 		final boolean lineExceeded = this.lineAnalyzer.lineExceeded;
 		final int lastPosition = this.lineAnalyzer.getLastPosition();
@@ -15,7 +15,7 @@
 		final int[] topPriorityGroupStarts = toArray(this.lineAnalyzer.topPriorityGroupStarts);
 		int topPriorityIndex = topPriorityGroupStarts.length - 1;
 		int nearestGroupEnd = topPriorityIndex == -1 ? 0
-				: this.tm.get(topPriorityGroupStarts[topPriorityIndex]).getWrapPolicy().topPriorityGroupEnd;
+				: this.tm.get(topPriorityGroupStarts[topPriorityIndex]).getWrapPolicy().groupEndIndex;
 
 		double bestTotalPenalty = getWrapPenalty(wrapTokenIndex, indent, lastIndex + 1, -1, WrapResult.NO_WRAP_NEEDED);
 		int bestExtraLines = lineExceeded ? Integer.MAX_VALUE : extraLines; // if line is exceeded, accept every wrap
@@ -27,7 +27,8 @@
 
 		if ((!lineExceeded || firstPotentialWrap < 0) && lastIndex + 1 < this.tm.size()) {
 			Token nextLineToken = this.tm.get(lastIndex + 1);
-			if (nextLineToken.isWrappable() && (this.tm.get(lastIndex).isComment() || nextLineToken.isComment())) {
+			if ((nextLineToken.getWrapPolicy() != null && nextLineToken.getWrapPolicy().wrapMode != WrapMode.FORCED)
+					&& (this.tm.get(lastIndex).isComment() || nextLineToken.isComment())) {
 				// this might be a pre-existing wrap forced by a comment, calculate penalties as normal
 				bestIndent = getWrapIndent(nextLineToken);
 				bestNextWrap = lastIndex + 1;
@@ -39,8 +40,7 @@
 
 		if (firstPotentialWrap < 0 && lineExceeded) {
 			if (topPriorityGroupStarts.length > 0) {
-				this.topPriorityWrapIndex = topPriorityGroupStarts[0];
-				return WrapResult.TOP_PRIORITY_WRAP_MET;
+				checkTopPriorityWraps(topPriorityGroupStarts[0]);
 			}
 
 			// Report high number of extra lines to encourage the algorithm to look
@@ -64,7 +64,7 @@
 				assert i == topPriorityGroupStarts[topPriorityIndex];
 				topPriorityIndex--;
 				nearestGroupEnd = topPriorityIndex == -1 ? 0
-						: this.tm.get(topPriorityGroupStarts[topPriorityIndex]).getWrapPolicy().topPriorityGroupEnd;
+						: this.tm.get(topPriorityGroupStarts[topPriorityIndex]).getWrapPolicy().groupEndIndex;
 			}
 
 			if (!token.isWrappable())
@@ -72,9 +72,6 @@
 
 			int nextWrapIndent = getWrapIndent(token);
 			WrapResult nextWrapResult = findWrapsCached(i, nextWrapIndent);
-
-			if (nextWrapResult == WrapResult.TOP_PRIORITY_WRAP_MET)
-				continue;
 
 			double totalPenalty = getWrapPenalty(wrapTokenIndex, indent, i, nextWrapIndent, nextWrapResult);
 			int totalExtraLines = extraLines + nextWrapResult.totalExtraLines;
@@ -93,8 +90,7 @@
 		}
 
 		if (bestNextWrap == -1 && lineExceeded && topPriorityGroupStarts.length > 0) {
-			this.topPriorityWrapIndex = topPriorityGroupStarts[0];
-			return WrapResult.TOP_PRIORITY_WRAP_MET;
+			checkTopPriorityWraps(topPriorityGroupStarts[0]);
 		}
 
 		return new WrapResult(bestTotalPenalty, bestExtraLines,

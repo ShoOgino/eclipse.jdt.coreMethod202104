@@ -1,0 +1,101 @@
+/*
+ * Rebuild a block from the nested structure which is in scope
+ */
+public Block updatedBlock(int depth, Set<TypeDeclaration> knownTypes){
+
+	// if block was not marked to be preserved or empty, then ignore it
+	if (!this.preserveContent || this.statementCount == 0) return null;
+	
+	Statement[] updatedStatements = new Statement[this.statementCount];
+	int updatedCount = 0;
+
+
+	// may need to update the end of the last statement
+	RecoveredStatement lastStatement = this.statements[this.statementCount - 1];
+	RecoveredMethod enclosingMethod = enclosingMethod();
+	RecoveredInitializer enclosingIntializer = enclosingInitializer();
+	int bodyEndValue = 0;
+	if(enclosingMethod != null) {
+		bodyEndValue = enclosingMethod.methodDeclaration.bodyEnd;
+		if(enclosingIntializer != null && enclosingMethod.methodDeclaration.sourceStart < enclosingIntializer.fieldDeclaration.sourceStart) {
+			bodyEndValue = enclosingIntializer.fieldDeclaration.declarationSourceEnd;
+		}
+	} else if(enclosingIntializer != null) {
+		bodyEndValue = enclosingIntializer.fieldDeclaration.declarationSourceEnd;
+	} else {
+		bodyEndValue = this.blockDeclaration.sourceEnd - 1;
+	}
+
+	if(lastStatement instanceof RecoveredLocalVariable) {
+		RecoveredLocalVariable lastLocalVariable = (RecoveredLocalVariable) lastStatement;
+		if(lastLocalVariable.localDeclaration.declarationSourceEnd == 0) {
+			lastLocalVariable.localDeclaration.declarationSourceEnd = bodyEndValue;
+			lastLocalVariable.localDeclaration.declarationEnd = bodyEndValue;
+		}
+	} else if(lastStatement instanceof RecoveredBlock) {
+		RecoveredBlock lastBlock = (RecoveredBlock) lastStatement;
+		if(lastBlock.blockDeclaration.sourceEnd == 0) {
+			lastBlock.blockDeclaration.sourceEnd = bodyEndValue;
+		}
+	} else if(!(lastStatement instanceof RecoveredType)){
+		if(lastStatement.statement.sourceEnd == 0) {
+			lastStatement.statement.sourceEnd = bodyEndValue;
+		}
+	}
+
+	int lastEnd = this.blockDeclaration.sourceStart;
+
+	// only collect the non-null updated statements
+	next:
+	for (int i = 0; i < this.statementCount; i++){
+		Statement updatedStatement = this.statements[i].updatedStatement(depth, knownTypes);
+		if (updatedStatement != null) {
+			for (int j = 0; j < i; j++) {
+				if (updatedStatements[j] instanceof LocalDeclaration) {
+					LocalDeclaration local = (LocalDeclaration) updatedStatements[j];
+					if (local.initialization != null) {
+						if (updatedStatement.sourceStart >= local.initialization.sourceStart && updatedStatement.sourceEnd <= local.initialization.sourceEnd)
+							continue next;
+					}
+				}
+			}
+			updatedStatements[updatedCount++] = updatedStatement;
+			
+			if (updatedStatement instanceof LocalDeclaration) {
+				LocalDeclaration localDeclaration = (LocalDeclaration) updatedStatement;
+				if(localDeclaration.declarationSourceEnd > lastEnd) {
+					lastEnd = localDeclaration.declarationSourceEnd;
+				}
+			} else if (updatedStatement instanceof TypeDeclaration) {
+				TypeDeclaration typeDeclaration = (TypeDeclaration) updatedStatement;
+				if(typeDeclaration.declarationSourceEnd > lastEnd) {
+					lastEnd = typeDeclaration.declarationSourceEnd;
+				}
+			} else {
+				if (updatedStatement.sourceEnd > lastEnd) {
+					lastEnd = updatedStatement.sourceEnd;
+				}
+			}
+		}
+	}
+	if (updatedCount == 0) return null; // not interesting block
+
+	// resize statement collection if necessary
+	if (updatedCount != this.statementCount){
+		this.blockDeclaration.statements = new Statement[updatedCount];
+		System.arraycopy(updatedStatements, 0, this.blockDeclaration.statements, 0, updatedCount);
+	} else {
+		this.blockDeclaration.statements = updatedStatements;
+	}
+
+	if (this.blockDeclaration.sourceEnd == 0) {
+		if(lastEnd < bodyEndValue) {
+			this.blockDeclaration.sourceEnd = bodyEndValue;
+		} else {
+			this.blockDeclaration.sourceEnd = lastEnd;
+		}
+	}
+
+	return this.blockDeclaration;
+}
+

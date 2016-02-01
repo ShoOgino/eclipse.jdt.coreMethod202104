@@ -102,16 +102,34 @@
 			if (camelCaseMatch) matchRule |= SearchPattern.R_CAMELCASE_MATCH;
 			if (monitor != null) {
 				IndexManager indexManager = JavaModelManager.getIndexManager();
-				while (indexManager.awaitingJobsCount() > 0) {
-					try {
-						Thread.sleep(50); // indexes are not ready,  sleep 50ms...
-					} catch (InterruptedException e) {
-						// Do nothing
+				// Wait for the end of indexing or a cancel
+				indexManager.performConcurrentJob(new IJob() {
+					@Override
+					public boolean belongsTo(String jobFamily) {
+						return true;
 					}
-					if (monitor.isCanceled()) {
-						throw new OperationCanceledException();
+
+					@Override
+					public void cancel() {
+						// job is cancelled through progress
 					}
-				}
+
+					@Override
+					public void ensureReadyToRun() {
+						// always ready
+					}
+
+					@Override
+					public boolean execute(IProgressMonitor progress) {
+						return progress == null || !progress.isCanceled();
+					}
+
+					@Override
+					public String getJobFamily() {
+						return ""; //$NON-NLS-1$
+					}
+				
+				}, IJob.WaitUntilReady, monitor);
 				new BasicSearchEngine(this.workingCopies).searchAllConstructorDeclarations(
 						qualification,
 						simpleName,

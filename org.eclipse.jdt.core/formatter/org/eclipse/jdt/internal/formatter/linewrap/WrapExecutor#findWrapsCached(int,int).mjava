@@ -1,14 +1,32 @@
-	private WrapResult findWrapsCached(int startTokenIndex, int indent) {
+	private WrapResult findWrapsCached(int startTokenIndex, int indent) throws WrapRestartThrowable {
 		this.wrapInfoTemp.wrapTokenIndex = startTokenIndex;
 		this.wrapInfoTemp.indent = indent;
 		WrapResult wrapResult = this.wrapSearchResults.get(this.wrapInfoTemp);
+		if (wrapResult == null && this.wrapSearchResults.containsKey(this.wrapInfoTemp))
+			return null; // no wrap needed
+
+		// pre-existing result may be based on different wrapping of earlier tokens and therefore be wrong
+		WrapResult wr = wrapResult;
+		while (wr != null && wr.nextWrap != null) {
+			WrapInfo wi = wr.nextWrap;
+			Token token = this.tm.get(wi.wrapTokenIndex);
+			if (token.getWrapPolicy().wrapParentIndex < startTokenIndex && getWrapIndent(token) != wi.indent) {
+				wrapResult = null;
+				break;
+			}
+			wr = this.wrapSearchResults.get(wi);
+		}
+
 		if (wrapResult == null) {
 			Token token = this.tm.get(startTokenIndex);
 			boolean wasLineBreak = token.getLineBreaksBefore() > 0;
 			token.breakBefore();
-			wrapResult = findWraps(startTokenIndex, indent);
-			if (!wasLineBreak)
-				token.clearLineBreaksBefore();
+			try {
+				wrapResult = findWraps(startTokenIndex, indent);
+			} finally {
+				if (!wasLineBreak)
+					token.clearLineBreaksBefore();
+			}
 
 			WrapInfo wrapInfo = new WrapInfo(startTokenIndex, indent);
 			this.wrapSearchResults.put(wrapInfo, wrapResult);
