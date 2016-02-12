@@ -5,39 +5,41 @@
 	 *
 	 * @param annotations
 	 *            the type annotations for this type
-	 * @param wrapper
+	 * @param genericSignature
 	 *            the generic signature to parse
 	 * @throws CoreException
 	 */
-	private NdTypeSignature createTypeSignature(ITypeAnnotationWalker annotations, SignatureWrapper wrapper)
+	private NdTypeSignature createTypeSignature(ITypeAnnotationWalker annotations, SignatureWrapper genericSignature,
+			char[] fieldDescriptorIfVariable)
 			throws CoreException {
-		char[] genericSignature = wrapper.signature;
+		char[] signature = genericSignature.signature;
 
-		if (genericSignature == null || genericSignature.length == 0) {
+		if (signature == null || signature.length == 0) {
 			return null;
 		}
 
-		char firstChar = genericSignature[wrapper.start];
+		char firstChar = signature[genericSignature.start];
 		switch (firstChar) {
 			case 'T': {
 				// Skip the 'T' prefix
-				wrapper.start++;
+				genericSignature.start++;
 				NdComplexTypeSignature typeSignature = new NdComplexTypeSignature(getNd());
-				typeSignature.setRawType(createTypeIdFromFieldDescriptor(JAVA_LANG_OBJECT_FIELD_DESCRIPTOR));
-				typeSignature.setVariableIdentifier(wrapper.nextWord());
+				typeSignature.setRawType(createTypeIdFromFieldDescriptor(fieldDescriptorIfVariable));
+				typeSignature.setVariableIdentifier(genericSignature.nextWord());
 				attachAnnotations(typeSignature, annotations);
 				// Skip the trailing semicolon
-				wrapper.start++;
+				genericSignature.start++;
 				return typeSignature;
 			}
 			case '[': {
 				// Skip the '[' prefix
-				wrapper.start++;
+				genericSignature.start++;
 				// Determine the array argument type
-				NdTypeSignature elementType = createTypeSignature(annotations.toNextArrayDimension(), wrapper);
-				char[] fieldDescriptor = CharArrayUtils.concat(ARRAY_FIELD_DESCRIPTOR_PREFIX,
+				NdTypeSignature elementType = createTypeSignature(annotations.toNextArrayDimension(), genericSignature,
+						CharArrayUtils.substring(fieldDescriptorIfVariable, 1));
+				char[] computedFieldDescriptor = CharArrayUtils.concat(ARRAY_FIELD_DESCRIPTOR_PREFIX,
 						elementType.getRawType().getFieldDescriptor().getChars());
-				NdTypeId rawType = createTypeIdFromFieldDescriptor(fieldDescriptor);
+				NdTypeId rawType = createTypeIdFromFieldDescriptor(computedFieldDescriptor);
 				// We encode signatures as though they were a one-argument generic type whose element
 				// type is the generic argument.
 				NdComplexTypeSignature typeSignature = new NdComplexTypeSignature(getNd());
@@ -48,7 +50,7 @@
 				return typeSignature;
 			}
 			case 'V':
-				wrapper.start++;
+				genericSignature.start++;
 				return null;
 			case 'B':
 			case 'C':
@@ -58,18 +60,18 @@
 			case 'J':
 			case 'S':
 			case 'Z':
-				wrapper.start++;
+				genericSignature.start++;
 				return createTypeIdFromFieldDescriptor(new char[] { firstChar });
 			case 'L':
-				return parseClassTypeSignature(null, annotations, wrapper);
+				return parseClassTypeSignature(null, annotations, genericSignature);
 			case '+':
 			case '-':
 			case '*':
 				throw new CoreException(Package.createStatus("Unexpected wildcard in top-level of generic signature: " //$NON-NLS-1$
-						+ wrapper.toString()));
+						+ genericSignature.toString()));
 			default:
 				throw new CoreException(Package.createStatus("Generic signature starts with unknown character: " //$NON-NLS-1$
-						+ wrapper.toString()));
+						+ genericSignature.toString()));
 		}
 	}
 
