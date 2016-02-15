@@ -5,19 +5,43 @@
 			this.ignoreFurtherInvestigation = true;
 			return;
 		}
+		this.moduleBinding = this.scope.environment().getModule(this.moduleName);
 		this.binding.compoundName = CharOperation.arrayConcat(this.tokens, this.name);
-		for(int i = 0; i < this.usesCount; i++) {
-			TypeReference ref = this.uses[i];
-			TypeBinding type = ref.resolveType(this.binding.scope);
-			if (type == null || !type.isValidBinding()) {
-				this.ignoreFurtherInvestigation = true;
+		Set<ModuleBinding> requiredModules = new HashSet<ModuleBinding>();
+		for(int i = 0; i < this.requiresCount; i++) {
+			ModuleReference ref = this.requires[i];
+			if (ref.resolve(this.scope) != null) {
+				if (!requiredModules.add(ref.binding)) {
+					this.scope.problemReporter().duplicateModuleReference(IProblem.DuplicateRequires, ref);
+				}
+				Collection<ModuleBinding> deps = ref.binding.getImplicitDependencies();
+				if (deps.contains(this.moduleBinding))
+					this.scope.problemReporter().cyclicModuleDependency(this.moduleBinding, ref);
 			}
 		}
+		for (int i = 0; i < this.exportsCount; i++) {
+			this.exports[i].resolve(this.scope);
+		}
+		for(int i = 0; i < this.usesCount; i++) {
+			Set<TypeBinding> allTypes = new HashSet<TypeBinding>();
+			if (this.uses[i].resolveType(this.scope) != null) {
+				if (!allTypes.add(this.uses[i].resolvedType)) {
+					this.scope.problemReporter().duplicateTypeReference(IProblem.DuplicateUses, this.uses[i]);
+				}
+			}
+		}
+		Map<TypeBinding, TypeBinding> services = new HashMap<TypeBinding, TypeBinding>(this.servicesCount); 
 		for(int i = 0; i < this.servicesCount; i++) {
-			TypeBinding inf = this.interfaces[i].resolveType(this.binding.scope);
-			TypeBinding imp = this.implementations[i].resolveType(this.binding.scope);
-			if (inf == null || !inf.isValidBinding() || imp == null || !imp.isValidBinding()) {
-				this.ignoreFurtherInvestigation = true;
+			if (this.interfaces[i].resolveType(this.scope) != null) {
+				TypeBinding inf = this.interfaces[i].resolvedType;
+				if (this.implementations[i].resolveType(this.scope) != null) {
+					TypeBinding imp = this.implementations[i].resolvedType;
+					if (services.get(inf) == imp)  { //$IDENTITY-COMPARISON$
+						this.scope.problemReporter().duplicateTypeReference(IProblem.DuplicateServices, this.interfaces[i], this.implementations[i]);
+					} else {
+						services.put(this.interfaces[i].resolvedType, this.implementations[i].resolvedType);
+					}
+				}
 			}
 		}
 	}
