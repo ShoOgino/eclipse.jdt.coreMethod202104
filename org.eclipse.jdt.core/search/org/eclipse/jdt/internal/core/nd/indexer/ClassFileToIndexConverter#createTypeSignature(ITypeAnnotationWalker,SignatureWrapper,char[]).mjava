@@ -7,6 +7,9 @@
 	 *            the type annotations for this type
 	 * @param genericSignature
 	 *            the generic signature to parse
+	 * @param fieldDescriptorIfVariable
+	 *            the field descriptor to use if the type is a type variable -- or null if unknown (the field descriptor
+	 *            for java.lang.Object will be used)
 	 * @throws CoreException
 	 */
 	private NdTypeSignature createTypeSignature(ITypeAnnotationWalker annotations, SignatureWrapper genericSignature,
@@ -18,25 +21,34 @@
 			return null;
 		}
 
-		char firstChar = signature[genericSignature.start];
+		char firstChar = genericSignature.charAtStart();
 		switch (firstChar) {
 			case 'T': {
 				// Skip the 'T' prefix
 				genericSignature.start++;
 				NdComplexTypeSignature typeSignature = new NdComplexTypeSignature(getNd());
-				typeSignature.setRawType(createTypeIdFromFieldDescriptor(fieldDescriptorIfVariable));
+				char[] fieldDescriptor = fieldDescriptorIfVariable;
+				if (fieldDescriptor == null) {
+					fieldDescriptor = JAVA_LANG_OBJECT_FIELD_DESCRIPTOR;
+				}
+				typeSignature.setRawType(createTypeIdFromFieldDescriptor(fieldDescriptor));
 				typeSignature.setVariableIdentifier(genericSignature.nextWord());
 				attachAnnotations(typeSignature, annotations);
 				// Skip the trailing semicolon
-				genericSignature.start++;
+				skipChar(genericSignature, ';');
 				return typeSignature;
 			}
 			case '[': {
 				// Skip the '[' prefix
 				genericSignature.start++;
+				char[] nestedFieldDescriptor = null;
+				if (fieldDescriptorIfVariable != null && fieldDescriptorIfVariable.length > 0
+						&& fieldDescriptorIfVariable[0] == '[') {
+					nestedFieldDescriptor = CharArrayUtils.substring(fieldDescriptorIfVariable, 1);
+				}
 				// Determine the array argument type
 				NdTypeSignature elementType = createTypeSignature(annotations.toNextArrayDimension(), genericSignature,
-						CharArrayUtils.substring(fieldDescriptorIfVariable, 1));
+						nestedFieldDescriptor);
 				char[] computedFieldDescriptor = CharArrayUtils.concat(ARRAY_FIELD_DESCRIPTOR_PREFIX,
 						elementType.getRawType().getFieldDescriptor().getChars());
 				NdTypeId rawType = createTypeIdFromFieldDescriptor(computedFieldDescriptor);

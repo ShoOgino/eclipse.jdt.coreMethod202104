@@ -3,7 +3,7 @@
 	 *
 	 * @throws CoreException
 	 */
-	private void addMethod(NdType type, IBinaryMethod next, IBinaryType binaryType, char[] binaryTypeName)
+	private void addMethod(NdType type, IBinaryMethod next, IBinaryType binaryType)
 			throws CoreException {
 		NdMethod method = new NdMethod(type);
 
@@ -17,28 +17,31 @@
 		skipChar(signature, '(');
 		skipChar(descriptor, '(');
 
-		int numCompilerDefinedParameters = 0;
-		if (next.isConstructor()) {
-			if ((binaryType.isLocal() || binaryType.isMember()) && (binaryType.getModifiers() & Modifier.STATIC) == 0) {
-				numCompilerDefinedParameters = 1;
+		List<char[]> parameterFieldDescriptors = new ArrayList<>();
+		while (!descriptor.atEnd()) {
+			if (descriptor.charAtStart() == ')') {
+				skipChar(descriptor, ')');
+				break;
 			}
-			if ((binaryType.getModifiers() & ClassFileConstants.AccEnum) != 0) {
-				numCompilerDefinedParameters = 2;
-			}
+			parameterFieldDescriptors.add(readNextFieldDescriptor(descriptor));
 		}
+
+		int numArgumentsInGenericSignature = countMethodArguments(signature);
+		int numCompilerDefinedParameters = Math.max(0,
+				parameterFieldDescriptors.size() - numArgumentsInGenericSignature);
 
 		boolean compilerDefinedParametersAreIncludedInSignature = (next.getGenericSignature() == null);
 
 		int annotatedParametersCount = next.getAnnotatedParametersCount();
 		char[][] parameterNames = next.getArgumentNames();
 		short descriptorParameterIdx = 0;
-		while (!descriptor.atEnd()) {
-			if (descriptor.charAtStart() == ')') {
-				skipChar(descriptor, ')');
+		char[] binaryTypeName = binaryType.getName();
+		while (!signature.atEnd()) {
+			if (signature.charAtStart() == ')') {
 				skipChar(signature, ')');
 				break;
 			}
-			char[] nextFieldDescriptor = readNextFieldDescriptor(descriptor);
+			char[] nextFieldDescriptor = parameterFieldDescriptors.get(descriptorParameterIdx);
 			/**
 			 * True iff this a parameter which is part of the field descriptor but not the generic signature -- that is,
 			 * it is a compiler-defined parameter.
@@ -97,7 +100,7 @@
 			method.setDefaultValue(createConstantFromMixedType(defaultValue));
 		}
 
-		method.setMethodId(createMethodId(binaryTypeName, next.getSelector(), next.getMethodDescriptor()));
+		method.setMethodId(createMethodId(binaryType.getName(), next.getSelector(), next.getMethodDescriptor()));
 		method.setModifiers(next.getModifiers());
 		method.setTagBits(next.getTagBits());
 	}
