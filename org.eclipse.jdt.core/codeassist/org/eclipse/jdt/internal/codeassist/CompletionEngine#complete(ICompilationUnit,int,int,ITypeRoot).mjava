@@ -44,6 +44,77 @@
 					System.out.println(parsedUnit.toString());
 				}
 
+				if (parsedUnit.isModuleInfo()) {
+					ModuleDeclaration moduleDeclaration = parsedUnit.moduleDeclaration;
+					if (moduleDeclaration == null) return;
+					if (moduleDeclaration instanceof CompletionOnModuleDeclaration) {
+						contextAccepted = true;
+						buildContext(parsedUnit.moduleDeclaration, null, parsedUnit, null, null);
+						this.requestor.setIgnored(CompletionProposal.MODULE_DECLARATION, false); //TODO: Hack until ui fixes this issue.
+						if(!this.requestor.isIgnored(CompletionProposal.MODULE_DECLARATION)) {
+							findModuleName(parsedUnit);
+						}
+						debugPrintf(); 
+						return;
+					}
+					if (moduleDeclaration instanceof CompletionOnKeywordModuleDeclaration) {
+						contextAccepted = true;
+						processModuleKeywordCompletion(parsedUnit, moduleDeclaration, (CompletionOnKeyword) moduleDeclaration);
+						return;								
+					}
+					ExportReference[] exports = moduleDeclaration.exports;
+					if (exports != null) {
+						for (int i = 0, l = exports.length; i < l; ++i) {
+							ExportReference exportReference = exports[i];
+							if (exportReference instanceof CompletionOnExportReference) {
+								contextAccepted = true;
+								buildContext(exportReference, null, parsedUnit, null, null);
+								if(!this.requestor.isIgnored(CompletionProposal.PACKAGE_REF)) {
+									findPackages((CompletionOnExportReference) exportReference);
+								}
+								debugPrintf();
+								return;
+							}
+							if (exportReference instanceof CompletionOnKeywordModuleInfo) {
+								contextAccepted = true;
+								processModuleKeywordCompletion(parsedUnit, exportReference, (CompletionOnKeyword) exportReference);
+								return;								
+							} 
+							ModuleReference[] targets = exportReference.targets;
+							if (targets == null) continue;
+							for (int j = 0, lj = targets.length; j < lj; j++) {
+								ModuleReference target = targets[j];
+								if (target == null) break;
+								if (target instanceof CompletionOnModuleReference) {
+									if(!this.requestor.isIgnored(CompletionProposal.MODULE_REF)) {
+										contextAccepted = true;
+										findModules((CompletionOnModuleReference) target);//TODO: find Modules
+									}
+									debugPrintf();
+									return;
+								} else if (target instanceof CompletionOnKeyword) {
+									contextAccepted = true;
+									//TODO
+								}
+							}
+						}
+					}
+					ModuleReference[] moduleRefs = moduleDeclaration.requires;
+					if (moduleRefs != null) {
+						for (int i = 0, l = moduleRefs.length; i < l; ++i) {
+							ModuleReference reference = moduleRefs[i];
+							if (reference instanceof CompletionOnModuleReference) {
+								contextAccepted = true;
+								buildContext(reference, null, parsedUnit, null, null);
+								if(!this.requestor.isIgnored(CompletionProposal.MODULE_REF)) {
+									findModules((CompletionOnModuleReference) reference);
+								}
+								debugPrintf();
+								return;
+							}
+						}
+					}
+				}
 				// scan the package & import statements first
 				if (parsedUnit.currentPackage instanceof CompletionOnPackageReference) {
 					contextAccepted = true;
@@ -51,12 +122,7 @@
 					if(!this.requestor.isIgnored(CompletionProposal.PACKAGE_REF)) {
 						findPackages((CompletionOnPackageReference) parsedUnit.currentPackage);
 					}
-					if(this.noProposal && this.problem != null) {
-						this.requestor.completionFailure(this.problem);
-						if(DEBUG) {
-							this.printDebug(this.problem);
-						}
-					}
+					debugPrintf();
 					return;
 				}
 
@@ -106,12 +172,7 @@
 									}
 								}
 
-								if(this.noProposal && this.problem != null) {
-									this.requestor.completionFailure(this.problem);
-									if(DEBUG) {
-										this.printDebug(this.problem);
-									}
-								}
+								debugPrintf();
 							}
 							return;
 						} else if(importReference instanceof CompletionOnKeyword) {
@@ -122,12 +183,7 @@
 								CompletionOnKeyword keyword = (CompletionOnKeyword)importReference;
 								findKeywords(keyword.getToken(), keyword.getPossibleKeywords(), false, parsedUnit.currentPackage != null);
 							}
-							if(this.noProposal && this.problem != null) {
-								this.requestor.completionFailure(this.problem);
-								if(DEBUG) {
-									this.printDebug(this.problem);
-								}
-							}
+							debugPrintf();
 							return;
 						}
 					}
