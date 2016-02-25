@@ -1,0 +1,39 @@
+	/** Lib exists as workspace project. Invocations conflict with type parameter constraints. Reconcile an individual CU. */
+	public void testProjectDependencyReconcile3() throws Exception {
+		try {
+			setupJavaProject("Lib");
+			this.project.getProject().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			this.root = null; // prepare to get the root from project Test1
+	
+			setupJavaProject("Test3b");
+			Util.createSourceZip(
+				new String[] {
+					"libs/MyFunction.eea", 
+					"class libs/MyFunction\n" + 
+					" <T:R:>\n" + 
+					" <T:1R:>\n" + 
+					"\n" + 
+					"compose\n" + 
+					" <V:Ljava/lang/Object;>(Llibs/MyFunction<-TV;+TT;>;)Llibs/MyFunction<TV;TR;>;\n" + 
+					" <1V:Ljava/lang/Object;>(Llibs/MyFunction<-TV;+TT;>;)Llibs/MyFunction<TV;TR;>;\n" + 
+					"\n",
+				},
+				this.project.getProject().getLocation().toString()+"/annots.zip");
+			this.project.getProject().refreshLocal(1, new NullProgressMonitor());
+
+			addProjectDependencyWithExternalAnnotations(this.project, "/Lib", "annots.zip", null);
+			IPackageFragment fragment = this.root.getPackageFragment("test1");
+			ICompilationUnit unit = fragment.getCompilationUnit("Reconcile3.java").getWorkingCopy(new NullProgressMonitor());
+			CompilationUnit reconciled = unit.reconcile(AST.JLS8, true, null, new NullProgressMonitor());
+			for (IProblem iProblem : reconciled.getProblems()) {
+				System.out.println(iProblem);
+			}
+			assertProblems(reconciled.getProblems(), new String[] {
+					"Pb(964) Null constraint mismatch: The type '@Nullable B' is not a valid substitute for the type parameter '@NonNull R'",
+					"Pb(964) Null constraint mismatch: The type '@Nullable String' is not a valid substitute for the type parameter '@NonNull V'",
+			}, new int[] { 12, 17 });
+		} finally {
+			deleteProject("Lib");
+		}
+	}
+
