@@ -2,6 +2,30 @@ public Object getElementInfo(IProgressMonitor monitor) throws JavaModelException
 	JavaModelManager manager = JavaModelManager.getJavaModelManager();
 	Object info = manager.getInfo(this);
 	if (info != null && info != JavaModelCache.NON_EXISTING_JAR_TYPE_INFO) return info;
+
+	if (this.cachedBinaryType != null) {
+		return this.cachedBinaryType;
+	}
+
+	// Check if we can return this type directly from the index
+	if (JavaIndex.isEnabled()) {
+		BinaryTypeDescriptor descriptor = BinaryTypeFactory.createDescriptor(this);
+
+		if (descriptor != null) {
+			IBinaryType result;
+			try {
+				result = BinaryTypeFactory.readFromIndex(descriptor, monitor);
+				this.cachedBinaryType = result;
+				if (result == null) {
+					ClassFile classFile = (ClassFile)getClassFile();
+					throw classFile.newNotPresentException();
+				}
+				return result;
+			} catch (NotInIndexException e) {
+				// Else fall back to openWhenClosed, below
+			}
+		}
+	}
 	return openWhenClosed(createElementInfo(), false, monitor);
 }
 
