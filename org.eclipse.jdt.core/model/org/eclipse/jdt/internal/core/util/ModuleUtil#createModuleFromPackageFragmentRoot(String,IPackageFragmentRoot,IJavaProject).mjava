@@ -1,0 +1,67 @@
+	private static String createModuleFromPackageFragmentRoot(String moduleName, IPackageFragmentRoot root, IJavaProject project) throws CoreException {
+		if (!root.isArchive()) {
+			ModuleAccumulatorEnvironment environment = new ModuleAccumulatorEnvironment(project);
+			Compiler compiler = newCompiler(environment, project);
+			LocalModuleImpl module = new LocalModuleImpl(moduleName == null ? root.getElementName() : moduleName);
+			List<IModule.IPackageExport> exports = new ArrayList<>();
+			// First go over the binary roots and see if any of them are modules
+			List<IModule.IModuleReference> required = new ArrayList<>();
+			IPackageFragmentRoot[] roots = project.getPackageFragmentRoots();
+			for (IPackageFragmentRoot binRoot : roots) {
+				if (binRoot.isArchive()) {
+					PackageFragmentRoot lib = (PackageFragmentRoot) binRoot;
+					org.eclipse.jdt.internal.compiler.env.IModule mod = ((OpenableElementInfo) lib.getElementInfo()).getModule();
+					if (mod != null) {
+						LocalModuleReferenceImpl ref = new LocalModuleReferenceImpl(mod.name(), false);
+						required.add(ref);
+					}
+				}
+			}
+			Set<org.eclipse.jdt.internal.compiler.env.ICompilationUnit> toCompile = new HashSet<>();
+			IJavaElement[] children = root.getChildren();
+			for (IJavaElement child : children) {
+				if (child instanceof IPackageFragment) {
+					IPackageFragment fragment = (IPackageFragment) child;
+					ICompilationUnit[] units = fragment.getCompilationUnits();
+					if (units.length != 0) {
+						String pack = fragment.getElementName();
+						exports.add(new LocalPackageExportImpl(fragment, null));
+						for (ICompilationUnit iUnit : units) {
+							org.eclipse.jdt.internal.compiler.env.ICompilationUnit sourceFile = 
+									new BasicCompilationUnit(iUnit.getSource().toCharArray(), CharOperation.splitOn('.', pack.toCharArray()), iUnit.getPath().toOSString());
+							toCompile.add(sourceFile);
+						}
+					}
+				}
+			}
+			org.eclipse.jdt.internal.compiler.env.ICompilationUnit[] sources = new org.eclipse.jdt.internal.compiler.env.ICompilationUnit[toCompile.size()];
+			toCompile.toArray(sources);
+			compiler.compile(sources);
+			Collections.sort(exports, new Comparator<IModule.IPackageExport>() {
+				@Override
+				public int compare(IModule.IPackageExport o1, IModule.IPackageExport o2) {
+					return o1.getExportedPackage().getElementName().compareTo(
+							o2.getExportedPackage().getElementName());
+				}
+			});
+			IModule.IPackageExport[] packs = new IModule.IPackageExport[exports.size()];
+			packs = exports.toArray(packs);
+			module.setExports(packs);
+			String[] mods = environment.getModules();
+			for (String string : mods) {
+				required.add(new LocalModuleReferenceImpl(string.toCharArray(), false));
+			}
+			Collections.sort(required, new Comparator<IModule.IModuleReference>() {
+				@Override
+				public int compare(IModule.IModuleReference o1, IModule.IModuleReference o2) {
+					return new String(o1.module().name()).compareTo(new String(o2.module().name()));
+				}
+			});
+			IModule.IModuleReference[] refs = new IModule.IModuleReference[required.size()];
+			refs = required.toArray(refs);
+			module.setRequiredModules(refs);
+			return module.toString();
+		}
+		return null;
+	}
+
