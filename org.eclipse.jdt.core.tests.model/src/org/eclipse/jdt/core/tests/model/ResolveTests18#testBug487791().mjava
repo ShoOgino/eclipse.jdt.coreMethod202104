@@ -1,0 +1,48 @@
+// nested poly invocation:
+public void testBug487791() throws JavaModelException {	
+	this.wc = getWorkingCopy(
+			"Resolve/src/Example.java",
+			"import java.util.Comparator;\n" + 
+			"import java.util.stream.Collectors;\n" + 
+			"\n" + 
+			"interface Something {\n" + 
+			"      public int getSize();\n" + 
+			"      public Instant getTime();\n" + 
+			"}\n" +
+			"interface Instant extends Comparable<Instant> {\n" +
+			"}\n" + 
+			"public class Example {\n" + 
+			"   public void test2() {\n" + 
+			"      java.util.stream.Collector<Something,?,java.util.Map<Integer,Something>> c = \n" + 
+			"      Collectors.collectingAndThen(\n" + 
+			"            Collectors.<Something>toList(),\n" + 
+			"            list -> list.stream().collect(Collectors.groupingBy(Something::getSize,\n" + 
+			"                     // Returns Collector<Something,?,Object> - INCORRECT!\n" + 
+			"                     Collectors.collectingAndThen(\n" + // <-- select here
+			"                        Collectors.<Something>toList(),\n" + 
+			"                        list2 -> list2.stream().sorted(Comparator.comparing(Something::getTime)).limit(1).findAny().orElse(null)\n" + 
+			"                     )\n" + 
+			"                  )));\n" + 
+			"   }\n" + 
+			"}\n");
+	this.wc.becomeWorkingCopy(null);
+
+	String str = this.wc.getSource();
+	String selection = "collectingAndThen";
+	int start = str.lastIndexOf(selection);
+	int length = selection.length();
+
+	IJavaElement[] elements = this.wc.codeSelect(start, length);
+	assertElementsEqual(
+		"Unexpected elements",
+		"collectingAndThen(java.util.stream.Collector<T,A,R>, java.util.function.Function<R,RR>) [in Collectors [in Collectors.class [in java.util.stream [in "+ getExternalPath() + "jclFull1.8.jar]]]]",
+		elements
+	);
+	String signature = new BindingKey(((IMethod) elements[0]).getKey()).toSignature();
+	String[] typeArguments = Signature.getTypeArguments(signature);
+	assertEquals("number of type arguments", 3, typeArguments.length);
+	assertEquals("4th type argument", "LSomething;", typeArguments[2]);
+	String returnType = Signature.getReturnType(signature);
+	assertEquals("return type", "Ljava.util.stream.Collector<LSomething;!*LSomething;>;", returnType);
+}
+
