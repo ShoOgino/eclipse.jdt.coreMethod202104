@@ -34,6 +34,10 @@ void cachePartsFrom(IBinaryType binaryType, boolean needFieldsAndMethods) {
 		}
 		ITypeAnnotationWalker walker = getTypeAnnotationWalker(binaryType.getTypeAnnotations(), Binding.NO_NULL_DEFAULT);
 		ITypeAnnotationWalker toplevelWalker = binaryType.enrichWithExternalAnnotationsFor(walker, null, this.environment);
+		this.externalAnnotationStatus = binaryType.getExternalAnnotationStatus();
+		if (this.externalAnnotationStatus.isPotentiallyUnannotatedLib() && this.defaultNullness != 0) {
+			this.externalAnnotationStatus = ExternalAnnotationStatus.TYPE_IS_ANNOTATED;
+		}
 		char[] typeSignature = binaryType.getGenericSignature(); // use generic signature even in 1.4
 		this.tagBits |= binaryType.getTagBits();
 		
@@ -99,6 +103,19 @@ void cachePartsFrom(IBinaryType binaryType, boolean needFieldsAndMethods) {
 				this.tagBits |= TagBits.HasUnresolvedSuperinterfaces;
 			}
 		}
+		boolean canUseNullTypeAnnotations = this.environment.globalOptions.isAnnotationBasedNullAnalysisEnabled && this.environment.globalOptions.sourceLevel >= ClassFileConstants.JDK1_8;
+		if (canUseNullTypeAnnotations && this.externalAnnotationStatus.isPotentiallyUnannotatedLib()) {
+			if (this.superclass != null && this.superclass.hasNullTypeAnnotations()) {
+				this.externalAnnotationStatus = ExternalAnnotationStatus.TYPE_IS_ANNOTATED;
+			} else {
+				for (TypeBinding ifc : this.superInterfaces) {
+					if (ifc.hasNullTypeAnnotations()) {
+						this.externalAnnotationStatus = ExternalAnnotationStatus.TYPE_IS_ANNOTATED;
+						break;
+					}
+				}
+			}
+		}
 
 		if (needFieldsAndMethods) {
 			IBinaryField[] iFields = binaryType.getFields();
@@ -135,7 +152,7 @@ void cachePartsFrom(IBinaryType binaryType, boolean needFieldsAndMethods) {
 						ITypeAnnotationWalker methodWalker = ITypeAnnotationWalker.EMPTY_ANNOTATION_WALKER;
 						if (sourceLevel < ClassFileConstants.JDK1_8)
 							methodWalker = binaryType.enrichWithExternalAnnotationsFor(methodWalker, iMethods[i], this.environment);
-						scanMethodForNullAnnotation(iMethods[i], this.methods[i], methodWalker);
+						scanMethodForNullAnnotation(iMethods[i], this.methods[i], methodWalker, canUseNullTypeAnnotations);
 					}
 				}
 			}
