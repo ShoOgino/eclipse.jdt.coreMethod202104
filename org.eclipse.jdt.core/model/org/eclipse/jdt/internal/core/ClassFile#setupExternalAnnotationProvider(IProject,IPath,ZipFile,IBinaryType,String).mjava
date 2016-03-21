@@ -1,6 +1,7 @@
-private void setupExternalAnnotationProvider(IProject project, final IPath externalAnnotationPath,
-		ZipFile annotationZip, ClassFileReader reader, final String typeName)
+private IBinaryType setupExternalAnnotationProvider(IProject project, final IPath externalAnnotationPath,
+		ZipFile annotationZip, IBinaryType reader, final String typeName)
 {
+	IBinaryType result = reader;
 	// try resolve path within the workspace:
 	IWorkspaceRoot root = project.getWorkspace().getRoot();
 	IResource resource;
@@ -16,24 +17,30 @@ private void setupExternalAnnotationProvider(IProject project, final IPath exter
 		if (resource.isVirtual()) {
 			Util.log(new Status(IStatus.ERROR, JavaCore.PLUGIN_ID,
 					"Virtual resource "+externalAnnotationPath+" cannot be used as annotationpath for project "+project.getName())); //$NON-NLS-1$ //$NON-NLS-2$
-			return;
+			return reader;
 		}
 		resolvedPath = resource.getLocation().toString(); // workspace lookup succeeded -> resolve it
 	} else {
 		resolvedPath = externalAnnotationPath.toString(); // not in workspace, use as is
 	}
 	try {
-		annotationZip = reader.setExternalAnnotationProvider(resolvedPath, typeName, annotationZip, new ClassFileReader.ZipFileProducer() {
-			@Override public ZipFile produce() throws IOException {
-				try {
-					return JavaModelManager.getJavaModelManager().getZipFile(externalAnnotationPath); // use (absolute, but) unresolved path here
-				} catch (CoreException e) {
-					throw new IOException("Failed to read annotation file for "+typeName+" from "+externalAnnotationPath.toString(), e); //$NON-NLS-1$ //$NON-NLS-2$
-				}
-			}});
+		if (annotationZip == null) {
+			annotationZip = ClassWithExternalAnnotations.getAnnotationZipFile(resolvedPath, new ClassFileReader.ZipFileProducer() {
+				@Override public ZipFile produce() throws IOException {
+					try {
+						return JavaModelManager.getJavaModelManager().getZipFile(externalAnnotationPath); // use (absolute, but) unresolved path here
+					} catch (CoreException e) {
+						throw new IOException("Failed to read annotation file for "+typeName+" from "+externalAnnotationPath.toString(), e); //$NON-NLS-1$ //$NON-NLS-2$
+					}
+				}});
+		}
+
+		ExternalAnnotationProvider annotationProvider = ClassWithExternalAnnotations
+				.externalAnnotationProvider(resolvedPath, typeName, annotationZip);
+		result = new ClassWithExternalAnnotations(reader, annotationProvider);
 	} catch (IOException e) {
 		Util.log(e);
-		return;
+		return result;
 	}
 	if (annotationZip == null) {
 		// Additional change listening for individual types only when annotations are in individual files.
@@ -41,5 +48,6 @@ private void setupExternalAnnotationProvider(IProject project, final IPath exter
 		this.externalAnnotationBase = externalAnnotationPath; // remember so we can unregister later
 		ExternalAnnotationTracker.registerClassFile(externalAnnotationPath, new Path(typeName), this);
 	}
+	return result;
 }
 
