@@ -1,0 +1,39 @@
+	protected boolean computeChildren(OpenableElementInfo info, IResource underlyingResource) throws JavaModelException {
+		final HashtableOfArrayToObject rawPackageInfo = new HashtableOfArrayToObject();
+		final String compliance = CompilerOptions.VERSION_1_8; // TODO: BETA_JAVA9 Revisit
+
+		// always create the default package
+		rawPackageInfo.put(CharOperation.NO_STRINGS, new ArrayList[] { EMPTY_LIST, EMPTY_LIST });
+
+		try {
+			org.eclipse.jdt.internal.compiler.util.JRTUtil.walkModuleImage(this.jarPath.toFile(),
+					new org.eclipse.jdt.internal.compiler.util.JRTUtil.JrtFileVisitor<Path>() {
+				@Override
+				public FileVisitResult visitPackage(Path dir, Path mod, BasicFileAttributes attrs) throws IOException {
+					initRawPackageInfo(rawPackageInfo, dir.toString(), true, compliance);
+					return FileVisitResult.CONTINUE;
+				}
+
+				@Override
+				public FileVisitResult visitFile(Path path, Path mod, BasicFileAttributes attrs) throws IOException {
+					initRawPackageInfo(rawPackageInfo, path.toString(), false, compliance);
+					return FileVisitResult.CONTINUE;
+				}
+
+				@Override
+				public FileVisitResult visitModule(Path mod) throws IOException {
+					if (!JrtPackageFragmentRoot.this.moduleName.equals(mod.toString())) {
+						return FileVisitResult.SKIP_SUBTREE;
+					}
+					return FileVisitResult.CONTINUE;
+				}
+			}, JRTUtil.NOTIFY_ALL);
+		} catch (IOException e) {
+			Util.log(IStatus.ERROR, "Error reading modules" + toStringWithAncestors()); //$NON-NLS-1$
+		}
+
+		info.setChildren(createChildren(rawPackageInfo));
+		((JarPackageFragmentRootInfo) info).rawPackageInfo = rawPackageInfo;
+		return true;
+	}
+
