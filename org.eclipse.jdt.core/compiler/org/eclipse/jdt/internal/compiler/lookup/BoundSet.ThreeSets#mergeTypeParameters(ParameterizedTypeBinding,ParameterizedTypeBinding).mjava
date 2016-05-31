@@ -1,0 +1,48 @@
+		public ParameterizedTypeBinding mergeTypeParameters(ParameterizedTypeBinding current, ParameterizedTypeBinding newB) {
+			TypeBinding[] curTypeArgs = current.typeArguments();
+			TypeBinding[] newTypeArgs = newB.typeArguments();
+			TypeBinding[] merged = new TypeBinding[curTypeArgs.length];
+			System.arraycopy(curTypeArgs, 0, merged, 0, curTypeArgs.length);
+			boolean wasMerged = false;
+			for (int i = 0; i < curTypeArgs.length; i++) {
+				if (TypeBinding.equalsEquals(curTypeArgs[i], newTypeArgs[i]))
+					continue;
+				// Don't mess with captures
+				if(curTypeArgs[i].isCapture() || newTypeArgs[i].isCapture())
+					return null;
+				if (curTypeArgs[i] instanceof InferenceVariable) {
+					if (!(newTypeArgs[i] instanceof InferenceVariable)) {
+						// Short circuit incorporation
+						// Merge the type parameters, we are going to
+						// end up with this bound during incorporation anyway because of the SAME
+						// bound on the inference variable
+						ThreeSets three = BoundSet.this.boundsPerVariable.get(curTypeArgs[i]);
+						if(three != null && three.sameBounds != null && three.sameBounds.contains(new TypeBound((InferenceVariable) curTypeArgs[i], newTypeArgs[i], ReductionResult.SAME))) {
+							merged[i] = newTypeArgs[i];
+							wasMerged = true;
+						}
+					} else if (!curTypeArgs[i].equals(newTypeArgs[i])) {
+						return null;
+					}
+				} else {
+					if (!(newTypeArgs[i] instanceof InferenceVariable)) {
+						if (!TypeBinding.equalsEquals(curTypeArgs[i], newTypeArgs[i])) {
+							return null;
+						}
+					} else {
+						ThreeSets three = BoundSet.this.boundsPerVariable.get(newTypeArgs[i]);
+						// We do not have a SAME bounds for this inference variable, do not substitute
+						if(three == null || three.sameBounds == null || !three.sameBounds.contains(new TypeBound((InferenceVariable) newTypeArgs[i], curTypeArgs[i], ReductionResult.SAME))) {
+							return null;
+						}
+					}
+				}
+			}
+			if(wasMerged) {
+				ParameterizedTypeBinding clone = (ParameterizedTypeBinding)current.clone(current.enclosingType());
+				clone.arguments = merged;
+				return clone;
+			}
+			return null;
+		}
+

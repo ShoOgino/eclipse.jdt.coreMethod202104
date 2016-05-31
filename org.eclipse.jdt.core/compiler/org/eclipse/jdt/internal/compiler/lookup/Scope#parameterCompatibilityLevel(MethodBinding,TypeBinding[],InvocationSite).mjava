@@ -1,5 +1,11 @@
 	// Version that just answers based on inference kind (at 1.8+) when available.
 	public int parameterCompatibilityLevel(MethodBinding method, TypeBinding[] arguments, InvocationSite site) {
+		if (method.problemId() == ProblemReasons.InvocationTypeInferenceFailure) {
+			// we need to accept methods with InvocationTypeInferenceFailure, because logically overload resolution happens *before* invocation type inference
+			method = ((ProblemMethodBinding)method).closestMatch; // for compatibility checks use the actual method
+			if (method == null)
+				return NOT_COMPATIBLE;
+		}
 		if (compilerOptions().sourceLevel >= ClassFileConstants.JDK1_8 && method instanceof ParameterizedGenericMethodBinding) {
 			int inferenceKind = InferenceContext18.CHECK_UNKNOWN;
 			InferenceContext18 context = null;
@@ -23,8 +29,14 @@
 					if (!argument.isFunctionalType())
 						continue;
 					TypeBinding parameter = InferenceContext18.getParameter(method.parameters, i, context.isVarArgs());
-					if (!argument.isCompatibleWith(parameter, this))
+					if (!argument.isCompatibleWith(parameter, this)) {
+						if (argument.isPolyType()) {
+							parameter = InferenceContext18.getParameter(method.original().parameters, i, context.isVarArgs());
+							if (!((PolyTypeBinding)argument).expression.isPertinentToApplicability(parameter, method))
+								continue;
+						}
 						return NOT_COMPATIBLE;
+					}
 				}
 			}
 			switch (inferenceKind) {

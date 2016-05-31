@@ -12,7 +12,28 @@ protected int resolveLevel(ReferenceExpression referenceExpression) {
 
 	// receiver type
 	if (this.pattern.declaringSimpleName == null && this.pattern.declaringQualification == null) return methodLevel; // since any declaring class will do
-	int declaringLevel = resolveLevelForType(this.pattern.declaringSimpleName, this.pattern.declaringQualification, method.declaringClass);
+	int declaringLevel;
+	ReferenceBinding ref = checkMethodRef(method, referenceExpression);
+	if (ref != null) {
+		declaringLevel = resolveLevelAsSubtype(this.pattern.declaringSimpleName, this.pattern.declaringQualification, ref, method.selector, method.parameters, ref.qualifiedPackageName(), method.isDefault());
+		if (declaringLevel == IMPOSSIBLE_MATCH) {
+			if (method.declaringClass == null || this.allSuperDeclaringTypeNames == null) {
+				declaringLevel = INACCURATE_MATCH;
+			} else {
+				char[][][] superTypeNames = (method.isDefault() && this.pattern.focus == null) ? this.samePkgSuperDeclaringTypeNames: this.allSuperDeclaringTypeNames;
+				if (superTypeNames != null && resolveLevelAsSuperInvocation(ref, method.parameters, superTypeNames, true)) {
+						declaringLevel = methodLevel // since this is an ACCURATE_MATCH so return the possibly weaker match
+							| SUPER_INVOCATION_FLAVOR; // TODO: not an invocation really but ref -> add flavor to returned level
+				}
+			}
+		}
+		if ((declaringLevel & FLAVORS_MASK) != 0) {
+			// level got some flavors => return it
+			return declaringLevel;
+		}
+	} else {
+		declaringLevel = resolveLevelForType(this.pattern.declaringSimpleName, this.pattern.declaringQualification, method.declaringClass);
+	}
 	return (methodLevel & MATCH_LEVEL_MASK) > (declaringLevel & MATCH_LEVEL_MASK) ? declaringLevel : methodLevel; // return the weaker match
 }
 
