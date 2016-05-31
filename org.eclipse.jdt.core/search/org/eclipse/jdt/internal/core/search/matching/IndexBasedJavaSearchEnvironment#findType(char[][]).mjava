@@ -1,0 +1,50 @@
+	@Override
+	public NameEnvironmentAnswer findType(char[][] compoundTypeName) {
+		char[] binaryName = CharOperation.concatWith(compoundTypeName, '/');
+
+		int bestEntryPosition = Integer.MAX_VALUE;
+		NameEnvironmentAnswer result = null;
+		ICompilationUnit cu = this.workingCopies.get(new String(binaryName));
+		if (cu != null) {
+			result = new NameEnvironmentAnswer((org.eclipse.jdt.internal.compiler.env.ICompilationUnit)cu, null);
+			bestEntryPosition = this.sourceEntryPosition;
+		}
+
+		char[] fieldDescriptor = JavaNames.binaryNameToFieldDescriptor(binaryName);
+		JavaIndex index = JavaIndex.getIndex();
+		Nd nd = index.getNd();
+		try (IReader lock = nd.acquireReadLock()) {
+			NdTypeId typeId = index.findType(fieldDescriptor);
+
+			if (typeId != null) {
+				List<NdType> types = typeId.getTypes();
+				for (NdType next : types) {
+					NdResourceFile resource = next.getFile();
+
+					IPath path = resource.getPath();
+					Integer nextRoot = this.mapPathsToRoots.getMostSpecific(path);
+					if (nextRoot != null) {
+						IPackageFragmentRoot root = this.roots[nextRoot];
+
+						ClasspathEntry classpathEntry = (ClasspathEntry)root.getRawClasspathEntry();
+						AccessRestriction accessRestriction = classpathEntry.getAccessRuleSet().getViolatedRestriction(binaryName);
+						TypeRef typeRef = TypeRef.create(next);
+						IBinaryType binaryType = new IndexBinaryType(typeRef, resource.getLocation().getChars()); 
+						NameEnvironmentAnswer nextAnswer = new NameEnvironmentAnswer(binaryType, accessRestriction);
+
+						boolean useNewAnswer = isBetter(result, bestEntryPosition, nextAnswer, nextRoot);
+
+						if (useNewAnswer) {
+							bestEntryPosition = nextRoot;
+							result = nextAnswer;
+						}
+					}
+				}
+			}
+		} catch (JavaModelException e) {
+			// project doesn't exist
+		}
+
+		return result;
+	}
+

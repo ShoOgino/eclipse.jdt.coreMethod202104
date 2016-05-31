@@ -1,0 +1,31 @@
+	@Override
+	public boolean isPackage(char[][] parentPackageName, char[] packageName) {
+		char[] binaryPackageName = CharOperation.concatWith(parentPackageName, '/');
+		char[] fieldDescriptorPrefix = CharArrayUtils.concat(JavaNames.FIELD_DESCRIPTOR_PREFIX, binaryPackageName,
+				packageName, new char[] { '/' });
+
+		// Search all the types that are a subpackage of the given package name. Return if we find any one of them on
+		// the classpath of this project.
+		JavaIndex index = JavaIndex.getIndex();
+		Nd nd = index.getNd();
+		try (IReader lock = nd.acquireReadLock()) {
+			return !index.visitFieldDescriptorsStartingWith(fieldDescriptorPrefix,
+					new FieldSearchIndex.Visitor<NdTypeId>() {
+						@Override
+						public boolean visit(NdTypeId typeId) {
+							List<NdType> types = typeId.getTypes();
+							for (NdType next : types) {
+								NdResourceFile resource = next.getFile();
+
+								IPath path = resource.getPath();
+
+								if (IndexBasedJavaSearchEnvironment.this.mapPathsToRoots.containsPrefixOf(path)) {
+									return false;
+								}
+							}
+							return true;
+						}
+					});
+		}
+	}
+
