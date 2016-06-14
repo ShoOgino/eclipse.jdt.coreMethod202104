@@ -2,6 +2,7 @@
 		SubMonitor subMonitor = SubMonitor.convert(monitor, 100);
 
 		long startTimeNs = System.nanoTime();
+		long currentTimeMs = System.currentTimeMillis();
 		if (DEBUG) {
 			Package.logInfo("Indexer running rescan"); //$NON-NLS-1$
 		}
@@ -16,7 +17,7 @@
 		long startGarbageCollectionNs = System.nanoTime();
 
 		// Remove all files in the index which aren't referenced in the workspace
-		cleanGarbage(allRoots.keySet(), subMonitor.split(4));
+		int gcFiles = cleanGarbage(currentTimeMs, allRoots.keySet(), subMonitor.split(4));
 
 		long startFingerprintTestNs = System.nanoTime();
 
@@ -28,7 +29,7 @@
 		int classesIndexed = 0;
 		SubMonitor loopMonitor = subMonitor.split(80).setWorkRemaining(rootsWithChanges.size());
 		for (IPath next : rootsWithChanges) {
-			classesIndexed += rescanArchive(next, allRoots.get(next), fingerprints.get(next).getNewFingerprint(),
+			classesIndexed += rescanArchive(currentTimeMs, next, allRoots.get(next), fingerprints.get(next).getNewFingerprint(),
 					loopMonitor.split(1));
 		}
 
@@ -59,9 +60,11 @@
 
 		long fingerprintTimeMs = (startIndexingNs - startFingerprintTestNs) / MS_TO_NS;
 		long locateRootsTimeMs = (startGarbageCollectionNs - startTimeNs) / MS_TO_NS;
+		long garbageCollectionMs = (startFingerprintTestNs - startGarbageCollectionNs) / MS_TO_NS;
 		long indexingTimeMs = (endIndexingNs - startIndexingNs) / MS_TO_NS;
 		long resourceMappingTimeMs = (endResourceMappingNs - endIndexingNs) / MS_TO_NS;
 
+		double averageGcTimeMs = gcFiles == 0 ? 0 : (double)garbageCollectionMs / (double)gcFiles;
 		double averageIndexTimeMs = classesIndexed == 0 ? 0 : (double)indexingTimeMs / (double)classesIndexed;
 		double averageFingerprintTimeMs = allRoots.size() == 0 ? 0 : (double)fingerprintTimeMs / (double)allRoots.size();
 		double averageResourceMappingMs = pathsToUpdate.size() == 0 ? 0 : (double)resourceMappingTimeMs / (double)pathsToUpdate.size();
@@ -70,6 +73,7 @@
 			Package.logInfo(
 					"Indexing done.\n" //$NON-NLS-1$
 					+ "  Located " + totalRoots + " roots in " + locateRootsTimeMs + "ms\n" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+					+ "  Collected garbage from " + gcFiles + " files in " +  garbageCollectionMs + "ms, average time = " + averageGcTimeMs + "ms\n" //$NON-NLS-1$//$NON-NLS-2$//$NON-NLS-3$//$NON-NLS-4$
 					+ "  Tested " + allRoots.size() + " fingerprints in " + fingerprintTimeMs + "ms, average time = " + averageFingerprintTimeMs + "ms\n" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
 					+ "  Indexed " + classesIndexed + " classes in " + indexingTimeMs + "ms, average time = " + averageIndexTimeMs + "ms\n" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
 					+ "  Updated " + pathsToUpdate.size() + " paths in " + resourceMappingTimeMs + "ms, average time = " + averageResourceMappingMs + "ms\n"); //$NON-NLS-1$//$NON-NLS-2$//$NON-NLS-3$//$NON-NLS-4$
