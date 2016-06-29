@@ -1,0 +1,30 @@
+	public void testReadingAllClassesInIndexAreEquivalentToOriginalJarFiles() throws Exception {
+		boolean foundAtLeastOneClass = false;
+		SubMonitor subMonitor = SubMonitor.convert(null);
+		IWorkspaceRoot root = ResourcesPlugin.getWorkspace().getRoot();
+		try (IReader reader = IndexerTest.index.getNd().acquireReadLock()) {
+			IProject project = root.getProject("P");
+
+			IJavaProject javaProject = JavaCore.create(project);
+			IPackageFragmentRoot[] roots = javaProject.getAllPackageFragmentRoots();
+			subMonitor.setWorkRemaining(roots.length);
+			for (IPackageFragmentRoot next : roots) {
+				SubMonitor iterationMon = subMonitor.split(1);
+				if (next.getKind() == IPackageFragmentRoot.K_BINARY) {
+					List<IClassFile> result = new ArrayList<>();
+					collectAllClassFiles(result, next);
+					for (IClassFile nextClass : result) {
+						IBinaryType originalBinaryType = ClassFileToIndexConverter.getTypeFromClassFile(nextClass, iterationMon);
+						PackageFragment pkg = (PackageFragment) nextClass.getParent();
+						String classFilePath = Util.concatWith(pkg.names, nextClass.getElementName(), '/');
+
+						IBinaryType indexedBinaryType = BinaryTypeFactory.create(nextClass, JavaNames.classFilePathToBinaryName(classFilePath));
+						IndexTester.testType(originalBinaryType, indexedBinaryType);
+						foundAtLeastOneClass = true;
+					}
+				}
+			}
+		}
+		assertTrue("No classes found in the index", foundAtLeastOneClass);
+	}
+
