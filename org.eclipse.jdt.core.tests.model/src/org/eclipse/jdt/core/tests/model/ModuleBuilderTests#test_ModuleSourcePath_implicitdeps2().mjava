@@ -1,0 +1,57 @@
+	// Changes to implicit dependencies should be reflected
+	public void test_ModuleSourcePath_implicitdeps2() throws CoreException {
+		if (!isJRE9) return;
+		try {
+			String[] sources = new String[] {
+				"src/module-info.java",
+				"module some.mod {\n" +
+				"	requires public org.astro;\n" +
+				"}"
+			};
+			IClasspathEntry dep = JavaCore.newContainerEntry(new Path(JavaCore.MODULE_PATH_CONTAINER_ID));
+			setupModuleProject("some.mod", sources, new IClasspathEntry[]{dep});
+			sources = new String[] {
+				"src/module-info.java",
+				"module org.astro {\n" +
+				"	exports org.astro;\n" + 
+				"}",
+				"src/org/astro/World.java",
+				"package org.astro;\n" +
+				"public interface World {\n" +
+				"	public String name();\n" +
+				"}"
+			};
+			setupModuleProject("org.astro", sources, new IClasspathEntry[]{dep});
+			String[] src = new String[] {
+				"src/module-info.java",
+				"module com.greetings {\n" +
+				"	requires some.mod;\n" +
+				"	exports com.greetings;\n" +
+				"}",
+				"src/com/greetings/MyWorld.java",
+				"package com.greetings;\n" +
+				"import org.astro.World;\n" +
+				"public class MyWorld implements World {\n" +
+				"	public String name() {\n" +
+				"		return \" My World!!\";\n" +
+				"	}\n" +
+				"}"
+			};
+			
+			IJavaProject p2 = setupModuleProject("com.greetings", src, new IClasspathEntry[] { dep });
+			this.editFile("some.mod/src/module-info.java",
+				"module some.mod {\n" +
+				"	requires org.astro;\n" +
+				"}");
+			p2.getProject().getWorkspace().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			IMarker[] markers = p2.getProject().findMarkers(null, true, IResource.DEPTH_INFINITE);
+			assertMarkers("Unexpected markers", 
+					"The import org cannot be resolved\n" +
+					"World cannot be resolved to a type",  markers);
+		} finally {
+			deleteProject("org.astro");
+			deleteProject("some.mod");
+			deleteProject("com.greetings");
+		}
+	}
+
