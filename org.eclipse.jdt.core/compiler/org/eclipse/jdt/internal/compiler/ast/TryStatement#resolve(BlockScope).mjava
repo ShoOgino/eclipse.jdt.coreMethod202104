@@ -18,19 +18,34 @@ public void resolve(BlockScope upperScope) {
 	}
 	for (int i = 0; i < resourceCount; i++) {
 		this.resources[i].resolve(resourceManagementScope);
-		LocalVariableBinding localVariableBinding = this.resources[i].binding;
-		if (localVariableBinding != null && localVariableBinding.isValidBinding()) {
-			localVariableBinding.modifiers |= ClassFileConstants.AccFinal;
-			localVariableBinding.tagBits |= TagBits.IsResource;
-			TypeBinding resourceType = localVariableBinding.type;
-			if (resourceType instanceof ReferenceBinding) {
-				if (resourceType.findSuperTypeOriginatingFrom(TypeIds.T_JavaLangAutoCloseable, false /*AutoCloseable is not a class*/) == null && resourceType.isValidBinding()) {
-					upperScope.problemReporter().resourceHasToImplementAutoCloseable(resourceType, this.resources[i].type);
+		if (this.resources[i] instanceof LocalDeclaration) {
+			LocalDeclaration node = (LocalDeclaration)this.resources[i];
+			LocalVariableBinding localVariableBinding = node.binding;
+			if (localVariableBinding != null && localVariableBinding.isValidBinding()) {
+				localVariableBinding.modifiers |= ClassFileConstants.AccFinal;
+				localVariableBinding.tagBits |= TagBits.IsResource;
+				TypeBinding resourceType = localVariableBinding.type;
+				if (resourceType instanceof ReferenceBinding) {
+					if (resourceType.findSuperTypeOriginatingFrom(TypeIds.T_JavaLangAutoCloseable, false /*AutoCloseable is not a class*/) == null && resourceType.isValidBinding()) {
+						upperScope.problemReporter().resourceHasToImplementAutoCloseable(resourceType, node.type);
+						localVariableBinding.type = new ProblemReferenceBinding(CharOperation.splitOn('.', resourceType.shortReadableName()), null, ProblemReasons.InvalidTypeForAutoManagedResource);
+					}
+				} else if (resourceType != null) { // https://bugs.eclipse.org/bugs/show_bug.cgi?id=349862, avoid secondary error in problematic null case
+					upperScope.problemReporter().resourceHasToImplementAutoCloseable(resourceType, node.type);
 					localVariableBinding.type = new ProblemReferenceBinding(CharOperation.splitOn('.', resourceType.shortReadableName()), null, ProblemReasons.InvalidTypeForAutoManagedResource);
 				}
+			}
+		} else { // expression
+			Expression node = (Expression) this.resources[i];
+			TypeBinding resourceType = node.resolvedType;
+			if (resourceType instanceof ReferenceBinding) {
+				if (resourceType.findSuperTypeOriginatingFrom(TypeIds.T_JavaLangAutoCloseable, false /*AutoCloseable is not a class*/) == null && resourceType.isValidBinding()) {
+					upperScope.problemReporter().resourceHasToImplementAutoCloseable(resourceType, node);
+					((Expression) this.resources[i]).resolvedType = new ProblemReferenceBinding(CharOperation.splitOn('.', resourceType.shortReadableName()), null, ProblemReasons.InvalidTypeForAutoManagedResource);
+				}
 			} else if (resourceType != null) { // https://bugs.eclipse.org/bugs/show_bug.cgi?id=349862, avoid secondary error in problematic null case
-				upperScope.problemReporter().resourceHasToImplementAutoCloseable(resourceType, this.resources[i].type);
-				localVariableBinding.type = new ProblemReferenceBinding(CharOperation.splitOn('.', resourceType.shortReadableName()), null, ProblemReasons.InvalidTypeForAutoManagedResource);
+				upperScope.problemReporter().resourceHasToImplementAutoCloseable(resourceType, node);
+				((Expression) this.resources[i]).resolvedType = new ProblemReferenceBinding(CharOperation.splitOn('.', resourceType.shortReadableName()), null, ProblemReasons.InvalidTypeForAutoManagedResource);
 			}
 		}
 	}

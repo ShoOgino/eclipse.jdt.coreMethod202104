@@ -62,7 +62,20 @@ public void generateCode(BlockScope currentScope, CodeStream codeStream) {
 				this.resourceExceptionLabels[i] = new ExceptionLabel(codeStream, null);
 				this.resourceExceptionLabels[i].placeStart();
 				if (i < resourceCount) {
-					this.resources[i].generateCode(this.scope, codeStream); // Initialize resources ...
+					Statement stmt = this.resources[i];
+					if (stmt instanceof NameReference) {
+						NameReference ref = (NameReference) stmt;
+						ref.bits |= ASTNode.IsCapturedOuterLocal; // TODO: selective flagging if ref.binding is not one of earlier inlined LVBs.
+						VariableBinding binding = (VariableBinding) ref.binding; // Only LVB expected here.
+						ref.checkEffectiveFinality(binding, this.scope);
+					} else if (stmt instanceof FieldReference) {
+						FieldReference fieldReference = (FieldReference) stmt;
+						if (!fieldReference.binding.isFinal())
+							this.scope.problemReporter().cannotReferToNonEffectivelyFinalOuterLocal(fieldReference.binding, fieldReference);
+						// effective finality maybe tricky to find here.
+						
+					}
+					stmt.generateCode(this.scope, codeStream); // Initialize resources ...
 				}
 			}
 		}
@@ -72,7 +85,7 @@ public void generateCode(BlockScope currentScope, CodeStream codeStream) {
 				BranchLabel exitLabel = new BranchLabel(codeStream);
 				this.resourceExceptionLabels[i].placeEnd(); // outer handler if any is the one that should catch exceptions out of close()
 				
-				LocalVariableBinding localVariable = i > 0 ? this.resources[i-1].binding : null;
+				Statement stmt = i > 0 ? this.resources[i - 1] : null;
 				if ((this.bits & ASTNode.IsTryBlockExiting) == 0) {
 					// inline resource closure
 					if (i > 0) {
@@ -84,10 +97,7 @@ public void generateCode(BlockScope currentScope, CodeStream codeStream) {
 							codeStream.removeNotDefinitelyAssignedVariables(currentScope, this.postTryInitStateIndex);
 							codeStream.addDefinitelyAssignedVariables(currentScope, this.postTryInitStateIndex);
 						}
-						codeStream.load(localVariable);
-						codeStream.ifnull(exitLabel);
-						codeStream.load(localVariable);
-						codeStream.invokeAutoCloseableClose(localVariable.type);
+						generateCodeSnippet(stmt, codeStream, exitLabel, false /* record */);
 						codeStream.recordPositionsFrom(invokeCloseStartPc, this.tryBlock.sourceEnd);
 					}
 					codeStream.goto_(exitLabel); // skip over the catch block.
@@ -129,13 +139,7 @@ public void generateCode(BlockScope currentScope, CodeStream codeStream) {
 				if (i > 0) {
 					// inline resource close here rather than bracketing the current catch block with a try region.
 					BranchLabel postCloseLabel = new BranchLabel(codeStream);
-					int invokeCloseStartPc = codeStream.position; // https://bugs.eclipse.org/bugs/show_bug.cgi?id=343785			
-					codeStream.load(localVariable);
-					codeStream.ifnull(postCloseLabel);
-					codeStream.load(localVariable);
-					codeStream.invokeAutoCloseableClose(localVariable.type);
-					codeStream.recordPositionsFrom(invokeCloseStartPc, this.tryBlock.sourceEnd);
-					codeStream.removeVariable(localVariable);
+					generateCodeSnippet(stmt, codeStream, postCloseLabel, true /* record */, i, codeStream.position);						
 					postCloseLabel.place();
 				}
 				codeStream.load(this.primaryExceptionVariable);
