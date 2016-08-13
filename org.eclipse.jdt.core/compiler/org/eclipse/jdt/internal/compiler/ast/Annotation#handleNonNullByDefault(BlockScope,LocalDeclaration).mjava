@@ -1,0 +1,58 @@
+	public void handleNonNullByDefault(BlockScope scope, LocalDeclaration localDeclaration) {
+		TypeBinding typeBinding = this.resolvedType;
+		if (typeBinding == null) {
+			typeBinding = this.type.resolveType(scope);
+			if (typeBinding == null) {
+				return;
+			}
+			this.resolvedType = typeBinding;
+		}
+		if (!typeBinding.isAnnotationType()) {
+			return;
+		}
+
+		ReferenceBinding annotationType = (ReferenceBinding) typeBinding;
+		
+		if (!annotationType.hasNullBit(TypeIds.BitNonNullByDefaultAnnotation)) {
+			return;
+		}
+
+		MethodBinding[] methods = annotationType.methods();
+		// clone valuePairs to keep track of unused ones
+		MemberValuePair[] pairs = memberValuePairs();
+		MemberValuePair valueAttribute = null; // remember the first 'value' pair
+		int pairsLength = pairs.length;
+
+		for (int i = 0, requiredLength = methods.length; i < requiredLength; i++) {
+			MethodBinding method = methods[i];
+			char[] selector = method.selector;
+			nextPair: for (int j = 0; j < pairsLength; j++) {
+				MemberValuePair pair = pairs[j];
+				if (pair == null) continue nextPair;
+				char[] name = pair.name;
+				if (CharOperation.equals(name, selector)) {
+					if (valueAttribute == null && CharOperation.equals(name, TypeConstants.VALUE)) {
+						valueAttribute = pair;
+						pair.binding = method;
+						pair.resolveTypeExpecting(scope, method.returnType);
+					}
+				}
+			}
+		}
+		// recognize standard annotations ?
+		long tagBits = determineNonNullByDefaultTagBits(annotationType, valueAttribute);
+		int defaultNullness = (int)(tagBits & Binding.NullnessDefaultMASK);
+
+		if (defaultNullness != 0) {
+			// the actual localDeclaration.binding is not set yet. fake one for problemreporter.			
+			LocalVariableBinding binding = new LocalVariableBinding(localDeclaration, null, 0, false);
+			Binding target = scope.checkRedundantDefaultNullness(defaultNullness, localDeclaration.sourceStart);
+			boolean recorded = scope.recordNonNullByDefault(binding, defaultNullness, this, this.sourceStart, localDeclaration.declarationSourceEnd);
+			 if (recorded) {
+				if (target != null) {
+					scope.problemReporter().nullDefaultAnnotationIsRedundant(localDeclaration, new Annotation[]{this}, target);
+				}
+			}
+		} 
+	}
+
