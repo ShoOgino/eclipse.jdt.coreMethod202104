@@ -1,11 +1,10 @@
-	public void testAnnotateMethodParameter() throws Exception {
+	public void testAnnotateConstructorParameter() throws Exception {
 		myCreateJavaProject("TestLibs");
 		String lib1Content =
 				"package libs;\n" + 
 				"\n" +
-				"public abstract class Lib1<T,U> {\n" +
-				"	public abstract void take(Lib1<X,U> lx);\n" +
-				"	public static class X {}\n" +
+				"public class Lib1<U> {\n" +
+				"	public Lib1(int ignore, U string) {}\n" +
 				"}\n";
 		addLibraryWithExternalAnnotations(this.project, "lib1.jar", "annots", new String[] {
 				"/UnannotatedLib/libs/Lib1.java",
@@ -20,14 +19,15 @@
 				"import libs.Lib1;\n" + 
 				"\n" + 
 				"public class Test1 {\n" + 
-				"	void test0(Lib1<Lib1.X,@Nullable String> xLib1, Lib1<Lib1.@Nullable X,@NonNull String> xLib2) {\n" + 
-				"		xLib1.take(xLib2);\n" + 
+				"	Object test0() {\n" + 
+				"		Lib1<@NonNull String> lib = new Lib1<>(1, null);\n" +
+				"		return lib;\n" + 
 				"	}\n" +
 				"}\n",
 				true, new NullProgressMonitor()).getWorkingCopy(new NullProgressMonitor());
 		CompilationUnit reconciled = cu.reconcile(AST.JLS8, true, null, new NullProgressMonitor());
 		assertProblems(reconciled.getProblems(), new String[] {
-				"Pb(953) Null type mismatch (type annotations): required 'Lib1<Lib1.X,@Nullable String>' but this expression has type 'Lib1<Lib1.@Nullable X,@NonNull String>'",
+				"Pb(910) Null type mismatch: required '@NonNull String' but the provided value is null",
 		}, new int[] { 7 });
 
 		// acquire library AST:
@@ -42,10 +42,10 @@
 		libWorkingCopy.discardWorkingCopy();
 		
 		// find type binding:
-		int start = lib1Content.indexOf("take");
+		int start = lib1Content.indexOf("U string");
 		ASTNode name = NodeFinder.perform(unit, start, 0);
 		assertTrue("should be simple name", name.getNodeType() == ASTNode.SIMPLE_NAME);
-		ASTNode method = name.getParent();
+		ASTNode method = name.getParent().getParent().getParent();
 		IMethodBinding methodBinding = ((MethodDeclaration)method).resolveBinding();
 		
 		// find annotation file (not yet existing):
@@ -56,14 +56,37 @@
 		// annotate:
 		String originalSignature = ExternalAnnotationUtil.extractGenericSignature(methodBinding);
 		ExternalAnnotationUtil.annotateMember("libs/Lib1", annotationFile,
-				"take", 
+				"<init>", 
 				originalSignature, 
-				"(Llibs/Lib1<L0libs/Lib1$X;T1U;>;)V", // <- two annotations: @Nullable X and @NonNull U
+				"(IT0U;)V", // <- @Nullable U
 				MergeStrategy.OVERWRITE_ANNOTATIONS, null);
 		assertTrue("file should exist", annotationFile.exists());
 
 		// check that the error is resolved now:
 		reconciled = cu.reconcile(AST.JLS8, true, null, new NullProgressMonitor());
 		assertNoProblems(reconciled.getProblems());
+		
+		// invert annotation:
+		ExternalAnnotationUtil.annotateMethodParameterType("libs/Lib1", annotationFile,
+				"<init>", 
+				originalSignature, 
+				"T1U;", // <- @NonNull U
+				1, // position 
+				MergeStrategy.OVERWRITE_ANNOTATIONS, null);
+		assertTrue("file should exist", annotationFile.exists());
+
+		// check that the error is back now:
+		reconciled = cu.reconcile(AST.JLS8, true, null, new NullProgressMonitor());
+		assertProblems(reconciled.getProblems(), new String[] {
+				"Pb(910) Null type mismatch: required '@NonNull String' but the provided value is null",
+		}, new int[] { 7 });
+
+		// check that the previous entry has been overwritten:
+		assertEquals(
+				"class libs/Lib1\n" + 
+				"<init>\n" + 
+				" (ITU;)V\n" + 
+				" (IT1U;)V\n",
+				readFully(annotationFile));
 	}
 
