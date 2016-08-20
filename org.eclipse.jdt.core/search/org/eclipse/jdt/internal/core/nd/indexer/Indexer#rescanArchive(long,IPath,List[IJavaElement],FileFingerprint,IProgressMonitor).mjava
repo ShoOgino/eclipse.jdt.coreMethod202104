@@ -43,7 +43,29 @@
 		if (DEBUG) {
 			Package.logInfo("rescanning " + thePath.toString()); //$NON-NLS-1$
 		}
-		int result = addElement(resourceFile, element, subMonitor.split(50));
+		int result;
+		try {
+			result = addElement(resourceFile, element, subMonitor.split(50));
+		} catch (JavaModelException e) {
+			if (DEBUG) {
+				Package.log("the file " + pathString + " cannot be indexed due to a recoverable error", null); //$NON-NLS-1$ //$NON-NLS-2$
+			}
+			// If this file can't be indexed due to a recoverable error, delete the NdResourceFile entry for it.
+			this.nd.acquireWriteLock(subMonitor.split(5));
+			try {
+				if (resourceFile.isInIndex()) {
+					resourceFile.delete();
+				}
+			} finally {
+				this.nd.releaseWriteLock();
+			}
+			return 0;
+		} catch (RuntimeException e) {
+			if (DEBUG) {
+				Package.log("A RuntimeException occurred while indexing " + pathString, e); //$NON-NLS-1$
+			}
+			throw e;
+		}
 
 		List<NdResourceFile> allResourcesWithThisPath = Collections.emptyList();
 		// Now update the timestamp and delete all older versions of this resource that exist in the index
