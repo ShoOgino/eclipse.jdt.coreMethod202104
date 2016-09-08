@@ -1,0 +1,85 @@
+	/**
+	 * Parses a ClassTypeSignature (as described in section 4.7.9.1 of the Java VM Specification Java SE 8 Edition). The
+	 * read pointer should be located just after the identifier. The caller is expected to have already read the field
+	 * descriptor for the type.
+	 */
+	private NdTypeSignature parseClassTypeSignature(NdComplexTypeSignature parentTypeOrNull, SignatureWrapper wrapper)
+			throws CoreException {
+		char[] identifier = wrapper.nextWord();
+		char[] fieldDescriptor;
+
+		if (parentTypeOrNull != null) {
+			fieldDescriptor = CharArrayUtils.concat(
+					parentTypeOrNull.getRawType().getFieldDescriptorWithoutTrailingSemicolon(),
+					INNER_TYPE_SEPARATOR, identifier, FIELD_DESCRIPTOR_SUFFIX);
+		} else {
+			fieldDescriptor = CharArrayUtils.concat(identifier, FIELD_DESCRIPTOR_SUFFIX);
+		}
+
+		char[] genericSignature = wrapper.signature;
+		boolean hasGenericArguments = (genericSignature.length > wrapper.start)
+				&& genericSignature[wrapper.start] == '<';
+		boolean isRawTypeWithNestedClass = genericSignature[wrapper.start] == '.';
+		NdTypeId rawType = createTypeIdFromFieldDescriptor(fieldDescriptor);
+		NdTypeSignature result = rawType;
+
+		boolean checkForSemicolon = true;
+		// Special optimization for signatures with no type annotations, no arrays, and no generic arguments that
+		// are not an inner type of a class that can't use this optimization. Basically, if there would be no attributes
+		// set on a NdComplexTypeSignature besides what it picks up from its raw type, we just use the raw type.
+		if (hasGenericArguments || parentTypeOrNull != null || isRawTypeWithNestedClass) {
+			NdComplexTypeSignature typeSignature = new NdComplexTypeSignature(getNd());
+			typeSignature.setRawType(rawType);
+
+			if (hasGenericArguments) {
+				wrapper.start++;
+				while (wrapper.start < genericSignature.length && (genericSignature[wrapper.start] != '>')) {
+					NdTypeArgument typeArgument = new NdTypeArgument(getNd(), typeSignature);
+
+					switch (genericSignature[wrapper.start]) {
+						case '+': {
+							typeArgument.setWildcard(NdTypeArgument.WILDCARD_SUPER);
+							wrapper.start++;
+							break;
+						}
+						case '-': {
+							typeArgument.setWildcard(NdTypeArgument.WILDCARD_EXTENDS);
+							wrapper.start++;
+							break;
+						}
+						case '*': {
+							typeArgument.setWildcard(NdTypeArgument.WILDCARD_QUESTION);
+							wrapper.start++;
+							continue;
+						}
+					}
+
+					NdTypeSignature nextSignature = createTypeSignature(wrapper, null);
+					typeArgument.setType(nextSignature);
+				}
+
+				skipChar(wrapper, '>');
+			}
+			result = typeSignature;
+
+			if (parentTypeOrNull != null) {
+				typeSignature.setGenericDeclaringType(parentTypeOrNull);
+			}
+
+			if (genericSignature[wrapper.start] == '.') {
+				// Don't check for a semicolon if we hit this branch since the recursive call to parseClassTypeSignature
+				// will do this
+				checkForSemicolon = false;
+				// Identifiers shouldn't start with '.'
+				skipChar(wrapper, '.');
+				result = parseClassTypeSignature(typeSignature, wrapper);
+			}
+		}
+
+		if (checkForSemicolon) {
+			skipChar(wrapper, ';');
+		}
+
+		return result;
+	}
+
