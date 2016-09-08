@@ -36,6 +36,35 @@
 				} finally {
 					this.nd.releaseWriteLock();
 				}
+
+				if (DEBUG_SELFTEST) {
+					// When this debug flag is on, we test everything written to the index by reading it back immediately after indexing
+					// and comparing it with the original class file.
+					JavaIndex index = JavaIndex.getIndex(this.nd);
+					try (IReader readLock = this.nd.acquireReadLock()) {
+						NdTypeId typeId = index.findType(descriptor.fieldDescriptor);
+						NdType targetType = null;
+						if (typeId != null) {
+							List<NdType> implementations = typeId.getTypes();
+							for (NdType nextType : implementations) {
+								NdResourceFile nextResourceFile = nextType.getResourceFile();
+								if (nextResourceFile.equals(resourceFile)) {
+									targetType = nextType;
+									break;
+								}
+							}
+						}
+
+						if (targetType != null) {
+							IndexBinaryType actualType = new IndexBinaryType(TypeRef.create(targetType), descriptor.indexPath);
+							IndexTester.testType(binaryType, actualType);
+						} else {
+							Package.logInfo("Could not find class in index immediately after indexing it: " + next.toString()); //$NON-NLS-1$
+						}
+					} catch (RuntimeException e) {
+						Package.log("Error during indexing: " + next.toString(), e); //$NON-NLS-1$
+					}
+				}
 			} catch (CoreException | ClassFormatException e) {
 				Package.log("Unable to index " + next.toString(), e); //$NON-NLS-1$
 			}
