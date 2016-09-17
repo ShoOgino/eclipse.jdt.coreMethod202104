@@ -1,0 +1,54 @@
+	/**
+	 * Notifies the given requestor of all package fragments with the
+	 * given name. Checks the requestor at regular intervals to see if the
+	 * requestor has canceled. The domain of
+	 * the search is bounded by the <code>IJavaProject</code>
+	 * this <code>NameLookup</code> was obtained from.
+	 *
+	 * @param partialMatch partial name matches qualify when <code>true</code>;
+	 *	only exact name matches qualify when <code>false</code>
+	 */
+	public void seekPackageFragments(String name, boolean partialMatch, IJavaElementRequestor requestor, IModuleContext context) {
+		if (context == IModuleContext.UNNAMED_MODULE_CONTEXT) {
+			seekPackageFragments(name, partialMatch, requestor);
+			return;
+		}
+		String[] splittedName = Util.splitOn('.', name, 0, name.length());
+		int pkgIndex = this.packageFragments.getIndex(splittedName);
+		if (pkgIndex == -1)
+			return;
+		Object value = this.packageFragments.valueTable[pkgIndex];
+		// reuse existing String[]
+		String[] pkgName = (String[]) this.packageFragments.keyTable[pkgIndex];
+		context.getEnvironment().forEach(r -> {
+			if (value instanceof PackageFragmentRoot) {
+				Object toCompare = value;
+				// TODO: need better representation of IModuleEnvironment and IModulePathEntry
+				// in the model to avoid comparison based on instance
+				if (r instanceof JavaProject) {
+					toCompare  = ((PackageFragmentRoot)value).getJavaProject();
+				}
+				if (value.equals(toCompare)) {
+					PackageFragmentRoot root = (PackageFragmentRoot) value;
+					requestor.acceptPackageFragment(root.getPackageFragment(pkgName));
+				}
+			} else {
+				IPackageFragmentRoot[] roots = (IPackageFragmentRoot[]) value;
+				if (roots != null) {
+					for (int i = 0, length = roots.length; i < length; i++) {
+						if (requestor.isCanceled())
+							return;
+						PackageFragmentRoot root = (PackageFragmentRoot) roots[i];
+						Object toCompare = root;
+						if (r instanceof JavaProject) {
+							toCompare  = root.getJavaProject();
+						}
+						if (root.equals(toCompare))
+							requestor.acceptPackageFragment(root.getPackageFragment(pkgName));
+					}
+				}
+			}
+		});
+		
+	}
+
