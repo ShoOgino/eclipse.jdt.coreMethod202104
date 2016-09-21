@@ -3,10 +3,18 @@
 			return;
 		assert this.wrapParentIndex >= 0 && this.wrapParentIndex < this.wrapIndexes.get(0);
 		assert this.wrapGroupEnd >= this.wrapIndexes.get(this.wrapIndexes.size() - 1);
+
 		float penalty = this.wrapPenalties.isEmpty() ? 1 : this.wrapPenalties.get(0);
 		WrapPolicy policy = getWrapPolicy(wrappingOption, penalty, true, parentNode);
-		if (policy == null)
-			return;
+
+		WrapPolicy existing = this.tm.get(this.wrapIndexes.get(0)).getWrapPolicy();
+		if (existing != null && existing.wrapMode == WrapMode.TOP_PRIORITY) {
+			// SEPARATE_LINES_IF_WRAPPED
+			assert existing.wrapParentIndex == this.wrapParentIndex;
+			this.wrapGroupEnd = existing.groupEndIndex;
+			policy = new WrapPolicy(WrapMode.TOP_PRIORITY, policy.wrapParentIndex, this.wrapGroupEnd, policy.extraIndent,
+					policy.structureDepth, policy.penaltyMultiplier, true, policy.indentOnColumn);
+		}
 
 		setTokenWrapPolicy(0, policy, true);
 
@@ -17,24 +25,6 @@
 			if (penalty != policy.penaltyMultiplier || i == 1)
 				policy = getWrapPolicy(wrappingOption, penalty, false, parentNode);
 			setTokenWrapPolicy(i, policy, wrapPreceedingComments);
-		}
-
-		boolean forceWrap = (wrappingOption & Alignment.M_FORCE) != 0;
-		if (forceWrap && policy.wrapMode != WrapMode.DISABLED) {
-			boolean satisfied = false;
-			for (int index : this.wrapIndexes) {
-				Token token = this.tm.get(index);
-				if (token.getWrapPolicy().wrapMode == WrapMode.TOP_PRIORITY) {
-					token.breakBefore();
-					satisfied = true;
-				}
-			}
-			if (!satisfied) {
-				boolean canWrapFirst = (wrappingOption
-						& Alignment.M_NEXT_PER_LINE_SPLIT) != Alignment.M_NEXT_PER_LINE_SPLIT;
-				if (canWrapFirst)
-					this.tm.get(this.wrapIndexes.get(0)).breakBefore();
-			}
 		}
 
 		if (!this.secondaryWrapIndexes.isEmpty()) {
