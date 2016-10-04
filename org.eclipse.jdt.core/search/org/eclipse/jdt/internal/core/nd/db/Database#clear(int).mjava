@@ -1,9 +1,13 @@
 	/**
-	 * Empty the contents of the Database, make it ready to start again
+	 * Empty the contents of the Database, make it ready to start again. Interrupting the thread with
+	 * {@link Thread#interrupt()} won't interrupt the write. Returns true iff the thread was interrupted
+	 * with {@link Thread#interrupt()}.
+	 * 
 	 * @throws IndexException
 	 */
-	public void clear(int version) throws IndexException {
+	public boolean clear(int version) throws IndexException {
 		assert this.fExclusiveLock;
+		boolean wasCanceled = false;
 		removeChunksFromCache();
 
 		this.fVersion= version;
@@ -13,8 +17,10 @@
 		this.fChunks = new Chunk[] {null};
 		this.fChunksUsed = this.fChunksAllocated = this.fChunks.length;
 		try {
-			this.fHeaderChunk.flush();	// Zero out header chunk.
-			this.fFile.getChannel().truncate(CHUNK_SIZE);	// Truncate database.
+			wasCanceled = this.fHeaderChunk.flush() || wasCanceled; // Zero out header chunk.
+			wasCanceled = performUninterruptableWrite(() -> {
+				this.fFile.getChannel().truncate(CHUNK_SIZE);
+			}) || wasCanceled;
 		} catch (IOException e) {
 			Package.log(e);
 		}
@@ -32,8 +38,9 @@
 		if (setasideChunks != 0) {
 			setVersion(getVersion());
 			createNewChunks((int) setasideChunks);
-			flush();
+			wasCanceled = flush() || wasCanceled;
 		}
 		this.memoryUsage.refresh();
+		return wasCanceled;
 	}
 

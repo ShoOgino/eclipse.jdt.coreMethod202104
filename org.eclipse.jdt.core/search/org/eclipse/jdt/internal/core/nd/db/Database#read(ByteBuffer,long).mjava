@@ -5,8 +5,21 @@
 				this.fFile.getChannel().read(buf, position);
 				return;
 			} catch (ClosedChannelException e) {
-				// Bug 219834 file may have be closed by interrupting a thread during an I/O operation.
-				reopen(e, ++retries);
+				// Always reopen the file if possible or subsequent reads will fail.
+				openFile();
+
+				// This is the most common type of interruption. If another thread called Thread.interrupt,
+				// throw an OperationCanceledException.
+				if (e instanceof ClosedByInterruptException) {
+					throw new OperationCanceledException();
+				}
+
+				// If we've retried too many times, just rethrow the exception.
+				if (++retries >= 20) {
+					throw e;
+				}
+
+				// Otherwise, retry
 			}
 		} while (true);
 	}
