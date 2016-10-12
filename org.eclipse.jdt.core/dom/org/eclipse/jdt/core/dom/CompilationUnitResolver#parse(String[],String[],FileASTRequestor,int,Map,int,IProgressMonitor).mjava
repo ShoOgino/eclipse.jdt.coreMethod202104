@@ -6,61 +6,58 @@
 			Map options,
 			int flags,
 			IProgressMonitor monitor) {
-		try {
-			CompilerOptions compilerOptions = new CompilerOptions(options);
-			compilerOptions.ignoreMethodBodies = (flags & ICompilationUnit.IGNORE_METHOD_BODIES) != 0;
-			Parser parser = new CommentRecorderParser(
-				new ProblemReporter(
-						DefaultErrorHandlingPolicies.proceedWithAllProblems(),
-						compilerOptions,
-						new DefaultProblemFactory()),
-				false);
-			int unitLength = sourceUnits.length;
-			if (monitor != null) monitor.beginTask("", unitLength); //$NON-NLS-1$
-			for (int i = 0; i < unitLength; i++) {
-				char[] contents = null;
-				String encoding = encodings != null ? encodings[i] : null;
-				try {
-					contents = Util.getFileCharContent(new File(sourceUnits[i]), encoding);
-				} catch(IOException e) {
-					// go to the next unit
-					continue;
-				}
-				if (contents == null) {
-					// go to the next unit
-					continue;
-				}
-				org.eclipse.jdt.internal.compiler.batch.CompilationUnit compilationUnit = new org.eclipse.jdt.internal.compiler.batch.CompilationUnit(contents, sourceUnits[i], encoding);
-				org.eclipse.jdt.internal.compiler.env.ICompilationUnit sourceUnit = compilationUnit;
-				CompilationResult compilationResult = new CompilationResult(sourceUnit, 0, 0, compilerOptions.maxProblemsPerUnit);
-				CompilationUnitDeclaration compilationUnitDeclaration = parser.dietParse(sourceUnit, compilationResult);
-
-				if (compilationUnitDeclaration.ignoreMethodBodies) {
-					compilationUnitDeclaration.ignoreFurtherInvestigation = true;
-					// if initial diet parse did not work, no need to dig into method bodies.
-					continue;
-				}
-
-				//fill the methods bodies in order for the code to be generated
-				//real parse of the method....
-				org.eclipse.jdt.internal.compiler.ast.TypeDeclaration[] types = compilationUnitDeclaration.types;
-				if (types != null) {
-					for (int j = 0, typeLength = types.length; j < typeLength; j++) {
-						types[j].parseMethods(parser, compilationUnitDeclaration);
-					}
-				}
-
-				// convert AST
-				CompilationUnit node = convert(compilationUnitDeclaration, parser.scanner.getSource(), apiLevel, options, false/*don't resolve binding*/, null/*no owner needed*/, null/*no binding table needed*/, flags /* flags */, monitor, true);
-				node.setTypeRoot(null);
-
-				// accept AST
-				astRequestor.acceptAST(sourceUnits[i], node);
-
-				if (monitor != null) monitor.worked(1);
+		CompilerOptions compilerOptions = new CompilerOptions(options);
+		compilerOptions.ignoreMethodBodies = (flags & ICompilationUnit.IGNORE_METHOD_BODIES) != 0;
+		Parser parser = new CommentRecorderParser(
+			new ProblemReporter(
+					DefaultErrorHandlingPolicies.proceedWithAllProblems(),
+					compilerOptions,
+					new DefaultProblemFactory()),
+			false);
+		int unitLength = sourceUnits.length;
+		SubMonitor subMonitor = SubMonitor.convert(monitor, unitLength);
+		for (int i = 0; i < unitLength; i++) {
+			SubMonitor iterationMonitor = subMonitor.split(1);
+			char[] contents = null;
+			String encoding = encodings != null ? encodings[i] : null;
+			try {
+				contents = Util.getFileCharContent(new File(sourceUnits[i]), encoding);
+			} catch(IOException e) {
+				// go to the next unit
+				continue;
 			}
-		} finally {
-			if (monitor != null) monitor.done();
+			if (contents == null) {
+				// go to the next unit
+				continue;
+			}
+			org.eclipse.jdt.internal.compiler.batch.CompilationUnit compilationUnit = new org.eclipse.jdt.internal.compiler.batch.CompilationUnit(contents, sourceUnits[i], encoding);
+			org.eclipse.jdt.internal.compiler.env.ICompilationUnit sourceUnit = compilationUnit;
+			CompilationResult compilationResult = new CompilationResult(sourceUnit, 0, 0, compilerOptions.maxProblemsPerUnit);
+			CompilationUnitDeclaration compilationUnitDeclaration = parser.dietParse(sourceUnit, compilationResult);
+
+			if (compilationUnitDeclaration.ignoreMethodBodies) {
+				compilationUnitDeclaration.ignoreFurtherInvestigation = true;
+				// if initial diet parse did not work, no need to dig into method bodies.
+				continue;
+			}
+
+			//fill the methods bodies in order for the code to be generated
+			//real parse of the method....
+			org.eclipse.jdt.internal.compiler.ast.TypeDeclaration[] types = compilationUnitDeclaration.types;
+			if (types != null) {
+				for (int j = 0, typeLength = types.length; j < typeLength; j++) {
+					types[j].parseMethods(parser, compilationUnitDeclaration);
+				}
+			}
+
+			// convert AST
+			CompilationUnit node = convert(compilationUnitDeclaration, parser.scanner.getSource(), apiLevel, options,
+					false/* don't resolve binding */, null/* no owner needed */, null/* no binding table needed */,
+					flags /* flags */, iterationMonitor, true);
+			node.setTypeRoot(null);
+
+			// accept AST
+			astRequestor.acceptAST(sourceUnits[i], node);
 		}
 	}
 
