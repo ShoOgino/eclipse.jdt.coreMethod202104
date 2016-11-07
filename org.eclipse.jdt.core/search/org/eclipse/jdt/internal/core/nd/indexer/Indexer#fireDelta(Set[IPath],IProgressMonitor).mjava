@@ -1,0 +1,45 @@
+	private void fireDelta(Set<IPath> indexablesWithChanges, IProgressMonitor monitor) {
+		SubMonitor subMonitor = SubMonitor.convert(monitor, 1);
+		IProject[] projects = this.root.getProjects();
+
+		List<IProject> projectsToScan = new ArrayList<>();
+
+		for (IProject next : projects) {
+			if (next.isOpen()) {
+				projectsToScan.add(next);
+			}
+		}
+		JavaModel model = JavaModelManager.getJavaModelManager().getJavaModel();
+		boolean hasChanges = false;
+		JavaElementDelta delta = new JavaElementDelta(model);
+		SubMonitor projectLoopMonitor = subMonitor.split(1).setWorkRemaining(projectsToScan.size());
+		for (IProject project : projectsToScan) {
+			projectLoopMonitor.split(1);
+			try {
+				if (project.isOpen() && project.isNatureEnabled(JavaCore.NATURE_ID)) {
+					IJavaProject javaProject = JavaCore.create(project);
+
+					IPackageFragmentRoot[] roots = javaProject.getAllPackageFragmentRoots();
+
+					for (IPackageFragmentRoot next : roots) {
+						if (next.isArchive()) {
+							IPath location = JavaIndex.getLocationForElement(next);
+
+							if (indexablesWithChanges.contains(location)) {
+								hasChanges = true;
+								delta.changed(next,
+										IJavaElementDelta.F_CONTENT | IJavaElementDelta.F_ARCHIVE_CONTENT_CHANGED);
+							}
+						}
+					}
+				}
+			} catch (CoreException e) {
+				Package.log(e);
+			}
+		}
+
+		if (hasChanges) {
+			fireChange(IndexerEvent.createChange(delta));
+		}
+	}
+

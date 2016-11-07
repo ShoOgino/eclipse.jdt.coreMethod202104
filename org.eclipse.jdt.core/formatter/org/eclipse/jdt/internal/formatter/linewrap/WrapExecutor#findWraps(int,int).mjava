@@ -2,12 +2,14 @@
 	 * The main algorithm that looks for optimal places to wrap.
 	 * Calls itself recursively to get results for wrapped sub-lines.  
 	 */
-	private WrapResult findWraps(int wrapTokenIndex, int indent) throws WrapRestartThrowable {
+	private WrapResult findWraps(int wrapTokenIndex, int indent) {
 		final int lastIndex = this.lineAnalyzer.analyzeLine(wrapTokenIndex, indent);
-		final boolean lineExceeded = this.lineAnalyzer.lineExceeded;
-		final int lastPosition = this.lineAnalyzer.getLastPosition();
+		final boolean nextLineWrapped = this.lineAnalyzer.isNextLineWrapped;
+		final boolean wrapRequired = this.lineAnalyzer.lineExceeded || nextLineWrapped;
+		int lineOverflow = Math.max(0, this.lineAnalyzer.getLastPosition() - this.options.page_width);
 		int extraLines = this.lineAnalyzer.extraLines;
 		final int firstPotentialWrap = this.lineAnalyzer.firstPotentialWrap;
+		final int activeTopPriorityWrap = this.lineAnalyzer.activeTopPriorityWrap;
 
 		final int[] extraLinesPerComment = toArray(this.lineAnalyzer.extraLinesPerComment);
 		int commentIndex = extraLinesPerComment.length;
@@ -18,45 +20,34 @@
 				: this.tm.get(topPriorityGroupStarts[topPriorityIndex]).getWrapPolicy().groupEndIndex;
 
 		double bestTotalPenalty = getWrapPenalty(wrapTokenIndex, indent, lastIndex + 1, -1, WrapResult.NO_WRAP_NEEDED);
-		int bestExtraLines = lineExceeded ? Integer.MAX_VALUE : extraLines; // if line is exceeded, accept every wrap
+		int bestExtraPenalty = lineOverflow + extraLines;
 		int bestNextWrap = -1;
 		int bestIndent = 0;
+		boolean cacheMiss = false;
 
-		if (!lineExceeded && (!this.options.join_wrapped_lines || !this.options.wrap_outer_expressions_when_nested))
-			return new WrapResult(bestTotalPenalty, bestExtraLines, null);
-
-		if ((!lineExceeded || firstPotentialWrap < 0) && lastIndex + 1 < this.tm.size()) {
-			Token nextLineToken = this.tm.get(lastIndex + 1);
-			if (nextLineToken.getWrapPolicy() != null && nextLineToken.getWrapPolicy().wrapMode != WrapMode.FORCED
-					&& (this.tm.get(lastIndex).isComment() || nextLineToken.isComment())) {
-				// this might be a pre-existing wrap forced by a comment, calculate penalties as normal
-				bestIndent = getWrapIndent(nextLineToken);
-				bestNextWrap = lastIndex + 1;
-				WrapResult wrapResult = findWrapsCached(bestNextWrap, bestIndent);
-				bestTotalPenalty = getWrapPenalty(wrapTokenIndex, indent, bestNextWrap, bestIndent, wrapResult);
-				bestExtraLines = extraLines + wrapResult.totalExtraLines;
-			}
+		if (!wrapRequired && activeTopPriorityWrap < 0
+				&& (!this.options.join_wrapped_lines || !this.options.wrap_outer_expressions_when_nested)) {
+			return new WrapResult(bestTotalPenalty, bestExtraPenalty, null);
 		}
 
-		if (firstPotentialWrap < 0 && lineExceeded) {
-			if (topPriorityGroupStarts.length > 0) {
-				checkTopPriorityWraps(topPriorityGroupStarts[0]);
-			}
-
-			// Report high number of extra lines to encourage the algorithm to look
-			// for other wraps (maybe something will result in smaller indent and line will fit).
-			// This should be achieved with penalty, but it's hard to choose a good penalty value here.
-			if (bestExtraLines == Integer.MAX_VALUE)
-				bestExtraLines = extraLines + lastPosition;
-			else
-				bestExtraLines += lastPosition;
+		// optimization: if there's a possible wrap at depth lower than line start, ignore the rest
+		int depthLimit = Integer.MAX_VALUE;
+		Token token = this.tm.get(wrapTokenIndex);
+		if (token.isWrappable() && this.options.wrap_outer_expressions_when_nested && activeTopPriorityWrap < 0) {
+			int currentDepth = token.getWrapPolicy().structureDepth;
+			if (this.lineAnalyzer.minStructureDepth < currentDepth)
+				depthLimit = currentDepth;
 		}
+		// optimization: turns out there's no point checking multiple wraps with the same policy 
+		ArrayList<WrapPolicy> policiesTried = new ArrayList<>();
 
 		for (int i = lastIndex; firstPotentialWrap >= 0 && i >= firstPotentialWrap; i--) {
-			Token token = this.tm.get(i);
+			token = this.tm.get(i);
 			if (commentIndex > 0
 					&& (token.tokenType == TokenNameCOMMENT_BLOCK || token.tokenType == TokenNameCOMMENT_JAVADOC)) {
 				extraLines -= extraLinesPerComment[--commentIndex];
+				if (extraLinesPerComment[commentIndex] > 0)
+					policiesTried.clear();
 			}
 			if (topPriorityIndex >= 0 && i <= nearestGroupEnd) {
 				if (i > topPriorityGroupStarts[topPriorityIndex])
@@ -67,33 +58,47 @@
 						: this.tm.get(topPriorityGroupStarts[topPriorityIndex]).getWrapPolicy().groupEndIndex;
 			}
 
-			if (!token.isWrappable())
+			WrapPolicy wrapPolicy = token.getWrapPolicy();
+			if (!token.isWrappable()
+					|| (activeTopPriorityWrap >= 0 && i != activeTopPriorityWrap)
+					|| policiesTried.contains(wrapPolicy)
+					|| wrapPolicy.structureDepth >= depthLimit)
 				continue;
+			policiesTried.add(wrapPolicy);
 
 			int nextWrapIndent = getWrapIndent(token);
 			WrapResult nextWrapResult = findWrapsCached(i, nextWrapIndent);
+			cacheMiss |= nextWrapResult == null;
+			if (cacheMiss)
+				continue;
 
 			double totalPenalty = getWrapPenalty(wrapTokenIndex, indent, i, nextWrapIndent, nextWrapResult);
-			int totalExtraLines = extraLines + nextWrapResult.totalExtraLines;
-			boolean isBetter = totalExtraLines < bestExtraLines || bestExtraLines == Integer.MAX_VALUE;
-			if (!isBetter && totalExtraLines == bestExtraLines)
+			int totalExtraPenalty = nextWrapResult.extraPenalty + extraLines;
+			if (lineOverflow > 0) {
+				int position = this.tm.getPositionInLine(i - 1);
+				position += this.tm.getLength(this.tm.get(i - 1), position);
+				lineOverflow = position - this.options.page_width;
+				totalExtraPenalty += Math.max(0, lineOverflow);
+			}
+			boolean isBetter = totalExtraPenalty < bestExtraPenalty
+					|| i == activeTopPriorityWrap
+					|| (bestNextWrap < 0 && wrapRequired);
+			if (!isBetter && totalExtraPenalty == bestExtraPenalty)
 				isBetter = totalPenalty < bestTotalPenalty || bestTotalPenalty == Double.MAX_VALUE;
 			if (isBetter) {
 				bestTotalPenalty = totalPenalty;
-				bestExtraLines = totalExtraLines;
+				bestExtraPenalty = totalExtraPenalty;
 				bestNextWrap = i;
 				bestIndent = nextWrapIndent;
 
-				if (!this.options.wrap_outer_expressions_when_nested)
+				if (!this.options.wrap_outer_expressions_when_nested || i == activeTopPriorityWrap || nextLineWrapped)
 					break;
 			}
 		}
+		if (cacheMiss)
+			return null;
 
-		if (bestNextWrap == -1 && lineExceeded && topPriorityGroupStarts.length > 0) {
-			checkTopPriorityWraps(topPriorityGroupStarts[0]);
-		}
-
-		return new WrapResult(bestTotalPenalty, bestExtraLines,
+		return new WrapResult(bestTotalPenalty, bestExtraPenalty,
 				bestNextWrap == -1 ? null : new WrapInfo(bestNextWrap, bestIndent));
 	}
 

@@ -1,0 +1,43 @@
+	/**
+	 * Invoked on all StructDef after both {@link #done()} has been called on the struct and
+	 * {@link #computeOffsets()} has been called on their base class.
+	 */
+	private void computeOffsets() {
+		int offset = this.superClass == null ? 0 : this.superClass.size();
+
+		for (IField next : this.fields) {
+			next.setOffset(offset);
+			offset += next.getRecordSize();
+		}
+
+		this.size = offset;
+		if (this.refCounted) {
+			this.deletionSemantics = DeletionSemantics.REFCOUNTED;
+		} else {
+			if (!this.ownerFields.isEmpty()) {
+				this.deletionSemantics = DeletionSemantics.OWNED;
+			} else if (this.superClass != null) {
+				this.deletionSemantics = this.superClass.deletionSemantics;
+			} else {
+				this.deletionSemantics = DeletionSemantics.EXPLICIT;
+			}
+		}
+		// Now verify that the deletion semantics of this struct are compatible with the deletion
+		// semantics of its superclass
+		if (this.superClass != null && this.deletionSemantics != this.superClass.deletionSemantics) {
+			if (this.superClass.deletionSemantics != DeletionSemantics.EXPLICIT) {
+				throw new IllegalStateException("A class (" + this.clazz.getName() + ") that uses "  //$NON-NLS-1$//$NON-NLS-2$
+					+ this.deletionSemantics.toString() + " deletion semantics may not inherit from a class " //$NON-NLS-1$
+					+ "that uses " + this.superClass.deletionSemantics.toString() + " semantics");  //$NON-NLS-1$//$NON-NLS-2$
+			}
+		}
+		
+		this.offsetsComputed = true;
+
+		for (StructDef<? extends T> next : this.subClasses) {
+			if (next.doneCalled) {
+				next.computeOffsets();
+			}
+		}
+	}
+

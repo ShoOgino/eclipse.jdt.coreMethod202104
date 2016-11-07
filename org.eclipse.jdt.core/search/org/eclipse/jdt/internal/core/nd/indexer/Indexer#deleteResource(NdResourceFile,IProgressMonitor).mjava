@@ -1,0 +1,56 @@
+	/**
+	 * Performs a non-atomic delete of the given resource file. First, it marks the file as being invalid
+	 * (by clearing out its timestamp). Then it deletes the children of the resource file, one child at a time.
+	 * Once all the children are deleted, the resource itself is deleted. The result on the database is exactly
+	 * the same as if the caller had called toDelete.delete(), but doing it this way ensures that a write lock
+	 * will never be held for a nontrivial amount of time.
+	 */
+	protected void deleteResource(NdResourceFile toDelete, IProgressMonitor monitor) {
+		SubMonitor deletionMonitor = SubMonitor.convert(monitor, 10);
+
+		this.nd.acquireWriteLock(deletionMonitor.split(1));
+		try {
+			if (toDelete.isInIndex()) {
+				toDelete.markAsInvalid();
+			}
+		} finally {
+			this.nd.releaseWriteLock();
+		}
+
+		for (;;) {
+			this.nd.acquireWriteLock(deletionMonitor.split(1));
+			try {
+				if (!toDelete.isInIndex()) {
+					break;
+				}
+		
+				int numChildren = toDelete.getBindingCount();
+				deletionMonitor.setWorkRemaining(numChildren + 1);
+				if (numChildren == 0) {
+					break;
+				}
+
+				NdBinding nextDeletion = toDelete.getBinding(numChildren - 1);
+				if (DEBUG_INSERTIONS) {
+					if (nextDeletion instanceof NdType) {
+						NdType type = (NdType)nextDeletion;
+						Package.logInfo("Deleting " + type.getTypeId().getFieldDescriptor().getString() + " from "  //$NON-NLS-1$//$NON-NLS-2$
+								+ new String(toDelete.getLocation().getString()) + " " + toDelete.address); //$NON-NLS-1$
+					}
+				}
+				nextDeletion.delete();
+			} finally {
+				this.nd.releaseWriteLock();
+			}
+		}
+
+		this.nd.acquireWriteLock(deletionMonitor.split(1));
+		try {
+			if (toDelete.isInIndex()) {
+				toDelete.delete();
+			}
+		} finally {
+			this.nd.releaseWriteLock();
+		}
+	}
+

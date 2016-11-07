@@ -1,0 +1,50 @@
+	@Override
+	public boolean isPackage(char[][] parentPackageName, char[] packageName) {
+		char[] binaryPackageName = CharOperation.concatWith(parentPackageName, '/');
+		final char[] fieldDescriptorPrefix;
+		
+		if (parentPackageName == null || parentPackageName.length == 0) {
+			fieldDescriptorPrefix = CharArrayUtils.concat(JavaNames.FIELD_DESCRIPTOR_PREFIX, packageName, 
+					new char[] { '/' });
+		} else {
+			fieldDescriptorPrefix = CharArrayUtils.concat(JavaNames.FIELD_DESCRIPTOR_PREFIX, binaryPackageName,
+					new char[] { '/' }, packageName, new char[] { '/' });
+		}
+
+		// Search all the types that are a subpackage of the given package name. Return if we find any one of them on
+		// the classpath of this project.
+		JavaIndex index = JavaIndex.getIndex();
+		Nd nd = index.getNd();
+		try (IReader lock = nd.acquireReadLock()) {
+			return !index.visitFieldDescriptorsStartingWith(fieldDescriptorPrefix,
+					new FieldSearchIndex.Visitor<NdTypeId>() {
+						@Override
+						public boolean visit(NdTypeId typeId) {
+							//String fd = typeId.getFieldDescriptor().getString();
+							// If this is an exact match for the field descriptor prefix we're looking for then
+							// this class can't be part of the package we're searching for (and, most likely, the
+							// "package" we're searching for is actually a class name - not a package).
+							if (typeId.getFieldDescriptor().length() <= fieldDescriptorPrefix.length + 1) {
+								return true;
+							}
+							List<NdType> types = typeId.getTypes();
+							for (NdType next : types) {
+								if (next.isMember() || next.isLocal() || next.isAnonymous()) {
+									continue;
+								}
+								NdResourceFile resource = next.getFile();
+
+								IPath path = resource.getPath();
+
+								if (containsPrefixOf(path)) {
+									// Terminate the search -- we've found a class belonging to the package
+									// we're searching for.
+									return false;
+								}
+							}
+							return true;
+						}
+					});
+		}
+	}
+

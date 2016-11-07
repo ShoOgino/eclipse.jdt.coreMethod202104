@@ -1,0 +1,55 @@
+	private PoolStats getPoolStats(short poolId) {
+		if (this.stats.isEmpty()) {
+			refresh();
+		}
+		PoolStats result = this.stats.get((int)poolId);
+		if (result == null) {
+			if (this.stats.size() >= TOTAL_MALLOC_POOLS) {
+				throw new IndexException("Too many malloc pools. Please increase the size of TOTAL_MALLOC_POOLS."); //$NON-NLS-1$
+			}
+			// Find the insertion position
+			int idx = 0;
+			for (;;idx++) {
+				PoolStats nextPool = readPool(idx);
+				if (idx > 0 && nextPool.poolId == 0) {
+					break;
+				}
+				if (nextPool.poolId == poolId) {
+					throw new IllegalStateException("The stats were out of sync with the database."); //$NON-NLS-1$
+				}
+				if (nextPool.poolId > poolId) {
+					break;
+				}
+			}
+
+			// Find the last pool position
+			int lastIdx = idx;
+			for (;;lastIdx++) {
+				PoolStats nextPool = readPool(lastIdx);
+				if (lastIdx > 0 && nextPool.poolId == 0) {
+					break;
+				}
+			}
+
+			// Shift all the pools to make room
+			for (int shiftIdx = lastIdx; shiftIdx > idx; shiftIdx--) {
+				PoolStats writeTo = readPool(shiftIdx);
+				PoolStats readFrom = readPool(shiftIdx - 1);
+
+				writeTo.setAllocations(this.db, readFrom.numAllocations);
+				writeTo.setTotalSize(this.db, readFrom.totalSize);
+				writeTo.setPoolId(this.db, readFrom.poolId);
+			}
+
+			result = readPool(idx);
+			result.setAllocations(this.db, 0);
+			result.setTotalSize(this.db, 0);
+			result.setPoolId(this.db, poolId);
+
+			refresh();
+
+			result = this.stats.get((int)poolId);
+		}
+		return result;
+	}
+

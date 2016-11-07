@@ -1,0 +1,31 @@
+	/**
+	 * Adds the given string to the receiving set. May cause the entire list to be loaded from the Database
+	 * while testing for uniqueness. Returns the record of the string that was inserted into the list.
+	 */
+	public long add(String str) throws CoreException {
+		long record = find(str);
+		if (record != 0)
+			return record;
+
+		IString string = this.db.newString(str);
+		record = string.getRecord();
+
+		long new_node = this.db.malloc(NodeType.sizeof, Database.POOL_STRING_SET);
+		NodeType.Next.put(this.db, new_node, getHead());
+		NodeType.Item.put(this.db, new_node, record);
+
+		if (this.lazyCache == null)
+			this.lazyCache = new HashMap<String, Long>();
+		this.lazyCache.put(str, record);
+
+		// If the Database has already been partially searched, then the loaded pointer will be after the
+		// head. Since we've already put this new record into the lazy cache, there is no reason to try to
+		// load it again. We put the new node at the start of the list so that it will be before the loaded
+		// pointer.
+		this.head = new_node;
+		if (this.loaded == 0)
+			this.loaded = new_node;
+		this.db.putRecPtr(this.ptr, new_node);
+		return record;
+	}
+

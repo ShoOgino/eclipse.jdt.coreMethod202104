@@ -1,0 +1,61 @@
+	/**
+	 * Ensures that the array contains at least enough space allocated to fit the given number of new elements.
+	 */
+	public void ensureCapacity(Nd nd, long address, int desiredSize) {
+		int growableBlockNeededSize = desiredSize - this.inlineSize;
+		long growableBlockAddress = GROWABLE_BLOCK_ADDRESS.get(nd, address);
+		int growableBlockCurrentSize = growableBlockAddress == 0 ? 0
+				: GrowableBlockHeader.ALLOCATED_SIZE.get(nd, growableBlockAddress);
+
+		// The growable region is already large enough.
+		if (growableBlockNeededSize <= growableBlockCurrentSize) {
+			return;
+		}
+
+		Database db = nd.getDB();
+
+		int neededBlockSize = getGrowableRegionSizeFor(desiredSize); 
+		if (neededBlockSize > GrowableBlockHeader.MAX_GROWABLE_SIZE) {
+			// We need a metablock.
+			long metablockAddress = growableBlockAddress;
+
+			if (!(growableBlockCurrentSize > GrowableBlockHeader.MAX_GROWABLE_SIZE)) {
+				// We weren't using a metablock previously
+				int currentSize = size(nd, address);
+				// Need to convert to using metablocks.
+				long firstGrowableBlockAddress = resizeBlock(nd, address, GrowableBlockHeader.MAX_GROWABLE_SIZE);
+
+				metablockAddress = db.malloc(computeBlockBytes(GrowableBlockHeader.MAX_GROWABLE_SIZE), Database.POOL_GROWABLE_ARRAY);
+				GrowableBlockHeader.ARRAY_SIZE.put(nd, metablockAddress, currentSize);
+				GrowableBlockHeader.ALLOCATED_SIZE.put(nd, metablockAddress,
+						GrowableBlockHeader.MAX_GROWABLE_SIZE);
+
+				// Link the first block into the metablock.
+				db.putRecPtr(metablockAddress + GrowableBlockHeader.GROWABLE_BLOCK_HEADER_BYTES,
+						firstGrowableBlockAddress);
+				GROWABLE_BLOCK_ADDRESS.put(nd, address, metablockAddress);
+			}
+
+			// neededBlockSize should always be a multiple of the max block size when metablocks are in use
+			assert neededBlockSize % GrowableBlockHeader.MAX_GROWABLE_SIZE == 0;
+			// Create extra growable blocks if necessary.
+			int requiredBlockCount = neededBlockSize / GrowableBlockHeader.MAX_GROWABLE_SIZE;
+			int currentAllocatedSize = GrowableBlockHeader.ALLOCATED_SIZE.get(nd, metablockAddress);
+			assert currentAllocatedSize % GrowableBlockHeader.MAX_GROWABLE_SIZE == 0;
+			int currentBlockCount = currentAllocatedSize / GrowableBlockHeader.MAX_GROWABLE_SIZE;
+
+			for (int nextBlock = currentBlockCount; nextBlock < requiredBlockCount; nextBlock++) {
+				long nextBlockAddress = db.malloc(computeBlockBytes(GrowableBlockHeader.MAX_GROWABLE_SIZE), Database.POOL_GROWABLE_ARRAY);
+
+				db.putRecPtr(metablockAddress + GrowableBlockHeader.GROWABLE_BLOCK_HEADER_BYTES
+						+ nextBlock * Database.PTR_SIZE, nextBlockAddress);
+			}
+
+			GrowableBlockHeader.ALLOCATED_SIZE.put(nd, metablockAddress, neededBlockSize);
+		} else {
+			long newBlockAddress = resizeBlock(nd, address, neededBlockSize);
+
+			GROWABLE_BLOCK_ADDRESS.put(nd, address, newBlockAddress);
+		}
+	}
+

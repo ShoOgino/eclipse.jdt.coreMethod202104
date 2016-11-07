@@ -1,0 +1,100 @@
+	public void rescan(IProgressMonitor monitor) throws CoreException {
+		SubMonitor subMonitor = SubMonitor.convert(monitor, 100);
+
+		synchronized (this.automaticIndexingMutex) {
+			this.indexerDirtiedWhileDisabled = false;
+		}
+
+		long startTimeNs = System.nanoTime();
+		long currentTimeMs = System.currentTimeMillis();
+		if (DEBUG) {
+			Package.logInfo("Indexer running rescan"); //$NON-NLS-1$
+		}
+
+		// Gather all the IPackageFragmentRoots in the workspace
+		List<IJavaElement> unfilteredIndexables = getAllIndexableObjectsInWorkspace(subMonitor.split(3));
+
+		int totalIndexables = unfilteredIndexables.size();
+		// Remove all duplicate indexables (jars which are referenced by more than one project)
+		Map<IPath, List<IJavaElement>> allIndexables = removeDuplicatePaths(unfilteredIndexables);
+
+		long startGarbageCollectionNs = System.nanoTime();
+
+		// Remove all files in the index which aren't referenced in the workspace
+		int gcFiles = cleanGarbage(currentTimeMs, allIndexables.keySet(), subMonitor.split(4));
+
+		long startFingerprintTestNs = System.nanoTime();
+
+		Map<IPath, FingerprintTestResult> fingerprints = testFingerprints(allIndexables.keySet(), subMonitor.split(7));
+		Set<IPath> indexablesWithChanges = new HashSet<>(
+				getIndexablesThatHaveChanged(allIndexables.keySet(), fingerprints));
+
+		long startIndexingNs = System.nanoTime();
+
+		int classesIndexed = 0;
+		SubMonitor loopMonitor = subMonitor.split(80).setWorkRemaining(indexablesWithChanges.size());
+		for (IPath next : indexablesWithChanges) {
+			classesIndexed += rescanArchive(currentTimeMs, next, allIndexables.get(next),
+					fingerprints.get(next).getNewFingerprint(), loopMonitor.split(1));
+		}
+
+		long endIndexingNs = System.nanoTime();
+
+		Map<IPath, List<IJavaElement>> pathsToUpdate = new HashMap<>();
+
+		for (IPath next : allIndexables.keySet()) {
+			if (!indexablesWithChanges.contains(next)) {
+				pathsToUpdate.put(next, allIndexables.get(next));
+				continue;
+			}
+		}
+
+		updateResourceMappings(pathsToUpdate, subMonitor.split(5));
+
+		// Flush the database to disk
+		this.nd.acquireWriteLock(subMonitor.split(4));
+		try {
+			this.nd.getDB().flush();
+		} finally {
+			this.nd.releaseWriteLock();
+		}
+
+		fireDelta(indexablesWithChanges, subMonitor.split(1));
+
+		if (DEBUG) {
+			Package.logInfo("Rescan finished"); //$NON-NLS-1$
+		}
+
+		long endResourceMappingNs = System.nanoTime();
+
+		long fingerprintTimeMs = (startIndexingNs - startFingerprintTestNs) / MS_TO_NS;
+		long locateIndexablesTimeMs = (startGarbageCollectionNs - startTimeNs) / MS_TO_NS;
+		long garbageCollectionMs = (startFingerprintTestNs - startGarbageCollectionNs) / MS_TO_NS;
+		long indexingTimeMs = (endIndexingNs - startIndexingNs) / MS_TO_NS;
+		long resourceMappingTimeMs = (endResourceMappingNs - endIndexingNs) / MS_TO_NS;
+
+		double averageGcTimeMs = gcFiles == 0 ? 0 : (double) garbageCollectionMs / (double) gcFiles;
+		double averageIndexTimeMs = classesIndexed == 0 ? 0 : (double) indexingTimeMs / (double) classesIndexed;
+		double averageFingerprintTimeMs = allIndexables.size() == 0 ? 0
+				: (double) fingerprintTimeMs / (double) allIndexables.size();
+		double averageResourceMappingMs = pathsToUpdate.size() == 0 ? 0
+				: (double) resourceMappingTimeMs / (double) pathsToUpdate.size();
+
+		if (DEBUG_TIMING) {
+			Package.logInfo(
+					"Indexing done.\n" //$NON-NLS-1$
+					+ "  Located " + totalIndexables + " indexables in " + locateIndexablesTimeMs + "ms\n" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+					+ "  Collected garbage from " + gcFiles + " files in " +  garbageCollectionMs + "ms, average time = " + averageGcTimeMs + "ms\n" //$NON-NLS-1$//$NON-NLS-2$//$NON-NLS-3$//$NON-NLS-4$
+					+ "  Tested " + allIndexables.size() + " fingerprints in " + fingerprintTimeMs + "ms, average time = " + averageFingerprintTimeMs + "ms\n" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+					+ "  Indexed " + classesIndexed + " classes in " + indexingTimeMs + "ms, average time = " + averageIndexTimeMs + "ms\n" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+					+ "  Updated " + pathsToUpdate.size() + " paths in " + resourceMappingTimeMs + "ms, average time = " + averageResourceMappingMs + "ms\n"); //$NON-NLS-1$//$NON-NLS-2$//$NON-NLS-3$//$NON-NLS-4$
+		}
+
+		if (DEBUG_ALLOCATIONS) {
+			try (IReader readLock = this.nd.acquireReadLock()) {
+				this.nd.getDB().reportFreeBlocks();
+				this.nd.getDB().getMemoryStats().printMemoryStats(this.nd.getTypeRegistry());
+			}
+		}
+	}
+

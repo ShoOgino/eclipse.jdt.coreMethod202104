@@ -1,0 +1,41 @@
+	public void accept(ILinkedListVisitor visitor) throws IndexException {
+		int count = 0;
+		Database db = getDB();
+
+		int blockRecordCount = this.firstBlockRecordCount;
+		int metadataMask = (1 << this.metadataBitsPerRecord) - 1;
+		int metadataRecordsPerShort = this.metadataBitsPerRecord == 0 ? 0 : (16 / this.metadataBitsPerRecord);
+		long current = this.address;
+		while (true) {
+			long ptr = db.getRecPtr(current + NEXT_MEMBER_BLOCK);
+			int elementsInBlock = getElementsInBlock(current, ptr, blockRecordCount);
+
+			long metadataStart = getAddressOfMetadata(current, blockRecordCount);
+			for (int idx = 0; idx < elementsInBlock; idx++) {
+				long elementRecord = getAddressOfElement(current, idx);
+
+				short metadataBits = 0;
+
+				if (metadataRecordsPerShort > 0) {
+					int metadataBitOffset = idx % metadataRecordsPerShort;
+					int whichShort = idx / metadataRecordsPerShort;
+					long metadataOffset = metadataStart + 2 * whichShort;
+					metadataBits = getDB().getShort(metadataOffset);
+
+					metadataBits >>>= metadataBits * metadataBitOffset;
+					metadataBits &= metadataMask;
+				}
+
+				visitor.visit(elementRecord, metadataBits, count++);
+			}
+
+			blockRecordCount = this.recordCount;
+
+			if (isLastBlock(current, ptr)) {
+				return;
+			}
+
+			current = ptr;
+		}
+	}
+

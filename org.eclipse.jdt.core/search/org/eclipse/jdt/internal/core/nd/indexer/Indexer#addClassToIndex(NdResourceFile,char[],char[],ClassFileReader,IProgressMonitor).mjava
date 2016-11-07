@@ -1,0 +1,52 @@
+	private boolean addClassToIndex(NdResourceFile resourceFile, char[] fieldDescriptor, char[] indexPath,
+			ClassFileReader binaryType, IProgressMonitor monitor) throws ClassFormatException, CoreException {
+		SubMonitor subMonitor = SubMonitor.convert(monitor, 100);
+		ClassFileToIndexConverter converter = new ClassFileToIndexConverter(resourceFile);
+
+		boolean indexed = false;
+		this.nd.acquireWriteLock(subMonitor.split(5));
+		try {
+			if (resourceFile.isInIndex()) {
+				if (DEBUG_INSERTIONS) {
+					Package.logInfo("Inserting " + new String(fieldDescriptor) + " into " //$NON-NLS-1$//$NON-NLS-2$
+							+ resourceFile.getLocation().getString() + " " + resourceFile.address); //$NON-NLS-1$
+				}
+				converter.addType(binaryType, fieldDescriptor, subMonitor.split(45));
+				indexed = true;
+			}
+		} finally {
+			this.nd.releaseWriteLock();
+		}
+
+		if (DEBUG_SELFTEST && indexed) {
+			// When this debug flag is on, we test everything written to the index by reading it back immediately after
+			// indexing and comparing it with the original class file.
+			JavaIndex index = JavaIndex.getIndex(this.nd);
+			try (IReader readLock = this.nd.acquireReadLock()) {
+				NdTypeId typeId = index.findType(fieldDescriptor);
+				NdType targetType = null;
+				if (typeId != null) {
+					List<NdType> implementations = typeId.getTypes();
+					for (NdType nextType : implementations) {
+						NdResourceFile nextResourceFile = nextType.getResourceFile();
+						if (nextResourceFile.equals(resourceFile)) {
+							targetType = nextType;
+							break;
+						}
+					}
+				}
+
+				if (targetType != null) {
+					IndexBinaryType actualType = new IndexBinaryType(TypeRef.create(targetType), indexPath);
+					IndexTester.testType(binaryType, actualType);
+				} else {
+					Package.logInfo(
+							"Could not find class in index immediately after indexing it: " + new String(indexPath)); //$NON-NLS-1$
+				}
+			} catch (RuntimeException e) {
+				Package.log("Error during indexing: " + new String(indexPath), e); //$NON-NLS-1$
+			}
+		}
+		return indexed;
+	}
+

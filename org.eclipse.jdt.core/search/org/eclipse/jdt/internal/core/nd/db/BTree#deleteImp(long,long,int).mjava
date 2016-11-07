@@ -1,0 +1,144 @@
+	/**
+	 * Implementation for deleting a key/record from the B-tree.
+	 * <p>
+	 * There is no distinction between keys and records.
+	 * <p>
+	 * This implements a single downward pass (with minor exceptions) deletion
+	 * <p>
+	 * @param key the address of the record to delete
+	 * @param nodeRecord a node that (directly or indirectly) contains the specified key/record
+	 * @param mode one of DELMODE_NORMAL, DELMODE_DELETE_MINIMUM, DELMODE_DELETE_MAXIMUM
+	 * 	where DELMODE_NORMAL: locates the specified key/record using the comparator provided
+	 *        DELMODE_DELETE_MINIMUM: locates and deletes the minimum element in the subtree rooted at nodeRecord
+	 *        DELMODE_DELETE_MAXIMUM: locates and deletes the maximum element in the subtree rooted at nodeRecord
+	 * @return the address of the record removed from the B-tree
+	 * @throws IndexException
+	 */
+	private long deleteImp(long key, long nodeRecord, int mode)
+	throws IndexException, BTreeKeyNotFoundException {
+		BTNode node = new BTNode(nodeRecord);
+
+		// Determine index of key in current node, or -1 if its not in this node.
+		int keyIndexInNode = -1;
+		if (mode == DELMODE_NORMAL)
+			for (int i= 0; i < node.keyCount; i++)
+				if (getRecord(node.chunk, node.node, i) == key) {
+					keyIndexInNode = i;
+					break;
+				}
+
+		if (getChild(node.chunk, node.node, 0) == 0) {
+			/* Case 1: leaf node containing the key (by method precondition) */
+			if (keyIndexInNode != -1) {
+				nodeContentDelete(node, keyIndexInNode, 1);
+				return key;
+			} else {
+				if (mode == DELMODE_DELETE_MINIMUM) {
+					long subst = getRecord(node.chunk, node.node, 0);
+					nodeContentDelete(node, 0, 1);
+					return subst;
+				} else if (mode == DELMODE_DELETE_MAXIMUM) {
+					long subst = getRecord(node.chunk, node.node, node.keyCount - 1);
+					nodeContentDelete(node, node.keyCount - 1, 1);
+					return subst;
+				}
+				throw new BTreeKeyNotFoundException("Deletion on absent key " + key + ", mode = " + mode);  //$NON-NLS-1$//$NON-NLS-2$
+			}
+		} else {
+			if (keyIndexInNode != -1) {
+				/* Case 2: non-leaf node which contains the key itself */
+
+				BTNode succ = node.getChild(keyIndexInNode + 1);
+				if (succ != null && succ.keyCount > this.minRecords) {
+					/* Case 2a: Delete key by overwriting it with its successor (which occurs in a leaf node) */
+					long subst = deleteImp(-1, succ.node, DELMODE_DELETE_MINIMUM);
+					putRecord(node.chunk, node.node, keyIndexInNode, subst);
+					return key;
+				}
+
+				BTNode pred = node.getChild(keyIndexInNode);
+				if (pred != null && pred.keyCount > this.minRecords) {
+					/* Case 2b: Delete key by overwriting it with its predecessor (which occurs in a leaf node) */
+					long subst = deleteImp(-1, pred.node, DELMODE_DELETE_MAXIMUM);
+					putRecord(node.chunk, node.node, keyIndexInNode, subst);
+					return key;
+				}
+
+				/* Case 2c: Merge successor and predecessor */
+				// assert(pred != null && succ != null);
+				if (pred != null) {
+					mergeNodes(succ, node, keyIndexInNode, pred);
+					return deleteImp(key, pred.node, mode);
+				}
+				return key;
+			} else {
+				/* Case 3: non-leaf node which does not itself contain the key */
+
+				/* Determine root of subtree that should contain the key */
+				int subtreeIndex;
+				switch(mode) {
+				case DELMODE_NORMAL:
+					subtreeIndex = node.keyCount;
+					for (int i= 0; i < node.keyCount; i++)
+						if (this.cmp.compare(this.nd, getRecord(node.chunk, node.node, i), key)>0) {
+							subtreeIndex = i;
+							break;
+						}
+					break;
+				case DELMODE_DELETE_MINIMUM: subtreeIndex = 0; break;
+				case DELMODE_DELETE_MAXIMUM: subtreeIndex = node.keyCount; break;
+				default: throw new IndexException(new Status(IStatus.ERROR, JavaCore.PLUGIN_ID, IStatus.OK, "Unknown delete mode " + mode, null)); //$NON-NLS-1$
+				}
+
+				BTNode child = node.getChild(subtreeIndex);
+				if (child == null) {
+					throw new IndexException(new Status(IStatus.ERROR, JavaCore.PLUGIN_ID, IStatus.OK,
+							"BTree integrity error (null child found)", null)); //$NON-NLS-1$
+				}
+
+				if (child.keyCount > this.minRecords) {
+					return deleteImp(key, child.node, mode);
+				} else {
+					BTNode sibR = node.getChild(subtreeIndex + 1);
+					if (sibR != null && sibR.keyCount > this.minRecords) {
+						/* Case 3a (i): child will underflow upon deletion, take a key from rightSibling */
+						long rightKey = getRecord(node.chunk, node.node, subtreeIndex);
+						long leftmostRightSiblingKey = getRecord(sibR.chunk, sibR.node, 0);
+						append(child, rightKey, getChild(sibR.chunk, sibR.node, 0));
+						nodeContentDelete(sibR, 0, 1);
+						putRecord(node.chunk, node.node, subtreeIndex, leftmostRightSiblingKey);
+						return deleteImp(key, child.node, mode);
+					}
+
+					BTNode sibL = node.getChild(subtreeIndex - 1);
+					if (sibL != null && sibL.keyCount > this.minRecords) {
+						/* Case 3a (ii): child will underflow upon deletion, take a key from leftSibling */
+						long leftKey = getRecord(node.chunk, node.node, subtreeIndex - 1);
+						prepend(child, leftKey, getChild(sibL.chunk, sibL.node, sibL.keyCount));
+						long rightmostLeftSiblingKey = getRecord(sibL.chunk, sibL.node, sibL.keyCount - 1);
+						putRecord(sibL.chunk, sibL.node, sibL.keyCount - 1, 0);
+						putChild(sibL.chunk, sibL.node, sibL.keyCount, 0);
+						putRecord(node.chunk, node.node, subtreeIndex - 1, rightmostLeftSiblingKey);
+						return deleteImp(key, child.node, mode);
+					}
+
+					/* Case 3b (i,ii): leftSibling, child, rightSibling all have minimum number of keys */
+
+					if (sibL != null) { // merge child into leftSibling
+						mergeNodes(child, node, subtreeIndex - 1, sibL);
+						return deleteImp(key, sibL.node, mode);
+					}
+
+					if (sibR != null) { // merge rightSibling into child
+						mergeNodes(sibR, node, subtreeIndex, child);
+						return deleteImp(key, child.node, mode);
+					}
+
+					throw new BTreeKeyNotFoundException(
+							MessageFormat.format("Deletion of key not in btree: {0} mode={1}", //$NON-NLS-1$
+									new Object[]{new Long(key), new Integer(mode)}));
+				}
+			}
+		}
+	}
+

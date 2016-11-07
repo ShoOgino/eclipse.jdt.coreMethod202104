@@ -1,0 +1,66 @@
+	/**
+	 * Adds a new element to the list and returns the record pointer to the start of the newly-allocated object
+	 *
+	 * @param metadataBits the metadata bits to attach to the new member. Use 0 if this list does not use metadata.
+	 */
+	public long addMember(short metadataBits) throws IndexException {
+		Database db = getDB();
+		long current = this.lastKnownBlock;
+		int thisBlockRecordCount = this.firstBlockRecordCount;
+		while (true) {
+			long ptr = db.getRecPtr(current + NEXT_MEMBER_BLOCK);
+			int elementsInBlock = getElementsInBlock(current, ptr, thisBlockRecordCount);
+
+			// If there's room in this block
+			if (elementsInBlock < thisBlockRecordCount) {
+				long positionOfElementCount = getAddressOfElement(current, thisBlockRecordCount - 1);
+				// If there's only one space left
+				if (elementsInBlock == thisBlockRecordCount - 1) {
+					// We use the fact that the next pointer points to itself as a sentinel to indicate that the
+					// block is full and there are no further blocks
+					db.putRecPtr(current + NEXT_MEMBER_BLOCK, current);
+					// Zero out the int we've been using to hold the count of elements
+					db.putInt(positionOfElementCount, 0);
+				} else {
+					// Increment the element count
+					db.putInt(positionOfElementCount, elementsInBlock + 1);
+				}
+
+				if (this.metadataBitsPerRecord > 0) {
+					int metadataMask = (1 << this.metadataBitsPerRecord) - 1;
+					int metadataRecordsPerShort = this.metadataBitsPerRecord == 0 ? 0
+							: (16 / this.metadataBitsPerRecord);
+					metadataBits &= metadataMask;
+
+					int metadataBitOffset = elementsInBlock % metadataRecordsPerShort;
+					long metadataStart = getAddressOfMetadata(current, thisBlockRecordCount);
+					int whichShort = elementsInBlock / metadataRecordsPerShort;
+					long metadataOffset = metadataStart + 2 * whichShort;
+					short metadataValue = db.getShort(metadataOffset);
+
+					// Resetting the previous visibility bits of the target member.
+					metadataValue &= ~(metadataMask << metadataBitOffset * this.metadataBitsPerRecord);
+					// Setting the new visibility bits of the target member.
+					metadataValue |= metadataBits << metadataBitOffset * this.metadataBitsPerRecord;
+
+					getDB().putShort(metadataOffset, metadataValue);
+				}
+
+				this.lastKnownBlock = current;
+				return getAddressOfElement(current, elementsInBlock);
+			} else {
+				// When ptr == current, this is a sentinel indicating that the block is full and there are no
+				// further blocks. If this is the case, create a new block
+				if (isLastBlock(current, ptr)) {
+					current = db.malloc(
+							recordSize(this.elementRecordSize, this.recordCount, this.metadataBitsPerRecord), Database.POOL_LINKED_LIST);
+					db.putRecPtr(current + NEXT_MEMBER_BLOCK, current);
+				} else {
+					thisBlockRecordCount = this.recordCount;
+					// Else, there are more blocks following this one so advance
+					current = ptr;
+				}
+			}
+		}
+	}
+

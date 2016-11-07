@@ -1,0 +1,39 @@
+	private FingerprintTestResult testForChanges(IPath thePath, IProgressMonitor monitor) throws CoreException {
+		SubMonitor subMonitor = SubMonitor.convert(monitor, 100);
+		JavaIndex javaIndex = JavaIndex.getIndex(this.nd);
+		String pathString = thePath.toString();
+
+		subMonitor.split(50);
+		NdResourceFile resourceFile = null;
+		FileFingerprint fingerprint = FileFingerprint.getEmpty();
+		this.nd.acquireReadLock();
+		try {
+			resourceFile = javaIndex.getResourceFile(pathString.toCharArray());
+
+			if (resourceFile != null) {
+				fingerprint = resourceFile.getFingerprint();
+			}
+		} finally {
+			this.nd.releaseReadLock();
+		}
+
+		FingerprintTestResult result = fingerprint.test(thePath, subMonitor.split(40));
+
+		// If this file hasn't changed but its timestamp has, write an updated fingerprint to the database
+		if (resourceFile != null && result.matches() && result.needsNewFingerprint()) {
+			this.nd.acquireWriteLock(subMonitor.split(10));
+			try {
+				if (resourceFile.isInIndex()) {
+					if (DEBUG) {
+						Package.logInfo(
+								"Writing updated fingerprint for " + thePath + ": " + result.getNewFingerprint()); //$NON-NLS-1$//$NON-NLS-2$
+					}
+					resourceFile.setFingerprint(result.getNewFingerprint());
+				}
+			} finally {
+				this.nd.releaseWriteLock();
+			}
+		}
+		return result;
+	}
+

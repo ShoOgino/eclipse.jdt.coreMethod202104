@@ -1,0 +1,43 @@
+	/**
+	 * Interrupting the thread with {@link Thread#interrupt()} won't interrupt the write. Returns true iff an attempt
+	 * was made to interrupt the thread with {@link Thread#interrupt()}.
+	 * 
+	 * @throws IndexException
+	 */
+	private boolean flushAndUnlockChunks(final ArrayList<Chunk> dirtyChunks, boolean isComplete) throws IndexException {
+		boolean wasInterrupted = false;
+		assert !Thread.holdsLock(this.fCache);
+		synchronized (this.fHeaderChunk) {
+			final boolean haveDirtyChunks = !dirtyChunks.isEmpty();
+			if (haveDirtyChunks || this.fHeaderChunk.fDirty) {
+				wasInterrupted = markFileIncomplete() || wasInterrupted;
+			}
+			if (haveDirtyChunks) {
+				for (Chunk chunk : dirtyChunks) {
+					if (chunk.fDirty) {
+						wasInterrupted = chunk.flush() || wasInterrupted;
+					}
+				}
+
+				// Only after the chunks are flushed we may unlock and release them.
+				synchronized (this.fCache) {
+					for (Chunk chunk : dirtyChunks) {
+						chunk.fLocked= false;
+						if (chunk.fCacheIndex < 0) {
+							this.fChunks[chunk.fSequenceNumber]= null;
+						}
+					}
+				}
+			}
+
+			if (isComplete) {
+				if (this.fHeaderChunk.fDirty || this.fIsMarkedIncomplete) {
+					this.fHeaderChunk.putInt(VERSION_OFFSET, this.fVersion);
+					wasInterrupted = this.fHeaderChunk.flush() || wasInterrupted;
+					this.fIsMarkedIncomplete= false;
+				}
+			}
+		}
+		return wasInterrupted;
+	}
+

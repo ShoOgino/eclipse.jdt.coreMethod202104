@@ -1,0 +1,46 @@
+	/**
+	 * Empty the contents of the Database, make it ready to start again. Interrupting the thread with
+	 * {@link Thread#interrupt()} won't interrupt the write. Returns true iff the thread was interrupted
+	 * with {@link Thread#interrupt()}.
+	 * 
+	 * @throws IndexException
+	 */
+	public boolean clear(int version) throws IndexException {
+		assert this.fExclusiveLock;
+		boolean wasCanceled = false;
+		removeChunksFromCache();
+
+		this.fVersion= version;
+		// Clear the first chunk.
+		this.fHeaderChunk.clear(0, CHUNK_SIZE);
+		// Chunks have been removed from the cache, so we may just reset the array of chunks.
+		this.fChunks = new Chunk[] {null};
+		this.fChunksUsed = this.fChunksAllocated = this.fChunks.length;
+		try {
+			wasCanceled = this.fHeaderChunk.flush() || wasCanceled; // Zero out header chunk.
+			wasCanceled = performUninterruptableWrite(() -> {
+				this.fFile.getChannel().truncate(CHUNK_SIZE);
+			}) || wasCanceled;
+		} catch (IOException e) {
+			Package.log(e);
+		}
+		this.malloced = this.freed = 0;
+		/*
+		 * This is for debugging purposes in order to simulate having a very large Nd database.
+		 * This will set aside the specified number of chunks.
+		 * Nothing uses these chunks so subsequent allocations come after these fillers.
+		 * The special function createNewChunks allocates all of these chunks at once.
+		 * 524288 for a file starting at 2G
+		 * 8388608 for a file starting at 32G
+		 *
+		 */
+		long setasideChunks = Long.getLong("org.eclipse.jdt.core.parser.nd.chunks", 0); //$NON-NLS-1$
+		if (setasideChunks != 0) {
+			setVersion(getVersion());
+			createNewChunks((int) setasideChunks);
+			wasCanceled = flush() || wasCanceled;
+		}
+		this.memoryUsage.refresh();
+		return wasCanceled;
+	}
+

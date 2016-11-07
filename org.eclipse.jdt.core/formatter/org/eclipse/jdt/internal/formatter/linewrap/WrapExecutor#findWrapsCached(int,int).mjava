@@ -1,36 +1,56 @@
-	private WrapResult findWrapsCached(int startTokenIndex, int indent) throws WrapRestartThrowable {
+	WrapResult findWrapsCached(final int startTokenIndex, final int indent) {
 		this.wrapInfoTemp.wrapTokenIndex = startTokenIndex;
 		this.wrapInfoTemp.indent = indent;
 		WrapResult wrapResult = this.wrapSearchResults.get(this.wrapInfoTemp);
-		if (wrapResult == null && this.wrapSearchResults.containsKey(this.wrapInfoTemp))
-			return null; // no wrap needed
 
 		// pre-existing result may be based on different wrapping of earlier tokens and therefore be wrong
 		WrapResult wr = wrapResult;
-		while (wr != null && wr.nextWrap != null) {
+		boolean cacheMissAllowed = true;
+		int lookupLimit = 50;
+		while (wr != null && wr.nextWrap != null && lookupLimit --> 0) {
 			WrapInfo wi = wr.nextWrap;
 			Token token = this.tm.get(wi.wrapTokenIndex);
 			if (token.getWrapPolicy().wrapParentIndex < startTokenIndex && getWrapIndent(token) != wi.indent) {
 				wrapResult = null;
+				cacheMissAllowed = false;
 				break;
 			}
 			wr = this.wrapSearchResults.get(wi);
 		}
 
-		if (wrapResult == null) {
-			Token token = this.tm.get(startTokenIndex);
-			boolean wasLineBreak = token.getLineBreaksBefore() > 0;
-			token.breakBefore();
-			try {
-				wrapResult = findWraps(startTokenIndex, indent);
-			} finally {
-				if (!wasLineBreak)
-					token.clearLineBreaksBefore();
-			}
+		if (wrapResult != null)
+			return wrapResult;
 
-			WrapInfo wrapInfo = new WrapInfo(startTokenIndex, indent);
-			this.wrapSearchResults.put(wrapInfo, wrapResult);
+		this.wrapSearchStack.push(new WrapInfo(startTokenIndex, indent));
+		if (this.wrapSearchStack.size() > 1 && cacheMissAllowed)
+			return null; // cache miss, need to find wraps later in main stack processing
+
+		ArrayList<WrapInfo> reverseStackTemp = new ArrayList<>();
+		// run main stack processing
+		while (true) {
+			final WrapInfo item = this.wrapSearchStack.peek();
+			Token token = this.tm.get(item.wrapTokenIndex);
+			token.setWrapped(true);
+			wrapResult = findWraps(item.wrapTokenIndex, item.indent);
+
+			assert (wrapResult == null) == (this.wrapSearchStack.peek() != item);
+			if (wrapResult != null) {
+				token.setWrapped(false);
+				this.wrapSearchStack.pop();
+				this.wrapSearchResults.put(item, wrapResult);
+				assert wrapResult.nextWrap == null || this.wrapSearchResults.get(wrapResult.nextWrap) != null; 
+				if (item.wrapTokenIndex == startTokenIndex && item.indent == indent)
+					break;
+			} else {
+				// reverse order of new items
+				while (this.wrapSearchStack.peek() != item)
+					reverseStackTemp.add(this.wrapSearchStack.pop());
+				for (WrapInfo item2 : reverseStackTemp)
+					this.wrapSearchStack.push(item2);
+				reverseStackTemp.clear();
+			}
 		}
+		assert wrapResult != null;
 		return wrapResult;
 	}
 

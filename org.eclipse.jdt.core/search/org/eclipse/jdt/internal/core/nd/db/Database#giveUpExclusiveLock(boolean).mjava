@@ -1,0 +1,41 @@
+	public boolean giveUpExclusiveLock(final boolean flush) throws IndexException {
+		boolean wasInterrupted = false;
+		if (this.fExclusiveLock) {
+			try {
+				ArrayList<Chunk> dirtyChunks= new ArrayList<>();
+				synchronized (this.fCache) {
+					for (int i= 1; i < this.fChunksUsed; i++) {
+						Chunk chunk= this.fChunks[i];
+						if (chunk != null) {
+							if (chunk.fCacheIndex < 0) {
+								// Locked chunk that has been removed from cache.
+								if (chunk.fDirty) {
+									dirtyChunks.add(chunk); // Keep in fChunks until it is flushed.
+								} else {
+									chunk.fLocked= false;
+									this.fChunks[i]= null;
+								}
+							} else if (chunk.fLocked) {
+								// Locked chunk, still in cache.
+								if (chunk.fDirty) {
+									if (flush) {
+										dirtyChunks.add(chunk);
+									}
+								} else {
+									chunk.fLocked= false;
+								}
+							} else {
+								assert !chunk.fDirty; // Dirty chunks must be locked.
+							}
+						}
+					}
+				}
+				// Also handles header chunk.
+				wasInterrupted = flushAndUnlockChunks(dirtyChunks, flush) || wasInterrupted;
+			} finally {
+				this.fExclusiveLock= false;
+			}
+		}
+		return wasInterrupted;
+	}
+

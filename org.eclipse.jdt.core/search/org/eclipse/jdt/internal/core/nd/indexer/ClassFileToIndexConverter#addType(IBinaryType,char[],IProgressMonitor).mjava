@@ -1,0 +1,108 @@
+	/**
+	 * Adds a type to the index, given an input class file and a binary name. Note that the given binary name is 
+	 * 
+	 * @param binaryType an object used for parsing the .class file itself
+	 * @param fieldDescriptor the name that is used to locate the class, computed from the .class file's name and location.
+	 * In the event that the .class file has been moved, this may differ from the binary name stored in the .class file
+	 * itself, which is why this is received as an argument rather than extracted from the .class file.
+	 * @throws CoreException
+	 */
+	public NdType addType(IBinaryType binaryType, char[] fieldDescriptor, IProgressMonitor monitor) throws CoreException {
+		char[] fieldDescriptorFromClass = JavaNames.binaryNameToFieldDescriptor(binaryType.getName());
+		logInfo("adding binary type " + new String(fieldDescriptor)); //$NON-NLS-1$
+
+		NdTypeId name = createTypeIdFromFieldDescriptor(fieldDescriptor);
+		NdType type = name.findTypeByResourceAddress(this.resource.address);
+
+		if (type == null) {
+			type = new NdType(getNd(), this.resource);
+		}
+
+		IBinaryTypeAnnotation[] typeAnnotations = binaryType.getTypeAnnotations();
+		if (typeAnnotations != null) {
+			for (IBinaryTypeAnnotation typeAnnotation : typeAnnotations) {
+				NdTypeAnnotationInType annotation = new NdTypeAnnotationInType(getNd(), type);
+
+				initTypeAnnotation(annotation, typeAnnotation);
+			}
+		}
+
+		type.setTypeId(name);
+
+		if (!CharArrayUtils.equals(fieldDescriptorFromClass, fieldDescriptor)) {
+			type.setFieldDescriptorFromClass(fieldDescriptorFromClass);
+		}
+
+		char[][] interfaces = binaryType.getInterfaceNames();
+		if (interfaces == null) {
+			interfaces = EMPTY_CHAR_ARRAY_ARRAY;
+		}
+
+		if (binaryType.getGenericSignature() != null) {
+			type.setFlag(NdType.FLG_GENERIC_SIGNATURE_PRESENT, true);
+		}
+
+		// Create the default generic signature if the .class file didn't supply one
+		SignatureWrapper signatureWrapper = GenericSignatures.getGenericSignature(binaryType);
+
+		type.setModifiers(binaryType.getModifiers());
+		type.setDeclaringType(createTypeIdFromBinaryName(binaryType.getEnclosingTypeName()));
+
+		readTypeParameters(type, signatureWrapper);
+
+		char[] superclassFieldDescriptor;
+		char[] superclassBinaryName = binaryType.getSuperclassName();
+		if (superclassBinaryName == null) {
+			superclassFieldDescriptor = JAVA_LANG_OBJECT_FIELD_DESCRIPTOR;
+		} else {
+			superclassFieldDescriptor = JavaNames.binaryNameToFieldDescriptor(superclassBinaryName);
+		}
+		type.setSuperclass(createTypeSignature(signatureWrapper, superclassFieldDescriptor));
+
+		short interfaceIdx = 0;
+		while (signatureWrapper.start < signatureWrapper.signature.length) {
+			// Note that there may be more interfaces listed in the generic signature than in the interfaces list.
+			// Although the VM spec doesn't discuss this case specifically, there are .class files in the wild with
+			// this characteristic. In such cases, we take what's in the generic signature and discard what's in the
+			// interfaces list.
+			char[] interfaceSpec = interfaceIdx < interfaces.length ? interfaces[interfaceIdx] : EMPTY_CHAR_ARRAY;
+			new NdTypeInterface(getNd(), type,
+					createTypeSignature(signatureWrapper, JavaNames.binaryNameToFieldDescriptor(interfaceSpec)));
+			interfaceIdx++;
+		}
+
+		IBinaryAnnotation[] annotations = binaryType.getAnnotations();
+		attachAnnotations(type, annotations);
+
+		type.setDeclaringMethod(createMethodId(binaryType.getEnclosingTypeName(), binaryType.getEnclosingMethod()));
+
+		IBinaryField[] fields = binaryType.getFields();
+
+		if (fields != null) {
+			for (IBinaryField nextField : fields) {
+				addField(type, nextField);
+			}
+		}
+
+		IBinaryMethod[] methods = binaryType.getMethods();
+
+		if (methods != null) {
+			for (IBinaryMethod next : methods) {
+				addMethod(type, next, binaryType);
+			}
+		}
+
+		char[][][] missingTypeNames = binaryType.getMissingTypeNames();
+		char[] missingTypeString = getMissingTypeString(missingTypeNames);
+
+		type.setMissingTypeNames(missingTypeString);
+		type.setSourceFileName(binaryType.sourceFileName());
+		type.setAnonymous(binaryType.isAnonymous());
+		type.setIsLocal(binaryType.isLocal());
+		type.setIsMember(binaryType.isMember());
+		type.setTagBits(binaryType.getTagBits());
+		type.setSourceNameOverride(binaryType.getSourceName());
+
+		return type;
+	}
+

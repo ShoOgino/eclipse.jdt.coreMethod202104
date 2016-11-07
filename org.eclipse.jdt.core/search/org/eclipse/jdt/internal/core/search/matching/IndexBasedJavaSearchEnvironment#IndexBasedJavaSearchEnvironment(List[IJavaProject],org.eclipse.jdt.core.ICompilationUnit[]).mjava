@@ -1,0 +1,53 @@
+	public IndexBasedJavaSearchEnvironment(List<IJavaProject> javaProject, org.eclipse.jdt.core.ICompilationUnit[] copies) {
+		this.workingCopies = JavaSearchNameEnvironment.getWorkingCopyMap(copies);
+
+		try {
+			List<IPackageFragmentRoot> localRoots = new ArrayList<>();
+
+			for (IJavaProject next : javaProject) {
+				for (IPackageFragmentRoot nextRoot : next.getAllPackageFragmentRoots()) {
+					IPath path = nextRoot.getPath();
+					if (!nextRoot.isArchive()) {
+						Object target = JavaModel.getTarget(path, true);
+						if (target != null) {
+							ClasspathLocation cp;
+							if (nextRoot.getKind() == IPackageFragmentRoot.K_SOURCE) {
+								PackageFragmentRoot root = (PackageFragmentRoot)nextRoot;
+								cp = new ClasspathSourceDirectory((IContainer)target, root.fullExclusionPatternChars(), root.fullInclusionPatternChars());
+								this.unindexedEntries.add(cp);
+							}
+						}
+					}
+
+					localRoots.add(nextRoot);
+				}
+			}
+
+			this.roots = localRoots.toArray(new IPackageFragmentRoot[0]);
+		} catch (JavaModelException e) {
+			this.roots = new IPackageFragmentRoot[0];
+			// project doesn't exist
+		}
+
+		// Build the map of paths onto root indices
+		int length = this.roots.length;
+		for (int i = 0; i < length; i++) {
+			IPath nextPath = JavaIndex.getLocationForElement(this.roots[i]);
+			this.mapPathsToRoots.put(nextPath, i);
+		}
+
+		// Locate the position of the first source entry
+		this.sourceEntryPosition = Integer.MAX_VALUE;
+		for (int i = 0; i < length; i++) {
+			IPackageFragmentRoot nextRoot = this.roots[i];
+			try {
+				if (nextRoot.getKind() == IPackageFragmentRoot.K_SOURCE) {
+					this.sourceEntryPosition = i;
+					break;
+				}
+			} catch (JavaModelException e) {
+				// project doesn't exist
+			}
+		}
+	}
+

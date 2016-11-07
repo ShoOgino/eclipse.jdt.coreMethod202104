@@ -1,0 +1,63 @@
+	public void testReadingAllClassesInIndexAreEquivalentToOriginalJarFiles() throws Exception {
+		IJavaProject javaProject = createJavaProject(PROJECT_NAME, new String[] {"src"}, new String[] {"JCL18_FULL"}, "bin", "1.8", true);
+		addClassFolder(javaProject, "lib", new String[] {
+				"p/Outer.java",
+				"import java.lang.annotation.*;\n" +
+				"\n" +
+				"@Retention(RetentionPolicy.RUNTIME) @Target(ElementType.TYPE_USE) @interface A {}\n" +
+				"@Retention(RetentionPolicy.RUNTIME) @Target(ElementType.METHOD) @interface M {}\n" +
+				"@Retention(RetentionPolicy.RUNTIME) @Target(ElementType.PARAMETER) @interface P {}\n" +
+				"\n" +
+				"class Outer {\n" +
+				"    class Middle1 {\n" +
+				"        class Inner {}\n" +
+				"    }\n" +
+				"    static class Middle2 {\n" +
+				"        class Inner {}\n" +
+				"        static class Middle3 {\n" +
+				"            class Inner2{};\n" +
+				"        }\n" +
+				"    }\n" +
+				"    Middle1.@A Inner e1;\n" +
+				"    Middle2.@A Inner e2;\n" +
+				"    Middle2.Middle3.@A Inner2 e3;\n" +
+				"    @M void foo(@P Middle2.Middle3.@A Inner2 e3) {};\n" +
+				"    class Middle4 extends @A Middle1 {}\n" +
+				"}\n",
+			}, "1.8");
+
+		IWorkspaceRoot root = ResourcesPlugin.getWorkspace().getRoot();
+		Indexer indexer = new Indexer(index.getNd(), root);
+
+		indexer.rescan(SubMonitor.convert(null));
+
+		boolean foundAtLeastOneClass = false;
+		SubMonitor subMonitor = SubMonitor.convert(null);
+		JavaIndex localIndex = IndexerTest.index;
+		try (IReader reader = localIndex.getNd().acquireReadLock()) {
+			IPackageFragmentRoot[] roots = javaProject.getAllPackageFragmentRoots();
+			subMonitor.setWorkRemaining(roots.length);
+			for (IPackageFragmentRoot next : roots) {
+				SubMonitor iterationMon = subMonitor.split(1);
+				if (next.getKind() == IPackageFragmentRoot.K_BINARY) {
+					List<IClassFile> result = new ArrayList<>();
+					collectAllClassFiles(result, next);
+					iterationMon.setWorkRemaining(result.size());
+					for (IClassFile nextClass : result) {
+						SubMonitor classMon = iterationMon.split(1);
+						BinaryTypeDescriptor descriptor = BinaryTypeFactory.createDescriptor(nextClass);
+						IndexBinaryType indexedBinaryType = (IndexBinaryType)BinaryTypeFactory.readFromIndex(localIndex, descriptor, classMon);
+						ClassFileReader originalBinaryType = BinaryTypeFactory.rawReadType(descriptor, true);
+
+						if (!indexedBinaryType.exists()) {
+							throw new IllegalStateException("Unable to find class in index " + new String(descriptor.indexPath));
+						}
+						IndexTester.testType(originalBinaryType, indexedBinaryType);
+						foundAtLeastOneClass = true;
+					}
+				}
+			}
+		}
+		assertTrue("No classes found in the index", foundAtLeastOneClass);
+	}
+

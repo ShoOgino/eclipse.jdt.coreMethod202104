@@ -1,8 +1,5 @@
 		@Override
 		protected boolean token(Token token, int index) {
-			if (token.tokenType == TokenNameCOMMENT_LINE)
-				return false;
-
 			if (token.hasNLSTag())
 				this.isNLSTagInLine = true;
 
@@ -10,25 +7,33 @@
 				WrapPolicy wrapPolicy = token.getWrapPolicy();
 				if (wrapPolicy.wrapMode == WrapMode.TOP_PRIORITY && getLineBreaksBefore() == 0
 						&& index > this.currentTopPriorityGroupEnd) {
-					this.topPriorityGroupStarts.add(index);
-					this.currentTopPriorityGroupEnd = wrapPolicy.groupEndIndex;
-				}
-				if (this.firstPotentialWrap < 0 && getWrapIndent(token) < this.counter)
+					if (isActiveTopPriorityWrap(index, wrapPolicy)) {
+						this.activeTopPriorityWrap = index;
+					} else {
+						this.topPriorityGroupStarts.add(index);
+						this.currentTopPriorityGroupEnd = wrapPolicy.groupEndIndex;
+					}
+					if (this.firstPotentialWrap < 0)
+						this.firstPotentialWrap = index;
+				} else if (this.firstPotentialWrap < 0 && getWrapIndent(token) < this.counter) {
 					this.firstPotentialWrap = index;
+				}
+				this.minStructureDepth = Math.min(this.minStructureDepth, wrapPolicy.structureDepth);
 			}
 
 			if (token.getAlign() > 0) {
 				this.counter = token.getAlign();
-			} else if (isSpaceBefore() && getLineBreaksBefore() == 0 && index > 0) {
+			} else if (isSpaceBefore() && getLineBreaksBefore() == 0 && index > 0
+					&& token.tokenType != TokenNameCOMMENT_LINE) {
 				this.counter++;
 			}
 
-			if (token.isComment()) {
+			if (!token.isComment()) {
+				this.counter += WrapExecutor.this.tm.getLength(token, this.counter);
+			} else if (token.tokenType != TokenNameCOMMENT_LINE) {
 				this.counter = this.commentWrapper.wrapMultiLineComment(token, this.counter, true, this.isNLSTagInLine);
 				this.extraLines += this.commentWrapper.getLinesCount() - 1;
 				this.extraLinesPerComment.add(this.commentWrapper.getLinesCount() - 1);
-			} else {
-				this.counter += WrapExecutor.this.tm.getLength(token, this.counter);
 			}
 
 			this.lineExceeded = this.counter > WrapExecutor.this.options.page_width;
@@ -36,6 +41,13 @@
 				return false;
 			}
 			token.setIndent(this.lineIndent);
+
+			if (getNext() != null && getNext().isWrappable() && getLineBreaksAfter() > 0) {
+				this.isNextLineWrapped = true;
+				if (this.firstPotentialWrap < 0)
+					this.firstPotentialWrap = index + 1;
+				return false; 
+			}
 
 			boolean isLineEnd = getLineBreaksAfter() > 0 || getNext() == null
 					|| (getNext().isNextLineOnWrap() && WrapExecutor.this.tm

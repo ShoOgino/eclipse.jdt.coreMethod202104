@@ -1,0 +1,82 @@
+	private StructDef(Class<T> clazz, StructDef<? super T> superClass, boolean isAbstract) {
+		this.clazz = clazz;
+		this.superClass = superClass;
+		if (this.superClass != null) {
+			this.superClass.subClasses.add(this);
+		}
+		this.isAbstract = isAbstract;
+		final String fullyQualifiedClassName = clazz.getName();
+
+		final Constructor<T> constructor;
+		if (!this.isAbstract) {
+			try {
+				constructor = clazz.getConstructor(new Class<?>[] { Nd.class, long.class });
+			} catch (NoSuchMethodException | SecurityException e) {
+				throw new IllegalArgumentException("The node class " + fullyQualifiedClassName //$NON-NLS-1$
+						+ " does not have an appropriate constructor for it to be used with Nd"); //$NON-NLS-1$
+			}
+		} else {
+			constructor = null;
+		}
+
+		this.hasUserDestructor = IDestructable.class.isAssignableFrom(clazz);
+
+		this.factory = new ITypeFactory<T>() {
+			public T create(Nd dom, long address) {
+				if (StructDef.this.isAbstract) {
+					throw new UnsupportedOperationException(
+							"Attempting to instantiate abstract class" + fullyQualifiedClassName); //$NON-NLS-1$
+				}
+
+				try {
+					return constructor.newInstance(dom, address);
+				} catch (InvocationTargetException e) {
+					Throwable target = e.getCause();
+
+					if (target instanceof RuntimeException) {
+						throw (RuntimeException) target;
+					}
+
+					throw new RuntimeException("Error in AutoTypeFactory", e); //$NON-NLS-1$
+				} catch (InstantiationException | IllegalAccessException e) {
+					throw new RuntimeException("Error in AutoTypeFactory", e); //$NON-NLS-1$
+				}
+			}
+
+			public int getRecordSize() {
+				return StructDef.this.size();
+			}
+
+			public boolean hasDestructor() {
+				return StructDef.this.hasUserDestructor || hasDestructableFields(); 
+			}
+
+			public Class<?> getElementClass() {
+				return StructDef.this.clazz;
+			}
+
+			public void destruct(Nd nd, long address) {
+				checkNotMutable();
+				if (StructDef.this.hasUserDestructor) {
+					IDestructable destructable = (IDestructable)create(nd, address);
+					destructable.destruct();
+				}
+				destructFields(nd, address);
+			}
+
+			public void destructFields(Nd dom, long address) {
+				StructDef.this.destructFields(dom, address);
+			}
+
+			@Override
+			public boolean isReadyForDeletion(Nd dom, long address) {
+				return StructDef.this.isReadyForDeletion(dom, address);
+			}
+			
+			@Override
+			public DeletionSemantics getDeletionSemantics() {
+				return StructDef.this.getDeletionSemantics();
+			}
+		};
+	}
+

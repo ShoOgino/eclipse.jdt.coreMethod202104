@@ -1,0 +1,74 @@
+	/**
+	 * Clean up unneeded files here, but only do so if it's been a long time since the file was last referenced. Being
+	 * too eager about removing old files means that operations which temporarily cause a file to become unreferenced
+	 * will run really slowly. also eagerly clean up any partially-indexed files we discover during the scan. That is,
+	 * if we discover a file with a timestamp of 0, it indicates that the indexer or all of Eclipse crashed midway
+	 * through indexing the file. Such garbage should be cleaned up as soon as possible, since it will never be useful.
+	 *
+	 * @param currentTimeMillis timestamp of the time at which the indexing operation started
+	 * @param allIndexables list of all referenced java roots
+	 * @param monitor progress monitor
+	 * @return the number of indexables in the index, prior to garbage collection
+	 */
+	private int cleanGarbage(long currentTimeMillis, Collection<IPath> allIndexables, IProgressMonitor monitor) {
+		JavaIndex index = JavaIndex.getIndex(this.nd);
+
+		int result = 0; 
+		HashSet<IPath> paths = new HashSet<>();
+		paths.addAll(allIndexables);
+		SubMonitor subMonitor = SubMonitor.convert(monitor, 3);
+
+		List<NdResourceFile> garbage = new ArrayList<>();
+		List<NdResourceFile> needsUpdate = new ArrayList<>();
+
+		long usageTimestampUpdatePeriod = getUsageTimestampUpdatePeriod();
+		long garbageCleanupTimeout = getGarbageCleanupTimeout();
+		// Build up the list of NdResourceFiles that either need to be garbage collected or
+		// have their read timestamps updated.
+		try (IReader reader = this.nd.acquireReadLock()) {
+			List<NdResourceFile> resourceFiles = index.getAllResourceFiles();
+
+			result = resourceFiles.size();
+			SubMonitor testMonitor = subMonitor.split(1).setWorkRemaining(resourceFiles.size());
+			for (NdResourceFile next : resourceFiles) {
+				testMonitor.split(1);
+				if (!next.isDoneIndexing()) {
+					garbage.add(next);
+				} else {
+					IPath nextPath = new Path(next.getLocation().toString());
+					long timeLastUsed = next.getTimeLastUsed();
+					long timeSinceLastUsed = currentTimeMillis - timeLastUsed;
+
+					if (paths.contains(nextPath)) {
+						if (timeSinceLastUsed > usageTimestampUpdatePeriod) {
+							needsUpdate.add(next);
+						}
+					} else {
+						if (timeSinceLastUsed > garbageCleanupTimeout) {
+							garbage.add(next);
+						}
+					}
+				}
+			}
+		}
+
+		SubMonitor deleteMonitor = subMonitor.split(1).setWorkRemaining(garbage.size());
+		for (NdResourceFile next : garbage) {
+			deleteResource(next, deleteMonitor.split(1));
+		}
+
+		SubMonitor updateMonitor = subMonitor.split(1).setWorkRemaining(needsUpdate.size());
+		for (NdResourceFile next : needsUpdate) {
+			this.nd.acquireWriteLock(updateMonitor.split(1));
+			try {
+				if (next.isInIndex()) {
+					next.setTimeLastUsed(currentTimeMillis);
+				}
+			} finally {
+				this.nd.releaseWriteLock();
+			}
+		}
+
+		return result;
+	}
+

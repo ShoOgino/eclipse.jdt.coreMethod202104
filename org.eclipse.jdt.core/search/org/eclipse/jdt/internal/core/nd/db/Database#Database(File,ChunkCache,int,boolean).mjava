@@ -1,0 +1,34 @@
+	/**
+	 * Construct a new Database object, creating a backing file if necessary.
+	 * @param location the local file path for the database
+	 * @param cache the cache to be used optimization
+	 * @param version the version number to store in the database (only applicable for new databases)
+	 * @param openReadOnly whether this Database object will ever need writing to
+	 * @throws IndexException
+	 */
+	public Database(File location, ChunkCache cache, int version, boolean openReadOnly) throws IndexException {
+		try {
+			this.fLocation = location;
+			this.fReadOnly= openReadOnly;
+			this.fCache= cache;
+			openFile();
+
+			int nChunksOnDisk = (int) (this.fFile.length() / CHUNK_SIZE);
+			this.fHeaderChunk= new Chunk(this, 0);
+			this.fHeaderChunk.fLocked= true;		// Never makes it into the cache, needed to satisfy assertions.
+			if (nChunksOnDisk <= 0) {
+				this.fVersion= version;
+				this.fChunks= new Chunk[1];
+				this.fChunksUsed = this.fChunksAllocated = this.fChunks.length;
+			} else {
+				this.fHeaderChunk.read();
+				this.fVersion= this.fHeaderChunk.getInt(VERSION_OFFSET);
+				this.fChunks = new Chunk[nChunksOnDisk];	// chunk[0] is unused.
+				this.fChunksUsed = this.fChunksAllocated = nChunksOnDisk;
+			}
+		} catch (IOException e) {
+			throw new IndexException(new DBStatus(e));
+		}
+		this.memoryUsage = new MemoryStats(this.fHeaderChunk, MALLOC_STATS_OFFSET);
+	}
+
