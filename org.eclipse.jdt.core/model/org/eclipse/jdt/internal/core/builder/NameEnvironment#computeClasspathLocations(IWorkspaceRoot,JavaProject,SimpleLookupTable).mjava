@@ -38,6 +38,9 @@ private void computeClasspathLocations(
 	IClasspathEntry[] classpathEntries = javaProject.getExpandedClasspath();
 	ArrayList sLocations = new ArrayList(classpathEntries.length);
 	ArrayList bLocations = new ArrayList(classpathEntries.length);
+	List<IModulePathEntry> entries = new ArrayList<>(classpathEntries.length);
+	IModuleDescription mod = null;
+	
 	nextEntry : for (int i = 0, l = classpathEntries.length; i < l; i++) {
 		ClasspathEntry entry = (ClasspathEntry) classpathEntries[i];
 		IPath path = entry.getPath();
@@ -76,6 +79,7 @@ private void computeClasspathLocations(
 				JavaProject prereqJavaProject = (JavaProject) JavaCore.create(prereqProject);
 				IClasspathEntry[] prereqClasspathEntries = prereqJavaProject.getRawClasspath();
 				ArrayList seen = new ArrayList();
+				List<ClasspathLocation> projectLocations = new ArrayList<ClasspathLocation>();
 				nextPrereqEntry: for (int j = 0, m = prereqClasspathEntries.length; j < m; j++) {
 					IClasspathEntry prereqEntry = prereqClasspathEntries[j];
 					if (prereqEntry.getEntryKind() == IClasspathEntry.CPE_SOURCE) {
@@ -91,6 +95,7 @@ private void computeClasspathLocations(
 							seen.add(binaryFolder);
 							ClasspathLocation bLocation = ClasspathLocation.forBinaryFolder(binaryFolder, true, entry.getAccessRuleSet(), externalAnnotationPath, this);
 							bLocations.add(bLocation);
+							projectLocations.add(bLocation);
 							if (binaryLocationsPerProject != null) { // normal builder mode
 								ClasspathLocation[] existingLocations = (ClasspathLocation[]) binaryLocationsPerProject.get(prereqProject);
 								if (existingLocations == null) {
@@ -104,6 +109,11 @@ private void computeClasspathLocations(
 							}
 						}
 					}
+				}
+				if ((mod = prereqJavaProject.getModuleDescription()) != null && projectLocations.size() > 0) {
+					ModuleDescriptionInfo info = (ModuleDescriptionInfo) ((SourceModule)mod).getElementInfo();
+					ModulePathEntry projectEntry = new ModulePathEntry(prereqJavaProject.getPath(), info, projectLocations.toArray(new ClasspathLocation[projectLocations.size()]));
+					entries.add(projectEntry);
 				}
 				continue nextEntry;
 
@@ -127,6 +137,11 @@ private void computeClasspathLocations(
 						bLocation = ClasspathLocation.forBinaryFolder((IContainer) target, false, accessRuleSet, externalAnnotationPath, this);	 // is library folder not output folder
 					}
 					bLocations.add(bLocation);
+					// TODO: Ideally we need to do something like mapToModulePathEntry using the path and if it is indeed
+					// a module path entry, then add the corresponding entry here, but that would need the target platform
+					if (bLocation instanceof IModulePathEntry) {
+						entries.add((IModulePathEntry) bLocation);
+					}
 					if (binaryLocationsPerProject != null) { // normal builder mode
 						IProject p = resource.getProject(); // can be the project being built
 						ClasspathLocation[] existingLocations = (ClasspathLocation[]) binaryLocationsPerProject.get(p);
@@ -145,7 +160,13 @@ private void computeClasspathLocations(
 							&& JavaCore.IGNORE.equals(javaProject.getOption(JavaCore.COMPILER_PB_DISCOURAGED_REFERENCE, true)))
 								? null
 								: entry.getAccessRuleSet();
-					bLocations.add(ClasspathLocation.forLibrary(path.toString(), accessRuleSet, externalAnnotationPath, this));
+					ClasspathLocation bLocation = ClasspathLocation.forLibrary(path.toString(), accessRuleSet, externalAnnotationPath, this);
+					bLocations.add(bLocation);
+					// TODO: Ideally we need to do something like mapToModulePathEntry using the path and if it is indeed
+					// a module path entry, then add the corresponding entry here, but that would need the target platform
+					if (bLocation instanceof IModulePathEntry) {
+						entries.add((IModulePathEntry) bLocation);
+					}
 				}
 				continue nextEntry;
 		}
@@ -156,7 +177,11 @@ private void computeClasspathLocations(
 	this.sourceLocations = new ClasspathMultiDirectory[sLocations.size()];
 	if (!sLocations.isEmpty()) {
 		sLocations.toArray(this.sourceLocations);
-
+		if ((mod = javaProject.getModuleDescription()) != null) {
+			ModuleDescriptionInfo info = (ModuleDescriptionInfo) ((SourceModule)mod).getElementInfo();
+			ModulePathEntry projectEntry = new ModulePathEntry(javaProject.getPath(), info, this.sourceLocations);
+			entries.add(0, projectEntry);
+		}
 		// collect the output folders, skipping duplicates
 		next : for (int i = 0, l = this.sourceLocations.length; i < l; i++) {
 			ClasspathMultiDirectory md = this.sourceLocations[i];
@@ -184,5 +209,7 @@ private void computeClasspathLocations(
 		this.binaryLocations[index++] = (ClasspathLocation) outputFolders.get(i);
 	for (int i = 0, l = bLocations.size(); i < l; i++)
 		this.binaryLocations[index++] = (ClasspathLocation) bLocations.get(i);
+	
+	this.modulePathEntries = entries.toArray(new IModulePathEntry[entries.size()]);
 }
 
