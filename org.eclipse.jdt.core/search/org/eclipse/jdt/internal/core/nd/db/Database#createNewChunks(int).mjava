@@ -1,20 +1,40 @@
-	/**
-	 * For testing purposes, only.
-	 */
 	private long createNewChunks(int numChunks) throws IndexException {
 		assert this.fExclusiveLock;
 		synchronized (this.fCache) {
-			final int oldLen= this.fChunks.length;
-			Chunk[] newchunks = new Chunk[oldLen + numChunks];
-			System.arraycopy(this.fChunks, 0, newchunks, 0, oldLen);
-			final Chunk chunk= new Chunk(this, oldLen + numChunks - 1);
-			chunk.fDirty= true;
-			newchunks[ oldLen + numChunks - 1 ] = chunk;
-			this.fChunks= newchunks;
-			this.fCache.add(chunk, true);
-			this.fChunksAllocated=oldLen + numChunks;
-			this.fChunksUsed=oldLen + numChunks;
-			return (long) (oldLen + numChunks - 1) * CHUNK_SIZE;
+			final int firstChunkIndex = this.fChunksUsed;
+			final int lastChunkIndex = firstChunkIndex + numChunks - 1;
+
+			final Chunk lastChunk = new Chunk(this, lastChunkIndex);
+			lastChunk.fDirty = true;
+
+			if (lastChunkIndex >= this.fChunks.length) {
+				int increment = Math.max(1024, this.fChunks.length / 20);
+				int newNumChunks = Math.max(lastChunkIndex + 1, this.fChunks.length + increment);
+				Chunk[] newChunks = new Chunk[newNumChunks];
+				System.arraycopy(this.fChunks, 0, newChunks, 0, this.fChunks.length);
+				this.fChunks = newChunks;
+			}
+
+			this.fChunksUsed = lastChunkIndex + 1;
+			this.fChunks[lastChunkIndex] = lastChunk;
+			this.fCache.add(lastChunk, true);
+			long result = (long) firstChunkIndex * CHUNK_SIZE;
+
+			/*
+			 * Non-dense pointers are at most 31 bits dense pointers are at most 35 bits Check the sizes here and throw
+			 * an exception if the address is too large. By throwing the IndexException with the special status, the
+			 * indexing operation should be stopped. This is desired since generally, once the max size is exceeded,
+			 * there are lots of errors.
+			 */
+			long endAddress = result + (numChunks * CHUNK_SIZE);
+			if (endAddress > MAX_DB_SIZE) {
+				Object bindings[] = { this.getLocation().getAbsolutePath(), MAX_DB_SIZE };
+				throw new IndexException(new Status(IStatus.ERROR, Package.PLUGIN_ID, Package.STATUS_DATABASE_TOO_LARGE,
+						NLS.bind("Database too large! Address = " + endAddress + ", max size = " + MAX_DB_SIZE, //$NON-NLS-1$ //$NON-NLS-2$
+								bindings), null));
+			}
+
+			return result;
 		}
 	}
 
