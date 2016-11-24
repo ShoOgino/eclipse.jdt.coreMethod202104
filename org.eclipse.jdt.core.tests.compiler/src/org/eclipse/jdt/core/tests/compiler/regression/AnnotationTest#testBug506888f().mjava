@@ -1,0 +1,55 @@
+public void testBug506888f() throws Exception {
+
+	class MyCompilerRequestor implements ICompilerRequestor {
+		String[] problemArguments = null;
+
+		@Override
+		public void acceptResult(CompilationResult result) {
+			for (CategorizedProblem problem : result.getAllProblems()) {
+				String[] arguments = problem.getArguments();
+				if (arguments != null && arguments.length > 0) {
+					this.problemArguments = arguments;
+					return;
+				}
+			}
+		}
+	}
+
+	if (this.complianceLevel <= ClassFileConstants.JDK1_5) {
+		return;
+	}
+	Map options = getCompilerOptions();
+	options.put(CompilerOptions.OPTION_ReportUnusedWarningToken, CompilerOptions.ERROR);
+	options.put(CompilerOptions.OPTION_ReportUnusedDeclaredThrownException, CompilerOptions.IGNORE);
+	options.put(CompilerOptions.OPTION_ReportUnusedLocal, CompilerOptions.WARNING);
+	MyCompilerRequestor requestor = new MyCompilerRequestor();
+	runTest(new String[] {
+				"X.java",
+				"public class X {\n" +
+				"	\n" +
+				"	@SuppressWarnings({\"unused\"})\n" +
+				"	void foo() {\n" +
+				"	}\n" +
+				"}	\n",
+			},
+			false,
+			"----------\n" + 
+			"1. INFO in X.java (at line 3)\n" + 
+			"	@SuppressWarnings({\"unused\"})\n" + 
+			"	                   ^^^^^^^^\n" + 
+			"At least one of the problems in category \'unused\' is not analysed due to a compiler option being ignored\n" + 
+			"----------\n",
+			"" /*expectedOutputString */,
+			"" /* expectedErrorString */,
+			false /* forceExecution */,
+			null /* classLib */,
+			true /* shouldFlushOutputDirectory */,
+			null /* vmArguments */,
+			options,
+			new Requestor(true, requestor, false, true),
+			JavacTestOptions.DEFAULT);
+	assertNotNull(requestor.problemArguments);
+	assertEquals(1, requestor.problemArguments.length);
+	assertEquals(JavaCore.COMPILER_PB_UNUSED_PARAMETER, requestor.problemArguments[0]);
+}
+
