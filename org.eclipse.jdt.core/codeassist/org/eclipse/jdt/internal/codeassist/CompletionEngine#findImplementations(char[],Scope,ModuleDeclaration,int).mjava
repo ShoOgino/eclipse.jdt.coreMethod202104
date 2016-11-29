@@ -1,0 +1,78 @@
+	private void findImplementations(char[] token, Scope scope, ModuleDeclaration module, int index) {
+
+		TypeReference theInterface = module.interfaces[index];
+
+		if (token == null)
+			return;
+		char[][] theInterfaceType = theInterface.getTypeName();
+		if (theInterfaceType == null) return;
+		NameEnvironmentAnswer answer =  this.nameEnvironment.findType(theInterfaceType);
+		IType typeHandle = null;
+		if (answer != null && answer.isSourceType()) {
+			typeHandle = ((SourceTypeElementInfo) answer.getSourceTypes()[0]).getHandle();
+			SearchPattern pattern = SearchPattern.createPattern(typeHandle, IJavaSearchConstants.IMPLEMENTORS, SearchPattern.R_EXACT_MATCH | SearchPattern.R_CASE_SENSITIVE);
+			IJavaSearchScope searchScope = BasicSearchEngine.createJavaSearchScope(new IJavaElement[] {this.javaProject});
+			class ImplSearchRequestor extends SearchRequestor {
+				String prefix;
+				List<String> filter;
+				public List<IType> types = new ArrayList<>();
+				public ImplSearchRequestor(char[] prefixToken, List<String> filter) {
+					this.prefix = (prefixToken == CharOperation.ALL_PREFIX) ? null : new String(prefixToken);
+					this.filter = filter;
+				}
+				@Override
+				public void acceptSearchMatch(SearchMatch match) throws CoreException {
+					checkCancel();
+					IJavaElement element = ((IJavaElement) match.getElement());
+					if (element.getElementType() == IJavaElement.TYPE) {
+						IType type = (IType) element;
+						if (this.prefix != null) {
+							String fullTypeName = type.getPackageFragment().getElementName();
+							if (fullTypeName != null) {
+								fullTypeName = fullTypeName.concat(".").concat(type.getElementName()); //$NON-NLS-1$
+							} else {
+								fullTypeName = type.getElementName();
+							}
+							if (!fullTypeName.startsWith(this.prefix)) return;
+							if (this.filter.contains(fullTypeName)) return;
+						}
+						this.types.add(type);
+					}
+				}
+			};
+			try {
+				List<String> existingImpl = new ArrayList<>();
+				char[][] theInterfaceName = theInterface.getTypeName();
+				for (int i = 0, l = this.moduleDeclaration.implementations.length; i < l; ++i) {
+					if (i == index) continue;
+ 					if (!CharOperation.equals(theInterfaceName, this.moduleDeclaration.interfaces[i].getTypeName())) continue;
+					char[][] typeName = this.moduleDeclaration.implementations[i].getTypeName();
+					if (typeName.equals(CharOperation.NO_CHAR_CHAR)) continue;
+					existingImpl.add(CharOperation.toString(typeName));
+				}
+				ImplSearchRequestor searchRequestor = new ImplSearchRequestor(this.completionToken, existingImpl);
+				new SearchEngine(this.owner == null ? null : JavaModelManager.getJavaModelManager().getWorkingCopies(this.owner, true/*add primary WCs*/)).search(
+						pattern,
+						new SearchParticipant[] {SearchEngine.getDefaultSearchParticipant()},
+						searchScope,
+						searchRequestor,
+						null
+					);
+				for (IType type : searchRequestor.types) {
+					String pkg = type.getPackageFragment().getElementName();
+					String name = type.getElementName();
+					this.acceptType(pkg.toCharArray(), name.toCharArray(), CharOperation.NO_CHAR_CHAR, type.getFlags(), null);
+					acceptTypes(scope);
+				}
+			} catch (CoreException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+
+		}
+		if(!this.requestor.isIgnored(CompletionProposal.PACKAGE_REF)) {
+			checkCancel();
+			findPackagesInCurrentModule();
+		}
+	}
+
