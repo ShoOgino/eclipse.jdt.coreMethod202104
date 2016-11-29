@@ -9,48 +9,58 @@
 		this.binding.compoundName = CharOperation.arrayConcat(this.tokens, this.name);
 		Set<ModuleBinding> requiredModules = new HashSet<ModuleBinding>();
 		for(int i = 0; i < this.requiresCount; i++) {
-			ModuleReference ref = this.requires[i];
+			RequiresStatement ref = this.requires[i];
 			if (ref != null && ref.resolve(this.scope) != null) {
-				if (!requiredModules.add(ref.binding)) {
-					this.scope.problemReporter().duplicateModuleReference(IProblem.DuplicateRequires, ref);
+				if (!requiredModules.add(ref.resolvedBinding)) {
+					this.scope.problemReporter().duplicateModuleReference(IProblem.DuplicateRequires, ref.module);
 				}
-				Collection<ModuleBinding> deps = ref.binding.dependencyGraphCollector().get();
+				Collection<ModuleBinding> deps = ref.resolvedBinding.dependencyGraphCollector().get();
 				if (deps.contains(this.moduleBinding))
-					this.scope.problemReporter().cyclicModuleDependency(this.moduleBinding, ref);
+					this.scope.problemReporter().cyclicModuleDependency(this.moduleBinding, ref.module);
 			}
 		}
 		Set<PackageBinding> exportedPkgs = new HashSet<>();
 		for (int i = 0; i < this.exportsCount; i++) {
-			ExportReference ref = this.exports[i];
+			ExportsStatement ref = this.exports[i];
  			if (ref != null && ref.resolve(this.scope)) {
 				if (!exportedPkgs.add(ref.resolvedPackage)) {
-					this.scope.problemReporter().invalidExportReference(IProblem.DuplicateExports, ref);
+					this.scope.problemReporter().invalidPackageReference(IProblem.DuplicateExports, ref);
 				}
 			}
 		}
-		for(int i = 0; i < this.usesCount; i++) {
-			Set<TypeBinding> allTypes = new HashSet<TypeBinding>();
-			if (this.uses[i] != null && this.uses[i].resolveType(this.scope) != null) {
-				if (!allTypes.add(this.uses[i].resolvedType)) {
-					this.scope.problemReporter().duplicateTypeReference(IProblem.DuplicateUses, this.uses[i]);
-				}
-			}
-		}
-		Map<TypeBinding, TypeBinding> services = new HashMap<TypeBinding, TypeBinding>(this.servicesCount); 
-		for(int i = 0; i < this.servicesCount; i++) {
-			if (this.interfaces[i] != null && this.interfaces[i].resolveType(this.scope) != null) {
-				TypeBinding inf = this.interfaces[i].resolvedType;
-				if (this.implementations[i] != null && this.implementations[i].resolveType(this.scope) != null) {
-					ReferenceBinding imp = (ReferenceBinding) this.implementations[i].resolvedType;
-					if (inf.isValidBinding() && imp.isValidBinding()) {
-						validate(this.interfaces[i], this.implementations[i]);
-						if (services.get(inf) == imp) { //$IDENTITY-COMPARISON$
-							this.scope.problemReporter().duplicateTypeReference(IProblem.DuplicateServices,
-									this.interfaces[i], this.implementations[i]);
-						} else {
-							services.put(inf, imp);
-						}
+		Set<PackageBinding> openedPkgs = new HashSet<>();
+		for (int i = 0; i < this.opensCount; i++) {
+			OpensStatement ref = this.opens[i];
+			if (isOpen()) {
+				this.scope.problemReporter().invalidOpensStatement(ref, this);
+			} else {
+				if (ref.resolve(this.scope)) {
+					if (!openedPkgs.add(ref.resolvedPackage)) {
+						this.scope.problemReporter().invalidPackageReference(IProblem.DuplicateOpens, ref);
 					}
+				}
+			}
+		}
+		Set<TypeBinding> allTypes = new HashSet<TypeBinding>();
+		for(int i = 0; i < this.usesCount; i++) {
+			TypeBinding serviceBinding = this.uses[i].serviceInterface.resolveType(this.scope);
+			if (serviceBinding != null && serviceBinding.isValidBinding()) {
+				if (!(serviceBinding.isClass() || serviceBinding.isInterface() || serviceBinding.isAnnotationType())) {
+					this.scope.problemReporter().invalidServiceRef(IProblem.InvalidServiceIntfType, this.uses[i].serviceInterface);
+				}
+				if (!allTypes.add(this.uses[i].serviceInterface.resolvedType)) {
+					this.scope.problemReporter().duplicateTypeReference(IProblem.DuplicateUses, this.uses[i].serviceInterface);
+				}
+			}
+		}
+		Set<TypeBinding> interfaces = new HashSet<>();
+		for(int i = 0; i < this.servicesCount; i++) {
+			this.services[i].resolve(this.scope);
+			TypeBinding infBinding = this.services[i].serviceInterface.resolvedType;
+			if (infBinding != null && infBinding.isValidBinding()) {
+				if (!interfaces.add(this.services[i].serviceInterface.resolvedType)) { 
+					this.scope.problemReporter().duplicateTypeReference(IProblem.DuplicateServices,
+							this.services[i].serviceInterface);
 				}
 			}
 		}
