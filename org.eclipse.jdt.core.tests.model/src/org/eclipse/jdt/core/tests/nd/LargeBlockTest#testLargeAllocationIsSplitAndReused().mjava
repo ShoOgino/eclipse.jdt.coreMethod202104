@@ -1,0 +1,46 @@
+	/**
+	 * Tests that if there is a single large free block available, that block
+	 * will be split and reused if necessary to satisfy a number of smaller
+	 * requests.
+	 * 
+	 * @throws Exception
+	 */
+	public void testLargeAllocationIsSplitAndReused() throws Exception {
+		long tempAddress = malloc(Database.getBytesThatFitInChunks(10));
+		// Use some space at the end of the database to prevent the allocator
+		// from using the end of the database, where stuff can be easily resized
+		mallocChunks(1);
+		free(tempAddress);
+
+		// Keep track of how much memory we are currently using, so we can
+		// ensure that any further allocations come from the freed block rather
+		// than the end of the database.
+		int chunkCount = this.db.getChunkCount();
+
+		long firstAllocation = mallocChunks(7);
+
+		assertEquals("The freed chunk should be reused (there should be 10 chunks available)", chunkCount,
+				this.db.getChunkCount());
+
+		long secondAllocation = mallocChunks(1);
+
+		assertEquals("The freed chunk should be reused (there should be 3 chunks available)", chunkCount,
+				this.db.getChunkCount());
+
+		long thirdAllocation = mallocChunks(2);
+
+		assertEquals("The freed chunk should be reused (there should be exactly 2 chunks available)", chunkCount,
+				this.db.getChunkCount());
+		assertTrue(
+				"Allocations should happen from the start of the database if it makes no difference to fragmentation",
+				secondAllocation > firstAllocation);
+		assertTrue("Free space should have been kept next to the largest block for as long as possible",
+				secondAllocation > thirdAllocation);
+
+		// Do another allocation when there are no free chunks
+		mallocChunks(1);
+
+		assertEquals("New chunks should be allocated when the database is out of free blocks", chunkCount + 1,
+				this.db.getChunkCount());
+	}
+

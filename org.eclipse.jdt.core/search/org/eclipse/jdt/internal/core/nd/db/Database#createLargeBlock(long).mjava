@@ -1,0 +1,68 @@
+	/**
+	 * Obtains a new block that can fit the given number of bytes (at minimum). Returns the
+	 * chunk number.
+	 * 
+	 * @param datasize minimum number of bytes needed
+	 * @return the chunk number
+	 */
+	private int createLargeBlock(long datasize) {
+		final int neededChunks = getChunksNeededForBytes(datasize);
+		int freeBlockChunkNum = getFreeBlockFromTrie(neededChunks);
+		final int numChunks;
+
+		if (freeBlockChunkNum == 0) {
+			final int lastChunkNum = this.fChunksUsed;
+
+			numChunks = neededChunks;
+
+			// Check if the last block in the database is free. If so, unlink and expand it.
+			int lastBlockSize = getBlockFooterForChunkBefore(lastChunkNum);
+			if (lastBlockSize > 0) {
+				int startChunkNum = getFirstChunkOfBlockBefore(lastChunkNum);
+
+				unlinkFreeBlock(startChunkNum);
+				// Allocate additional new chunks such that the new chunk is large enough to
+				// handle this allocation.
+				createNewChunks(neededChunks - lastBlockSize);
+				freeBlockChunkNum = startChunkNum;
+			} else {
+				freeBlockChunkNum = createNewChunks(numChunks);
+			}
+		} else {
+			numChunks = getBlockHeaderForChunkNum(freeBlockChunkNum);
+
+			unlinkFreeBlock(freeBlockChunkNum);
+		}
+
+		final int resultChunkNum;
+		if (numChunks > neededChunks) {
+			// If the chunk we've selected is larger than necessary, split it. We have the
+			// choice of using either half of the block. In the interest of leaving more
+			// opportunities of merging large blocks, we leave the unused half of the block
+			// next to the larger adjacent block.
+			final long nextBlockChunkNum = freeBlockChunkNum + numChunks;
+
+			final int nextBlockSize = Math.abs(getBlockHeaderForChunkNum(nextBlockChunkNum));
+			final int prevBlockSize = Math.abs(getBlockFooterForChunkBefore(freeBlockChunkNum));
+
+			final int unusedChunks = numChunks - neededChunks;
+			if (nextBlockSize >= prevBlockSize) {
+				// Use the start of the block
+				resultChunkNum = freeBlockChunkNum;
+				// Return the last half of the block to the free block pool
+				linkFreeBlockToTrie(freeBlockChunkNum + neededChunks, unusedChunks);
+			} else {
+				// Use the end of the block
+				resultChunkNum = freeBlockChunkNum + neededChunks;
+				// Return the first half of the block to the free block pool
+				linkFreeBlockToTrie(freeBlockChunkNum, unusedChunks);
+			}
+		} else {
+			resultChunkNum = freeBlockChunkNum;
+		}
+
+		// Fill in the header and footer
+		setBlockHeader(resultChunkNum, -neededChunks);
+		return resultChunkNum;
+	}
+
