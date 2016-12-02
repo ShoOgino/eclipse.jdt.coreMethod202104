@@ -1,0 +1,74 @@
+	public static void encodeResourceFiles(Integer[] codePoints, Environment environment, String exportDirectory) {
+		File parentFile = new File(exportDirectory);
+		if (!parentFile.exists()) {
+			if (!parentFile.mkdirs()) {
+				System.err.println("Could not create the export directory: " + exportDirectory); //$NON-NLS-1$
+				return;
+			}
+		}
+		long encoding = 0;
+		int length = codePoints.length;
+		int counter = 0;
+		long[] computedValues = new long[BLOCK_LENGTH];
+		int limit = BOUND;
+		int blockLimit = BLOCK_SIZE;
+		int blockNumber = 0;
+		boolean hasMeaningfulValue = false;
+		for (int i = 0; i < length; i++) {
+			if (codePoints[i] < blockLimit) {
+				int valueToEncode = codePoints[i] & 0xFFFF;
+				if (valueToEncode < limit) {
+					encoding |= Bits[getBitIndex(valueToEncode)];
+				} else {
+					i--;
+					computedValues[counter++] = encoding;
+					hasMeaningfulValue |= encoding != 0 ? true : false;
+					encoding = 0;
+					limit += BOUND;
+				}
+			} else {
+				computedValues[counter++] = encoding;
+				try {
+					File f = new File(exportDirectory,
+							environment.getResourceFileName() + blockNumber + RESOURCE_FILE_EXTENSION);
+					if (hasMeaningfulValue) {
+						try (DataOutputStream outputStream = new DataOutputStream(new FileOutputStream(f))) {
+							for (int j = 0, max = computedValues.length; j < max; j++) {
+								long value = computedValues[j];
+								outputStream.writeLong(value);
+							}
+							outputStream.flush();
+						}
+					}
+				} catch (FileNotFoundException e) {
+					e.printStackTrace();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+				counter = 0;
+				hasMeaningfulValue = false;
+				Arrays.fill(computedValues, 0);
+				i--;
+				limit = BOUND;
+				blockLimit += BLOCK_SIZE;
+				blockNumber++;
+			}
+		}
+		computedValues[counter++] = encoding;
+		try {
+			File f = new File(exportDirectory,
+					environment.getResourceFileName() + blockNumber + RESOURCE_FILE_EXTENSION);
+			try (DataOutputStream outputStream = new DataOutputStream(new FileOutputStream(f))) {
+				for (int j = 0, max = computedValues.length; j < max; j++) {
+					long value = computedValues[j];
+					outputStream.writeLong(value);
+				}
+				outputStream.flush();
+			}
+		} catch (FileNotFoundException e) {
+			e.printStackTrace();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
+
