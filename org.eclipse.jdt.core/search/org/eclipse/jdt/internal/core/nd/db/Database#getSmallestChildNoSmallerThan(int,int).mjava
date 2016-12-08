@@ -1,0 +1,42 @@
+	/**
+	 * Given the chunk number of a block somewhere in the free space trie, this returns the smallest
+	 * child in the subtree that is no smaller than the given number of chunks.
+	 * 
+	 * @param trieNodeChunkNum chunk number of a block in the free space trie
+	 * @param numChunks desired number of chunks
+	 * @return the chunk number of the first chunk in a contiguous free block containing at least the
+	 * given number of chunks
+	 */
+	private int getSmallestChildNoSmallerThan(int trieNodeChunkNum, int numChunks) {
+		if (trieNodeChunkNum == 0) {
+			return 0;
+		}
+		int currentSize = getBlockHeaderForChunkNum(trieNodeChunkNum);
+		assert (currentSize >= 0);
+		int difference = currentSize ^ numChunks;
+		if (difference == 0) {
+			return trieNodeChunkNum;
+		}
+
+		int bitMask = Integer.highestOneBit(difference);
+		int firstDifference = LargeBlock.SIZE_OF_SIZE_FIELD * 8 - Integer.numberOfLeadingZeros(bitMask) - 1;
+		boolean lookingForSmallerChild = (currentSize > numChunks);
+		for (int testPosition = firstDifference; testPosition < LargeBlock.ENTRIES_IN_CHILD_TABLE; testPosition++) {
+			if (((currentSize & bitMask) != 0) == lookingForSmallerChild) {
+				int nextChildChunkNum = getInt(
+						trieNodeChunkNum * CHUNK_SIZE + LargeBlock.CHILD_TABLE_OFFSET + (testPosition * PTR_SIZE));
+				int childResultChunkNum = getSmallestChildNoSmallerThan(nextChildChunkNum, numChunks);
+				if (childResultChunkNum != 0) {
+					return childResultChunkNum;
+				}
+			}
+			bitMask <<= 1;
+		}
+
+		if (lookingForSmallerChild) {
+			return trieNodeChunkNum;
+		} else {
+			return 0;
+		}
+	}
+
