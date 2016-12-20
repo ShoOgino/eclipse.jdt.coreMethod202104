@@ -60,46 +60,15 @@
 					if (this.moduleDeclaration instanceof CompletionOnKeywordModuleDeclaration) {
 						contextAccepted = true;
 						processModuleKeywordCompletion(parsedUnit, this.moduleDeclaration, (CompletionOnKeyword) this.moduleDeclaration);
-						return;								
+						return;
 					}
-					ExportsStatement[] exports = this.moduleDeclaration.exports;
-					if (exports != null) {
-						for (int i = 0, l = exports.length; i < l; ++i) {
-							ExportsStatement exportReference = exports[i];
-							if (exportReference instanceof CompletionOnExportReference) {
-								contextAccepted = true;
-								buildContext(exportReference, null, parsedUnit, null, null);
-								if(!this.requestor.isIgnored(CompletionProposal.PACKAGE_REF)) {
-									findPackages((CompletionOnExportReference) exportReference);
-								}
-								debugPrintf();
-								return;
-							}
-							// TODO
-//							if (exportReference instanceof CompletionOnKeywordModuleInfo) {
-//								contextAccepted = true;
-//								processModuleKeywordCompletion(parsedUnit, exportReference, (CompletionOnKeyword) exportReference);
-//								return;								
-//							} 
-							ModuleReference[] targets = exportReference.targets;
-							if (targets == null) continue;
-							for (int j = 0, lj = targets.length; j < lj; j++) {
-								ModuleReference target = targets[j];
-								if (target == null) break;
-								if (target instanceof CompletionOnModuleReference) {
-									buildContext(target, null, parsedUnit, null, null);
-									if(!this.requestor.isIgnored(CompletionProposal.MODULE_REF)) {
-										contextAccepted = true;
-										findTargettedModules((CompletionOnModuleReference) target);
-									}
-									debugPrintf();
-									return;
-								} else if (target instanceof CompletionOnKeyword) {
-									contextAccepted = true;
-									//TODO
-								}
-							}
-						}
+					if (this.moduleDeclaration.exports != null) {
+						contextAccepted = completeOnPackageVisibilityStatements(contextAccepted, parsedUnit, this.moduleDeclaration.exports);
+						if (contextAccepted) return;
+					}
+					if (this.moduleDeclaration.opens != null) {
+						contextAccepted = completeOnPackageVisibilityStatements(contextAccepted, parsedUnit, this.moduleDeclaration.opens);
+						if (contextAccepted) return;
 					}
 					RequiresStatement[] moduleRefs = this.moduleDeclaration.requires;
 					if (moduleRefs != null) {
@@ -133,9 +102,10 @@
 							}
 						}
 					}
-					ProvidesStatement[] services = this.moduleDeclaration.services;
-					for (int i = 0, l = services.length; i < l; ++i) {
-						TypeReference pInterface = services[i].serviceInterface;
+					ProvidesStatement[] providesStmts = this.moduleDeclaration.services;
+					for (int i = 0, l = providesStmts != null ? providesStmts.length : 0; i < l; ++i) {
+						ProvidesStatement providesStmt = providesStmts[i];
+						TypeReference pInterface = providesStmt.serviceInterface;
 						if (pInterface instanceof CompletionOnProvidesInterfacesSingleTypeReference ||
 								pInterface instanceof CompletionOnProvidesInterfacesQualifiedTypeReference) {
 							this.lookupEnvironment.buildTypeBindings(parsedUnit, null);
@@ -147,19 +117,22 @@
 								return;
 							}
 						}
-					
-//						TypeReference implementation = services[i].serviceImpl;
-//						if (implementation instanceof CompletionOnProvidesImplementationsSingleTypeReference ||
-//								implementation instanceof CompletionOnProvidesImplementationsQualifiedTypeReference) {
-//							this.lookupEnvironment.buildTypeBindings(parsedUnit, null);
-//							if ((this.unitScope = parsedUnit.scope) != null) {
-//								contextAccepted = true;
-//								buildContext(implementation, null, parsedUnit, null, null);
-//								findImplementations(this.moduleDeclaration, i);
-//								debugPrintf();
-//								return;
-//							}
-//						}
+						TypeReference[] implementations = providesStmt.implementations;
+						for (int j = 0, k = implementations.length; j < k; ++j) {
+							TypeReference implementation = implementations[i];
+							
+							if (implementation instanceof CompletionOnProvidesImplementationsSingleTypeReference ||
+									implementation instanceof CompletionOnProvidesImplementationsQualifiedTypeReference) {
+								this.lookupEnvironment.buildTypeBindings(parsedUnit, null);
+								if ((this.unitScope = parsedUnit.scope) != null) {
+									contextAccepted = true;
+									buildContext(implementation, null, parsedUnit, null, null);
+									findImplementations(providesStmt, i/* stmtIndex */, j/* implIndex */);
+									debugPrintf();
+									return;
+								}
+							}
+						}
 					}
 				}
 				// scan the package & import statements first
