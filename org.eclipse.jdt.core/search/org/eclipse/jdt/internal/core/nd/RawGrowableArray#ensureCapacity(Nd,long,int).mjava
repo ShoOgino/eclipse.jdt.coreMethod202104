@@ -19,35 +19,57 @@
 			// We need a metablock.
 			long metablockAddress = growableBlockAddress;
 
+			// neededBlockSize should always be a multiple of the max block size when metablocks are in use
+			assert neededBlockSize % GrowableBlockHeader.MAX_GROWABLE_SIZE == 0;
+			// Create extra growable blocks if necessary.
+			int requiredBlockCount = divideRoundingUp(neededBlockSize, GrowableBlockHeader.MAX_GROWABLE_SIZE);
+
+			int neededMetablockPages = computeMetablockPagesForBlocks(requiredBlockCount);
+
+			if (neededMetablockPages > Short.MAX_VALUE) {
+				throw new IndexException("A metablock overflowed. Unable to allocate " + neededMetablockPages //$NON-NLS-1$
+						+ " pages."); //$NON-NLS-1$
+			}
 			if (!(growableBlockCurrentSize > GrowableBlockHeader.MAX_GROWABLE_SIZE)) {
 				// We weren't using a metablock previously
 				int currentSize = size(nd, address);
 				// Need to convert to using metablocks.
 				long firstGrowableBlockAddress = resizeBlock(nd, address, GrowableBlockHeader.MAX_GROWABLE_SIZE);
 
-				metablockAddress = db.malloc(computeBlockBytes(GrowableBlockHeader.MAX_GROWABLE_SIZE), Database.POOL_GROWABLE_ARRAY);
+				metablockAddress = db.malloc(Database.getBytesThatFitInChunks(neededMetablockPages),
+						Database.POOL_GROWABLE_ARRAY);
 				GrowableBlockHeader.ARRAY_SIZE.put(nd, metablockAddress, currentSize);
 				GrowableBlockHeader.ALLOCATED_SIZE.put(nd, metablockAddress,
 						GrowableBlockHeader.MAX_GROWABLE_SIZE);
+				MetaBlockHeader.METABLOCK_NUM_PAGES.put(nd, metablockAddress, (short)neededMetablockPages);
 
 				// Link the first block into the metablock.
-				db.putRecPtr(metablockAddress + GrowableBlockHeader.GROWABLE_BLOCK_HEADER_BYTES,
+				db.putRecPtr(metablockAddress + MetaBlockHeader.META_BLOCK_HEADER_BYTES,
 						firstGrowableBlockAddress);
 				GROWABLE_BLOCK_ADDRESS.put(nd, address, metablockAddress);
 			}
 
-			// neededBlockSize should always be a multiple of the max block size when metablocks are in use
-			assert neededBlockSize % GrowableBlockHeader.MAX_GROWABLE_SIZE == 0;
-			// Create extra growable blocks if necessary.
-			int requiredBlockCount = neededBlockSize / GrowableBlockHeader.MAX_GROWABLE_SIZE;
+			short metablockCurrentPages = MetaBlockHeader.METABLOCK_NUM_PAGES.get(nd, metablockAddress);
+			if (metablockCurrentPages < neededMetablockPages) {
+				short newMetablockPages = (short)Math.min(Short.MAX_VALUE, neededMetablockPages * 1.5);
+				long newMetablockAddress = db.malloc(Database.getBytesThatFitInChunks(newMetablockPages),
+						Database.POOL_GROWABLE_ARRAY);
+				int oldNumPages = MetaBlockHeader.METABLOCK_NUM_PAGES.get(nd, metablockAddress);
+				db.memcpy(newMetablockAddress, metablockAddress, (int)Database.getBytesThatFitInChunks(oldNumPages));
+				db.free(metablockAddress, Database.POOL_GROWABLE_ARRAY);
+				metablockAddress = newMetablockAddress;
+				MetaBlockHeader.METABLOCK_NUM_PAGES.put(nd, metablockAddress, newMetablockPages);
+				GROWABLE_BLOCK_ADDRESS.put(nd, address, metablockAddress);
+			}
 			int currentAllocatedSize = GrowableBlockHeader.ALLOCATED_SIZE.get(nd, metablockAddress);
 			assert currentAllocatedSize % GrowableBlockHeader.MAX_GROWABLE_SIZE == 0;
 			int currentBlockCount = currentAllocatedSize / GrowableBlockHeader.MAX_GROWABLE_SIZE;
 
 			for (int nextBlock = currentBlockCount; nextBlock < requiredBlockCount; nextBlock++) {
-				long nextBlockAddress = db.malloc(computeBlockBytes(GrowableBlockHeader.MAX_GROWABLE_SIZE), Database.POOL_GROWABLE_ARRAY);
+				long nextBlockAddress = db.malloc(computeBlockBytes(GrowableBlockHeader.MAX_GROWABLE_SIZE),
+						Database.POOL_GROWABLE_ARRAY);
 
-				db.putRecPtr(metablockAddress + GrowableBlockHeader.GROWABLE_BLOCK_HEADER_BYTES
+				db.putRecPtr(metablockAddress + MetaBlockHeader.META_BLOCK_HEADER_BYTES
 						+ nextBlock * Database.PTR_SIZE, nextBlockAddress);
 			}
 

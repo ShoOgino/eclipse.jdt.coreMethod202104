@@ -12,6 +12,12 @@
 		String tag = null;
 		List tags = new ArrayList();
 		int length = source.length;
+		// https://bugs.eclipse.org/bugs/show_bug.cgi?id=206345
+		// when parsing tags such as @code and @literal,
+		// any tag should be discarded and considered as plain text until
+		// properly closed with closing brace
+		boolean considerTagAsPlainText = false;
+		int openingBraces = 0;
 		char previousChar=0, currentChar=0;
 		for (int i=0; i<length;) {
 			previousChar = currentChar;
@@ -110,6 +116,7 @@
 						if (currentChar >= 'a' && currentChar <= 'z') {
 							tag += currentChar;
 						} else {
+							if (tag.equalsIgnoreCase(TAG_LITERAL) || tag.equalsIgnoreCase(TAG_CODE)) considerTagAsPlainText = true;
 							tags.add(tag);
 							tag = null;
 						}
@@ -117,9 +124,17 @@
 					// Some characters are special in javadoc comments
 					switch (currentChar) {
 						case '@':
-							if (!lineStarted || previousChar == '{') {
+							if (!lineStarted) {
 								tag = "";
 								lineStarted = true;
+							} else if (previousChar == '{') {
+								// https://bugs.eclipse.org/bugs/show_bug.cgi?id=206345
+								if (considerTagAsPlainText) {
+									openingBraces++;
+								} else {
+									tag = "";
+									lineStarted = true;
+								}
 							}
 							break;
 						case '\r':
@@ -127,6 +142,16 @@
 							lineStarted = false;
 							break;
 						case '*':
+							break;
+						case '}':
+							// https://bugs.eclipse.org/bugs/show_bug.cgi?id=206345
+							if (considerTagAsPlainText) {
+								if (openingBraces > 0) {
+									openingBraces--;
+								} else {
+									considerTagAsPlainText = false;
+								}
+							}
 							break;
 						default:
 							if (!Character.isWhitespace(currentChar)) {

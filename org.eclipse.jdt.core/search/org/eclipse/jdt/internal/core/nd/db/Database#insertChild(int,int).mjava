@@ -1,0 +1,36 @@
+	/**
+	 * Adds the given child block to the given parent subtree of the free space trie. Any existing
+	 * subtree under the given child block will be retained.
+	 * 
+	 * @param parentChunkNum root of the existing tree, or 0 if the child is going to be the new root
+	 * @param newChildChunkNum the new child to insert
+	 */
+	private void insertChild(int parentChunkNum, int newChildChunkNum) {
+		if (parentChunkNum == 0) {
+			putInt(newChildChunkNum * CHUNK_SIZE + LargeBlock.PARENT_OFFSET, parentChunkNum);
+			putInt(FREE_BLOCK_OFFSET, newChildChunkNum);
+			return;
+		}
+		int numChunks = getBlockHeaderForChunkNum(newChildChunkNum);
+		for (;;) {
+			int currentSize = getBlockHeaderForChunkNum(parentChunkNum);
+			int difference = currentSize ^ numChunks;
+			if (difference == 0) {
+				// The newly added item is exactly the same size as this trie node
+				insertFreeBlockAfter(parentChunkNum, newChildChunkNum);
+				return;
+			}
+
+			int firstDifference = LargeBlock.SIZE_OF_SIZE_FIELD * 8 - Integer.numberOfLeadingZeros(difference) - 1;
+			long locationOfChildPointer = parentChunkNum * CHUNK_SIZE + LargeBlock.CHILD_TABLE_OFFSET
+					+ (firstDifference * INT_SIZE);
+			int childChunkNum = getInt(locationOfChildPointer);
+			if (childChunkNum == 0) {
+				putInt(locationOfChildPointer, newChildChunkNum);
+				putInt(newChildChunkNum * CHUNK_SIZE + LargeBlock.PARENT_OFFSET, parentChunkNum);
+				return;
+			}
+			parentChunkNum = childChunkNum;
+		}
+	}
+

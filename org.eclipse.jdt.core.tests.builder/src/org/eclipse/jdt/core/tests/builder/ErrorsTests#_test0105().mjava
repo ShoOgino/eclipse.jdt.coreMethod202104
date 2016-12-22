@@ -1,0 +1,67 @@
+// https://bugs.eclipse.org/bugs/show_bug.cgi?id=97998
+// Improving the error message in case of a read-only file in output
+// directory. Beware: this test only works under Linux - execution on other
+// platforms always succeeds, but the result is not significant.
+public void _test0105() throws JavaModelException, CoreException, IOException { // FIXME: re-enable!
+	if ("Linux".equals(System.getProperty("os.name"))) {
+		IPath projectPath = env.addProject("P");
+		env.addExternalJars(projectPath, Util.getJavaClassLibs());
+		IPath root = env.getPackageFragmentRootPath(projectPath, "");
+		IPath outputFolderPath = env.getOutputLocation(projectPath);
+		File outputFolder = env.getWorkspaceRootPath().append(outputFolderPath).toFile();
+		env.addClass(root, "p1",
+				"X",
+				"package p1;\n" +
+				"public class X {\n" +
+				"}\n"
+			);
+		try {
+			fullBuild(projectPath);
+			expectingNoProblems();
+			outputFolder.setReadOnly();
+			// outputFolder.setReadable(false);
+			// PREMATURE no appropriate solution for Windows/NTFS/JDK 1.4
+			System.err.println("\n\n=== EXPECTED EXCEPTION =========================================================");
+			System.err.println("ErrorsTests#test0105 will emit an expected exception below");
+			cleanBuild();
+			System.err.println("=== END OF EXPECTED EXCEPTION ==================================================\n\n");
+			expectingOnlySpecificProblemFor(env.getWorkspaceRootPath(),
+					new Problem("",
+						"The project was not built due to \"Could not delete \'" +
+						env.getWorkspaceRootPath() + "/P/bin/.classpath\'.\". " +
+						"Fix the problem, then try refreshing this project and building " +
+						"it since it may be inconsistent", projectPath, -1, -1, CategorizedProblem.CAT_BUILDPATH, IMarker.SEVERITY_ERROR));
+		} finally {
+			// waiting for JDK 6: outputFolder.setWritable(true); -- workaround:
+			Process process = null;
+			try {
+				process = Runtime.getRuntime().exec("chmod -R a+w " + outputFolder.getAbsolutePath());
+				process.waitFor();
+			} catch (InterruptedException e) {
+				// go ahead
+			} finally {
+				if (process != null) {
+					process.destroy();
+				}
+			}
+		}
+		try {
+			cleanBuild();
+			expectingNoProblems();
+		} catch (Throwable t) {
+			Process process = null;
+			try {
+				process = Runtime.getRuntime().exec("chmod -R a+w " + outputFolder.getAbsolutePath());
+				process.waitFor();
+			} catch (InterruptedException ie) {
+				// go ahead
+			} finally {
+				if (process != null) {
+					process.destroy();
+				}
+			}
+			fail(t.getMessage());
+		}
+	}
+}
+
