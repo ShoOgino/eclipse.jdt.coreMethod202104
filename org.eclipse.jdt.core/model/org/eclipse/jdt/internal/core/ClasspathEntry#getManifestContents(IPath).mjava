@@ -1,0 +1,41 @@
+	private static char[] getManifestContents(IPath jarPath) throws CoreException, IOException {
+		// Try to read a cached manifest from the index
+		if (JavaIndex.isEnabled()) {
+			JavaIndex index = JavaIndex.getIndex();
+			String location = JavaModelManager.getLocalFile(jarPath).getAbsolutePath();
+			try (IReader reader = index.getNd().acquireReadLock()) {
+				NdResourceFile resourceFile = index.getResourceFile(location.toCharArray());
+				if (index.isUpToDate(resourceFile)) {
+					char[] manifestContent = resourceFile.getManifestContent().getChars();
+					if (manifestContent.length == 0) {
+						return null;
+					}
+					return manifestContent;
+				}
+			}
+		}
+
+		ZipFile zip = null;
+		InputStream inputStream = null;
+		JavaModelManager manager = JavaModelManager.getJavaModelManager();
+		try {
+			zip = manager.getZipFile(jarPath);
+			ZipEntry manifest = zip.getEntry("META-INF/MANIFEST.MF"); //$NON-NLS-1$
+			if (manifest == null) {
+				return null;
+			}
+			inputStream = zip.getInputStream(manifest);
+			char[] chars = getInputStreamAsCharArray(inputStream, -1, UTF_8);
+			return chars;
+		} finally {
+			if (inputStream != null) {
+				try {
+					inputStream.close();
+				} catch (IOException e) {
+					// best effort
+				}
+			}
+			manager.closeZipFile(zip);
+		}
+	}
+
