@@ -1,0 +1,29 @@
+	private void releaseWriteLockAndFlush(int establishReadLocks, boolean flush) throws AssertionError {
+		int initialReadLocks = flush ? establishReadLocks + 1 : establishReadLocks;
+		// Convert this write lock to a read lock while we flush the page cache to disk. That will prevent
+		// other writers from dirtying more pages during the flush but will allow reads to proceed.
+		synchronized (this.mutex) {
+			if (sDEBUG_LOCKS) {
+				long timeHeld = this.lastWriteAccess - this.timeWriteLockAcquired;
+				if (timeHeld >= LONG_WRITE_LOCK_REPORT_THRESHOLD) {
+					System.out.println("Index write lock held for " + timeHeld + " ms");  //$NON-NLS-1$//$NON-NLS-2$
+				}
+				decWriteLock(initialReadLocks);
+			}
+
+			if (this.lockCount < 0) {
+				this.lockCount = initialReadLocks;
+			}
+			this.mutex.notifyAll();
+			this.db.setLocked(initialReadLocks != 0);
+		}
+
+		if (flush) {
+			try {
+				this.db.flush();
+			} finally {
+				releaseReadLock();
+			}
+		}
+	}
+

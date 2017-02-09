@@ -1,28 +1,34 @@
 	public boolean flush() throws IndexException {
 		boolean wasInterrupted = false;
 		assert this.fLocked;
-		if (this.fExclusiveLock) {
-			try {
-				wasInterrupted = giveUpExclusiveLock(true) || wasInterrupted;
-			} finally {
-				setExclusiveLock();
-			}
-			return wasInterrupted;
-		}
-
-		// Be careful as other readers may access chunks concurrently.
 		ArrayList<Chunk> dirtyChunks= new ArrayList<>();
-		synchronized (this.fCache) {
-			for (Chunk chunk : this.allocatedChunks) {
-				if (chunk.fSequenceNumber >= 1 && chunk.fDirty) {
-					dirtyChunks.add(chunk);
+		int scanIndex = NUM_HEADER_CHUNKS;
+
+		while (scanIndex < this.fChunksUsed) {
+			synchronized (this.fCache) {
+				int countMax = Math.min(MAX_ITERATIONS_PER_LOCK, this.fChunksUsed - scanIndex);
+				for (int count = 0; count < countMax; count++) {
+					Chunk chunk = this.fChunks[scanIndex++];
+
+					if (chunk != null) {
+						if (chunk.fDirty) {
+							dirtyChunks.add(chunk); // Keep in fChunks until it is flushed.
+						} else if (chunk.fCacheIndex < 0) {
+							if (DEBUG_PAGE_CACHE) {
+								System.out.println(
+										"CHUNK " + chunk.fSequenceNumber + ": removing from vector in flush - instance " //$NON-NLS-1$//$NON-NLS-2$
+												+ System.identityHashCode(chunk));
+							}
+							// Non-dirty chunk that has been removed from cache.
+							this.fChunks[chunk.fSequenceNumber]= null;
+						}
+					}
 				}
 			}
 		}
-
-		sortBySequenceNumber(dirtyChunks);
-
 		// Also handles header chunk.
-		return flushAndUnlockChunks(dirtyChunks, true) || wasInterrupted;
+		wasInterrupted = flushAndUnlockChunks(dirtyChunks, true) || wasInterrupted;
+
+		return wasInterrupted;
 	}
 
