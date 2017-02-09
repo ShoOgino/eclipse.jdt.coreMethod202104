@@ -44,61 +44,65 @@ private void launchVerifyTestsIfNeeded(String[] classpaths, String[] vmArguments
 		launcher.setVMArguments(new String[] {"-verify"});
 	}
 	launcher.setProgramClass(VerifyTests.class.getName());
-	int portNumber = Util.getFreePort();
-	launcher.setProgramArguments(new String[] {Integer.toString(portNumber)});
-	try {
-		this.vm = launcher.launch();
-		final InputStream input = this.vm.getInputStream();
-		Thread outputThread = new Thread(new Runnable() {
-			public void run() {
-				try {
-					int c = input.read();
-					while (c != -1) {
-						TestVerifier.this.outputBuffer.append((char) c);
-						c = input.read();
+	try (ServerSocket server = new ServerSocket(0)) {
+		int portNumber = server.getLocalPort();
+
+		launcher.setProgramArguments(new String[] {Integer.toString(portNumber)});
+		try {
+			this.vm = launcher.launch();
+			final InputStream input = this.vm.getInputStream();
+			Thread outputThread = new Thread(new Runnable() {
+				public void run() {
+					try {
+						int c = input.read();
+						while (c != -1) {
+							TestVerifier.this.outputBuffer.append((char) c);
+							c = input.read();
+						}
+					} catch(IOException ioEx) {
 					}
-				} catch(IOException ioEx) {
 				}
-			}
-		});
-		final InputStream errorStream = this.vm.getErrorStream();
-		Thread errorThread = new Thread(new Runnable() {
-			public void run() {
-				try {
-					int c = errorStream.read();
-					while (c != -1) {
-						TestVerifier.this.errorBuffer.append((char) c);
-						c = errorStream.read();
+			});
+			final InputStream errorStream = this.vm.getErrorStream();
+			Thread errorThread = new Thread(new Runnable() {
+				public void run() {
+					try {
+						int c = errorStream.read();
+						while (c != -1) {
+							TestVerifier.this.errorBuffer.append((char) c);
+							c = errorStream.read();
+						}
+					} catch(IOException ioEx) {
 					}
-				} catch(IOException ioEx) {
 				}
+			});
+			outputThread.start();
+			errorThread.start();
+		} catch(TargetException e) {
+			throw new Error(e.getMessage());
+		}
+	
+		// connect to the vm
+		this.socket = null;
+		boolean isVMRunning = false;
+		do {
+			try {
+				this.socket = server.accept();
+				this.socket.setTcpNoDelay(true);
+				break;
+			} catch (UnknownHostException e) {
+			} catch (IOException e) {
 			}
-		});
-		outputThread.start();
-		errorThread.start();
-	} catch(TargetException e) {
+			if (this.socket == null) {
+				try {
+					Thread.sleep(100);
+				} catch (InterruptedException e) {
+				}
+				isVMRunning = this.vm.isRunning();
+			}
+		} while (this.socket == null && isVMRunning);
+	} catch (IOException e) {
 		throw new Error(e.getMessage());
 	}
-
-	// connect to the vm
-	this.socket = null;
-	boolean isVMRunning = false;
-	do {
-		try {
-			this.socket = new Socket("localhost", portNumber);
-			this.socket.setTcpNoDelay(true);
-			break;
-		} catch (UnknownHostException e) {
-		} catch (IOException e) {
-		}
-		if (this.socket == null) {
-			try {
-				Thread.sleep(100);
-			} catch (InterruptedException e) {
-			}
-			isVMRunning = this.vm.isRunning();
-		}
-	} while (this.socket == null && isVMRunning);
-
 }
 
