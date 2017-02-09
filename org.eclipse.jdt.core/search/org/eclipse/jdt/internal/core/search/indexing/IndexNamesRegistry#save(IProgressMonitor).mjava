@@ -1,0 +1,35 @@
+	private void save(IProgressMonitor monitor) {
+		SubMonitor subMonitor = SubMonitor.convert(monitor);
+		char[][] newContents;
+		synchronized (this.queueMutex) {
+			newContents = this.pendingWrite;
+		}
+
+		if (newContents == null) {
+			return;
+		}
+
+		subMonitor.setWorkRemaining(newContents.length);
+		
+		try (BufferedWriter writer = new BufferedWriter(new FileWriter(this.savedIndexNamesFile))) {
+			writer.write(DiskIndex.SIGNATURE);
+			writer.write('+');
+			writer.write(this.javaPluginWorkingLocation.toOSString());
+			writer.write('\n');
+			for (char[] next : newContents) {
+				subMonitor.split(1);
+				writer.write(next);
+				writer.write('\n');
+			}
+		} catch (IOException ignored) {
+			if (JobManager.VERBOSE)
+				Util.verbose("Failed to write saved index file names", System.err); //$NON-NLS-1$
+		}
+
+		synchronized (this.queueMutex) {
+			if (this.pendingWrite == newContents) {
+				this.pendingWrite = null;
+			}
+		}
+	}
+

@@ -5,46 +5,42 @@
 			this.indexerDirtiedWhileDisabled = false;
 		}
 
-		long startTimeNs = System.nanoTime();
 		long currentTimeMs = System.currentTimeMillis();
 		if (DEBUG) {
 			Package.logInfo("Indexer running rescan"); //$NON-NLS-1$
 		}
 
-		// Gather all the IPackageFragmentRoots in the workspace
-		List<IJavaElement> unfilteredIndexables = getAllIndexableObjectsInWorkspace(subMonitor.split(3));
+		this.fileStateCache.clear();
+		WorkspaceSnapshot snapshot = WorkspaceSnapshot.create(this.root, subMonitor.split(4));
+		Set<IPath> locations = snapshot.allLocations();
 
-		int totalIndexables = unfilteredIndexables.size();
-		// Remove all duplicate indexables (jars which are referenced by more than one project)
-		Map<IPath, List<IJavaElement>> allIndexables = removeDuplicatePaths(unfilteredIndexables);
-
-		long startGarbageCollectionNs = System.nanoTime();
+		long startGarbageCollectionMs = System.currentTimeMillis();
 
 		// Remove all files in the index which aren't referenced in the workspace
-		int gcFiles = cleanGarbage(currentTimeMs, allIndexables.keySet(), subMonitor.split(4));
+		int gcFiles = cleanGarbage(currentTimeMs, locations, subMonitor.split(1));
 
-		long startFingerprintTestNs = System.nanoTime();
+		long startFingerprintTestMs = System.currentTimeMillis();
 
-		Map<IPath, FingerprintTestResult> fingerprints = testFingerprints(allIndexables.keySet(), subMonitor.split(7));
+		Map<IPath, FingerprintTestResult> fingerprints = testFingerprints(locations, subMonitor.split(5));
 		Set<IPath> indexablesWithChanges = new HashSet<>(
-				getIndexablesThatHaveChanged(allIndexables.keySet(), fingerprints));
+				getIndexablesThatHaveChanged(locations, fingerprints));
 
-		long startIndexingNs = System.nanoTime();
+		long startIndexingMs = System.currentTimeMillis();
 
 		int classesIndexed = 0;
 		SubMonitor loopMonitor = subMonitor.split(80).setWorkRemaining(indexablesWithChanges.size());
 		for (IPath next : indexablesWithChanges) {
-			classesIndexed += rescanArchive(currentTimeMs, next, allIndexables.get(next),
+			classesIndexed += rescanArchive(currentTimeMs, next, snapshot.get(next),
 					fingerprints.get(next).getNewFingerprint(), loopMonitor.split(1));
 		}
 
-		long endIndexingNs = System.nanoTime();
+		long endIndexingMs = System.currentTimeMillis();
 
 		Map<IPath, List<IJavaElement>> pathsToUpdate = new HashMap<>();
 
-		for (IPath next : allIndexables.keySet()) {
+		for (IPath next : locations) {
 			if (!indexablesWithChanges.contains(next)) {
-				pathsToUpdate.put(next, allIndexables.get(next));
+				pathsToUpdate.put(next, snapshot.get(next));
 				continue;
 			}
 		}
@@ -65,29 +61,29 @@
 			Package.logInfo("Rescan finished"); //$NON-NLS-1$
 		}
 
-		long endResourceMappingNs = System.nanoTime();
+		long endResourceMappingMs = System.currentTimeMillis();
 
-		long fingerprintTimeMs = (startIndexingNs - startFingerprintTestNs) / MS_TO_NS;
-		long locateIndexablesTimeMs = (startGarbageCollectionNs - startTimeNs) / MS_TO_NS;
-		long garbageCollectionMs = (startFingerprintTestNs - startGarbageCollectionNs) / MS_TO_NS;
-		long indexingTimeMs = (endIndexingNs - startIndexingNs) / MS_TO_NS;
-		long resourceMappingTimeMs = (endResourceMappingNs - endIndexingNs) / MS_TO_NS;
+		long locateIndexablesTimeMs = startGarbageCollectionMs - currentTimeMs;
+		long garbageCollectionMs = startFingerprintTestMs - startGarbageCollectionMs;
+		long fingerprintTimeMs = startIndexingMs - startFingerprintTestMs;
+		long indexingTimeMs = endIndexingMs - startIndexingMs;
+		long resourceMappingTimeMs = endResourceMappingMs - endIndexingMs;
 
 		double averageGcTimeMs = gcFiles == 0 ? 0 : (double) garbageCollectionMs / (double) gcFiles;
 		double averageIndexTimeMs = classesIndexed == 0 ? 0 : (double) indexingTimeMs / (double) classesIndexed;
-		double averageFingerprintTimeMs = allIndexables.size() == 0 ? 0
-				: (double) fingerprintTimeMs / (double) allIndexables.size();
+		double averageFingerprintTimeMs = locations.size() == 0 ? 0
+				: (double) fingerprintTimeMs / (double) locations.size();
 		double averageResourceMappingMs = pathsToUpdate.size() == 0 ? 0
 				: (double) resourceMappingTimeMs / (double) pathsToUpdate.size();
 
 		if (DEBUG_TIMING) {
 			Package.logInfo(
 					"Indexing done.\n" //$NON-NLS-1$
-					+ "  Located " + totalIndexables + " indexables in " + locateIndexablesTimeMs + "ms\n" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
-					+ "  Collected garbage from " + gcFiles + " files in " +  garbageCollectionMs + "ms, average time = " + averageGcTimeMs + "ms\n" //$NON-NLS-1$//$NON-NLS-2$//$NON-NLS-3$//$NON-NLS-4$
-					+ "  Tested " + allIndexables.size() + " fingerprints in " + fingerprintTimeMs + "ms, average time = " + averageFingerprintTimeMs + "ms\n" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
-					+ "  Indexed " + classesIndexed + " classes in " + indexingTimeMs + "ms, average time = " + averageIndexTimeMs + "ms\n" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
-					+ "  Updated " + pathsToUpdate.size() + " paths in " + resourceMappingTimeMs + "ms, average time = " + averageResourceMappingMs + "ms\n"); //$NON-NLS-1$//$NON-NLS-2$//$NON-NLS-3$//$NON-NLS-4$
+					+ "  Located " + locations.size() + " indexables in " + locateIndexablesTimeMs + "ms\n" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+					+ "  Collected garbage from " + gcFiles + " files in " +  garbageCollectionMs + "ms, average time = " + String.format("%.3g", averageGcTimeMs) + "ms\n" //$NON-NLS-1$//$NON-NLS-2$//$NON-NLS-3$//$NON-NLS-4$ //$NON-NLS-5$
+					+ "  Tested " + locations.size() + " fingerprints in " + fingerprintTimeMs + "ms, average time = " + String.format("%.3g", averageFingerprintTimeMs) + "ms\n" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$ //$NON-NLS-5$
+					+ "  Indexed " + classesIndexed + " classes in " + indexingTimeMs + "ms, average time = " + String.format("%.3g", averageIndexTimeMs) + "ms\n" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$ //$NON-NLS-5$
+					+ "  Updated " + pathsToUpdate.size() + " paths in " + resourceMappingTimeMs + "ms, average time = " + String.format("%.3g", averageResourceMappingMs) + "ms\n"); //$NON-NLS-1$//$NON-NLS-2$//$NON-NLS-3$//$NON-NLS-4$ //$NON-NLS-5$
 		}
 
 		if (DEBUG_ALLOCATIONS) {
