@@ -54,12 +54,25 @@
 			
 			if (innerContext != null) {
 				MethodBinding shallowMethod = innerMethod.shallowOriginal();
+				if (looksLikeVarargs(innerMethod, argumentTypes)) {
+					InferenceContext18 varArgsCtx = invocation.freshInferenceContext(innerContext.scope); // start over
+					varArgsCtx.inferenceKind = InferenceContext18.CHECK_VARARG;
+					varArgsCtx.inferInvocationApplicability(shallowMethod, argumentTypes, shallowMethod.isConstructor());
+					if (varArgsCtx.solve(true) != null) {
+						varArgsCtx.stepCompleted = InferenceContext18.APPLICABILITY_INFERRED;
+						innerContext = varArgsCtx;
+					}
+				}
 				innerContext.outerContext = this;
 				if (innerContext.stepCompleted < InferenceContext18.APPLICABILITY_INFERRED) // shouldn't happen, but let's play safe
 					innerContext.inferInvocationApplicability(shallowMethod, argumentTypes, shallowMethod.isConstructor());
 				if (!innerContext.computeB3(invocation, substF, shallowMethod))
 					return false;
-				return innerContext.addConstraintsToC(arguments, c, innerMethod.genericMethod(), innerContext.inferenceKind, invocation);
+				if (innerContext.addConstraintsToC(arguments, c, innerMethod.genericMethod(), innerContext.inferenceKind, invocation)) {
+					this.currentBounds.addBounds(innerContext.currentBounds, this.environment);
+					return true;
+				}
+				return false;
 			} else {
 				int applicabilityKind = getInferenceKind(innerMethod, argumentTypes);
 				return this.addConstraintsToC(arguments, c, innerMethod.genericMethod(), applicabilityKind, invocation);
