@@ -1,0 +1,37 @@
+	public NameEnvironmentAnswer findClass(String binaryFileName, String qualifiedPackageName, String qualifiedBinaryFileName, IModule mod) {
+		// TOOD: BETA_JAVA9 - Should really check for packages with the module context
+		if (!isPackage(qualifiedPackageName)) return null; // most common case
+
+		try {
+			IBinaryType reader = ClassFileReader.read(this.zipFile, qualifiedBinaryFileName);
+			if (reader != null) {
+				if (reader instanceof ClassFileReader) {
+					ClassFileReader classReader = (ClassFileReader) reader;
+					if (classReader.moduleName == null) {
+						classReader.moduleName = this.module == null ? null : this.module.name();
+					}
+				}
+				String fileNameWithoutExtension = qualifiedBinaryFileName.substring(0, qualifiedBinaryFileName.length() - SuffixConstants.SUFFIX_CLASS.length);
+				if (this.externalAnnotationPath != null) {
+					try {
+						if (this.annotationZipFile == null) {
+							this.annotationZipFile = ExternalAnnotationDecorator
+									.getAnnotationZipFile(this.externalAnnotationPath, null);
+						}
+
+						reader = ExternalAnnotationDecorator.create(reader, this.externalAnnotationPath,
+								fileNameWithoutExtension, this.annotationZipFile);
+					} catch (IOException e) {
+						// don't let error on annotations fail class reading
+					}
+				}
+				if (this.accessRuleSet == null)
+					return new NameEnvironmentAnswer(reader, null);
+				return new NameEnvironmentAnswer(reader, this.accessRuleSet.getViolatedRestriction(fileNameWithoutExtension.toCharArray()));
+			}
+		} catch (IOException e) { // treat as if class file is missing
+		} catch (ClassFormatException e) { // treat as if class file is missing
+		}
+		return null;
+	}
+
