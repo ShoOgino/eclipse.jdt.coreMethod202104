@@ -10,40 +10,26 @@
 	public int wrapMultiLineComment(Token commentToken, int startPosition, boolean simulate, boolean noWrap) {
 		this.lineCounter = 1;
 		this.counter = startPosition;
-
-		List<Token> structure = commentToken.getInternalStructure();
-		if (structure == null || structure.isEmpty())
-			return startPosition + this.tm.getLength(commentToken, startPosition);
-
 		commentToken.setIndent(this.tm.toIndent(startPosition, true));
 		this.lineStartPosition = commentToken.getIndent();
 		this.simulation = simulate;
 		this.wrapDisabled = noWrap;
 		this.potentialWrapToken = this.potentialWrapTokenSubstitute = null;
-		this.blockStructure = structure;
-		traverse(structure, 0);
-
-		boolean newLinesAtBoundries = commentToken.tokenType == TokenNameCOMMENT_JAVADOC
+		this.newLinesAtBoundries = commentToken.tokenType == TokenNameCOMMENT_JAVADOC
 				? this.options.comment_new_lines_at_javadoc_boundaries
 				: this.options.comment_new_lines_at_block_boundaries;
-		if (this.lineCounter > 1 && newLinesAtBoundries) {
-			Token endingToken = structure.get(structure.size() - 1);
-			if (!simulate && endingToken.tokenType != TokenNameNotAToken) {
-				structure.get(0).breakAfter();
-				endingToken.breakBefore();
-				endingToken.setAlign(1);
-			}
-			return startPosition + this.tm.getLength(endingToken, startPosition);
-		} else if (this.lineCounter > 1 && !newLinesAtBoundries) {
-			// the rest of this code assumes that newLinesAtBoundries==true, so now subtract the additional lines
-			this.lineCounter -= 2;
 
-			this.lineCounter -= structure.get(1).getLineBreaksBefore();
-			structure.get(1).clearLineBreaksBefore();
-			Token last = structure.get(structure.size() - 1);
-			this.lineCounter -= last.getLineBreaksBefore();
-			last.clearLineBreaksBefore();
-		}
+		List<Token> structure = commentToken.getInternalStructure();
+		if (structure == null || structure.isEmpty())
+			return startPosition + this.tm.getLength(commentToken, startPosition);
+
+		int position = tryToFitInOneLine(structure, startPosition, noWrap);
+		if (position > 0)
+			return position;
+
+		traverse(structure, 0);
+		if (this.newLinesAtBoundries)
+			return this.lineStartPosition + 1 + this.tm.getLength(structure.get(structure.size() - 1), 0);
 		return this.counter;
 	}
 
