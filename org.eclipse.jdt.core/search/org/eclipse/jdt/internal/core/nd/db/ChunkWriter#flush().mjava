@@ -1,0 +1,37 @@
+	/**
+	 * Flushes any outstanding writes to disk immediately.
+	 * 
+	 * @return true iff any attempt was made to interrupt the thread using {@link Thread#interrupt()}. The write
+	 *         succeeds regardless of the return value.
+	 * @throws IOException if unable to perform the write
+	 */
+	public boolean flush() throws IOException {
+		int bytesToWrite = (int) (this.lastWritePosition - this.bufferStartPosition);
+		if (bytesToWrite == 0) {
+			return false;
+		}
+		long startTimeMs = System.currentTimeMillis();
+		boolean result = this.writeCallback.write(ByteBuffer.wrap(this.buffer, 0, bytesToWrite),
+				this.bufferStartPosition);
+		long elapsedTimeMs = System.currentTimeMillis() - startTimeMs;
+
+		this.totalBytesWritten += bytesToWrite;
+		this.totalWriteTimeMs += elapsedTimeMs;
+		this.bytesWrittenSinceLastSleep = Math.max(0,
+				this.bytesWrittenSinceLastSleep + bytesToWrite - (long) (elapsedTimeMs * this.maxBytesPerMillisecond));
+		long desiredSleepTime = (long) (this.bytesWrittenSinceLastSleep / this.maxBytesPerMillisecond);
+
+		// If we're writing too fast, sleep to create backpressure and prevent us from overloading
+		// the disk's I/O bandwidth.
+		if (desiredSleepTime > 0) {
+			try {
+				this.sleepFunction.sleep(desiredSleepTime);
+				this.bytesWrittenSinceLastSleep -= this.maxBytesPerMillisecond * desiredSleepTime;
+			} catch (InterruptedException e) {
+				result = true;
+			}
+		}
+		this.bufferStartPosition = this.lastWritePosition;
+		return result;
+	}
+

@@ -22,15 +22,25 @@
 			chunk = this.fChunks[index];
 		}
 
+		long readStartMs = 0;
+		long readEndMs = 0;
 		// Read the new chunk outside of any synchronized block (this allows parallel reads and prevents background
 		// threads from retaining a lock that blocks the UI while the background thread performs I/O).
 		boolean cacheMiss = (chunk == null);
 		if (cacheMiss) {
+			readStartMs = System.currentTimeMillis();
 			chunk = new Chunk(this, index);
 			chunk.read();
+			readEndMs = System.currentTimeMillis();
 		}
 
 		synchronized (this.fCache) {
+			if (cacheMiss) {
+				this.cacheMisses++;
+				this.totalReadTimeMs += (readEndMs - readStartMs);
+			} else {
+				this.cacheHits++;
+			}
 			Chunk newChunk = this.fChunks[index];
 			if (newChunk != chunk && newChunk != null) {
 				// Another thread fetched this chunk in the meantime. In this case, we should use the chunk fetched
@@ -40,17 +50,13 @@
 							+ ": already fetched by another thread - instance " //$NON-NLS-1$
 							+ System.identityHashCode(chunk));
 				}
-				this.cacheMisses++;
 				chunk = newChunk;
 			} else if (cacheMiss) {
 				if (DEBUG_PAGE_CACHE) {
 					System.out.println("CHUNK " + chunk.fSequenceNumber + ": inserted into vector - instance " //$NON-NLS-1$//$NON-NLS-2$
 							+ System.identityHashCode(chunk));
 				}
-				this.cacheMisses++;
 				this.fChunks[index] = chunk;
-			} else {
-				this.cacheHits++;
 			}
 			this.fCache.add(chunk);
 			this.fMostRecentlyFetchedChunk = chunk;

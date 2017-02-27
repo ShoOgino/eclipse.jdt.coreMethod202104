@@ -12,27 +12,43 @@
 			wasInterrupted = markFileIncomplete() || wasInterrupted;
 		}
 		if (haveDirtyChunks) {
-			for (Chunk chunk : dirtyChunks) {
-				if (chunk.fDirty) {
-					boolean wasCanceled = false;
-					if (DEBUG_PAGE_CACHE) {
-						System.out.println("CHUNK " + chunk.fSequenceNumber + ": flushing - instance "  //$NON-NLS-1$//$NON-NLS-2$
-								+ System.identityHashCode(chunk));
+			double desiredWriteBytesPerMs = Database.MIN_BYTES_PER_MILLISECOND;
+			synchronized (this.fCache) {
+				if (this.cacheMisses > 100) {
+					double measuredReadBytesPerMs = getAverageReadBytesPerMs();
+					if (measuredReadBytesPerMs > 0) {
+						desiredWriteBytesPerMs = measuredReadBytesPerMs / 2;
 					}
-					try {
-						final ByteBuffer buf;
+				}
+			}
+			desiredWriteBytesPerMs = Math.max(desiredWriteBytesPerMs, Database.MIN_BYTES_PER_MILLISECOND);
+			ChunkWriter writer = new ChunkWriter(WRITE_BUFFER_SIZE, desiredWriteBytesPerMs, this::write);
+			try {
+				for (Chunk chunk : dirtyChunks) {
+					if (chunk.fDirty) {
+						boolean wasCanceled = false;
+						if (DEBUG_PAGE_CACHE) {
+							System.out.println("CHUNK " + chunk.fSequenceNumber + ": flushing - instance " //$NON-NLS-1$//$NON-NLS-2$
+									+ System.identityHashCode(chunk));
+						}
+						byte[] nextBytes;
 						synchronized (this.fCache) {
-							buf = ByteBuffer.wrap(chunk.getBytes());
+							nextBytes = chunk.getBytes();
 							chunk.fDirty = false;
 							chunkCleaned(chunk);
 						}
-						wasCanceled = write(buf, (long) chunk.fSequenceNumber * Database.CHUNK_SIZE);
-					} catch (IOException e) {
-						throw new IndexException(new DBStatus(e));
-					}
+						wasCanceled = writer.write((long) chunk.fSequenceNumber * Database.CHUNK_SIZE, nextBytes);
 
-					wasInterrupted = wasCanceled || wasInterrupted;
+						wasInterrupted = wasCanceled || wasInterrupted;
+					}
 				}
+				writer.flush();
+				synchronized (this.fCache) {
+					this.pageWritesBytes += writer.getBytesWritten();
+					this.totalWriteTimeMs += writer.getTotalWriteTimeMs();
+				}
+			} catch (IOException e) {
+				throw new IndexException(new DBStatus(e));
 			}
 		}
 
