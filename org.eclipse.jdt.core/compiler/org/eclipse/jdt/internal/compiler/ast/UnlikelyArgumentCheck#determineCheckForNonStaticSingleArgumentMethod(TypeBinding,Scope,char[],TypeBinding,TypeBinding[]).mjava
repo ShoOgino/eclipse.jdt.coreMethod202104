@@ -1,0 +1,101 @@
+	/**
+	 * When targeting a well-known dangerous method, returns an UnlikelyArgumentCheck object that contains the types to
+	 * check against each other and to report
+	 */
+	public static /* @Nullable */ UnlikelyArgumentCheck determineCheckForNonStaticSingleArgumentMethod(
+			TypeBinding argumentType, Scope scope, char[] selector, TypeBinding actualReceiverType,
+			TypeBinding[] parameters) {
+		// detecting only methods with a single argument, typed either as Object or as Collection:
+		if (parameters.length != 1)
+			return null;
+		int paramTypeId = parameters[0].original().id;
+		if (paramTypeId != TypeIds.T_JavaLangObject && paramTypeId != TypeIds.T_JavaUtilCollection)
+			return null;
+
+		// check selectors before typeBits as to avoid unnecessary super-traversals for the receiver type
+		DangerousMethod suspect = DangerousMethod.detectSelector(selector);
+		if (suspect == null)
+			return null;
+
+		if (actualReceiverType.hasTypeBit(TypeIds.BitMap)) {
+			if (paramTypeId == TypeIds.T_JavaLangObject) {
+				switch (suspect) {
+					case ContainsKey:
+					case Get:
+					case Remove:
+						// map operations taking a key
+						ReferenceBinding mapType = actualReceiverType
+								.findSuperTypeOriginatingFrom(TypeIds.T_JavaUtilMap, false);
+						if (mapType != null && mapType.isParameterizedType())
+							return new UnlikelyArgumentCheck(suspect, argumentType,
+									((ParameterizedTypeBinding) mapType).typeArguments()[0], mapType);
+						break;
+					case ContainsValue:
+						// map operation taking a value
+						mapType = actualReceiverType.findSuperTypeOriginatingFrom(TypeIds.T_JavaUtilMap, false);
+						if (mapType != null && mapType.isParameterizedType())
+							return new UnlikelyArgumentCheck(suspect, argumentType,
+									((ParameterizedTypeBinding) mapType).typeArguments()[1], mapType);
+						break;
+					default: // no other suspects are detected in java.util.Map
+				}
+			}
+		}
+		if (actualReceiverType.hasTypeBit(TypeIds.BitCollection)) {
+			if (paramTypeId == TypeIds.T_JavaLangObject) {
+				switch (suspect) {
+					case Remove:
+					case Contains:
+						// collection operations taking a single element
+						ReferenceBinding collectionType = actualReceiverType
+								.findSuperTypeOriginatingFrom(TypeIds.T_JavaUtilCollection, false);
+						if (collectionType != null && collectionType.isParameterizedType())
+							return new UnlikelyArgumentCheck(suspect, argumentType,
+									((ParameterizedTypeBinding) collectionType).typeArguments()[0], collectionType);
+						break;
+					default: // no other suspects with Object-parameter are detected in java.util.Collection
+				}
+			} else if (paramTypeId == TypeIds.T_JavaUtilCollection) {
+				switch (suspect) {
+					case RemoveAll:
+					case ContainsAll:
+					case RetainAll:
+						// collection operations taking another collection
+						ReferenceBinding collectionType = actualReceiverType
+								.findSuperTypeOriginatingFrom(TypeIds.T_JavaUtilCollection, false);
+						ReferenceBinding argumentCollectionType = argumentType
+								.findSuperTypeOriginatingFrom(TypeIds.T_JavaUtilCollection, false);
+						if (collectionType != null && argumentCollectionType != null
+								&& argumentCollectionType.isParameterizedTypeWithActualArguments() 
+								&& collectionType.isParameterizedTypeWithActualArguments()) {
+							return new UnlikelyArgumentCheck(suspect,
+									((ParameterizedTypeBinding) argumentCollectionType).typeArguments()[0],
+									((ParameterizedTypeBinding) collectionType).typeArguments()[0], collectionType);
+						}
+						break;
+					default: // no other suspects with Collection-parameter are detected in java.util.Collection
+				}
+			}
+			if (actualReceiverType.hasTypeBit(TypeIds.BitList)) {
+				if (paramTypeId == TypeIds.T_JavaLangObject) {
+					switch (suspect) {
+						case IndexOf:
+						case LastIndexOf:
+							// list operations taking a single element
+							ReferenceBinding listType = actualReceiverType
+									.findSuperTypeOriginatingFrom(TypeIds.T_JavaUtilList, false);
+							if (listType != null && listType.isParameterizedType())
+								return new UnlikelyArgumentCheck(suspect, argumentType,
+										((ParameterizedTypeBinding) listType).typeArguments()[0], listType);
+							break;
+						default: // no other suspects are detected in java.util.List
+					}
+				}
+			}
+		}
+		if (paramTypeId == TypeIds.T_JavaLangObject && suspect == DangerousMethod.Equals) {
+			return new UnlikelyArgumentCheck(suspect, argumentType, actualReceiverType, actualReceiverType);
+		}
+		return null; // not replacing
+	}
+

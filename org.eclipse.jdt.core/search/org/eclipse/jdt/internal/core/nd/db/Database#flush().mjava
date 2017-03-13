@@ -1,28 +1,18 @@
 	public boolean flush() throws IndexException {
 		boolean wasInterrupted = false;
 		assert this.fLocked;
-		if (this.fExclusiveLock) {
-			try {
-				wasInterrupted = giveUpExclusiveLock(true) || wasInterrupted;
-			} finally {
-				setExclusiveLock();
-			}
-			return wasInterrupted;
-		}
-
-		// Be careful as other readers may access chunks concurrently.
 		ArrayList<Chunk> dirtyChunks= new ArrayList<>();
 		synchronized (this.fCache) {
-			for (Chunk chunk : this.allocatedChunks) {
-				if (chunk.fSequenceNumber >= 1 && chunk.fDirty) {
-					dirtyChunks.add(chunk);
-				}
-			}
+			dirtyChunks.addAll(this.dirtyChunkSet);
 		}
-
 		sortBySequenceNumber(dirtyChunks);
 
+		long startTime = System.currentTimeMillis();
 		// Also handles header chunk.
-		return flushAndUnlockChunks(dirtyChunks, true) || wasInterrupted;
+		wasInterrupted = flushAndUnlockChunks(dirtyChunks, true) || wasInterrupted;
+		long elapsedTime = System.currentTimeMillis() - startTime;
+		this.totalFlushTime += elapsedTime;
+
+		return wasInterrupted;
 	}
 

@@ -1,16 +1,23 @@
 	@Override
 	protected boolean token(Token token, int index) {
-		int positionIfNewLine = this.lineStartPosition + token.getAlign() + token.getIndent();
-		if (token.tokenType != TokenNameNotAToken)
-			positionIfNewLine += COMMENT_LINE_SEPARATOR_LENGTH;
-		if (getLineBreaksBefore() > 0) {
-			this.lineCounter = Math.max(this.lineCounter + getLineBreaksBefore(), 4);
+		final int positionIfNewLine = getStartingPosition(token);
+
+		int lineBreaksBefore = getLineBreaksBefore();
+		if ((index == 1 || getNext() == null) && this.newLinesAtBoundries && lineBreaksBefore == 0) {
+			if (!this.simulation)
+				token.breakBefore();
+			lineBreaksBefore = 1;
+		}
+
+		if (lineBreaksBefore > 0) {
+			this.lineCounter += lineBreaksBefore;
 			this.counter = positionIfNewLine;
 			this.potentialWrapToken = this.potentialWrapTokenSubstitute = null;
+			this.lineLimit = getLineLimit(this.lineStartPosition);
 
 			boolean isFormattedCode = token.getWrapPolicy() != null
 					&& token.getWrapPolicy() != WrapPolicy.SUBSTITUTE_ONLY;
-			if (!isFormattedCode && token.getAlign() == 0) {
+			if (!isFormattedCode && token.getAlign() == 0 && !this.simulation) {
 				// Indents are reserved for code inside <pre>.
 				// Indentation of javadoc tags can be achieved with align
 				token.setAlign(token.getIndent());
@@ -18,8 +25,7 @@
 			}
 		}
 
-		boolean canWrap = getNext() != null && getLineBreaksBefore() == 0 && index > 1
-				&& positionIfNewLine < this.counter;
+		boolean canWrap = getNext() != null && lineBreaksBefore == 0 && index > 1 && positionIfNewLine < this.counter;
 		if (canWrap) {
 			if (token.getWrapPolicy() == null) {
 				this.potentialWrapToken = token;
@@ -39,7 +45,6 @@
 				this.potentialWrapToken = this.potentialWrapTokenSubstitute;
 				this.counterIfWrapped = this.counterIfWrappedSubstitute;
 			}
-			this.counter = this.counterIfWrapped;
 			if (!this.simulation) {
 				this.potentialWrapToken.breakBefore();
 				// Indents are reserved for code inside <pre>.
@@ -47,8 +52,10 @@
 				this.potentialWrapToken.setAlign(this.potentialWrapToken.getIndent());
 				this.potentialWrapToken.setIndent(0);
 			}
-			this.lineCounter = Math.max(this.lineCounter + 1, 4);
+			this.counter = this.counterIfWrapped;
+			this.lineCounter++;
 			this.potentialWrapToken = this.potentialWrapTokenSubstitute = null;
+			this.lineLimit = getLineLimit(this.lineStartPosition);
 		}
 
 		if (isSpaceAfter()) {

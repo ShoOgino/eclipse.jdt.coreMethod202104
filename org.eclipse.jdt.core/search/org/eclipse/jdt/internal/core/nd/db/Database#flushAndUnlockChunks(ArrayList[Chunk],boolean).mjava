@@ -7,36 +7,56 @@
 	private boolean flushAndUnlockChunks(final ArrayList<Chunk> dirtyChunks, boolean isComplete) throws IndexException {
 		boolean wasInterrupted = false;
 		assert !Thread.holdsLock(this.fCache);
-		synchronized (this.fHeaderChunk) {
-			final boolean haveDirtyChunks = !dirtyChunks.isEmpty();
-			if (haveDirtyChunks || this.fHeaderChunk.fDirty) {
-				wasInterrupted = markFileIncomplete() || wasInterrupted;
+		final boolean haveDirtyChunks = !dirtyChunks.isEmpty();
+		if (haveDirtyChunks || this.fHeaderChunk.fDirty) {
+			wasInterrupted = markFileIncomplete() || wasInterrupted;
+		}
+		if (haveDirtyChunks) {
+			double desiredWriteBytesPerMs = Database.MIN_BYTES_PER_MILLISECOND;
+			synchronized (this.fCache) {
+				if (this.cacheMisses > 100) {
+					double measuredReadBytesPerMs = getAverageReadBytesPerMs();
+					if (measuredReadBytesPerMs > 0) {
+						desiredWriteBytesPerMs = measuredReadBytesPerMs / 2;
+					}
+				}
 			}
-			if (haveDirtyChunks) {
+			desiredWriteBytesPerMs = Math.max(desiredWriteBytesPerMs, Database.MIN_BYTES_PER_MILLISECOND);
+			ChunkWriter writer = new ChunkWriter(WRITE_BUFFER_SIZE, desiredWriteBytesPerMs, this::write);
+			try {
 				for (Chunk chunk : dirtyChunks) {
 					if (chunk.fDirty) {
-						wasInterrupted = chunk.flush() || wasInterrupted;
-					}
-				}
-
-				// Only after the chunks are flushed we may unlock and release them.
-				synchronized (this.fCache) {
-					for (Chunk chunk : dirtyChunks) {
-						chunk.fLocked= false;
-						if (chunk.fCacheIndex < 0) {
-							this.fChunks[chunk.fSequenceNumber]= null;
-							this.allocatedChunks.remove(chunk);
+						boolean wasCanceled = false;
+						if (DEBUG_PAGE_CACHE) {
+							System.out.println("CHUNK " + chunk.fSequenceNumber + ": flushing - instance " //$NON-NLS-1$//$NON-NLS-2$
+									+ System.identityHashCode(chunk));
 						}
+						byte[] nextBytes;
+						synchronized (this.fCache) {
+							nextBytes = chunk.getBytes();
+							chunk.fDirty = false;
+							chunkCleaned(chunk);
+						}
+						wasCanceled = writer.write((long) chunk.fSequenceNumber * Database.CHUNK_SIZE, nextBytes);
+
+						wasInterrupted = wasCanceled || wasInterrupted;
 					}
 				}
-			}
-
-			if (isComplete) {
-				if (this.fHeaderChunk.fDirty || this.fIsMarkedIncomplete) {
-					this.fHeaderChunk.putInt(VERSION_OFFSET, this.fVersion);
-					wasInterrupted = this.fHeaderChunk.flush() || wasInterrupted;
-					this.fIsMarkedIncomplete= false;
+				writer.flush();
+				synchronized (this.fCache) {
+					this.pageWritesBytes += writer.getBytesWritten();
+					this.totalWriteTimeMs += writer.getTotalWriteTimeMs();
 				}
+			} catch (IOException e) {
+				throw new IndexException(new DBStatus(e));
+			}
+		}
+
+		if (isComplete) {
+			if (this.fHeaderChunk.fDirty || this.fIsMarkedIncomplete) {
+				this.fHeaderChunk.putInt(VERSION_OFFSET, this.fVersion);
+				wasInterrupted = this.fHeaderChunk.flush() || wasInterrupted;
+				this.fIsMarkedIncomplete= false;
 			}
 		}
 		return wasInterrupted;

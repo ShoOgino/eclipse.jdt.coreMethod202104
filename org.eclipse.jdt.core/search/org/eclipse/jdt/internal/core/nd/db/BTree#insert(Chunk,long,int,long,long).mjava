@@ -8,6 +8,7 @@
 				// Found it, never mind.
 				return median;
 			} else {
+				chunk.makeDirty();
 				// Split it.
 				// Create the new node and move the larger records over.
 				long newnode = allocateNode();
@@ -32,11 +33,15 @@
 					for (int i = this.maxRecords - 2; i >= iParent; --i) {
 						long r = getRecord(pChunk, parent, i);
 						if (r != 0) {
+							// Re-fetch pChunk since we can only dirty the page that was fetched most recently from
+							// the database (anything fetched earlier may have been paged out)
+							pChunk = pChunk.getWritableChunk();
 							putRecord(pChunk, parent, i + 1, r);
 							putChild(pChunk, parent, i + 2, getChild(pChunk, parent, i + 1));
 						}
 					}
 				}
+				pChunk = pChunk.getWritableChunk();
 				putRecord(pChunk, parent, iParent, median);
 				putChild(pChunk, parent, iParent + 1, newnode);
 
@@ -74,6 +79,9 @@
 				}
 			}
 		}
+
+		// Note that the call to compare, above, may have paged out and reallocated the chunk so fetch it again now.
+		chunk = this.db.getChunk(node);
 		final int i= lower;
 		long child = getChild(chunk, node, i);
 		if (child != 0) {
