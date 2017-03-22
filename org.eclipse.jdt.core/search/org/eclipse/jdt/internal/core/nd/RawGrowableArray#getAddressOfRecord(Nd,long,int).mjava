@@ -12,7 +12,12 @@
 
 			// We use reads of 1 past the end of the array to handle insertions.
 			if (index > size) {
-				throw new IndexException(
+				ProblemBuilder builder = nd.describeProblem();
+
+				addSizeTo(nd, address, builder);
+
+				builder.addProblemAddress(GROWABLE_BLOCK_ADDRESS, address);
+				builder.throwException(
 						"Record index " + index + " out of range. Array contains " + size + " elements"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
 			}
 
@@ -24,8 +29,15 @@
 				int blockRelativeIndex = growableBlockRelativeIndex % GrowableBlockHeader.MAX_GROWABLE_SIZE;
 				int block = growableBlockRelativeIndex / GrowableBlockHeader.MAX_GROWABLE_SIZE;
 
-				growableBlockAddress = db.getRecPtr(growableBlockAddress + MetaBlockHeader.META_BLOCK_HEADER_BYTES
-						+ block * Database.PTR_SIZE);
+				long dataBlockAddress = growableBlockAddress + MetaBlockHeader.META_BLOCK_HEADER_BYTES
+						+ block * Database.PTR_SIZE;
+				growableBlockAddress = db.getRecPtr(dataBlockAddress);
+				if (growableBlockAddress == 0) {
+					nd.describeProblem()
+						.addProblemAddress("backpointer number " + block, dataBlockAddress, Database.PTR_SIZE) //$NON-NLS-1$
+						.addProblemAddress(GROWABLE_BLOCK_ADDRESS, address)
+						.throwException("Null data block found in metablock"); //$NON-NLS-1$
+				}
 				growableBlockRelativeIndex = blockRelativeIndex;
 			}
 

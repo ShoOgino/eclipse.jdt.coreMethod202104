@@ -5,65 +5,84 @@
 		assert this.fExclusiveLock;
 		assert datasize >= 0;
 		assert datasize <= MAX_MALLOC_SIZE;
-
+		
 		long result;
 		int usedSize;
-		if (datasize >= MAX_SINGLE_BLOCK_MALLOC_SIZE) {
-			int newChunkNum = createLargeBlock(datasize);
-			usedSize = Math.abs(getBlockHeaderForChunkNum(newChunkNum)) * CHUNK_SIZE;
-			result = (long) newChunkNum * CHUNK_SIZE + LargeBlock.HEADER_SIZE;
-			// Note that we identify large blocks by setting their block size to 0.
-			clearRange(result, usedSize - LargeBlock.HEADER_SIZE - LargeBlock.FOOTER_SIZE);
-			result = result + BLOCK_HEADER_SIZE;
-		} else {
-			long freeBlock = 0;
-			int needDeltas = divideRoundingUp(datasize + BLOCK_HEADER_SIZE, BLOCK_SIZE_DELTA);
-			if (needDeltas < MIN_BLOCK_DELTAS) {
-				needDeltas = MIN_BLOCK_DELTAS;
-			}
-
-			// Which block size.
-			int useDeltas;
-			for (useDeltas = needDeltas; useDeltas <= MAX_BLOCK_DELTAS; useDeltas++) {
-				freeBlock = getFirstBlock(useDeltas * BLOCK_SIZE_DELTA);
-				if (freeBlock != 0)
-					break;
-			}
-
-			// Get the block.
-			Chunk chunk;
-			if (freeBlock == 0) {
-				// Allocate a new chunk.
-				freeBlock = (long) (createLargeBlock(datasize)) * (long) CHUNK_SIZE + LargeBlock.HEADER_SIZE;
-				useDeltas = MAX_BLOCK_DELTAS;
-				chunk = getChunk(freeBlock);
+		this.log.start(this.mallocTag);
+		try {
+			if (datasize >= MAX_SINGLE_BLOCK_MALLOC_SIZE) {
+				int newChunkNum = createLargeBlock(datasize);
+				usedSize = Math.abs(getBlockHeaderForChunkNum(newChunkNum)) * CHUNK_SIZE;
+				result = (long) newChunkNum * CHUNK_SIZE + LargeBlock.HEADER_SIZE;
+				// Note that we identify large blocks by setting their block size to 0.
+				clearRange(result, usedSize - LargeBlock.HEADER_SIZE - LargeBlock.FOOTER_SIZE);
+				result = result + BLOCK_HEADER_SIZE;
 			} else {
-				chunk = getChunk(freeBlock);
-				chunk.makeDirty();
-				removeBlock(chunk, useDeltas * BLOCK_SIZE_DELTA, freeBlock);
+				long freeBlock = 0;
+				int needDeltas = divideRoundingUp(datasize + BLOCK_HEADER_SIZE, BLOCK_SIZE_DELTA);
+				if (needDeltas < MIN_BLOCK_DELTAS) {
+					needDeltas = MIN_BLOCK_DELTAS;
+				}
+	
+				// Which block size.
+				int useDeltas;
+				for (useDeltas = needDeltas; useDeltas <= MAX_BLOCK_DELTAS; useDeltas++) {
+					freeBlock = getFirstBlock(useDeltas * BLOCK_SIZE_DELTA);
+					if (freeBlock != 0)
+						break;
+				}
+	
+				// Get the block.
+				Chunk chunk;
+				if (freeBlock == 0) {
+					// Allocate a new chunk.
+					freeBlock = (long) (createLargeBlock(datasize)) * (long) CHUNK_SIZE + LargeBlock.HEADER_SIZE;
+					useDeltas = MAX_BLOCK_DELTAS;
+					chunk = getChunk(freeBlock);
+				} else {
+					chunk = getChunk(freeBlock);
+					chunk.makeDirty();
+					int blockReportedSize = chunk.getShort(freeBlock);
+					if (blockReportedSize != useDeltas * BLOCK_SIZE_DELTA) {
+						describeProblem()
+							.addProblemAddress("block size", freeBlock, SHORT_SIZE) //$NON-NLS-1$
+							.throwException(
+								"Heap corruption detected in free space list. Block " + freeBlock //$NON-NLS-1$
+								+ " reports a size of " + blockReportedSize + " but was in the list for blocks of size "  //$NON-NLS-1$//$NON-NLS-2$
+								+ useDeltas * BLOCK_SIZE_DELTA);
+					}
+					removeBlock(chunk, useDeltas * BLOCK_SIZE_DELTA, freeBlock);
+				}
+	
+				final int unusedDeltas = useDeltas - needDeltas;
+				if (unusedDeltas >= MIN_BLOCK_DELTAS) {
+					// Add in the unused part of our block.
+					addBlock(chunk, unusedDeltas * BLOCK_SIZE_DELTA, freeBlock + needDeltas * BLOCK_SIZE_DELTA);
+					useDeltas = needDeltas;
+				}
+	
+				// Make our size negative to show in use.
+				usedSize = useDeltas * BLOCK_SIZE_DELTA;
+				chunk.putShort(freeBlock, (short) -usedSize);
+	
+				// Clear out the block, lots of people are expecting this.
+				chunk.clear(freeBlock + BLOCK_HEADER_SIZE, usedSize - BLOCK_HEADER_SIZE);
+				result = freeBlock + BLOCK_HEADER_SIZE;
 			}
-
-			final int unusedDeltas = useDeltas - needDeltas;
-			if (unusedDeltas >= MIN_BLOCK_DELTAS) {
-				// Add in the unused part of our block.
-				addBlock(chunk, unusedDeltas * BLOCK_SIZE_DELTA, freeBlock + needDeltas * BLOCK_SIZE_DELTA);
-				useDeltas = needDeltas;
-			}
-
-			// Make our size negative to show in use.
-			usedSize = useDeltas * BLOCK_SIZE_DELTA;
-			chunk.putShort(freeBlock, (short) -usedSize);
-
-			// Clear out the block, lots of people are expecting this.
-			chunk.clear(freeBlock + BLOCK_HEADER_SIZE, usedSize - BLOCK_HEADER_SIZE);
-			result = freeBlock + BLOCK_HEADER_SIZE;
+		} finally {
+			this.log.end(this.mallocTag);
 		}
 
+		this.log.recordMalloc(result, usedSize - BLOCK_HEADER_SIZE);
 		this.malloced += usedSize;
 		this.memoryUsage.recordMalloc(poolId, usedSize);
 
-		if (DEBUG_LARGE_CHUNKS) {
-			validateFreeSpaceTries();
+		if (DEBUG_FREE_SPACE) {
+			boolean performedValidation = periodicValidateFreeSpace();
+
+			if (performedValidation) {
+				verifyNotInFreeSpaceList(result);
+			}
 		}
 
 		return result;
