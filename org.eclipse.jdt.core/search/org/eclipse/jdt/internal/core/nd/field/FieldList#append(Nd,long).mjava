@@ -1,0 +1,42 @@
+	public T append(Nd nd, long address) {
+		Database db = nd.getDB();
+		db.getLog().start(this.appendTag);
+		try {
+			long headerStartAddress = address + this.offset;
+			long nextBlockAddress = LAST_BLOCK_WITH_ELEMENTS.get(nd, headerStartAddress);
+	
+			// Ensure that there's at least one block
+			long insertionBlockAddress = nextBlockAddress;
+			if (nextBlockAddress == 0) {
+				long newBlockAddress = allocateNewBlock(nd, this.elementsPerBlock);
+				LAST_BLOCK_WITH_ELEMENTS.put(nd, headerStartAddress, newBlockAddress);
+				FIRST_BLOCK.put(nd, headerStartAddress, newBlockAddress);
+				insertionBlockAddress = newBlockAddress;
+			}
+	
+			// Check if there's any free space in this block
+			int elementsInBlock = BlockHeader.ELEMENTS_IN_USE.get(nd, insertionBlockAddress);
+			int blockSize = BlockHeader.BLOCK_SIZE.get(nd, insertionBlockAddress);
+	
+			if (elementsInBlock >= blockSize) {
+				long nextBlock = BlockHeader.NEXT_BLOCK.get(nd, insertionBlockAddress);
+				if (nextBlock == 0) {
+					nextBlock = allocateNewBlock(nd, this.elementsPerBlock);
+					BlockHeader.NEXT_BLOCK.put(nd, insertionBlockAddress, nextBlock);
+				}
+				LAST_BLOCK_WITH_ELEMENTS.put(nd, headerStartAddress, nextBlock);
+				insertionBlockAddress = nextBlock;
+				elementsInBlock = BlockHeader.ELEMENTS_IN_USE.get(nd, insertionBlockAddress); 
+			}
+	
+			BlockHeader.ELEMENTS_IN_USE.put(nd, insertionBlockAddress, (short) (elementsInBlock + 1));
+			int elementSize = getElementSize();
+	
+			long resultAddress = insertionBlockAddress + BlockHeader.BLOCK_HEADER_BYTES + elementsInBlock * elementSize;
+			assert ((resultAddress - Database.BLOCK_HEADER_SIZE) & (Database.BLOCK_SIZE_DELTA - 1)) == 0;
+			return this.elementType.getFactory().create(nd, resultAddress);
+		} finally {
+			db.getLog().end(this.appendTag);
+		}
+	}
+

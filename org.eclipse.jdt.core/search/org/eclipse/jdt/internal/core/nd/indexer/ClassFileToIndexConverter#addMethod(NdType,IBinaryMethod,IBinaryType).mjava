@@ -19,8 +19,9 @@
 
 		IBinaryTypeAnnotation[] typeAnnotations = next.getTypeAnnotations();
 		if (typeAnnotations != null) {
+			method.allocateTypeAnnotations(typeAnnotations.length);
 			for (IBinaryTypeAnnotation typeAnnotation : typeAnnotations) {
-				NdTypeAnnotationInMethod annotation = new NdTypeAnnotationInMethod(getNd(), method);
+				NdTypeAnnotation annotation = method.createTypeAnnotation();
 
 				initTypeAnnotation(annotation, typeAnnotation);
 			}
@@ -62,6 +63,10 @@
 
 		int parameterNameIdx = 0;
 		int annotatedParametersCount = next.getAnnotatedParametersCount();
+		int namedParameterCount = parameterNames == null ? 0 : parameterNames.length;
+		int estimatedParameterCount = Math.max(Math.max(Math.max(numArgumentsInGenericSignature, namedParameterCount),
+				annotatedParametersCount), parameterFieldDescriptors.size());
+		method.allocateParameters(estimatedParameterCount);
 
 		short descriptorParameterIdx = 0;
 		char[] binaryTypeName = binaryType.getName();
@@ -80,8 +85,8 @@
 			if (isCompilerDefined && !compilerDefinedParametersAreIncludedInSignature) {
 				nextFieldSignature = new SignatureWrapper(nextFieldDescriptor);
 			}
-			NdMethodParameter parameter = new NdMethodParameter(method,
-					createTypeSignature(nextFieldSignature, nextFieldDescriptor));
+			NdMethodParameter parameter = method.createNewParameter();
+			parameter.setType(createTypeSignature(nextFieldSignature, nextFieldDescriptor));
 
 			parameter.setCompilerDefined(isCompilerDefined);
 
@@ -91,7 +96,7 @@
 
 				attachAnnotations(parameter, parameterAnnotations);
 			}
-			if (!isCompilerDefined && parameterNames != null && parameterNames.length > parameterNameIdx) {
+			if (!isCompilerDefined && namedParameterCount > parameterNameIdx) {
 				parameter.setName(parameterNames[parameterNameIdx++]);
 			}
 			descriptorParameterIdx++;
@@ -106,11 +111,12 @@
 		if (exceptionTypes == null) {
 			exceptionTypes = CharArrayUtils.EMPTY_ARRAY_OF_CHAR_ARRAYS;
 		}
+		method.allocateExceptions(exceptionTypes.length);
 		int throwsIdx = 0;
 		if (hasExceptionsInSignature) {
 			while (hasAnotherException(signature)) {
 				signature.start++;
-				new NdMethodException(method, createTypeSignature(signature,
+				method.createException(createTypeSignature(signature,
 						JavaNames.binaryNameToFieldDescriptor(exceptionTypes[throwsIdx])));
 				throwsIdx++;
 			}
@@ -118,7 +124,7 @@
 			for (;throwsIdx < exceptionTypes.length; throwsIdx++) {
 				char[] fieldDescriptor = JavaNames.binaryNameToFieldDescriptor(exceptionTypes[throwsIdx]);
 				SignatureWrapper convertedWrapper = new SignatureWrapper(fieldDescriptor);
-				new NdMethodException(method, createTypeSignature(convertedWrapper,
+				method.createException(createTypeSignature(convertedWrapper,
 						JavaNames.binaryNameToFieldDescriptor(exceptionTypes[throwsIdx])));
 			}
 		}
