@@ -34,6 +34,31 @@
 		IPackageFragmentRoot root = null;
 
 		switch(resolvedEntry.getEntryKind()){
+			case IClasspathEntry.CPE_JRT_SYSTEM :
+				PerProjectInfo info = getPerProjectInfo();
+				ObjectVector imageRoots;
+				if (info.jrtRoots == null || !info.jrtRoots.containsKey(entryPath)) {
+					imageRoots = new ObjectVector();
+					loadModulesInJrt(entryPath, imageRoots, rootToResolvedEntries, resolvedEntry, referringEntry);
+					info.setJrtPackageRoots(entryPath, imageRoots); // unfiltered
+					rootIDs.add(rootID);
+				} else {
+					imageRoots = info.jrtRoots.get(entryPath);
+				}
+				if (filterModuleRoots) {
+					List<String> rootModules = null;
+					String limitModules = ClasspathEntry.getExtraAttribute(resolvedEntry, IClasspathAttribute.LIMIT_MODULES);
+					if (limitModules != null) {
+						rootModules = Arrays.asList(limitModules.split(",")); //$NON-NLS-1$
+					} else if (isUnNamedModule()) {
+						rootModules = defaultRootModules((Iterable) imageRoots);
+					}
+					if (rootModules != null) {
+						imageRoots = filterLimitedModules(entryPath, imageRoots, rootModules);
+					}
+				}
+				accumulatedRoots.addAll(imageRoots);
+				break;
 			// source folder
 			case IClasspathEntry.CPE_SOURCE :
 
@@ -61,31 +86,7 @@
 				} else if (target instanceof File) {
 					// external target
 					if (JavaModel.isFile(target)) {
-						if (JavaModel.isJimage((File) target)) {
-							PerProjectInfo info = getPerProjectInfo();
-							ObjectVector imageRoots;
-							if (info.jrtRoots == null || !info.jrtRoots.containsKey(entryPath)) {
-								imageRoots = new ObjectVector();
-								loadModulesInJimage(entryPath, imageRoots, rootToResolvedEntries, resolvedEntry, referringEntry);
-								info.setJrtPackageRoots(entryPath, imageRoots); // unfiltered
-								rootIDs.add(rootID);
-							} else {
-								imageRoots = info.jrtRoots.get(entryPath);
-							}
-							if (filterModuleRoots) {
-								List<String> rootModules = null;
-								String limitModules = ClasspathEntry.getExtraAttribute(resolvedEntry, IClasspathAttribute.LIMIT_MODULES);
-								if (limitModules != null) {
-									rootModules = Arrays.asList(limitModules.split(",")); //$NON-NLS-1$
-								} else if (isUnNamedModule()) {
-									rootModules = defaultRootModules((Iterable) imageRoots);
-								}
-								if (rootModules != null) {
-									imageRoots = filterLimitedModules(entryPath, imageRoots, rootModules);
-								}
-							}
-							accumulatedRoots.addAll(imageRoots);
-						} else if (JavaModel.isJmod((File) target)) {
+						if (JavaModel.isJmod((File) target)) {
 							root = new JModPackageFragmentRoot(entryPath, this);
 						}
 						else {
