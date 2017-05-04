@@ -1,31 +1,21 @@
 	private ASTNode parseSourceCode(int kind) {
-		ASTParser parser = ASTParser.newParser(AST.JLS9);
-		Map<String, String> parserOptions = JavaCore.getOptions();
-		parserOptions.put(CompilerOptions.OPTION_Source, this.sourceLevel);
-		parserOptions.put(CompilerOptions.OPTION_DocCommentSupport, CompilerOptions.ENABLED);
-		parser.setCompilerOptions(parserOptions);
-
-		switch (kind & K_MASK) {
-			case K_COMPILATION_UNIT:
-				return parseSourceCode(parser, ASTParser.K_COMPILATION_UNIT, true);
-			case K_CLASS_BODY_DECLARATIONS:
-				return parseSourceCode(parser, ASTParser.K_CLASS_BODY_DECLARATIONS, false);
-			case K_STATEMENTS:
-				return parseSourceCode(parser, ASTParser.K_STATEMENTS, false);
-			case K_EXPRESSION:
-				return parseSourceCode(parser, ASTParser.K_EXPRESSION, false);
-			case K_UNKNOWN:
-				int[] parserModes = { ASTParser.K_COMPILATION_UNIT, ASTParser.K_EXPRESSION,
-						ASTParser.K_CLASS_BODY_DECLARATIONS, ASTParser.K_STATEMENTS };
-				for (int parserMode : parserModes) {
-					ASTNode astNode = parseSourceCode(parser, parserMode, false);
-					if (astNode != null)
-						return astNode;
-					parser.setCompilerOptions(parserOptions); // parser loses compiler options after every use
-				}
-				return null;
-			default:
-				throw new IllegalArgumentException();
+		kind = kind & K_MASK;
+		if (kind != K_UNKNOWN) {
+			ASTNode astNode = createParser(kind).createAST(null);
+			if (kind == K_COMPILATION_UNIT || kind == K_MODULE_INFO)
+				return astNode;
+			return hasErrors(astNode) ? null : astNode;
 		}
+
+		int[] kindsToTry = { K_COMPILATION_UNIT, K_EXPRESSION, K_CLASS_BODY_DECLARATIONS, K_STATEMENTS, K_MODULE_INFO };
+		for (int kindToTry : kindsToTry) {
+			ASTNode astNode = createParser(kindToTry).createAST(null);
+			if (!hasErrors(astNode)) {
+				if (kindToTry == K_MODULE_INFO) 
+					tokenizeSource(kindToTry); // run scanner again to get module specific tokens
+				return astNode;
+			}
+		}
+		return null;
 	}
 
