@@ -1,0 +1,51 @@
+	/**
+	 * Ensures that the receiver will have space for the given number of elements without additional
+	 * allocation. Callers should invoke this prior to a sequence of {@link FieldList#append(Nd, long)}
+	 * calls if they know in advance how many elements will be appended. Will create the minimum number
+	 * of extra blocks needed to the given number of additional elements.
+	 */
+	public void allocate(Nd nd, long address, int numElements) {
+		Database db = nd.getDB();
+		db.getLog().start(this.allocateTag);
+		try {
+			if (numElements == 0) {
+				// Not an error, but there's nothing to do if the caller didn't actually ask for anything to be allocated.
+				return;
+			}
+			long headerStartAddress = address + this.offset;
+			long nextBlockAddress = LAST_BLOCK_WITH_ELEMENTS.get(nd, headerStartAddress);
+	
+			int maxBlockSizeThatFitsInAChunk = (int) ((MAX_BYTES_IN_A_CHUNK - BlockHeader.BLOCK_HEADER_BYTES)
+					/ getElementSize());
+
+			// Ensure that there's at least one block
+			if (nextBlockAddress == 0) {
+				int firstAllocation = Math.min(numElements, maxBlockSizeThatFitsInAChunk);
+				nextBlockAddress = allocateNewBlock(nd, firstAllocation);
+				LAST_BLOCK_WITH_ELEMENTS.put(nd, headerStartAddress, nextBlockAddress);
+				FIRST_BLOCK.put(nd, headerStartAddress, nextBlockAddress);
+			}
+	
+			// Check if there's any free space in this block
+			int remainingToAllocate = numElements;
+			while (true) {
+				long currentBlockAddress = nextBlockAddress;
+				nextBlockAddress = BlockHeader.NEXT_BLOCK.get(nd, currentBlockAddress);
+				int elementsInUse = BlockHeader.ELEMENTS_IN_USE.get(nd, currentBlockAddress);
+				int blockSize = BlockHeader.BLOCK_SIZE.get(nd, currentBlockAddress);
+	
+				remainingToAllocate -= (blockSize - elementsInUse);
+				if (remainingToAllocate <= 0) {
+					break;
+				}
+	
+				if (nextBlockAddress == 0) {
+					nextBlockAddress = allocateNewBlock(nd, Math.min(maxBlockSizeThatFitsInAChunk, numElements));
+					BlockHeader.NEXT_BLOCK.put(nd, currentBlockAddress, nextBlockAddress);
+				}
+			}
+		} finally {
+			db.getLog().end(this.allocateTag);
+		}
+	}
+

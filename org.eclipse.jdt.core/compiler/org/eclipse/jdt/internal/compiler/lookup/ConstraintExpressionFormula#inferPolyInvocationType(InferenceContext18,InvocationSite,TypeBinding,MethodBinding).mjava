@@ -10,8 +10,7 @@
 				throw new InferenceFailureException("expression has no value"); //$NON-NLS-1$
 
 			if (inferenceContext.usesUncheckedConversion) {
-				// spec says erasure, but we don't really have compatibility rules for erasure, use raw type instead:
-				TypeBinding erasure = inferenceContext.environment.convertToRawType(returnType, false);
+				TypeBinding erasure = getRealErasure(returnType, inferenceContext.environment);
 				ConstraintTypeFormula newConstraint = ConstraintTypeFormula.create(erasure, targetType, COMPATIBLE);
 				return inferenceContext.reduceAndIncorporate(newConstraint);
 			}
@@ -24,12 +23,17 @@
 						parameterizedType.genericType(), betas, parameterizedType.enclosingType(), parameterizedType.getTypeAnnotations());
 				inferenceContext.currentBounds.captures.put(gbeta, parameterizedType); // established: both types have nonnull arguments
 				if (InferenceContext18.SHOULD_WORKAROUND_BUG_JDK_8054721) {
-					parameterizedType = parameterizedType.capture(inferenceContext.scope, invocationSite.sourceStart(), invocationSite.sourceEnd());
-					arguments = parameterizedType.arguments;
 					for (int i = 0, length = arguments.length; i < length; i++) {
-						if (arguments[i].isCapture() && arguments[i].isProperType(true)) {
-							CaptureBinding capture = (CaptureBinding) arguments[i];
-							inferenceContext.currentBounds.addBound(new TypeBound(betas[i], capture, SAME), inferenceContext.environment);
+						if (arguments[i].isWildcard()) {
+							WildcardBinding wc = (WildcardBinding) arguments[i];
+							switch (wc.boundKind) {
+								case Wildcard.EXTENDS:
+									inferenceContext.currentBounds.addBound(new TypeBound(betas[i], wc.bound(), SUBTYPE), inferenceContext.environment);
+									break;
+								case Wildcard.SUPER:
+									inferenceContext.currentBounds.addBound(new TypeBound(betas[i], wc.bound(), SUPERTYPE), inferenceContext.environment);
+									break;
+							}
 						}
 					}
 				}

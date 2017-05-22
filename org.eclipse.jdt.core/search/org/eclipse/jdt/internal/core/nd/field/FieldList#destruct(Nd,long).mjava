@@ -1,0 +1,24 @@
+	@Override
+	public void destruct(Nd nd, long address) {
+		Database db = nd.getDB();
+		db.getLog().start(this.destructTag);
+		try {
+			short poolId = getMemoryPoolId(nd);
+			long headerStartAddress = address + this.offset;
+			long firstBlockAddress = FIRST_BLOCK.get(nd, headerStartAddress);
+	
+			long nextBlockAddress = firstBlockAddress;
+			while (nextBlockAddress != 0) {
+				long currentBlockAddress = nextBlockAddress;
+				nextBlockAddress = BlockHeader.NEXT_BLOCK.get(nd, currentBlockAddress);
+				int elementsInBlock = BlockHeader.ELEMENTS_IN_USE.get(nd, currentBlockAddress);
+				destructElements(nd, currentBlockAddress + BlockHeader.BLOCK_HEADER_BYTES, elementsInBlock);
+				db.free(currentBlockAddress, poolId);
+			}
+	
+			db.clearRange(headerStartAddress, getRecordSize());
+		} finally {
+			db.getLog().end(this.destructTag);
+		} 
+	}
+

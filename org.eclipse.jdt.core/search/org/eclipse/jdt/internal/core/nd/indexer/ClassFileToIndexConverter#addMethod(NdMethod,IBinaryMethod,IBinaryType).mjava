@@ -1,0 +1,144 @@
+	/**
+	 * Adds the given method to the given type
+	 *
+	 * @throws CoreException
+	 */
+	private void addMethod(NdMethod method, IBinaryMethod next, IBinaryType binaryType)
+			throws CoreException {
+		int flags = 0;
+
+		attachAnnotations(method, next.getAnnotations());
+
+		if (next.getGenericSignature() != null) {
+			flags |= NdMethod.FLG_GENERIC_SIGNATURE_PRESENT;
+		}
+		SignatureWrapper signature = GenericSignatures.getGenericSignature(next);
+		SignatureWrapper descriptor = new SignatureWrapper(next.getMethodDescriptor());
+		readTypeParameters(method, signature);
+
+		IBinaryTypeAnnotation[] typeAnnotations = next.getTypeAnnotations();
+		if (typeAnnotations != null) {
+			method.allocateTypeAnnotations(typeAnnotations.length);
+			for (IBinaryTypeAnnotation typeAnnotation : typeAnnotations) {
+				NdTypeAnnotation annotation = method.createTypeAnnotation();
+
+				initTypeAnnotation(annotation, typeAnnotation);
+			}
+		}
+
+		skipChar(signature, '(');
+		skipChar(descriptor, '(');
+
+		List<char[]> parameterFieldDescriptors = new ArrayList<>();
+		while (!descriptor.atEnd()) {
+			if (descriptor.charAtStart() == ')') {
+				skipChar(descriptor, ')');
+				break;
+			}
+			parameterFieldDescriptors.add(readNextFieldDescriptor(descriptor));
+		}
+
+		char[][] parameterNames = next.getArgumentNames();
+		int numArgumentsInGenericSignature = countMethodArguments(signature);
+		int numCompilerDefinedParameters = Math.max(0,
+				parameterFieldDescriptors.size() - numArgumentsInGenericSignature);
+		
+		boolean compilerDefinedParametersAreIncludedInSignature = (next.getGenericSignature() == null);
+
+		// If there is no generic signature, then fall back to heuristics based on what we know about
+		// where the java compiler likes to create compiler-defined arguments
+		if (compilerDefinedParametersAreIncludedInSignature) {
+			// Constructors for non-static member types get a compiler-defined first argument
+			if (binaryType.isMember() 
+					&& next.isConstructor() 
+					&& ((binaryType.getModifiers() & Modifier.STATIC) == 0)
+					&& parameterFieldDescriptors.size() > 0) {
+
+				numCompilerDefinedParameters = 1;
+			} else {
+				numCompilerDefinedParameters = 0;
+			}
+		}
+
+		int parameterNameIdx = 0;
+		int annotatedParametersCount = next.getAnnotatedParametersCount();
+		int namedParameterCount = parameterNames == null ? 0 : parameterNames.length;
+		int estimatedParameterCount = Math.max(Math.max(Math.max(numArgumentsInGenericSignature, namedParameterCount),
+				annotatedParametersCount), parameterFieldDescriptors.size());
+		method.allocateParameters(estimatedParameterCount);
+
+		short descriptorParameterIdx = 0;
+		char[] binaryTypeName = binaryType.getName();
+		while (!signature.atEnd()) {
+			if (signature.charAtStart() == ')') {
+				skipChar(signature, ')');
+				break;
+			}
+			char[] nextFieldDescriptor = parameterFieldDescriptors.get(descriptorParameterIdx);
+			/**
+			 * True iff this a parameter which is part of the field descriptor but not the generic signature -- that is,
+			 * it is a compiler-defined parameter.
+			 */
+			boolean isCompilerDefined = descriptorParameterIdx < numCompilerDefinedParameters;
+			SignatureWrapper nextFieldSignature = signature;
+			if (isCompilerDefined && !compilerDefinedParametersAreIncludedInSignature) {
+				nextFieldSignature = new SignatureWrapper(nextFieldDescriptor);
+			}
+			NdMethodParameter parameter = method.createNewParameter();
+			parameter.setType(createTypeSignature(nextFieldSignature, nextFieldDescriptor));
+
+			parameter.setCompilerDefined(isCompilerDefined);
+
+			if (descriptorParameterIdx < annotatedParametersCount) {
+				IBinaryAnnotation[] parameterAnnotations = next.getParameterAnnotations(descriptorParameterIdx,
+						binaryTypeName);
+
+				attachAnnotations(parameter, parameterAnnotations);
+			}
+			if (!isCompilerDefined && namedParameterCount > parameterNameIdx) {
+				parameter.setName(parameterNames[parameterNameIdx++]);
+			}
+			descriptorParameterIdx++;
+		}
+
+		skipChar(descriptor, ')');
+		char[] nextFieldDescriptor = readNextFieldDescriptor(descriptor);
+		method.setReturnType(createTypeSignature(signature, nextFieldDescriptor));
+
+		boolean hasExceptionsInSignature = hasAnotherException(signature);
+		char[][] exceptionTypes = next.getExceptionTypeNames();
+		if (exceptionTypes == null) {
+			exceptionTypes = CharArrayUtils.EMPTY_ARRAY_OF_CHAR_ARRAYS;
+		}
+		method.allocateExceptions(exceptionTypes.length);
+		int throwsIdx = 0;
+		if (hasExceptionsInSignature) {
+			while (hasAnotherException(signature)) {
+				signature.start++;
+				method.createException(createTypeSignature(signature,
+						JavaNames.binaryNameToFieldDescriptor(exceptionTypes[throwsIdx])));
+				throwsIdx++;
+			}
+		} else if (exceptionTypes.length != 0) {
+			for (;throwsIdx < exceptionTypes.length; throwsIdx++) {
+				char[] fieldDescriptor = JavaNames.binaryNameToFieldDescriptor(exceptionTypes[throwsIdx]);
+				SignatureWrapper convertedWrapper = new SignatureWrapper(fieldDescriptor);
+				method.createException(createTypeSignature(convertedWrapper,
+						JavaNames.binaryNameToFieldDescriptor(exceptionTypes[throwsIdx])));
+			}
+		}
+
+		if (hasExceptionsInSignature) {
+			flags |= NdMethod.FLG_THROWS_SIGNATURE_PRESENT;
+		}
+
+		Object defaultValue = next.getDefaultValue();
+		if (defaultValue != null) {
+			method.setDefaultValue(createConstantFromMixedType(defaultValue));
+		}
+
+		method.setModifiers(next.getModifiers());
+		method.setTagBits(next.getTagBits());
+		method.setFlags(flags);
+	}
+
