@@ -1,24 +1,59 @@
-	public PackageBinding getTopLevelPackage(char[] name) {
-		// return package binding if there exists a package named name in this module's context and it can be seen by this module
-		// A package can be seen by this module if it declares the package or someone exports that package to it
-		PackageBinding existing = this.environment.getPackage0(name);
-		if (existing != null) {
-			if (existing == LookupEnvironment.TheNotFoundPackage)
-				return null;
-		}
-		existing = getDeclaredPackage(new char[][] {name});
-		if (existing != null) {
-			return existing;
+	/**
+	 * Return a package binding if there exists a package named name in this module's context and it can be seen by this module.
+	 * A package can be seen by this module if it is declared in this module or any other module read by this module 
+	 * (JLS 7.4.3 for packages based on JLS 7.3 for compilation units).
+	 * Package exports are not considered for visibility check (only when checking "uniquely visible" (JLS 7.4.3)).
+	 * <p>
+	 * The returned package may be a {@link SplitPackageBinding}, if more than one package of the given name is visible.
+	 * </p>
+	 * <p>
+	 * When asked via the unnamed module or an automatic module all other named modules are considered visible. 
+	 * </p>
+	 */
+	PackageBinding getTopLevelPackage(char[] name) {
+		// check caches:
+		PackageBinding binding = this.declaredPackages.get(name);
+		if (binding != null)
+			return binding;
+		binding = this.environment.getPackage0(name);
+		if (binding != null)
+			return binding;
+
+		// find declaration in a visible module:
+		if (this.environment.useModuleSystem) {
+			IModuleAwareNameEnvironment moduleEnv = (IModuleAwareNameEnvironment) this.environment.nameEnvironment;
+			char[][] declaringModuleNames = moduleEnv.getModulesDeclaringPackage(null, name, nameForLookup());
+			if (declaringModuleNames != null) {
+				if (CharOperation.containsEqual(declaringModuleNames, this.moduleName)) {
+					// declared here, not yet known, so create it now:
+					binding = new PackageBinding(new char[][] {name}, null, this.environment, this);
+				} else {
+					// visible but foreign (when current is unnamed or auto):
+					for (char[] declaringModuleName : declaringModuleNames) {
+						ModuleBinding declaringModule = this.environment.root.getModule(declaringModuleName);
+						if (declaringModule != null)
+							binding = SplitPackageBinding.combine(declaringModule.getTopLevelPackage(name), binding);
+					}
+				}
+			}
 		} else {
-			return Stream.of(getAllRequiredModules()).sorted((m1, m2) -> m1.requires.length - m2.requires.length)
-					.map(m -> {
-						PackageBinding binding = m.getExportedPackage(name);
-						if (binding != null && m.isPackageExportedTo(binding, this)) {
-							return m.declaredPackages.get(name);
-						}
-						return null;
-					})
-			.filter(p -> p != null).findFirst().orElse(null);
+			if (this.environment.nameEnvironment.isPackage(null, name))
+				binding = new PackageBinding(new char[][] {name}, null, this.environment, this);			
 		}
+
+		// enrich with split-siblings from visible modules:
+		for (ModuleBinding required : getAllRequiredModules()) {
+			if (required == this) continue;
+			binding = SplitPackageBinding.combine(required.getTopLevelPackage(name), binding);
+		}
+
+		// remember:
+		if (binding != null) {
+			this.environment.knownPackages.put(name, binding);
+			binding = addPackage(binding, false);
+		} else {
+			this.environment.knownPackages.put(name, LookupEnvironment.TheNotFoundPackage);
+		}
+		return binding;
 	}
 

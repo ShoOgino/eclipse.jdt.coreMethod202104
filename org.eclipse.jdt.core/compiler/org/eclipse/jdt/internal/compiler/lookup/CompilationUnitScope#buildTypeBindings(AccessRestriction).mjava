@@ -1,5 +1,4 @@
 void buildTypeBindings(AccessRestriction accessRestriction) {
-	char[] modName = module();
 	this.topLevelTypes = new SourceTypeBinding[0]; // want it initialized if the package cannot be resolved
 	boolean firstIsSynthetic = false;
 	if (this.referenceContext.compilationResult.compilationUnit != null) {
@@ -18,14 +17,21 @@ void buildTypeBindings(AccessRestriction accessRestriction) {
 	}
 	if (this.currentPackageName == CharOperation.NO_CHAR_CHAR) {
 		// environment default package is never null
-		this.fPackage = this.environment.getDefaultPackage(modName);
+		this.fPackage = this.environment.defaultPackage;
+		if (this.referenceContext.isModuleInfo()) { // cannot have a package as per grammar
+			ModuleDeclaration moduleDecl = this.referenceContext.moduleDeclaration;
+			if (moduleDecl != null) {
+				moduleDecl.createScope(this);
+				moduleDecl.checkAndSetModifiers();
+			}
+		}
 	} else {
-		if ((this.fPackage = this.environment.createPackage(this.currentPackageName, modName)) == null) {
+		if ((this.fPackage = this.environment.createPackage(this.currentPackageName)) == null) {
 			if (this.referenceContext.currentPackage != null) {
 				problemReporter().packageCollidesWithType(this.referenceContext); // only report when the unit has a package statement
 			}
 			// ensure fPackage is not null
-			this.fPackage = this.environment.getDefaultPackage(modName);
+			this.fPackage = this.environment.defaultPackage;
 			return;
 		} else if (this.referenceContext.isPackageInfo()) {
 			// resolve package annotations now if this is "package-info.java".
@@ -38,10 +44,6 @@ void buildTypeBindings(AccessRestriction accessRestriction) {
 			if (this.referenceContext.currentPackage != null && this.referenceContext.currentPackage.annotations != null) {
 				this.referenceContext.types[0].annotations = this.referenceContext.currentPackage.annotations;
 			}
-		} else if (this.referenceContext.isModuleInfo()) {
-			ModuleDeclaration module = this.referenceContext.moduleDeclaration;
-			if (module != null)
-				module.moduleBinding = this.environment().getModule(module());
 		}
 		recordQualifiedReference(this.currentPackageName); // always dependent on your own package
 	}
@@ -56,22 +58,18 @@ void buildTypeBindings(AccessRestriction accessRestriction) {
 		if (this.environment.isProcessingAnnotations && this.environment.isMissingType(typeDecl.name))
 			throw new SourceTypeCollisionException(); // resolved a type ref before APT generated the type
 		ReferenceBinding typeBinding = this.fPackage.getType0(typeDecl.name);
+		if (Binding.isValid(typeBinding) && this.fPackage instanceof SplitPackageBinding && !this.environment.module.canAccess(typeBinding.fPackage))
+			typeBinding = null;
 		recordSimpleReference(typeDecl.name); // needed to detect collision cases
-		if (typeBinding != null && typeBinding.isValidBinding() && !(typeBinding instanceof UnresolvedReferenceBinding)) {
+		if (Binding.isValid(typeBinding) && !(typeBinding instanceof UnresolvedReferenceBinding)) {
 			// if its an unresolved binding - its fixed up whenever its needed, see UnresolvedReferenceBinding.resolve()
 			if (this.environment.isProcessingAnnotations)
 				throw new SourceTypeCollisionException(); // resolved a type ref before APT generated the type
 			// if a type exists, check that its a valid type
 			// it can be a NotFound problem type if its a secondary type referenced before its primary type found in additional units
 			// and it can be an unresolved type which is now being defined
-			if (!typeBinding.isModule()) // Kludge?
-				problemReporter().duplicateTypes(this.referenceContext, typeDecl);
+			problemReporter().duplicateTypes(this.referenceContext, typeDecl);
 			continue nextType;
-		}
-		if (this.fPackage != this.environment.getDefaultPackage(modName) && this.fPackage.getPackage(typeDecl.name, module()) != null) {
-			// if a package exists, it must be a valid package - cannot be a NotFound problem package
-			// this is now a warning since a package does not really 'exist' until it contains a type, see JLS v2, 7.4.3
-			problemReporter().typeCollidesWithPackage(this.referenceContext, typeDecl);
 		}
 
 		if ((typeDecl.modifiers & ClassFileConstants.AccPublic) != 0) {

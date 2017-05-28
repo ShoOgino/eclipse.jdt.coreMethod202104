@@ -4,7 +4,19 @@ private PackageBinding computePackageFrom(char[][] constantPoolName, boolean isM
 
 	PackageBinding packageBinding = getPackage0(constantPoolName[0]);
 	if (packageBinding == null || packageBinding == TheNotFoundPackage) {
-		packageBinding = new PackageBinding(constantPoolName[0], this);
+		if (this.useModuleSystem && this.module.isUnnamed()) {
+			char[][] declaringModules = ((IModuleAwareNameEnvironment) this.nameEnvironment).getModulesDeclaringPackage(null, constantPoolName[0], ModuleBinding.ANY);
+			if (declaringModules != null) {
+				for (char[] mod : declaringModules) {
+					ModuleBinding declaringModule = this.root.getModule(mod);
+					if (declaringModule != null)
+						packageBinding = SplitPackageBinding.combine(declaringModule.getTopLevelPackage(constantPoolName[0]), packageBinding);
+				}
+			}
+		}
+		if (packageBinding == null || packageBinding == TheNotFoundPackage) {
+			packageBinding = new PackageBinding(constantPoolName[0], this, this.module);
+		}
 		if (isMissing) packageBinding.tagBits |= TagBits.HasMissingType;
 		this.knownPackages.put(constantPoolName[0], packageBinding);
 	}
@@ -12,7 +24,19 @@ private PackageBinding computePackageFrom(char[][] constantPoolName, boolean isM
 	for (int i = 1, length = constantPoolName.length - 1; i < length; i++) {
 		PackageBinding parent = packageBinding;
 		if ((packageBinding = parent.getPackage0(constantPoolName[i])) == null || packageBinding == TheNotFoundPackage) {
-			packageBinding = new PackageBinding(CharOperation.subarray(constantPoolName, 0, i + 1), parent, this);
+			if (this.useModuleSystem && this.module.isUnnamed()) {
+				char[][] declaringModules = ((IModuleAwareNameEnvironment) this.nameEnvironment).getModulesDeclaringPackage(parent.compoundName, constantPoolName[i], ModuleBinding.ANY);
+				if (declaringModules != null) {
+					for (char[] mod : declaringModules) {
+						ModuleBinding declaringModule = this.root.getModule(mod);
+						if (declaringModule != null)
+							packageBinding = SplitPackageBinding.combine(declaringModule.getPackage(parent.compoundName, constantPoolName[i]), packageBinding);
+					}
+				}
+			}
+			if (packageBinding == null || packageBinding == TheNotFoundPackage) {
+				packageBinding = new PackageBinding(CharOperation.subarray(constantPoolName, 0, i + 1), parent, this, this.module);
+			}
 			if (isMissing) {
 				packageBinding.tagBits |= TagBits.HasMissingType;
 			}

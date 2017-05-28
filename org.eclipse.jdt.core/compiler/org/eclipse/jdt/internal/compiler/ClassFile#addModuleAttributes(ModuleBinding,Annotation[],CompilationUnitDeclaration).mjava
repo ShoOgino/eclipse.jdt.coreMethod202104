@@ -1,0 +1,48 @@
+	/**
+	 * INTERNAL USE-ONLY
+	 * This methods generate all the module attributes for the receiver.
+	 */
+	public void addModuleAttributes(ModuleBinding module, Annotation[] annotations, CompilationUnitDeclaration cud) {
+		int attributesNumber = 0;
+		// leave two bytes for the number of attributes and store the current offset
+		int attributeOffset = this.contentsOffset;
+		this.contentsOffset += 2;
+
+		// source attribute
+		if ((this.produceAttributes & ClassFileConstants.ATTR_SOURCE) != 0) {
+			String fullFileName =
+				new String(cud.getFileName());
+			fullFileName = fullFileName.replace('\\', '/');
+			int lastIndex = fullFileName.lastIndexOf('/');
+			if (lastIndex != -1) {
+				fullFileName = fullFileName.substring(lastIndex + 1, fullFileName.length());
+			}
+			attributesNumber += generateSourceAttribute(fullFileName);
+		}
+		// Deprecated attribute
+		if (module.isDeprecated()) {
+			// check that there is enough space to write all the bytes for the field info corresponding
+			// to the @fieldBinding
+			attributesNumber += generateDeprecatedAttribute();
+		}
+		attributesNumber += generateModuleAttribute(cud.moduleDeclaration);
+		if (annotations != null) {
+			long targetMask = TagBits.AnnotationForModule;
+			attributesNumber += generateRuntimeAnnotations(annotations, targetMask); 
+		}
+
+		// update the number of attributes
+		if (attributeOffset + 2 >= this.contents.length) {
+			resizeContents(2);
+		}
+		this.contents[attributeOffset++] = (byte) (attributesNumber >> 8);
+		this.contents[attributeOffset] = (byte) attributesNumber;
+
+		// resynchronize all offsets of the classfile
+		this.header = this.constantPool.poolContent;
+		this.headerOffset = this.constantPool.currentOffset;
+		int constantPoolCount = this.constantPool.currentIndex;
+		this.header[this.constantPoolOffset++] = (byte) (constantPoolCount >> 8);
+		this.header[this.constantPoolOffset] = (byte) constantPoolCount;
+	}
+

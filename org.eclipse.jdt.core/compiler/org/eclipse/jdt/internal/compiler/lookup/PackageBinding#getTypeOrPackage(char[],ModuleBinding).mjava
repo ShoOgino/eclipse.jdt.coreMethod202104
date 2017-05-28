@@ -1,0 +1,48 @@
+public Binding getTypeOrPackage(char[] name, ModuleBinding mod) {
+	ReferenceBinding referenceBinding = getType0(name);
+	if (referenceBinding != null && referenceBinding != LookupEnvironment.TheNotFoundType) {
+		referenceBinding = (ReferenceBinding) BinaryTypeBinding.resolveType(referenceBinding, this.environment, false /* no raw conversion for now */);
+		if (referenceBinding.isNestedType()) {
+			return new ProblemReferenceBinding(new char[][]{name}, referenceBinding, ProblemReasons.InternalNameProvided);
+		}
+		if (mod != this.enclosingModule && !mod.canAccess(referenceBinding.fPackage)) {
+			return new ProblemReferenceBinding(referenceBinding.compoundName, referenceBinding, ProblemReasons.NotAccessible);
+		}
+		if ((referenceBinding.tagBits & TagBits.HasMissingType) == 0) {
+			return referenceBinding;
+		}
+		// referenceBinding is a MissingType, will return it if no package is found
+	}
+
+	PackageBinding packageBinding = getPackage0(name);
+	if (packageBinding != null && packageBinding != LookupEnvironment.TheNotFoundPackage) {
+		return packageBinding;
+	}
+	if (referenceBinding == null) { // have not looked for it before
+		if ((referenceBinding = this.environment.askForType(this, name, mod)) != null) {
+			if (referenceBinding.isNestedType()) {
+				return new ProblemReferenceBinding(new char[][]{name}, referenceBinding, ProblemReasons.InternalNameProvided);
+			}
+			if (!mod.canAccess(referenceBinding.fPackage))
+				return new ProblemReferenceBinding(referenceBinding.compoundName, referenceBinding, ProblemReasons.NotAccessible);
+			return referenceBinding;
+		}
+
+		// Since name could not be found, add a problem binding
+		// to the collections so it will be reported as an error next time.
+		addNotFoundType(name);
+	}
+
+	if (packageBinding == null) { // have not looked for it before
+		if ((packageBinding = findPackage(name, mod)) != null) {
+			return packageBinding;
+		}
+		if (referenceBinding != null && referenceBinding != LookupEnvironment.TheNotFoundType) {
+			return referenceBinding; // found cached missing type - check if package conflict
+		}
+		addNotFoundPackage(name);
+	}
+
+	return null;
+}
+

@@ -38,7 +38,10 @@ private void computeClasspathLocations(
 	IClasspathEntry[] classpathEntries = javaProject.getExpandedClasspath();
 	ArrayList sLocations = new ArrayList(classpathEntries.length);
 	ArrayList bLocations = new ArrayList(classpathEntries.length);
-	List<IModulePathEntry> entries = new ArrayList<>(classpathEntries.length);
+	Map<String, IModulePathEntry> moduleEntries = null;
+	if (CompilerOptions.versionToJdkLevel(javaProject.getOption(JavaCore.COMPILER_COMPLIANCE, true)) >= ClassFileConstants.JDK9) {
+		moduleEntries = new HashMap<>(classpathEntries.length);
+	}
 	IModuleDescription mod = null;
 	
 	nextEntry : for (int i = 0, l = classpathEntries.length; i < l; i++) {
@@ -62,7 +65,7 @@ private void computeClasspathLocations(
 					if (!outputFolder.exists())
 						createOutputFolder(outputFolder);
 				}
-					sLocations.add(ClasspathLocation.forSourceFolder(
+				sLocations.add(ClasspathLocation.forSourceFolder(
 							(IContainer) target, 
 							outputFolder,
 							entry.fullInclusionPatternChars(), 
@@ -110,13 +113,12 @@ private void computeClasspathLocations(
 						}
 					}
 				}
-				if ((mod = prereqJavaProject.getModuleDescription()) != null && projectLocations.size() > 0) {
+				if (moduleEntries != null && (mod = prereqJavaProject.getModuleDescription()) != null && projectLocations.size() > 0) {
 					try {
-						ModuleDescriptionInfo info = (ModuleDescriptionInfo) ((SourceModule) mod).getElementInfo();
-						ModulePathEntry projectEntry = new ModulePathEntry(prereqJavaProject.getPath(), info,
-								projectLocations.toArray(new ClasspathLocation[projectLocations.size()]));
-						entries.add(projectEntry);
-
+						SourceModule sourceModule = (SourceModule)mod;
+						ModuleDescriptionInfo info = (ModuleDescriptionInfo) sourceModule.getElementInfo();
+						ModulePathEntry projectEntry = new ModulePathEntry(prereqJavaProject.getPath(), info, projectLocations.toArray(new ClasspathLocation[projectLocations.size()]));
+						moduleEntries.put(sourceModule.getElementName(), projectEntry);
 					} catch (JavaModelException jme) {
 						// do nothing, probably a non module project
 					}
@@ -145,8 +147,18 @@ private void computeClasspathLocations(
 					bLocations.add(bLocation);
 					// TODO: Ideally we need to do something like mapToModulePathEntry using the path and if it is indeed
 					// a module path entry, then add the corresponding entry here, but that would need the target platform
-					if (bLocation instanceof IModulePathEntry) {
-						entries.add((IModulePathEntry) bLocation);
+					if (moduleEntries != null) {
+						if (bLocation instanceof IMultiModuleEntry) {
+							IMultiModuleEntry binaryModulePathEntry = (IMultiModuleEntry) bLocation;
+							for (String moduleName : binaryModulePathEntry.getModuleNames()) {
+								moduleEntries.put(moduleName, binaryModulePathEntry);							
+							}
+						} else if (bLocation instanceof IModulePathEntry) {
+							IModulePathEntry binaryModulePathEntry = (IModulePathEntry) bLocation;
+							IModule module = binaryModulePathEntry.getModule();
+							if (module != null)
+								moduleEntries.put(String.valueOf(module.name()), binaryModulePathEntry);
+						}
 					}
 					if (binaryLocationsPerProject != null) { // normal builder mode
 						IProject p = resource.getProject(); // can be the project being built
@@ -170,8 +182,18 @@ private void computeClasspathLocations(
 					bLocations.add(bLocation);
 					// TODO: Ideally we need to do something like mapToModulePathEntry using the path and if it is indeed
 					// a module path entry, then add the corresponding entry here, but that would need the target platform
-					if (bLocation instanceof IModulePathEntry) {
-						entries.add((IModulePathEntry) bLocation);
+					if (moduleEntries != null) {
+						if (bLocation instanceof IMultiModuleEntry) {
+							IMultiModuleEntry binaryModulePathEntry = (IMultiModuleEntry) bLocation;
+							for (String moduleName : binaryModulePathEntry.getModuleNames()) {
+								moduleEntries.put(moduleName, binaryModulePathEntry);							
+							}
+						} else if (bLocation instanceof IModulePathEntry) {
+							IModulePathEntry binaryModulePathEntry = (IModulePathEntry) bLocation;
+							IModule module = binaryModulePathEntry.getModule();
+							if (module != null)
+								moduleEntries.put(String.valueOf(module.name()), binaryModulePathEntry);
+						}
 					}
 				}
 				continue nextEntry;
@@ -183,12 +205,12 @@ private void computeClasspathLocations(
 	this.sourceLocations = new ClasspathMultiDirectory[sLocations.size()];
 	if (!sLocations.isEmpty()) {
 		sLocations.toArray(this.sourceLocations);
-		if ((mod = javaProject.getModuleDescription()) != null) {
+		if (moduleEntries != null && (mod = javaProject.getModuleDescription()) != null) {
 			try {
-				ModuleDescriptionInfo info = (ModuleDescriptionInfo) ((SourceModule) mod).getElementInfo();
-				ModulePathEntry projectEntry = new ModulePathEntry(javaProject.getPath(), info,
-						this.sourceLocations);
-				entries.add(0, projectEntry);
+				SourceModule sourceModule = (SourceModule)mod;
+				ModuleDescriptionInfo info = (ModuleDescriptionInfo) sourceModule.getElementInfo();
+				ModulePathEntry projectEntry = new ModulePathEntry(javaProject.getPath(), info, this.sourceLocations);
+				moduleEntries.put(sourceModule.getElementName(), projectEntry);
 			} catch (JavaModelException jme) {
 				// do nothing, probably a non module project
 			}
@@ -221,6 +243,7 @@ private void computeClasspathLocations(
 	for (int i = 0, l = bLocations.size(); i < l; i++)
 		this.binaryLocations[index++] = (ClasspathLocation) bLocations.get(i);
 	
-	this.modulePathEntries = entries.toArray(new IModulePathEntry[entries.size()]);
+	if (moduleEntries != null && !moduleEntries.isEmpty())
+		this.modulePathEntries = moduleEntries;
 }
 

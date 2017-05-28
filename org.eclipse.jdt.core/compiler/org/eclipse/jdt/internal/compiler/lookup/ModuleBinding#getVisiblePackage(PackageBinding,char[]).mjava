@@ -1,0 +1,47 @@
+	// Given parent is visible in this module, see if there is sub package named name visible in this module
+	private PackageBinding getVisiblePackage(PackageBinding parent, char[] name) {
+		assert parent.compoundName.length > 0 : "shouldn't ask children of a default package"; //$NON-NLS-1$
+
+		// check caches:
+		char[][] subPkgCompoundName = CharOperation.arrayConcat(parent.compoundName, name);
+		char[] fullFlatName = CharOperation.concatWith(subPkgCompoundName, '.');
+		PackageBinding pkg = this.declaredPackages.get(fullFlatName);
+		if (pkg != null)
+			return pkg;
+		pkg = parent.getPackage0(name);
+		if (pkg != null) {
+			if (pkg == LookupEnvironment.TheNotFoundPackage)
+				return null;
+			else
+				return addPackage(pkg, false);
+		}
+
+		PackageBinding binding = null;
+		if (!parent.isDeclaredIn(this)) {
+			// delegate foreign packages to their declaring modules:
+			if (parent instanceof SplitPackageBinding)
+				return combineWithChildrenOfSplitPackage(binding, (SplitPackageBinding) parent, name);
+			return parent.enclosingModule.getVisiblePackage(parent, name);
+		}
+
+		boolean isPackage = this.environment.useModuleSystem 
+								? isDeclaredPackage(parent.compoundName, name)
+								: this.environment.nameEnvironment.isPackage(parent.compoundName, name);
+		if (!isPackage)
+			return null; 
+
+		// create
+		binding = new PackageBinding(subPkgCompoundName, parent, this.environment, this);
+		
+		// enrich
+		if (parent instanceof SplitPackageBinding)
+			binding = combineWithChildrenOfSplitPackage(binding, (SplitPackageBinding) parent, name);
+
+		// remember
+		if (parent.compoundName.length == 0)
+			this.environment.knownPackages.put(name, binding);
+		else
+			parent.addPackage(binding);
+		return addPackage(binding, false);
+	}
+

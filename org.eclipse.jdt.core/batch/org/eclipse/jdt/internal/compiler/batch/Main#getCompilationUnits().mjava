@@ -9,28 +9,48 @@ public CompilationUnit[] getCompilationUnits() {
 	String defaultEncoding = this.options.get(CompilerOptions.OPTION_Encoding);
 	if (Util.EMPTY_STRING.equals(defaultEncoding))
 		defaultEncoding = null;
+	
+	Map<String,CompilationUnit> pathToModCU = new HashMap<>();
 
-	for (int i = 0; i < fileCount; i++) {
-		char[] charName = this.filenames[i].toCharArray();
-		if (knownFileNames.get(charName) != null)
-			throw new IllegalArgumentException(this.bind("unit.more", this.filenames[i])); //$NON-NLS-1$
-		knownFileNames.put(charName, charName);
-		File file = new File(this.filenames[i]);
-		if (!file.exists())
-			throw new IllegalArgumentException(this.bind("unit.missing", this.filenames[i])); //$NON-NLS-1$
-		String encoding = this.encodings[i];
-		if (encoding == null)
-			encoding = defaultEncoding;
-		String fileName;
-		try {
-			fileName = file.getCanonicalPath();
-		} catch (IOException e) {
-			// if we got exception during canonicalization, fall back to the name that was specified
-			fileName = this.filenames[i];
+	for (int round = 0; round < 2; round++) {
+		for (int i = 0; i < fileCount; i++) {
+			char[] charName = this.filenames[i].toCharArray();
+			boolean isModuleInfo = CharOperation.endsWith(charName, TypeConstants.MODULE_INFO_FILE_NAME);
+			if (isModuleInfo == (round==0)) { // 1st round: modules, 2nd round others (to ensure populating pathToModCU well in time)
+				if (knownFileNames.get(charName) != null)
+					throw new IllegalArgumentException(this.bind("unit.more", this.filenames[i])); //$NON-NLS-1$
+				knownFileNames.put(charName, charName);
+				File file = new File(this.filenames[i]);
+				if (!file.exists())
+					throw new IllegalArgumentException(this.bind("unit.missing", this.filenames[i])); //$NON-NLS-1$
+				String encoding = this.encodings[i];
+				if (encoding == null)
+					encoding = defaultEncoding;
+				String fileName;
+				try {
+					fileName = file.getCanonicalPath();
+				} catch (IOException e) {
+					// if we got exception during canonicalization, fall back to the name that was specified
+					fileName = this.filenames[i];
+				}
+				units[i] = new CompilationUnit(null, fileName, encoding, this.destinationPaths[i],
+						shouldIgnoreOptionalProblems(this.ignoreOptionalProblemsFromFolders, fileName.toCharArray()), 
+						this.modNames[i]);
+				if (isModuleInfo) {
+					int lastSlash = CharOperation.lastIndexOf('/', units[i].fileName);
+					if (lastSlash != -1) {
+						pathToModCU.put(String.valueOf(CharOperation.subarray(units[i].fileName, 0, lastSlash)), units[i]);
+					}
+				} else {
+					for (Entry<String, CompilationUnit> entry : pathToModCU.entrySet()) {
+						if (fileName.startsWith(entry.getKey())) { // associate CUs to module by common prefix
+							units[i].setModule(entry.getValue());
+							break;
+						}
+					}
+				}
+			}
 		}
-		units[i] = new CompilationUnit(null, fileName, encoding, this.destinationPaths[i],
-				shouldIgnoreOptionalProblems(this.ignoreOptionalProblemsFromFolders, fileName.toCharArray()), 
-				this.modNames[i]);
 	}
 	return units;
 }

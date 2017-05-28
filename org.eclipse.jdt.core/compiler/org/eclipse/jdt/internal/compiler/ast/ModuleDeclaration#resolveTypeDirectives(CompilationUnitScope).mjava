@@ -1,0 +1,37 @@
+	/** Resolve those module directives that relate to types (provides / uses). */
+	public void resolveTypeDirectives(CompilationUnitScope cuScope) {
+		if (this.binding == null) {
+			this.ignoreFurtherInvestigation = true;
+			return;
+		}
+		ASTNode.resolveAnnotations(this.scope, this.annotations, this.binding);
+
+		Set<TypeBinding> allTypes = new HashSet<TypeBinding>();
+		for(int i = 0; i < this.usesCount; i++) {
+			TypeBinding serviceBinding = this.uses[i].serviceInterface.resolveType(this.scope);
+			if (serviceBinding != null && serviceBinding.isValidBinding()) {
+				if (!(serviceBinding.isClass() || serviceBinding.isInterface() || serviceBinding.isAnnotationType())) {
+					cuScope.problemReporter().invalidServiceRef(IProblem.InvalidServiceIntfType, this.uses[i].serviceInterface);
+				}
+				if (!allTypes.add(this.uses[i].serviceInterface.resolvedType)) {
+					cuScope.problemReporter().duplicateTypeReference(IProblem.DuplicateUses, this.uses[i].serviceInterface);
+				}
+			}
+		}
+		this.binding.setUses(allTypes.toArray(new TypeBinding[allTypes.size()]));
+		
+		Set<TypeBinding> interfaces = new HashSet<>();
+		for(int i = 0; i < this.servicesCount; i++) {
+			this.services[i].resolve(this.scope);
+			TypeBinding infBinding = this.services[i].serviceInterface.resolvedType;
+			if (infBinding != null && infBinding.isValidBinding()) {
+				if (!interfaces.add(this.services[i].serviceInterface.resolvedType)) { 
+					cuScope.problemReporter().duplicateTypeReference(IProblem.DuplicateServices,
+							this.services[i].serviceInterface);
+				}
+				this.binding.setImplementations(infBinding, this.services[i].getResolvedImplementations());
+			}
+		}
+		this.binding.setServices(interfaces.toArray(new TypeBinding[interfaces.size()]));
+	}
+

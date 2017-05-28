@@ -1,12 +1,15 @@
 private Binding findImport(char[][] compoundName, int length) {
 	recordQualifiedReference(compoundName);
-	char[] modName = module();
-	Binding binding = this.environment.getTopLevelPackage(compoundName[0], modName);
+	ModuleBinding module = module();
+	Binding binding = this.environment.getTopLevelPackage(compoundName[0]);
 	int i = 1;
 	foundNothingOrType: if (binding != null) {
 		PackageBinding packageBinding = (PackageBinding) binding;
 		while (i < length) {
-			binding = packageBinding.getTypeOrPackage(compoundName[i++], modName);
+			binding = packageBinding.getTypeOrPackage(compoundName[i++], module);
+			if (binding instanceof ReferenceBinding && binding.problemId() == ProblemReasons.NotAccessible) {
+				return this.environment.convertToRawType((TypeBinding) binding, false /*do not force conversion of enclosing types*/);
+			}
 			if (binding == null || !binding.isValidBinding()) {
 				binding = null;
 				break foundNothingOrType;
@@ -16,6 +19,8 @@ private Binding findImport(char[][] compoundName, int length) {
 
 			packageBinding = (PackageBinding) binding;
 		}
+		if (packageBinding.isValidBinding() && !module.canAccess(packageBinding))
+			return new ProblemPackageBinding(compoundName, ProblemReasons.NotAccessible);
 		return packageBinding;
 	}
 
@@ -23,8 +28,7 @@ private Binding findImport(char[][] compoundName, int length) {
 	if (binding == null) {
 		if (compilerOptions().complianceLevel >= ClassFileConstants.JDK1_4)
 			return new ProblemReferenceBinding(CharOperation.subarray(compoundName, 0, i), null, ProblemReasons.NotFound);
-		PackageBinding defaultPackage = this.environment.getDefaultPackage(modName);
-		type = findType(compoundName[0], defaultPackage, defaultPackage);
+		type = findType(compoundName[0], this.environment.defaultPackage, this.environment.defaultPackage);
 		if (type == null || !type.isValidBinding())
 			return new ProblemReferenceBinding(CharOperation.subarray(compoundName, 0, i), null, ProblemReasons.NotFound);
 		i = 1; // reset to look for member types inside the default package type
