@@ -1,0 +1,67 @@
+	// An automatic module shouldn't allow access to classpath
+	public void testBug518282f() throws CoreException, IOException {
+		if (!isJRE9) return;
+		Hashtable<String, String> javaCoreOptions = JavaCore.getOptions();
+		String libPath = "externalLib/test.jar";
+		try {
+			String[] src = new String[] { 
+					"src/org/astro/World.java",
+					"package org.astro;\n" +
+					"public interface World {\n" +
+					"	public String name();\n" +
+					"}"
+			};
+			IJavaProject p1 = setupModuleProject("org.astro", src);
+			src = new String[] { 
+				"src/com/greetings/Test.java",
+				"package com.greetings;\n" +
+				"import  org.astro.World;\n" +
+				"public class Test implements World {\n" +
+				"	public String name() {\n" +
+				"		return \" My World!!\";\n" +
+				"	}\n" +
+				"}"
+			};
+			IClasspathEntry dep = JavaCore.newProjectEntry(p1.getPath());
+			IJavaProject p2 = setupModuleProject("test", src, new IClasspathEntry[] {dep});
+			getWorkspace().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			File rootDir = new File(p2.getProject().findMember("bin").getLocation().toString());
+			Util.zip(rootDir, getExternalResourcePath(libPath));
+			src = new String[] { 
+				"src/module-info.java",
+				"module test_automodules {\n" +
+				"	requires test;\n" +
+				"}",
+				"src/test/Main.java",
+				"package test;\n" +
+				"import com.greetings.Test;\n" +
+				"public class Main {\n" +
+				"	public static void main(String[] args) {\n" +
+				"		org.astro.World world = new Test();\n" +
+				"		System.out.println(world.name());\n" +
+				"	}\n" +
+				"}"
+			};
+			IClasspathAttribute modAttr = new ClasspathAttribute("module", "true");
+			dep = JavaCore.newLibraryEntry(new Path(getExternalResourcePath(libPath)), null, null,
+				ClasspathEntry.NO_ACCESS_RULES,
+				new IClasspathAttribute[] {modAttr},
+				false/*not exported*/);
+			modAttr = new ClasspathAttribute("module", "false");
+			IClasspathEntry dep2 = JavaCore.newLibraryEntry(p1.getProject().findMember("bin").getFullPath(), null, null,
+				ClasspathEntry.NO_ACCESS_RULES,
+				new IClasspathAttribute[] {modAttr},
+				false/*not exported*/);
+			IJavaProject p3 = setupModuleProject("test_automodules", src, new IClasspathEntry[] {dep, dep2});
+			getWorkspace().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			IMarker[] markers = p3.getProject().findMarkers(null, true, IResource.DEPTH_INFINITE);
+			assertMarkers("Unexpected markers", "org cannot be resolved to a type", markers);
+		} finally {
+			this.deleteProject("test");
+			this.deleteProject("test_automodules");
+			this.deleteProject("org.astro");
+			deleteExternalResource(libPath);
+			JavaCore.setOptions(javaCoreOptions);
+		}
+	}
+

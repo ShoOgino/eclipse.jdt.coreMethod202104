@@ -1,0 +1,55 @@
+	// A modular jar on the module path of a project should behave as a regular module and not
+	// as an automatic module
+	public void testBug518282b() throws CoreException, IOException {
+		if (!isJRE9) return;
+		Hashtable<String, String> javaCoreOptions = JavaCore.getOptions();
+		String libPath = "externalLib/test.jar";
+		try {
+			String[] src = new String[] { 
+					"src/module-info.java",
+					"module com.greetings {\n" +
+					"	exports com.greetings;\n" +
+					"}",
+					"src/com/greetings/Test.java",
+					"package com.greetings;\n" +
+					"public class Test {\n" +
+					"	public String name() {\n" +
+					"		return \" My World!!\";\n" +
+					"	}\n" +
+					"}"
+			};
+			IJavaProject p1 = setupModuleProject("test", src);
+			getWorkspace().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			File rootDir = new File(p1.getProject().findMember("bin").getLocation().toString());
+			Util.zip(rootDir, getExternalResourcePath(libPath));
+			src = new String[] { 
+					"src/module-info.java",
+					"module test_automodules {\n" +
+					"	requires com.greetings;\n" +
+					"}",
+					"src/test/Main.java",
+					"package test;\n" +
+					"import com.greetings.Test;\n" +
+					"public class Main {\n" +
+					"	public static void main(String[] args) {\n" +
+					"		System.out.println(new Test().name());\n" +
+					"	}\n" +
+					"}"
+			};
+			IClasspathAttribute modAttr = new ClasspathAttribute("module", "true");
+			IClasspathEntry dep = JavaCore.newLibraryEntry(new Path(getExternalResourcePath(libPath)), null, null,
+				ClasspathEntry.NO_ACCESS_RULES,
+				new IClasspathAttribute[] {modAttr},
+				false/*not exported*/);
+			IJavaProject p2 = setupModuleProject("test_automodules", src, new IClasspathEntry[] {dep});
+			getWorkspace().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			IMarker[] markers = p2.getProject().findMarkers(null, true, IResource.DEPTH_INFINITE);
+			assertMarkers("Unexpected markers", "", markers);
+		} finally {
+			this.deleteProject("test");
+			this.deleteProject("test_automodules");
+			deleteExternalResource(libPath);
+			JavaCore.setOptions(javaCoreOptions);
+		}
+	}
+
