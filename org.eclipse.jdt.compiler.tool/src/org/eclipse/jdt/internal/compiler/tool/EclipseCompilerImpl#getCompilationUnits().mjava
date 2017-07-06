@@ -1,30 +1,59 @@
 	@Override
 	public CompilationUnit[] getCompilationUnits() {
+		// This method is largely a copy of Main#getCompilationUnits()
 		if (this.compilationUnits == null) return EclipseCompilerImpl.NO_UNITS;
+		Map<String,CompilationUnit> pathToModCU = new HashMap<>();
+		HashtableOfObject knownFileNames = new HashtableOfObject();
 		ArrayList<CompilationUnit> units = new ArrayList<>();
-		for (final JavaFileObject javaFileObject : this.compilationUnits) {
-			if (javaFileObject.getKind() != JavaFileObject.Kind.SOURCE) {
-				throw new IllegalArgumentException();
-			}
-			String name = javaFileObject.getName();
-			CompilationUnit compilationUnit = new CompilationUnit(null,
-				name,
-				null, 
-				null,
-				shouldIgnoreOptionalProblems(this.ignoreOptionalProblemsFromFolders, name.toCharArray()), null) {
+		for (int round = 0; round < 2; round++) {
+			int i = 0;
+			for (final JavaFileObject javaFileObject : this.compilationUnits) {
+				String name = javaFileObject.getName();
+				char[] charName = name.toCharArray();
+				boolean isModuleInfo = CharOperation.endsWith(charName, TypeConstants.MODULE_INFO_FILE_NAME);
+				if (isModuleInfo == (round==0)) { // 1st round: modules, 2nd round others (to ensure populating pathToModCU well in time)
+					if (knownFileNames.get(charName) != null)
+						throw new IllegalArgumentException(this.bind("unit.more", name)); //$NON-NLS-1$
+					knownFileNames.put(charName, charName);
+					File file = new File(name);
+					if (!file.exists())
+						throw new IllegalArgumentException(this.bind("unit.missing", name)); //$NON-NLS-1$
+					CompilationUnit cu = new CompilationUnit(null,
+							name,
+							null, 
+							this.destinationPaths[i],
+							shouldIgnoreOptionalProblems(this.ignoreOptionalProblemsFromFolders, name.toCharArray()), this.modNames[i]) {
 
-				@Override
-				public char[] getContents() {
-					try {
-						return javaFileObject.getCharContent(true).toString().toCharArray();
-					} catch(IOException e) {
-						e.printStackTrace();
-						throw new AbortCompilationUnit(null, e, null);
-					}
+							@Override
+							public char[] getContents() {
+								try {
+									return javaFileObject.getCharContent(true).toString().toCharArray();
+								} catch(IOException e) {
+									e.printStackTrace();
+									throw new AbortCompilationUnit(null, e, null);
+								}
+							}
+						};
+						units.add(cu);
+						this.javaFileObjectMap.put(cu, javaFileObject);
+						if (isModuleInfo) {
+							int lastSlash = CharOperation.lastIndexOf(File.separatorChar, cu.fileName);
+							if (lastSlash != -1) {
+								pathToModCU.put(String.valueOf(CharOperation.subarray(cu.fileName, 0, lastSlash)), cu);
+							}
+						} else {
+							for (Entry<String, CompilationUnit> entry : pathToModCU.entrySet()) {
+								Path modPath = Paths.get(entry.getKey());
+								Path cuPath = Paths.get(name);
+								while (cuPath != null && cuPath.startsWith(modPath)) {
+									cu.setModule(entry.getValue());
+									break;
+								}
+							}
+						}
 				}
-			};
-			units.add(compilationUnit);
-			this.javaFileObjectMap.put(compilationUnit, javaFileObject);
+				i++;
+			}
 		}
 		CompilationUnit[] result = new CompilationUnit[units.size()];
 		units.toArray(result);

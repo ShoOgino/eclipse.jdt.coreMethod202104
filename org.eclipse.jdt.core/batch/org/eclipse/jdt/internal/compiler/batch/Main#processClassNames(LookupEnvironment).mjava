@@ -2,30 +2,52 @@ private ReferenceBinding[] processClassNames(LookupEnvironment environment) {
 	// check for .class file presence in case of apt processing
 	int length = this.classNames.length;
 	ReferenceBinding[] referenceBindings = new ReferenceBinding[length];
-	for (int i = 0; i < length; i++) {
-		String currentName = this.classNames[i];
-		char[][] compoundName = null;
-		int idx = currentName.indexOf('/');
-		ModuleBinding mod = null;
-		if (idx > 0) {
-			String m = currentName.substring(0, idx);
-			mod = environment.getModule(m.toCharArray());
-			if (mod == null) {
-				throw new IllegalArgumentException(this.bind("configure.invalidModuleName", m)); //$NON-NLS-1$
+	ModuleBinding[] modules = new ModuleBinding[length];
+	Set<ModuleBinding> modSet = new HashSet<>();
+	String[] typeNames = new String[length];
+	if (this.complianceLevel <= ClassFileConstants.JDK1_8) {
+		typeNames = this.classNames;
+	} else {
+		for (int i = 0; i < length; i++) {
+			String currentName = this.classNames[i];
+			int idx = currentName.indexOf('/');
+			ModuleBinding mod = null;
+			if (idx > 0) {
+				String m = currentName.substring(0, idx);
+				mod = environment.getModule(m.toCharArray());
+				if (mod == null) {
+					throw new IllegalArgumentException(this.bind("configure.invalidModuleName", m)); //$NON-NLS-1$
+				}
+				modules[i] = mod;
+				modSet.add(mod);
+				currentName = currentName.substring(idx + 1);
 			}
-			currentName = currentName.substring(idx + 1);
+			typeNames[i] = currentName;
 		}
-		if (currentName.indexOf('.') != -1) {
+		for (ModuleBinding mod : modSet) {
+			mod.getExports();
+			mod.getRequires();
+			mod.getOpens();
+			mod.getServices();
+		}
+	}
+
+	for (int i = 0; i < length; i++) {
+		char[][] compoundName = null;
+		String cls = typeNames[i];
+		if (cls.indexOf('.') != -1) {
 			// consider names with '.' as fully qualified names
-			char[] typeName = currentName.toCharArray();
+			char[] typeName = cls.toCharArray();
 			compoundName = CharOperation.splitOn('.', typeName);
 		} else {
-			compoundName = new char[][] { currentName.toCharArray() };
+			compoundName = new char[][] { cls.toCharArray() };
 		}
+		ModuleBinding mod = modules[i];
 		ReferenceBinding type = mod != null ? environment.getType(compoundName, mod) : environment.getType(compoundName);
 		if (type != null && type.isValidBinding()) {
 			if (type.isBinaryBinding()) {
 				referenceBindings[i] = type;
+				type.superclass();
 			}
 		} else {
 			throw new IllegalArgumentException(
