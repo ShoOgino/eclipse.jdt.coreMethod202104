@@ -1,0 +1,54 @@
+	// test that two packages of the same name exported by two named modules result in
+	// a conflict in the context of a non-modular project
+	public void _test_conflicting_packages_unnamed() throws CoreException {
+		if (!isJRE9) return;
+		try {
+			String[] sources = new String[] {
+				"src/module-info.java",
+				"module some.mod {\n" +
+				"	exports org.astro;\n" +
+				"}",
+				"src/org/astro/Test.java",
+				"package org.astro;\n" +
+				"public class Test { }"
+			};
+			IClasspathEntry dep = JavaCore.newContainerEntry(new Path(JavaCore.MODULE_PATH_CONTAINER_ID));
+			IJavaProject p1 = setupModuleProject("some.mod", sources, new IClasspathEntry[]{dep});
+			sources = new String[] {
+				"src/module-info.java",
+				"module org.astro {\n" +
+				"	exports org.astro;\n" + 
+				"}",
+				"src/org/astro/World.java",
+				"package org.astro;\n" +
+				"public interface World {\n" +
+				"	public String name();\n" +
+				"}"
+			};
+			IJavaProject p2 = setupModuleProject("org.astro", sources, new IClasspathEntry[]{dep});
+			String[] src = new String[] {
+				"src/com/greetings/MyWorld.java",
+				"package com.greetings;\n" +
+				"import org.astro.World;\n" +
+				"public class MyWorld implements World {\n" +
+				"	public String name() {\n" +
+				"		return \" My World!!\";\n" +
+				"	}\n" +
+				"}"
+			};
+			IClasspathEntry dep1 = JavaCore.newProjectEntry(p1.getPath());
+			IClasspathEntry dep2 = JavaCore.newProjectEntry(p2.getPath());
+			IJavaProject p3 = setupModuleProject("com.greetings", src, new IClasspathEntry[] { dep1, dep2 });
+			getWorkspace().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			IMarker[] markers = p3.getProject().findMarkers(null, true, IResource.DEPTH_INFINITE);
+			sortMarkers(markers);
+			assertMarkers("Unexpected markers", 
+					"Package org.astro exists in multiple modules, org.astro and some.mod\n" +
+					"World cannot be resolved to a type",  markers);
+		} finally {
+			deleteProject("org.astro");
+			deleteProject("some.mod");
+			deleteProject("com.greetings");
+		}
+	}
+

@@ -1,0 +1,57 @@
+	// accessible package bundle.org contains type astro
+	// accessible package bundle.org.astro contains type World
+	// Type bundle.org.astro.World should not be resolved, because type
+	// bundle.org.astro trumps package bundle.org.astro
+	public void _test_conflict_packagevstype() throws CoreException {
+		if (!isJRE9) return;
+		try {
+			IClasspathEntry dep = JavaCore.newContainerEntry(new Path(JavaCore.MODULE_PATH_CONTAINER_ID));
+			String[] sources = new String[] {
+				"src/module-info.java",
+				"module org.astro {\n" +
+				"	exports bundle.org.astro;\n" + 
+				"}",
+				"src/bundle/org/astro/World.java",
+				"package bundle.org.astro;\n" +
+				"public interface World {\n" +
+				"	public String name();\n" +
+				"}"
+			};
+			setupModuleProject("org.astro", sources, new IClasspathEntry[]{dep});
+			sources = new String[] {
+					"src/module-info.java",
+					"module other.mod {\n" +
+					"	exports bundle.org;\n" + 
+					"}",
+					"src/bundle/org/astro.java",
+					"package bundle.org;\n" +
+					"public class astro {}"
+				};
+			setupModuleProject("other.mod", sources, new IClasspathEntry[]{dep});
+			String[] src = new String[] {
+				"src/module-info.java",
+				"module com.greetings {\n" +
+				"	requires org.astro;\n" +
+				"	requires other.mod;\n" +
+				"	exports com.greetings;\n" +
+				"}",
+				"src/com/greetings/MyWorld.java",
+				"package com.greetings;\n" +
+				"public class MyWorld implements bundle.org.astro.World {\n" +
+				"	public String name() {\n" +
+				"		return \" My World!!\";\n" +
+				"	}\n" +
+				"}"
+			};
+			IJavaProject p2 = setupModuleProject("com.greetings", src, new IClasspathEntry[] { dep });
+			p2.getProject().getWorkspace().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			IMarker[] markers = p2.getProject().findMarkers(null, true, IResource.DEPTH_INFINITE);
+			assertMarkers("Unexpected markers", 
+					"bundle.org.astro.World cannot be resolved to a type",  markers);
+		} finally {
+			deleteProject("org.astro");
+			deleteProject("other.mod");
+			deleteProject("com.greetings");
+		}
+	}
+
