@@ -1,0 +1,57 @@
+	public void testExternalTestJarChanged() throws CoreException, java.io.IOException {
+		IPath projectPath = env.addProject("Project"); 
+		env.removePackageFragmentRoot(projectPath, "");
+		env.addExternalJars(projectPath, Util.getJavaClassLibs());
+
+		IPath tests = env.addTestPackageFragmentRoot(projectPath, "tests"); 
+		IPath classTest = env.addClass(tests, "p", "X", 
+			"package p;\n"+ 
+			"public class X {\n" + 
+			"  void foo() {\n" + 
+			"    new q.Y().bar();\n" + 
+			"  }\n" + 
+			"}" 
+		);
+		String externalJar = Util.getOutputDirectory() + java.io.File.separator + "test.jar"; 
+		Util.createJar(
+			new String[] {
+				"q/Y.java", 
+				"package q;\n" + 
+				"public class Y {\n" + 
+				"}" 
+			},
+			new HashMap<>(),
+			externalJar
+		);
+		fullBuild();
+		expectingProblemsFor(
+			classTest,
+			"Problem : q cannot be resolved to a type [ resource : </Project/tests/p/X.java> range : <51,52> category : <40> severity : <2>]"
+		);
+		env.addExternalTestJar(projectPath, externalJar, false);
+		
+		incrementalBuild();
+		expectingProblemsFor(
+			classTest,
+			"Problem : The method bar() is undefined for the type Y [ resource : </Project/tests/p/X.java> range : <57,60> category : <50> severity : <2>]"
+		);
+		
+		Util.createJar(
+			new String[] {
+				"q/Y.java", 
+				"package q;\n" + 
+				"public class Y {\n" + 
+				"  public void bar() {\n" + 
+				"  }\n" + 
+				"}" 
+			},
+			new HashMap<>(),
+			externalJar
+		);
+		
+		env.getProject(projectPath).touch(null);
+		
+		incrementalBuild();
+		expectingNoProblems();
+	}
+

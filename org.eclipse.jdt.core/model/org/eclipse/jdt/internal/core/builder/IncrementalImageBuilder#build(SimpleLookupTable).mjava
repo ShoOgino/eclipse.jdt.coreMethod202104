@@ -1,4 +1,11 @@
 public boolean build(SimpleLookupTable deltas) {
+	if(this.sourceLocations.length == 0) {
+		if (this.testImageBuilder != null) {
+			return this.testImageBuilder.build(deltas);
+		} else {
+			return true;
+		}
+	}
 	// initialize builder
 	// walk this project's deltas, find changed source files
 	// walk prereq projects' deltas, find changed class files & add affected source files
@@ -28,8 +35,12 @@ public boolean build(SimpleLookupTable deltas) {
 			this.notifier.updateProgressDelta(0.25f);
 		} else {
 			IResourceDelta sourceDelta = (IResourceDelta) deltas.get(this.javaBuilder.currentProject);
-			if (sourceDelta != null)
-				if (!findSourceFiles(sourceDelta)) return false;
+			if (sourceDelta != null) {
+				if (!findSourceFiles(sourceDelta)) return this.testImageBuilder != null ? this.testImageBuilder.build(deltas) : false;
+				if(this.testImageBuilder != null) {
+					this.testImageBuilder.findSourceFiles(sourceDelta);
+				}
+			}
 			this.notifier.updateProgressDelta(0.10f);
 
 			Object[] keyTable = deltas.keyTable;
@@ -50,26 +61,11 @@ public boolean build(SimpleLookupTable deltas) {
 			this.notifier.updateProgressDelta(0.05f);
 		}
 
-		this.compileLoop = 0;
-		float increment = 0.40f;
-		while (this.sourceFiles.size() > 0) { // added to in acceptResult
-			if (++this.compileLoop > MaxCompileLoop) {
-				if (JavaBuilder.DEBUG)
-					System.out.println("ABORTING incremental build... exceeded loop count"); //$NON-NLS-1$
-				return false;
-			}
-			this.notifier.checkCancel();
-
-			SourceFile[] allSourceFiles = new SourceFile[this.sourceFiles.size()];
-			this.sourceFiles.toArray(allSourceFiles);
-			resetCollections();
-
-			this.workQueue.addAll(allSourceFiles);
-			this.notifier.setProgressPerCompilationUnit(increment / allSourceFiles.length);
-			increment = increment / 2;
-			compile(allSourceFiles);
-			removeSecondaryTypes();
-			addAffectedSourceFiles();
+		if (incrementalBuildLoop() == false) {
+			return false;
+		}
+		if (this.testImageBuilder != null && this.testImageBuilder.incrementalBuildLoop() == false) {
+			return false;
 		}
 		if (this.hasStructuralChanges && this.javaBuilder.javaProject.hasCycleMarker())
 			this.javaBuilder.mustPropagateStructuralChanges();
@@ -83,6 +79,9 @@ public boolean build(SimpleLookupTable deltas) {
 		throw internalException(e);
 	} finally {
 		cleanUp();
+		if (this.testImageBuilder != null) {
+			this.testImageBuilder.cleanUp();
+		}
 	}
 	return true;
 }

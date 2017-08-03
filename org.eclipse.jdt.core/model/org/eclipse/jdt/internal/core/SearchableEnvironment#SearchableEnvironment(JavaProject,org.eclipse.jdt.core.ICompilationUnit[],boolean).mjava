@@ -1,0 +1,31 @@
+	/**
+	 * Creates a SearchableEnvironment on the given project
+	 */
+	public SearchableEnvironment(JavaProject project, org.eclipse.jdt.core.ICompilationUnit[] workingCopies, boolean excludeTestCode) throws JavaModelException {
+		this.project = project;
+		this.excludeTestCode = excludeTestCode;
+		this.checkAccessRestrictions =
+			!JavaCore.IGNORE.equals(project.getOption(JavaCore.COMPILER_PB_FORBIDDEN_REFERENCE, true))
+			|| !JavaCore.IGNORE.equals(project.getOption(JavaCore.COMPILER_PB_DISCOURAGED_REFERENCE, true));
+		this.workingCopies = workingCopies;
+		this.nameLookup = project.newNameLookup(workingCopies, excludeTestCode);
+		if (CompilerOptions.versionToJdkLevel(project.getOption(JavaCore.COMPILER_COMPLIANCE, true)) >= ClassFileConstants.JDK9) {
+			for (IPackageFragmentRoot root : project.getPackageFragmentRoots()) {
+				if (root.getModuleDescription() != null) {
+					this.knownModuleLocations = new HashMap<>();
+					break;
+				}
+			}
+		}
+		if (CompilerOptions.versionToJdkLevel(project.getOption(JavaCore.COMPILER_COMPLIANCE, true)) >= ClassFileConstants.JDK9) {
+			this.moduleUpdater = new ModuleUpdater(project);
+			if (!excludeTestCode) {
+				IClasspathEntry[] expandedClasspath = project.getExpandedClasspath();
+				this.moduleUpdater.addReadUnnamedForNonEmptyClasspath(project, expandedClasspath);
+			}
+			for (IClasspathEntry entry : project.getRawClasspath())
+				if(!excludeTestCode || !entry.isTest())
+					this.moduleUpdater.computeModuleUpdates(entry);
+		}
+	}
+
