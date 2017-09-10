@@ -45,7 +45,7 @@ private void computeClasspathLocations(
 	}
 	IModuleDescription mod = null;
 	
-	String patchedModuleName = pushPatchToFront(classpathEntries);
+	String patchedModuleName = ModuleEntryProcessor.pushPatchToFront(classpathEntries);
 	IModule patchedModule = null;
 
 	nextEntry : for (int i = 0, l = classpathEntries.length; i < l; i++) {
@@ -61,6 +61,12 @@ private void computeClasspathLocations(
 		IPath externalAnnotationPath = ClasspathEntry.getExternalAnnotationPath(entry, javaProject.getProject(), true);
 		if (target == null) continue nextEntry;
 		boolean isOnModulePath = isOnModulePath(entry);
+
+		Set<String> limitModules = ModuleEntryProcessor.computeLimitModules(javaProject, entry);
+		if (patchedModuleName != null &&  limitModules != null && !limitModules.contains(patchedModuleName)) {
+			// TODO(SHMOD) report an error
+			patchedModuleName = null;
+		}
 
 		if (this.moduleUpdater != null)
 			this.moduleUpdater.computeModuleUpdates(entry);
@@ -86,7 +92,7 @@ private void computeClasspathLocations(
 							entry.fullExclusionPatternChars(),
 							entry.ignoreOptionalProblems());
 				if (patchedModule != null) {
-					combineIntoModuleEntry(sourceLocation, patchedModule, moduleEntries);
+					ModuleEntryProcessor.combinePatchIntoModuleEntry(sourceLocation, patchedModule, moduleEntries);
 				}
 				sLocations.add(sourceLocation);
 				continue nextEntry;
@@ -145,9 +151,11 @@ private void computeClasspathLocations(
 					ModulePathEntry projectEntry = new ModulePathEntry(prereqJavaProject.getPath(), info,
 							projectLocations.toArray(new ClasspathLocation[projectLocations.size()]));
 					String moduleName = String.valueOf(info.name());
-					moduleEntries.put(moduleName, projectEntry);
-					if (moduleName.equals(patchedModuleName))
-						patchedModule = info;
+					if (limitModules == null || limitModules.contains(moduleName)) {
+						moduleEntries.put(moduleName, projectEntry);
+						if (moduleName.equals(patchedModuleName))
+							patchedModule = info;
+					}
 				}
 				continue nextEntry;
 
@@ -174,7 +182,8 @@ private void computeClasspathLocations(
 					// TODO: Ideally we need to do something like mapToModulePathEntry using the path and if it is indeed
 					// a module path entry, then add the corresponding entry here, but that would need the target platform
 					if (moduleEntries != null) {
-						patchedModule = collectModuleEntries(bLocation, path, isOnModulePath, patchedModuleName, patchedModule, moduleEntries);
+						patchedModule = collectModuleEntries(bLocation, path, isOnModulePath,
+											limitModules, patchedModuleName, patchedModule, moduleEntries);
 					}
 					if (binaryLocationsPerProject != null) { // normal builder mode
 						IProject p = resource.getProject(); // can be the project being built
@@ -197,7 +206,8 @@ private void computeClasspathLocations(
 					ClasspathLocation bLocation = ClasspathLocation.forLibrary(path.toOSString(), accessRuleSet, externalAnnotationPath, isOnModulePath);
 					bLocations.add(bLocation);
 					if (moduleEntries != null) {
-						patchedModule = collectModuleEntries(bLocation, path, isOnModulePath, patchedModuleName, patchedModule, moduleEntries);
+						patchedModule = collectModuleEntries(bLocation, path, isOnModulePath,
+											limitModules, patchedModuleName, patchedModule, moduleEntries);
 					}
 				}
 				continue nextEntry;
