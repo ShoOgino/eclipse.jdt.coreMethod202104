@@ -1,0 +1,53 @@
+// test that types in a module can be correctly resolved including their super types when seen from the unnamed module during completion
+public void testBug522164_src() throws Exception {
+	IJavaProject project1 = createJavaProject("Completion9_1", new String[] {"src"}, new String[] {"JCL19_LIB"}, "bin", "9");
+	IJavaProject project2 = createJavaProject("Completion9_2", new String[] {"src"}, new String[] {"JCL19_LIB"}, "bin", "9");
+	try {
+		project1.open(null);
+		createTypePlus("/Completion9_1/src/", "p.priv", "PrivIfc", null, false, true);
+		createFolder("/Completion9_1/src/p/a");
+		createFile("/Completion9_1/src/p/a/Ifc.java",
+					"package p.a;\n" +
+					"public interface Ifc extends p.priv.PrivIfc {\n" +
+					"	default void test() {};\n" +
+					"}\n");
+		createTypePlus("/Completion9_1/src/", "p.a", "Impl", "implements Ifc", true, false);
+		createFile("/Completion9_1/src/module-info.java",
+					"module mod.one { \n" +
+					"	exports p.a;\n" +
+					"	provides p.a.Ifc with p.a.Impl;\n" +
+					"}");
+		project1.getProject().build(IncrementalProjectBuilder.FULL_BUILD, null);
+
+		IClasspathAttribute[] attributes = {
+			JavaCore.newClasspathAttribute(IClasspathAttribute.MODULE, "true")	
+		};
+		addClasspathEntry(project2, JavaCore.newProjectEntry(new Path("/Completion9_1"), null, false, attributes, false));
+		createFolder("/Completion9_2/src/x");
+		String filePath = "/Completion9_2/src/x/X.java";
+		String completeBehind = "ifc.te";
+		String content =
+					"package x;\n" +
+					"public class X {\n" +
+					"	void test(p.a.Ifc ifc) {\n" +
+					"		" + completeBehind + "\n" +
+					"	}\n" +
+					"}\n";
+		createFile(filePath, content);
+		int cursorLocation = content.lastIndexOf(completeBehind) + completeBehind.length();
+		CompletionTestsRequestor2 requestor = new CompletionTestsRequestor2();
+
+		waitUntilIndexesReady();
+
+		ICompilationUnit unit = getCompilationUnit("/Completion9_2/src/x/X.java");
+		unit.codeComplete(cursorLocation, requestor);
+
+		String expected = "test[METHOD_REF]{test(), Lp.a.Ifc;, ()V, test, 60}";
+		assertResults(expected,	requestor.getResults());
+
+	} finally {
+		deleteProject(project1);
+		deleteProject(project2);
+	}
+}
+
