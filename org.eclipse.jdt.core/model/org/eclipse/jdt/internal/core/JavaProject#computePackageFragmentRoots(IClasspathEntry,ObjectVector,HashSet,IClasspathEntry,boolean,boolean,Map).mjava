@@ -7,6 +7,7 @@
 	 * @param rootIDs HashSet
 	 * @param referringEntry the CP entry (project) referring to this entry, or null if initial project
 	 * @param retrieveExportedRoots boolean
+	 * @param respectLimitModules if true a limit-modules attribute will be evaluated to filter the resulting roots
 	 * @throws JavaModelException
 	 */
 	public void computePackageFragmentRoots(
@@ -15,6 +16,7 @@
 		HashSet rootIDs,
 		IClasspathEntry referringEntry,
 		boolean retrieveExportedRoots,
+		boolean respectLimitModules,
 		Map rootToResolvedEntries) throws JavaModelException {
 
 		String rootID = ((ClasspathEntry)resolvedEntry).rootID();
@@ -56,18 +58,21 @@
 					if (JavaModel.isFile(target)) {
 						if (JavaModel.isJimage((File) target)) {
 							PerProjectInfo info = getPerProjectInfo();
+							ObjectVector imageRoots;
 							if (info.jrtRoots == null || !info.jrtRoots.containsKey(entryPath)) {
-								ObjectVector imageRoots = new ObjectVector();
+								imageRoots = new ObjectVector();
 								loadModulesInJimage(entryPath, imageRoots, rootToResolvedEntries, resolvedEntry, referringEntry);
+								info.setJrtPackageRoots(entryPath, imageRoots); // unfiltered
+								rootIDs.add(rootID);
+							} else {
+								imageRoots = info.jrtRoots.get(entryPath);
+							}
+							if (respectLimitModules) {
 								String limitModules = ClasspathEntry.getExtraAttribute(resolvedEntry, IClasspathAttribute.LIMIT_MODULES);
 								if (limitModules != null)
 									imageRoots = filterLimitedModules(entryPath, imageRoots, limitModules);
-								info.setJrtPackageRoots(entryPath, imageRoots);
-								accumulatedRoots.addAll(imageRoots);
-								rootIDs.add(rootID);
-							} else {
-								accumulatedRoots.addAll(info.jrtRoots.get(entryPath));
 							}
+							accumulatedRoots.addAll(imageRoots);
 						} else if (JavaModel.isJmod((File) target)) {
 							root = new JModPackageFragmentRoot(entryPath, this);
 						}
@@ -98,6 +103,7 @@
 							rootIDs,
 							rootToResolvedEntries == null ? resolvedEntry : ((ClasspathEntry)resolvedEntry).combineWith((ClasspathEntry) referringEntry), // only combine if need to build the reverse map
 							retrieveExportedRoots,
+							respectLimitModules,
 							rootToResolvedEntries);
 					}
 				break;
