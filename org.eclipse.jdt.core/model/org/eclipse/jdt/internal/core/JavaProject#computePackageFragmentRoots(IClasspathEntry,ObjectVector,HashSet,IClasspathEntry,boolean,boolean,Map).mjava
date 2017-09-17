@@ -7,7 +7,9 @@
 	 * @param rootIDs HashSet
 	 * @param referringEntry the CP entry (project) referring to this entry, or null if initial project
 	 * @param retrieveExportedRoots boolean
-	 * @param respectLimitModules if true a limit-modules attribute will be evaluated to filter the resulting roots
+	 * @param filterModuleRoots if true, roots corresponding to modules will be filtered if applicable:
+	 *    if a limit-modules attribute exists, this is used, otherwise system modules will be filtered
+	 *    according to the rules of root modules per JEP 261.
 	 * @throws JavaModelException
 	 */
 	public void computePackageFragmentRoots(
@@ -16,7 +18,7 @@
 		HashSet rootIDs,
 		IClasspathEntry referringEntry,
 		boolean retrieveExportedRoots,
-		boolean respectLimitModules,
+		boolean filterModuleRoots,
 		Map rootToResolvedEntries) throws JavaModelException {
 
 		String rootID = ((ClasspathEntry)resolvedEntry).rootID();
@@ -67,10 +69,17 @@
 							} else {
 								imageRoots = info.jrtRoots.get(entryPath);
 							}
-							if (respectLimitModules) {
+							if (filterModuleRoots) {
+								List<String> rootModules = null;
 								String limitModules = ClasspathEntry.getExtraAttribute(resolvedEntry, IClasspathAttribute.LIMIT_MODULES);
-								if (limitModules != null)
-									imageRoots = filterLimitedModules(entryPath, imageRoots, limitModules);
+								if (limitModules != null) {
+									rootModules = Arrays.asList(limitModules.split(",")); //$NON-NLS-1$
+								} else if (isUnNamedModule()) {
+									rootModules = defaultRootModules((Iterable) imageRoots);
+								}
+								if (rootModules != null) {
+									imageRoots = filterLimitedModules(entryPath, imageRoots, rootModules);
+								}
 							}
 							accumulatedRoots.addAll(imageRoots);
 						} else if (JavaModel.isJmod((File) target)) {
@@ -103,7 +112,7 @@
 							rootIDs,
 							rootToResolvedEntries == null ? resolvedEntry : ((ClasspathEntry)resolvedEntry).combineWith((ClasspathEntry) referringEntry), // only combine if need to build the reverse map
 							retrieveExportedRoots,
-							respectLimitModules,
+							filterModuleRoots,
 							rootToResolvedEntries);
 					}
 				break;
