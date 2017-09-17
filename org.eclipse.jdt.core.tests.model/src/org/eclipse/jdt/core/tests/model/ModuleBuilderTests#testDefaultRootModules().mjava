@@ -1,0 +1,51 @@
+	public void testDefaultRootModules() throws CoreException, IOException {
+		if (!isJRE9) return;
+		String save = System.getProperty("modules.to.load");
+		// need to see all modules:
+		System.setProperty("modules.to.load", "");
+		JRTUtil.reset();
+		ClasspathJrt.resetCaches();
+		try {
+
+			IJavaProject project = createJava9Project("org.astro", new String[]{"src"});
+
+			String[] sources = {
+				"src/org/astro/ProblemWithPostConstruct.java",
+				"package org.astro;\n" +
+				"import javax.annotation.PostConstruct;\n" + 
+				"\n" + 
+				"public class ProblemWithPostConstruct {\n" +
+				"	@PostConstruct void init() {}\n" + 
+				"}\n"
+			};
+			createSourceFiles(project, sources);
+			
+			getWorkspace().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			IMarker[] markers = project.getProject().findMarkers(null, true, IResource.DEPTH_INFINITE);
+			sortMarkers(markers);
+			assertMarkers("Unexpected markers",
+					"The import javax.annotation.PostConstruct cannot be resolved\n" + 
+					"PostConstruct cannot be resolved to a type", // not in default root modules: java.xml.ws.annotation
+					markers);
+			
+			this.problemRequestor.reset();
+			ICompilationUnit cu = getCompilationUnit("/org.astro/src/org/astro/ProblemWithPostConstruct.java");
+			cu.getWorkingCopy(this.wcOwner, null);
+			assertProblems(
+				"Unexpected problems",
+				"----------\n" + 
+				"1. ERROR in /org.astro/src/org/astro/ProblemWithPostConstruct.java\n" + 
+				"The import javax.annotation.PostConstruct cannot be resolved\n" + 
+				"----------\n" + 
+				"2. ERROR in /org.astro/src/org/astro/ProblemWithPostConstruct.java\n" + 
+				"PostConstruct cannot be resolved to a type\n" + 
+				"----------\n",
+				this.problemRequestor);
+		} finally {
+			this.deleteProject("org.astro");
+			System.setProperty("modules.to.load", save);
+			JRTUtil.reset();
+			ClasspathJrt.resetCaches();
+		}
+	}
+
