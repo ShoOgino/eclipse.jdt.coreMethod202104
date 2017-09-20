@@ -1,8 +1,7 @@
 	public TryStatement convert(org.eclipse.jdt.internal.compiler.ast.TryStatement statement) {
 		final TryStatement tryStatement = new TryStatement(this.ast);
 		tryStatement.setSourceRange(statement.sourceStart, statement.sourceEnd - statement.sourceStart + 1);
-		LocalDeclaration[] localDeclarations = statement.resources;
-		int resourcesLength = localDeclarations.length;
+		int resourcesLength = statement.resources.length;
 		if (resourcesLength > 0) {
 			switch(this.ast.apiLevel) {
 				case AST.JLS2_INTERNAL :
@@ -10,15 +9,41 @@
 					// convert it to a simple try statement tagged as MALFORMED
 					tryStatement.setFlags(tryStatement.getFlags() | ASTNode.MALFORMED);
 					break;
-				default:
+				case AST.JLS4_INTERNAL:
+				case AST.JLS8_INTERNAL:
 					for (int i = 0; i < resourcesLength; i++) {
-						LocalDeclaration localDeclaration = localDeclarations[i];
+						if (!(statement.resources[i] instanceof LocalDeclaration)) {
+							tryStatement.setFlags(tryStatement.getFlags() | ASTNode.MALFORMED);
+							break;
+						}
+						LocalDeclaration localDeclaration = (LocalDeclaration)statement.resources[i];
 						VariableDeclarationExpression variableDeclarationExpression = convertToVariableDeclarationExpression(localDeclaration);
 						int start = variableDeclarationExpression.getStartPosition();
 						int end = localDeclaration.declarationEnd;
 						variableDeclarationExpression.setSourceRange(start, end - start + 1);
 						tryStatement.resources().add(variableDeclarationExpression);
 					}
+					break;
+				default:
+					for (int i = 0; i < resourcesLength; i++) {
+						org.eclipse.jdt.internal.compiler.ast.Statement resource = statement.resources[i];
+						if (resource instanceof LocalDeclaration) {
+							LocalDeclaration localDeclaration = (LocalDeclaration)resource;
+							VariableDeclarationExpression variableDeclarationExpression = convertToVariableDeclarationExpression(localDeclaration);
+							int start = variableDeclarationExpression.getStartPosition();
+							int end = localDeclaration.declarationEnd;
+							variableDeclarationExpression.setSourceRange(start, end - start + 1);
+							tryStatement.resources().add(variableDeclarationExpression);
+						} else if (resource instanceof NameReference) {
+							tryStatement.resources().add(convert((NameReference) resource));
+						} else if (resource instanceof FieldReference) {
+							tryStatement.resources().add(convert((FieldReference) resource));
+						} else {
+							tryStatement.setFlags(tryStatement.getFlags() | ASTNode.MALFORMED);
+							break;
+						}
+					}
+					break;
 			}
 		}
 		tryStatement.setBody(convert(statement.tryBlock));

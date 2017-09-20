@@ -1,0 +1,43 @@
+	Set<String> runConformModuleTest(String[] testFiles, String commandLine,
+			String expectedFailureOutOutputString, String expectedFailureErrOutputString,
+			boolean shouldFlushOutputDirectory, String output)
+	{
+		this.runConformTest(testFiles, commandLine, expectedFailureOutOutputString, expectedFailureErrOutputString, shouldFlushOutputDirectory);
+		if (RUN_JAVAC) {
+			File outputDir = new File(output);
+			final Set<String> outFiles = new HashSet<>();
+			walkOutFiles(output, outFiles, true);
+			String[] testFileNames = new String[testFiles.length/2];
+			for (int i = 0; i < testFileNames.length; i++) {
+				testFileNames[i] = testFiles[i*2];
+			}
+			for (Object comp : javacCompilers) {
+				JavacCompiler javacCompiler = (JavacCompiler) comp;
+				if (javacCompiler.compliance < ClassFileConstants.JDK9)
+					continue;
+				commandLine = adjustForJavac(commandLine);
+				StringBuffer log = new StringBuffer();
+				try {
+					long compileResult = javacCompiler.compile(
+											outputDir, /* directory */
+											commandLine /* options */,
+											testFileNames /* source file names */,
+											log);
+					if (compileResult != 0) {
+						System.err.println("Previous error was from "+testName());
+						fail("Unexpected error from javac");
+					}
+				} catch (IOException | InterruptedException e) {
+					e.printStackTrace();
+					throw new AssertionFailedError(e.getMessage());
+				}
+				final Set<String> expectedFiles = new HashSet<>(outFiles);
+				walkOutFiles(output, expectedFiles, false);
+				for (String missingFile : expectedFiles)
+					System.err.println("Missing output file from javac:    "+missingFile);
+			}
+			return outFiles;
+		}
+		return null;
+	}
+

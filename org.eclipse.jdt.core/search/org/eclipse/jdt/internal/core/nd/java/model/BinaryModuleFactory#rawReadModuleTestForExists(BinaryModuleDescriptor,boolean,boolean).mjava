@@ -1,0 +1,56 @@
+	/**
+	 * Read the class file from disk, circumventing the index's cache. This should only be used by callers
+	 * that need to read information from the class file which aren't present in the index (such as method bodies).
+	 * 
+	 * @return the newly-created IBinaryModule or null if the given class file does not exist.
+	 * @throws ClassFormatException if the class file existed but was corrupt
+	 * @throws JavaModelException if unable to read the class file due to a transient failure
+	 * @throws FileNotFoundException if the file does not exist
+	 */
+	public static IBinaryModule rawReadModuleTestForExists(BinaryModuleDescriptor descriptor, boolean fullyInitialize,
+			boolean useInvalidArchiveCache) throws JavaModelException, ClassFormatException, FileNotFoundException {
+		if (descriptor == null) {
+			return null;
+		}
+		if (descriptor.isInJarFile()) {
+			ZipFile zip = null;
+			try {
+				zip = JavaModelManager.getJavaModelManager().getZipFile(new Path(new String(descriptor.workspacePath)),
+						useInvalidArchiveCache);
+				String entryName = TypeConstants.MODULE_INFO_CLASS_NAME_STRING;
+				ZipEntry ze = zip.getEntry(entryName);
+				if (ze != null) {
+					byte contents[];
+					try {
+						contents = org.eclipse.jdt.internal.compiler.util.Util.getZipEntryByteContent(ze, zip);
+					} catch (IOException ioe) {
+						throw new JavaModelException(ioe, IJavaModelStatusConstants.IO_EXCEPTION);
+					}
+					ClassFileReader classFileReader = new ClassFileReader(contents, descriptor.indexPath, fullyInitialize);
+					return classFileReader.getModuleDeclaration();
+				}
+			} catch (CoreException e) {
+				throw new JavaModelException(e);
+			} finally {
+				JavaModelManager.getJavaModelManager().closeZipFile(zip);
+			}
+		} else {
+			IFile file = ResourcesPlugin.getWorkspace().getRoot().getFile(new Path(new String(descriptor.workspacePath)));
+			byte[] contents;
+			try (InputStream stream = file.getContents(true)) {
+				contents = org.eclipse.jdt.internal.compiler.util.Util.getInputStreamAsByteArray(stream, -1);
+			} catch (CoreException e) {
+				IStatus status = e.getStatus();
+				if (status.getCode() == IResourceStatus.RESOURCE_NOT_FOUND) {
+					throw new FileNotFoundException();
+				}
+				throw new JavaModelException(e);
+			} catch (IOException e) {
+				throw new JavaModelException(e, IJavaModelStatusConstants.IO_EXCEPTION);
+			}
+			ClassFileReader classFileReader = new ClassFileReader(contents, file.getFullPath().toString().toCharArray(), fullyInitialize);
+			return classFileReader.getModuleDeclaration();
+		}
+		return null;
+	}
+

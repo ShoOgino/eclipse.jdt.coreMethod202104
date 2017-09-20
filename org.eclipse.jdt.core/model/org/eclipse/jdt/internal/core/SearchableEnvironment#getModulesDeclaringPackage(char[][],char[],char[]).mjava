@@ -1,0 +1,57 @@
+	/**
+	 * @see org.eclipse.jdt.internal.compiler.env.IModuleAwareNameEnvironment#getModulesDeclaringPackage(char[][], char[], char[])
+	 */
+	@Override
+	public char[][] getModulesDeclaringPackage(char[][] parentPackageName, char[] name, char[] moduleName) {
+		String[] pkgName;
+		if (parentPackageName == null)
+			pkgName = new String[] {new String(name)};
+		else {
+			int length = parentPackageName.length;
+			pkgName = new String[length+1];
+			for (int i = 0; i < length; i++)
+				pkgName[i] = new String(parentPackageName[i]);
+			pkgName[length] = new String(name);
+		}
+		LookupStrategy strategy = LookupStrategy.get(moduleName);
+		switch (strategy) {
+			case Named:
+				if (this.knownModuleLocations != null) {
+					IPackageFragmentRoot[] moduleContext = findModuleContext(moduleName);
+					if (moduleContext != null) {
+						// (this.owner != null && this.owner.isPackage(pkgName)) // TODO(SHMOD) see old isPackage
+						if (this.nameLookup.isPackage(pkgName, moduleContext)) {
+							return new char[][] { moduleName };
+						}
+					}
+				}
+				return null;
+			case Unnamed:
+			case Any:
+				// if in pre-9 mode we may still search the unnamed module 
+				if (this.knownModuleLocations == null) {
+					if ((this.owner != null && this.owner.isPackage(pkgName))
+							|| this.nameLookup.isPackage(pkgName))
+						return new char[][] { ModuleBinding.UNNAMED };
+					return null;
+				}
+				//$FALL-THROUGH$
+			case AnyNamed:
+				char[][] names = CharOperation.NO_CHAR_CHAR;
+				IPackageFragmentRoot[] packageRoots = this.nameLookup.packageFragmentRoots;
+				for (IPackageFragmentRoot packageRoot : packageRoots) {
+					IPackageFragmentRoot[] singleton = { packageRoot };
+					if (strategy.matches(singleton, locs -> locs[0] instanceof JrtPackageFragmentRoot || getModuleDescription(locs) != null)) {
+						if (this.nameLookup.isPackage(pkgName, singleton)) {
+							IModuleDescription moduleDescription = getModuleDescription(singleton);
+							char[] aName = moduleDescription != null ? moduleDescription.getElementName().toCharArray() : ModuleBinding.UNNAMED;
+							names = CharOperation.arrayConcat(names, aName);
+						}
+					}
+				}
+				return names == CharOperation.NO_CHAR_CHAR ? null : names;
+			default:
+				throw new IllegalArgumentException("Unexpected LookupStrategy "+strategy); //$NON-NLS-1$
+		}
+	}
+

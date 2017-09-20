@@ -1,0 +1,235 @@
+	private int generateModuleAttribute(ModuleDeclaration module) {
+		ModuleBinding binding = module.binding;
+		int localContentsOffset = this.contentsOffset;
+		if (localContentsOffset + 10 >= this.contents.length) {
+			resizeContents(10);
+		}
+		int moduleAttributeNameIndex =
+			this.constantPool.literalIndex(AttributeNamesConstants.ModuleName);
+		this.contents[localContentsOffset++] = (byte) (moduleAttributeNameIndex >> 8);
+		this.contents[localContentsOffset++] = (byte) moduleAttributeNameIndex;
+		int attrLengthOffset = localContentsOffset;
+		localContentsOffset += 4;
+		int moduleNameIndex =
+				this.constantPool.literalIndexForModule(binding.moduleName);
+		this.contents[localContentsOffset++] = (byte) (moduleNameIndex >> 8);
+		this.contents[localContentsOffset++] = (byte) moduleNameIndex;
+		int flags = module.modifiers & ~(ClassFileConstants.AccModule);
+		this.contents[localContentsOffset++] = (byte) (flags >> 8);
+		this.contents[localContentsOffset++] = (byte) flags;
+		int module_version = 0;
+		this.contents[localContentsOffset++] = (byte) (module_version >> 8);
+		this.contents[localContentsOffset++] = (byte) module_version;
+		int attrLength = 6;
+		
+		// ================= requires section =================
+		/** u2 requires_count;
+	    	{   u2 requires_index;
+	        	u2 requires_flags;
+	    	} requires[requires_count];
+	    **/
+		int requiresCountOffset = localContentsOffset;
+		int requiresCount = module.requiresCount;
+		int requiresSize = 2 + requiresCount * 6;
+		if (localContentsOffset + requiresSize >= this.contents.length) {
+			resizeContents(requiresSize);
+		}
+		
+		localContentsOffset += 2;
+		ModuleBinding javaBaseBinding = null;
+		for(int i = 0; i < module.requiresCount; i++) {
+			RequiresStatement req = module.requires[i];
+			ModuleBinding reqBinding = req.resolvedBinding;
+			if (CharOperation.equals(reqBinding.moduleName, TypeConstants.JAVA_BASE)) {
+				javaBaseBinding = reqBinding;
+			}
+			int nameIndex = this.constantPool.literalIndexForModule(reqBinding.moduleName);
+			this.contents[localContentsOffset++] = (byte) (nameIndex >> 8);
+			this.contents[localContentsOffset++] = (byte) (nameIndex);
+			flags = req.modifiers;
+			this.contents[localContentsOffset++] = (byte) (flags >> 8);
+			this.contents[localContentsOffset++] = (byte) (flags);
+			int required_version = 0;
+			this.contents[localContentsOffset++] = (byte) (required_version >> 8);
+			this.contents[localContentsOffset++] = (byte) (required_version);
+		}
+		if (!CharOperation.equals(binding.moduleName, TypeConstants.JAVA_BASE) && javaBaseBinding == null) {
+			if (localContentsOffset + 6 >= this.contents.length) {
+				resizeContents(6);
+			}
+			javaBaseBinding = binding.environment.javaBaseModule();
+			int javabase_index = this.constantPool.literalIndexForModule(javaBaseBinding.moduleName);
+			this.contents[localContentsOffset++] = (byte) (javabase_index >> 8);
+			this.contents[localContentsOffset++] = (byte) (javabase_index);
+			flags = ClassFileConstants.AccMandated;
+			this.contents[localContentsOffset++] = (byte) (flags >> 8);
+			this.contents[localContentsOffset++] = (byte) flags;
+			int required_version = 0;
+			this.contents[localContentsOffset++] = (byte) (required_version >> 8);
+			this.contents[localContentsOffset++] = (byte) (required_version);
+			requiresCount++;
+		}
+		this.contents[requiresCountOffset++] = (byte) (requiresCount >> 8);
+		this.contents[requiresCountOffset++] = (byte) requiresCount;
+		attrLength += 2 + 6 * requiresCount;
+		// ================= end requires section =================
+
+		// ================= exports section =================
+		/**
+		 * u2 exports_count;
+		 * {   u2 exports_index;
+		 *     u2 exports_flags;
+		 *     u2 exports_to_count;
+		 *     u2 exports_to_index[exports_to_count];
+		 * } exports[exports_count];
+		 */
+		int exportsSize = 2 + module.exportsCount * 6;
+		if (localContentsOffset + exportsSize >= this.contents.length) {
+			resizeContents(exportsSize);
+		}
+		this.contents[localContentsOffset++] = (byte) (module.exportsCount >> 8);
+		this.contents[localContentsOffset++] = (byte) module.exportsCount;
+		for (int i = 0; i < module.exportsCount; i++) {
+			ExportsStatement ref = module.exports[i];
+			if (localContentsOffset + 6 >= this.contents.length) {
+				resizeContents((module.exportsCount - i) * 6);
+			}
+			int nameIndex = this.constantPool.literalIndexForPackage(CharOperation.replaceOnCopy(ref.pkgName, '.', '/'));
+			this.contents[localContentsOffset++] = (byte) (nameIndex >> 8);
+			this.contents[localContentsOffset++] = (byte) (nameIndex);
+			// TODO exports_flags - check when they are set
+			this.contents[localContentsOffset++] = (byte) 0;
+			this.contents[localContentsOffset++] = (byte) 0;
+
+			int exportsToCount = ref.isQualified() ? ref.targets.length : 0; 
+			this.contents[localContentsOffset++] = (byte) (exportsToCount >> 8);
+			this.contents[localContentsOffset++] = (byte) (exportsToCount);
+			if (exportsToCount > 0) {
+				int targetSize = 2 * exportsToCount;
+				if (localContentsOffset + targetSize >= this.contents.length) {
+					resizeContents(targetSize);
+				}
+				for(int j = 0; j < exportsToCount; j++) {
+					nameIndex = this.constantPool.literalIndexForModule(ref.targets[j].moduleName);
+					this.contents[localContentsOffset++] = (byte) (nameIndex >> 8);
+					this.contents[localContentsOffset++] = (byte) (nameIndex);
+				}
+				attrLength += targetSize;
+			}
+		}
+		attrLength += exportsSize;
+		// ================= end exports section =================
+
+		// ================= opens section =================
+		/**
+		 * u2 opens_count;
+		 * {   u2 opens_index;
+		 *     u2 opens_flags;
+		 *     u2 opens_to_count;
+		 *     u2 opens_to_index[opens_to_count];
+		 * } exports[exports_count];
+		 */
+		int opensSize = 2 + module.opensCount * 6;
+		if (localContentsOffset + opensSize >= this.contents.length) {
+			resizeContents(opensSize);
+		}
+		this.contents[localContentsOffset++] = (byte) (module.opensCount >> 8);
+		this.contents[localContentsOffset++] = (byte) module.opensCount;
+		for (int i = 0; i < module.opensCount; i++) {
+			OpensStatement ref = module.opens[i];
+			if (localContentsOffset + 6 >= this.contents.length) {
+				resizeContents((module.opensCount - i) * 6);
+			}
+			int nameIndex = this.constantPool.literalIndexForPackage(CharOperation.replaceOnCopy(ref.pkgName, '.', '/'));
+			this.contents[localContentsOffset++] = (byte) (nameIndex >> 8);
+			this.contents[localContentsOffset++] = (byte) (nameIndex);
+			// TODO opens_flags - check when they are set
+			this.contents[localContentsOffset++] = (byte) 0;
+			this.contents[localContentsOffset++] = (byte) 0;
+			
+			int opensToCount = ref.isQualified() ? ref.targets.length : 0; 
+			this.contents[localContentsOffset++] = (byte) (opensToCount >> 8);
+			this.contents[localContentsOffset++] = (byte) (opensToCount);
+			if (opensToCount > 0) {
+				int targetSize = 2 * opensToCount;
+				if (localContentsOffset + targetSize >= this.contents.length) {
+					resizeContents(targetSize);
+				}
+				for(int j = 0; j < opensToCount; j++) {
+					nameIndex = this.constantPool.literalIndexForModule(ref.targets[j].moduleName);
+					this.contents[localContentsOffset++] = (byte) (nameIndex >> 8);
+					this.contents[localContentsOffset++] = (byte) (nameIndex);
+				}
+				attrLength += targetSize;
+			}
+		}
+		attrLength += opensSize;
+		// ================= end opens section =================
+
+		// ================= uses section =================
+		/**
+		 * u2 uses_count;
+		 * u2 uses_index[uses_count];
+		 */
+		int usesSize = 2 + 2 * module.usesCount;
+		if (localContentsOffset + usesSize >= this.contents.length) {
+			resizeContents(usesSize);
+		}
+		this.contents[localContentsOffset++] = (byte) (module.usesCount >> 8);
+		this.contents[localContentsOffset++] = (byte) module.usesCount;
+		for(int i = 0; i < module.usesCount; i++) {
+			int nameIndex = this.constantPool.literalIndexForType(module.uses[i].serviceInterface.resolvedType.constantPoolName());
+			this.contents[localContentsOffset++] = (byte) (nameIndex >> 8);
+			this.contents[localContentsOffset++] = (byte) (nameIndex);
+		}
+		attrLength += usesSize;
+		// ================= end uses section =================
+
+		// ================= provides section =================
+		/**
+		 * u2 provides_count;
+		 * {
+		 * 		u2 provides_index;
+		 * 		u2 provides_with_count;
+		 * 		u2 provides_with_index[provides_with_count];
+		 * } provides[provides_count];
+		 */
+		int servicesSize = 2 + 4 * module.servicesCount;
+		if (localContentsOffset + servicesSize >= this.contents.length) {
+			resizeContents(servicesSize);
+		}
+		this.contents[localContentsOffset++] = (byte) (module.servicesCount >> 8);
+		this.contents[localContentsOffset++] = (byte) module.servicesCount;
+		for(int i = 0; i < module.servicesCount; i++) {
+			if (localContentsOffset + 4 >= this.contents.length) {
+				resizeContents((module.servicesCount - i) * 4);
+			}
+			int nameIndex = this.constantPool.literalIndexForType(module.services[i].serviceInterface.resolvedType.constantPoolName());
+			this.contents[localContentsOffset++] = (byte) (nameIndex >> 8);
+			this.contents[localContentsOffset++] = (byte) (nameIndex);
+			TypeReference[] impls = module.services[i].implementations;
+			int implLength = impls.length;
+			this.contents[localContentsOffset++] = (byte) (implLength >> 8);
+			this.contents[localContentsOffset++] = (byte) implLength;
+			int targetSize = implLength * 2;
+			if (localContentsOffset + targetSize >= this.contents.length) {
+				resizeContents(targetSize);
+			}
+			for (int j = 0; j < implLength; j++) {
+				nameIndex = this.constantPool.literalIndexForType(impls[j].resolvedType.constantPoolName());
+				this.contents[localContentsOffset++] = (byte) (nameIndex >> 8);
+				this.contents[localContentsOffset++] = (byte) (nameIndex);
+			}
+			attrLength += targetSize;
+		}
+		attrLength += servicesSize;
+		// ================= end provides section =================
+
+		this.contents[attrLengthOffset++] = (byte)(attrLength >> 24);
+		this.contents[attrLengthOffset++] = (byte)(attrLength >> 16);
+		this.contents[attrLengthOffset++] = (byte)(attrLength >> 8);
+		this.contents[attrLengthOffset++] = (byte)attrLength;
+		this.contentsOffset = localContentsOffset;
+		return 1;
+	}
+

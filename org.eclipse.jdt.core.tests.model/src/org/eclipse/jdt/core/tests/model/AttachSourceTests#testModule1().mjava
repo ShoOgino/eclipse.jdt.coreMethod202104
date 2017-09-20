@@ -1,0 +1,51 @@
+public void testModule1() throws CoreException, IOException {
+	if (!isJRE9) {
+		System.err.println(this.getClass().getName()+'.'+getName()+" needs a Java 9 JRE - skipped");
+		return;
+	}
+	try {
+		IJavaProject javaProject = createJavaProject("Test", new String[]{"src"}, null, "bin", JavaCore.VERSION_9);
+		createFolder("/Test/src/test1");
+		createFile("/Test/src/test1/Test.java",
+			"package test1;\n" +
+			"\n" +
+			"public class Test {}");
+		createFile("/Test/src/module-info.java",
+			"module test {\n" +
+			"	requires mod.one;\n" +
+			"	exports test1;\n" +
+			"}\n");
+
+		String modOneSrc = 
+			"\n" +
+			"/** The no. one module. */\n" +
+			"module mod.one {\n" +
+			"  exports m.o.p;\n" +
+			"}\n";
+		String[] pathAndContents = new String[] {
+			"module-info.java",
+			modOneSrc,
+			"m/o/p/C.java",
+			"package m.o.p;\n" +
+			"public class C {\n" + 
+			"}"
+		};
+		addLibrary(javaProject, "mod.one.jar", "mod.onesrc.zip", pathAndContents, JavaCore.VERSION_9);
+		IPackageFragmentRoot root = javaProject.getPackageFragmentRoot(getFile("/Test/mod.one.jar"));
+		IModularClassFile cf = root.getPackageFragment("").getModularClassFile();
+		assertSourceEquals(
+			"Unexpected source for class file mod.one/module-info.class",
+			modOneSrc,
+			cf.getSource());
+		IModuleDescription module = cf.getModule();
+		ISourceRange javadocRange = module.getJavadocRange();
+		String srcJavadoc = modOneSrc.substring(javadocRange.getOffset(), javadocRange.getOffset()+javadocRange.getLength());
+		assertEquals("javadoc from source", "/** The no. one module. */", srcJavadoc);
+		ISourceRange sourceRange = module.getSourceRange();
+		assertEquals("source start", 1, sourceRange.getOffset()); // start after initial '\n'
+		assertEquals("source end", modOneSrc.length()-2, sourceRange.getLength()); // end before terminal '\n'
+	} finally {
+		deleteProject("Test");
+	}
+}
+

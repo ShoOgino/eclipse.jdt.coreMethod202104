@@ -172,8 +172,10 @@
 				}
 			} else {
 				if (isDiamond) {
-					scope.problemReporter().diamondNotWithAnoymousClasses(this.type);
-					return null;
+					if (sourceLevel < ClassFileConstants.JDK9) {
+						scope.problemReporter().diamondNotWithAnoymousClasses(this.type);
+						return null;
+					}
 				}	
 				ReferenceBinding superType = (ReferenceBinding) receiverType;
 				if (superType.isTypeVariable()) {
@@ -184,61 +186,7 @@
 					scope.problemReporter().cannotInstantiate(this.type, superType);
 					return this.resolvedType = superType;
 				}
-				// anonymous type scenario
-				// an anonymous class inherits from java.lang.Object when declared "after" an interface
-				ReferenceBinding anonymousSuperclass = superType.isInterface() ? scope.getJavaLangObject() : superType;
-				// insert anonymous type in scope
-				scope.addAnonymousType(this.anonymousType, superType);
-				this.anonymousType.resolve(scope);
-
-				// find anonymous super constructor
-				this.resolvedType = this.anonymousType.binding; // 1.2 change
-				if ((this.resolvedType.tagBits & TagBits.HierarchyHasProblems) != 0) {
-					return null; // stop secondary errors
-				}
-				MethodBinding inheritedBinding = findConstructorBinding(scope, this, anonymousSuperclass, this.argumentTypes);
-
-				if (!inheritedBinding.isValidBinding()) {
-					if (inheritedBinding.declaringClass == null) {
-						inheritedBinding.declaringClass = anonymousSuperclass;
-					}
-					if (this.type != null && !this.type.resolvedType.isValidBinding()) {
-						// problem already got signaled on type reference, do not report secondary problem
-						return null;
-					}
-					scope.problemReporter().invalidConstructor(this, inheritedBinding);
-					return this.resolvedType;
-				}
-				if ((inheritedBinding.tagBits & TagBits.HasMissingType) != 0) {
-					scope.problemReporter().missingTypeInConstructor(this, inheritedBinding);
-				}
-				if (this.enclosingInstance != null) {
-					ReferenceBinding targetEnclosing = inheritedBinding.declaringClass.enclosingType();
-					if (targetEnclosing == null) {
-						scope.problemReporter().unnecessaryEnclosingInstanceSpecification(this.enclosingInstance, superType);
-						return this.resolvedType;
-					} else if (!enclosingInstanceType.isCompatibleWith(targetEnclosing) && !scope.isBoxingCompatibleWith(enclosingInstanceType, targetEnclosing)) {
-						scope.problemReporter().typeMismatchError(enclosingInstanceType, targetEnclosing, this.enclosingInstance, null);
-						return this.resolvedType;
-					}
-					this.enclosingInstance.computeConversion(scope, targetEnclosing, enclosingInstanceType);
-				}
-				if (this.arguments != null) {
-					if (checkInvocationArguments(scope, null, anonymousSuperclass, inheritedBinding, this.arguments, this.argumentTypes, this.argsContainCast, this)) {
-						this.bits |= ASTNode.Unchecked;
-					}
-				}
-				if (this.typeArguments != null && inheritedBinding.original().typeVariables == Binding.NO_TYPE_VARIABLES) {
-					scope.problemReporter().unnecessaryTypeArgumentsForMethodInvocation(inheritedBinding, this.genericTypeArguments, this.typeArguments);
-				}
-				// Update the anonymous inner class : superclass, interface
-				LookupEnvironment environment=scope.environment();
-				if (environment.globalOptions.isAnnotationBasedNullAnalysisEnabled) {
-					ImplicitNullAnnotationVerifier.ensureNullnessIsKnown(inheritedBinding, scope);
-				}
-
-				this.binding = this.anonymousType.createDefaultConstructorWithBinding(inheritedBinding, 	(this.bits & ASTNode.Unchecked) != 0 && this.genericTypeArguments == null);
-				return this.resolvedType;
+				this.resolvedType = receiverType;
 			}
 		} else {
 			if (this.enclosingInstance != null) {
@@ -246,8 +194,9 @@
 				this.resolvedType = receiverType = this.type.resolvedType;
 			}
 		}
+		MethodBinding constructorBinding = null;
 		if (isDiamond) {
-			this.binding = inferConstructorOfElidedParameterizedType(scope);
+			this.binding = constructorBinding = inferConstructorOfElidedParameterizedType(scope);
 			if (this.binding == null || !this.binding.isValidBinding()) {
 				scope.problemReporter().cannotInferElidedTypes(this);
 				return this.resolvedType = null;
@@ -256,47 +205,90 @@
 				return new PolyTypeBinding(this);
 			}
 			this.resolvedType = this.type.resolvedType = receiverType = this.binding.declaringClass;
+			if (this.anonymousType != null) {
+				constructorBinding = getAnonymousConstructorBinding((ReferenceBinding) receiverType, scope);
+				if (constructorBinding == null)
+					return null;
+				this.resolvedType = this.anonymousType.binding;
+				// Check that inferred type is valid
+				if (!validate((ParameterizedTypeBinding) receiverType, scope)) {
+					return this.resolvedType;
+				}
+			} else {
+				// 15.9.3 - If the compile-time declaration is applicable by variable arity invocation...
+				if (this.binding.isVarargs()) {
+					TypeBinding lastArg = this.binding.parameters[this.binding.parameters.length - 1].leafComponentType();
+					if (!lastArg.erasure().canBeSeenBy(scope)) {
+						scope.problemReporter().invalidType(this, new ProblemReferenceBinding(new char[][] {lastArg.readableName()}, (ReferenceBinding)lastArg, ProblemReasons.NotVisible));
+						return this.resolvedType = null;
+					}
+				}
+			}
 			resolvePolyExpressionArguments(this, this.binding, this.argumentTypes, scope);
 		} else {
-			this.binding = findConstructorBinding(scope, this, (ReferenceBinding) receiverType, this.argumentTypes);
-		}
-
-		if (this.binding.isValidBinding()) {	
-			if (isMethodUseDeprecated(this.binding, scope, true)) {
-				scope.problemReporter().deprecatedMethod(this.binding, this);
+			if (this.anonymousType != null) {
+				constructorBinding = getAnonymousConstructorBinding((ReferenceBinding) receiverType, scope);
+				if (constructorBinding == null)
+					return null;
+				this.resolvedType = this.anonymousType.binding;
+			} else {
+				this.binding = constructorBinding = findConstructorBinding(scope, this, (ReferenceBinding) receiverType, this.argumentTypes);
 			}
-			if (checkInvocationArguments(scope, null, receiverType, this.binding, this.arguments, this.argumentTypes, this.argsContainCast, this)) {
+		}
+		ReferenceBinding receiver = (ReferenceBinding) receiverType;
+		ReferenceBinding superType = receiver.isInterface() ? scope.getJavaLangObject() : receiver;
+		if (constructorBinding.isValidBinding()) {
+			if (isMethodUseDeprecated(constructorBinding, scope, true)) {
+				scope.problemReporter().deprecatedMethod(constructorBinding, this);
+			}
+			if (checkInvocationArguments(scope, null, superType, constructorBinding, this.arguments,
+					this.argumentTypes, this.argsContainCast, this)) {
 				this.bits |= ASTNode.Unchecked;
 			}
-			if (this.typeArguments != null && this.binding.original().typeVariables == Binding.NO_TYPE_VARIABLES) {
-				scope.problemReporter().unnecessaryTypeArgumentsForMethodInvocation(this.binding, this.genericTypeArguments, this.typeArguments);
+			if (this.typeArguments != null && constructorBinding.original().typeVariables == Binding.NO_TYPE_VARIABLES) {
+				scope.problemReporter().unnecessaryTypeArgumentsForMethodInvocation(constructorBinding,
+						this.genericTypeArguments, this.typeArguments);
 			}
 		} else {
-			if (this.binding.declaringClass == null) {
-				this.binding.declaringClass = (ReferenceBinding) receiverType;
+			if (constructorBinding.declaringClass == null) {
+				constructorBinding.declaringClass = superType;
 			}
 			if (this.type != null && !this.type.resolvedType.isValidBinding()) {
 				// problem already got signaled on type reference, do not report secondary problem
 				return null;
 			}
-			scope.problemReporter().invalidConstructor(this, this.binding);
+			scope.problemReporter().invalidConstructor(this, constructorBinding);
+			return this.resolvedType;
+		}
+		if ((constructorBinding.tagBits & TagBits.HasMissingType) != 0) {
+			scope.problemReporter().missingTypeInConstructor(this, constructorBinding);
+		}
+		if (this.enclosingInstance != null) {
+			ReferenceBinding targetEnclosing = constructorBinding.declaringClass.enclosingType();
+			if (targetEnclosing == null) {
+				scope.problemReporter().unnecessaryEnclosingInstanceSpecification(this.enclosingInstance, receiver);
+				return this.resolvedType;
+			} else if (!enclosingInstanceType.isCompatibleWith(targetEnclosing) && !scope.isBoxingCompatibleWith(enclosingInstanceType, targetEnclosing)) {
+				scope.problemReporter().typeMismatchError(enclosingInstanceType, targetEnclosing, this.enclosingInstance, null);
+				return this.resolvedType;
+			}
+			this.enclosingInstance.computeConversion(scope, targetEnclosing, enclosingInstanceType);
+		}
+		if (!isDiamond && receiverType.isParameterizedTypeWithActualArguments() && 
+				(this.anonymousType == null || sourceLevel >= ClassFileConstants.JDK9)) {
+			checkTypeArgumentRedundancy((ParameterizedTypeBinding) receiverType, scope);
+		}
+		if (this.anonymousType != null) {
+			// anonymous type scenario
+			// Update the anonymous inner class : superclass, interface
+			LookupEnvironment environment=scope.environment();
+			if (environment.globalOptions.isAnnotationBasedNullAnalysisEnabled) {
+				ImplicitNullAnnotationVerifier.ensureNullnessIsKnown(constructorBinding, scope);
+			}
+			this.binding = this.anonymousType.createDefaultConstructorWithBinding(constructorBinding, (this.bits & ASTNode.Unchecked) != 0 && this.genericTypeArguments == null);
+			return this.resolvedType;
+		} else {
 			return this.resolvedType = receiverType;
 		}
-		if ((this.binding.tagBits & TagBits.HasMissingType) != 0) {
-			scope.problemReporter().missingTypeInConstructor(this, this.binding);
-		}
-		if (!isDiamond && receiverType.isParameterizedTypeWithActualArguments()) {
-			checkTypeArgumentRedundancy((ParameterizedTypeBinding)receiverType, scope);
-		}
-		// The enclosing instance must be compatible with the innermost enclosing type
-		ReferenceBinding expectedType = this.binding.declaringClass.enclosingType();
-		if (TypeBinding.notEquals(expectedType, enclosingInstanceType)) // must call before computeConversion() and typeMismatchError()
-			scope.compilationUnitScope().recordTypeConversion(expectedType, enclosingInstanceType);
-		if (enclosingInstanceType.isCompatibleWith(expectedType) || scope.isBoxingCompatibleWith(enclosingInstanceType, expectedType)) {
-			this.enclosingInstance.computeConversion(scope, expectedType, enclosingInstanceType);
-			return this.resolvedType = receiverType;
-		}
-		scope.problemReporter().typeMismatchError(enclosingInstanceType, expectedType, this.enclosingInstance, null);
-		return this.resolvedType = receiverType;
 	}
 

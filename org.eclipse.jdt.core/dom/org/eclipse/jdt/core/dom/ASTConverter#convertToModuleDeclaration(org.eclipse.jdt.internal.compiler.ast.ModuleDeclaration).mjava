@@ -1,0 +1,72 @@
+	public ModuleDeclaration convertToModuleDeclaration(org.eclipse.jdt.internal.compiler.ast.ModuleDeclaration moduleDeclaration) {
+		checkCanceled();
+		if (this.scanner.sourceLevel < ClassFileConstants.JDK9
+				|| this.ast.apiLevel < AST.JLS9_INTERNAL) return null;
+		ModuleDeclaration moduleDecl = this.ast.newModuleDeclaration();
+		// TODO
+		//convert(moduleDeclaration.javadoc, moduleDecl);
+		setAnnotations(moduleDecl, moduleDeclaration); // only annotations
+		moduleDecl.setOpen(moduleDeclaration.isOpen());
+		Name moduleName = getName(moduleDeclaration, CharOperation.splitOn('.', moduleDeclaration.moduleName), moduleDeclaration.sourcePositions);
+		moduleDecl.setName(moduleName);
+
+		List<ModuleDirective> stmts = moduleDecl.moduleStatements();
+		TreeSet<ModuleDirective> tSet = new TreeSet<> (new Comparator() {
+			public int compare(Object o1, Object o2) {
+				int p1 = ((ModuleDirective) o1).getStartPosition();
+				int p2 = ((ModuleDirective) o2).getStartPosition();
+				return p1 < p2 ? -1 : p1 == p2 ? 0 : 1;
+			}
+		});
+		for (int i = 0; i < moduleDeclaration.exportsCount; ++i) {
+			tSet.add(getPackageVisibilityStatement(moduleDeclaration.exports[i], new ExportsDirective(this.ast)));
+		}
+		for (int i = 0; i < moduleDeclaration.opensCount; ++i) {
+			tSet.add(getPackageVisibilityStatement(moduleDeclaration.opens[i], new OpensDirective(this.ast)));
+		}
+		for (int i = 0; i < moduleDeclaration.requiresCount; ++i) {
+			org.eclipse.jdt.internal.compiler.ast.RequiresStatement req = moduleDeclaration.requires[i];
+			ModuleReference moduleRef = req.module;
+			RequiresDirective stmt = new RequiresDirective(this.ast);
+			Name name = getName(moduleRef, CharOperation.splitOn('.', moduleRef.moduleName), moduleRef.sourcePositions);
+			stmt.setName(name);
+			if (this.resolveBindings) {
+				recordNodes(name, moduleRef);
+			}
+
+			setModuleModifiers(req, stmt);
+			stmt.setSourceRange(req.declarationSourceStart, req.declarationEnd - req.declarationSourceStart + 1);
+			tSet.add(stmt);
+		}
+		for (int i = 0; i < moduleDeclaration.usesCount; ++i) {
+			org.eclipse.jdt.internal.compiler.ast.UsesStatement usesStatement = moduleDeclaration.uses[i];
+			UsesDirective stmt = new UsesDirective(this.ast);
+			TypeReference usesRef = usesStatement.serviceInterface;
+			Name name = convert(usesRef);
+			stmt.setName(name);
+			stmt.setSourceRange(usesStatement.declarationSourceStart, usesStatement.declarationSourceEnd - usesStatement.declarationSourceStart + 1);			
+			tSet.add(stmt);
+		}
+		for (int i = 0; i < moduleDeclaration.servicesCount; ++i) {
+			org.eclipse.jdt.internal.compiler.ast.ProvidesStatement pStmt = moduleDeclaration.services[i];
+			ProvidesDirective stmt = new ProvidesDirective(this.ast);
+			stmt.setName(convert(pStmt.serviceInterface));
+			TypeReference[] impls = pStmt.implementations;
+			for (TypeReference impl : impls) {
+				stmt.implementations().add(convert(impl));
+			}
+			stmt.setSourceRange(pStmt.declarationSourceStart, pStmt.declarationSourceEnd - pStmt.declarationSourceStart + 1);
+			tSet.add(stmt);
+		}
+		// The javadoc comment is now got from 	list store in compilation unit declaration
+		if (this.resolveBindings) {
+			recordNodes(moduleDecl, moduleDeclaration);
+			recordNodes(moduleName, moduleDeclaration);
+			moduleDecl.resolveBinding();
+		}
+		stmts.addAll(tSet);
+		int end = getKnownEnd(moduleDecl, moduleDeclaration.sourceEnd, moduleDeclaration.declarationSourceEnd);
+		moduleDecl.setSourceRange(moduleDeclaration.declarationSourceStart, end  - moduleDeclaration.declarationSourceStart + 1);
+		return moduleDecl;
+	}
+

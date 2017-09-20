@@ -1,0 +1,59 @@
+private NameEnvironmentAnswer internalFindClass(String qualifiedTypeName, char[] typeName, boolean asBinaryOnly, /*NonNull*/char[] moduleName) {
+	if (this.knownFileNames.contains(qualifiedTypeName)) return null; // looking for a file which we know was provided at the beginning of the compilation
+
+	String qualifiedBinaryFileName = qualifiedTypeName + SUFFIX_STRING_class;
+	String qualifiedPackageName =
+		qualifiedTypeName.length() == typeName.length
+			? Util.EMPTY_STRING
+			: qualifiedBinaryFileName.substring(0, qualifiedTypeName.length() - typeName.length - 1);
+
+	LookupStrategy strategy = LookupStrategy.get(moduleName);
+	if (strategy == LookupStrategy.Named) {
+		if (this.moduleLocations != null) {
+			// searching for a specific named module:
+			String moduleNameString = String.valueOf(moduleName);
+			Classpath classpath = this.moduleLocations.get(moduleNameString);
+			if (classpath != null) {
+				return classpath.findClass(typeName, qualifiedPackageName, moduleNameString, qualifiedBinaryFileName);
+			}
+		}
+		return null;
+	}
+	String qp2 = File.separatorChar == '/' ? qualifiedPackageName : qualifiedPackageName.replace('/', File.separatorChar);
+	NameEnvironmentAnswer suggestedAnswer = null;
+	if (qualifiedPackageName == qp2) {
+		for (int i = 0, length = this.classpaths.length; i < length; i++) {
+			if (!strategy.matches(this.classpaths[i], Classpath::hasModule))
+				continue;
+			NameEnvironmentAnswer answer = this.classpaths[i].findClass(typeName, qualifiedPackageName, null, qualifiedBinaryFileName, asBinaryOnly);
+			if (answer != null) {
+				if (!answer.ignoreIfBetter()) {
+					if (answer.isBetter(suggestedAnswer))
+						return answer;
+				} else if (answer.isBetter(suggestedAnswer))
+					// remember suggestion and keep looking
+					suggestedAnswer = answer;
+			}
+		}
+	} else {
+		String qb2 = qualifiedBinaryFileName.replace('/', File.separatorChar);
+		for (int i = 0, length = this.classpaths.length; i < length; i++) {
+			Classpath p = this.classpaths[i];
+			if (!strategy.matches(p, Classpath::hasModule))
+				continue;
+			NameEnvironmentAnswer answer = !(p instanceof ClasspathDirectory)
+				? p.findClass(typeName, qualifiedPackageName, null, qualifiedBinaryFileName, asBinaryOnly)
+				: p.findClass(typeName, qp2, null, qb2, asBinaryOnly);
+			if (answer != null) {
+				if (!answer.ignoreIfBetter()) {
+					if (answer.isBetter(suggestedAnswer))
+						return answer;
+				} else if (answer.isBetter(suggestedAnswer))
+					// remember suggestion and keep looking
+					suggestedAnswer = answer;
+			}
+		}
+	}
+	return suggestedAnswer;
+}
+

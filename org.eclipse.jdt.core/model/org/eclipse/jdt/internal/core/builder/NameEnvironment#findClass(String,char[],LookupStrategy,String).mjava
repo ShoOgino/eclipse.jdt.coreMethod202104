@@ -1,0 +1,68 @@
+private NameEnvironmentAnswer findClass(String qualifiedTypeName, char[] typeName, LookupStrategy strategy, String moduleName) {
+	if (this.notifier != null)
+		this.notifier.checkCancelWithinCompiler();
+
+	String moduleQualifiedName = moduleName != null ? moduleName+':'+qualifiedTypeName : qualifiedTypeName;
+	if (this.initialTypeNames != null && this.initialTypeNames.includes(moduleQualifiedName)) {
+		if (this.isIncrementalBuild)
+			// catch the case that a type inside a source file has been renamed but other class files are looking for it
+			throw new AbortCompilation(true, new AbortIncrementalBuildException(qualifiedTypeName));
+		return null; // looking for a file which we know was provided at the beginning of the compilation
+	}
+
+	if (this.additionalUnits != null && this.sourceLocations.length > 0) {
+		// if an additional source file is waiting to be compiled, answer it BUT not if this is a secondary type search
+		// if we answer X.java & it no longer defines Y then the binary type looking for Y will think the class path is wrong
+		// let the recompile loop fix up dependents when the secondary type Y has been deleted from X.java
+		// Only enclosing type names are present in the additional units table, so strip off inner class specifications
+		// when doing the lookup (https://bugs.eclipse.org/372418). 
+		// Also take care of $ in the name of the class (https://bugs.eclipse.org/377401)
+		// and prefer name with '$' if unit exists rather than failing to search for nested class (https://bugs.eclipse.org/392727)
+		SourceFile unit = (SourceFile) this.additionalUnits.get(qualifiedTypeName); // doesn't have file extension
+		if (unit != null)
+			return new NameEnvironmentAnswer(unit, null /*no access restriction*/);
+		int index = qualifiedTypeName.indexOf('$');
+		if (index > 0) {
+			String enclosingTypeName = qualifiedTypeName.substring(0, index);
+			unit = (SourceFile) this.additionalUnits.get(enclosingTypeName); // doesn't have file extension
+			if (unit != null)
+				return new NameEnvironmentAnswer(unit, null /*no access restriction*/);
+		}
+	}
+
+	String qBinaryFileName = qualifiedTypeName + SUFFIX_STRING_class;
+	String qPackageName =  (qualifiedTypeName.length() == typeName.length) ? Util.EMPTY_STRING :
+		qBinaryFileName.substring(0, qBinaryFileName.length() - typeName.length - 7);
+	char[] binaryFileName = CharOperation.concat(typeName, SUFFIX_class);
+
+	ClasspathLocation[] relevantLocations;
+	if (moduleName != null && this.modulePathEntries != null) {
+		IModulePathEntry modulePathEntry = this.modulePathEntries.get(moduleName);
+		if (modulePathEntry instanceof ModulePathEntry) {
+			relevantLocations = ((ModulePathEntry) modulePathEntry).getClasspathLocations();
+		} else if (modulePathEntry instanceof ClasspathLocation) {
+			return ((ClasspathLocation) modulePathEntry).findClass(typeName, qPackageName, moduleName, qBinaryFileName, false);
+		} else {
+			return null;
+		}
+	} else {
+		relevantLocations = this.binaryLocations;
+	}
+	NameEnvironmentAnswer suggestedAnswer = null;
+	for (ClasspathLocation classpathLocation : relevantLocations) {
+		if (!strategy.matches(classpathLocation, ClasspathLocation::hasModule)) {
+			continue;
+		}
+		NameEnvironmentAnswer answer = classpathLocation.findClass(binaryFileName, qPackageName, moduleName, qBinaryFileName, false);
+		if (answer != null) {
+			if (!answer.ignoreIfBetter()) {
+				if (answer.isBetter(suggestedAnswer))
+					return answer;
+			} else if (answer.isBetter(suggestedAnswer))
+				// remember suggestion and keep looking
+				suggestedAnswer = answer;
+		}
+	}
+	return suggestedAnswer;
+}
+

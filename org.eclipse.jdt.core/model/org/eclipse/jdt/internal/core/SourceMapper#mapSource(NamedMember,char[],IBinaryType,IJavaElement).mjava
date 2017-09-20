@@ -1,0 +1,93 @@
+	/**
+	 * Maps the given source code to the given binary type and its children.
+	 * If a non-null java element is passed, finds the name range for the
+	 * given java element without storing it.
+	 */
+	public synchronized ISourceRange mapSource(
+		NamedMember typeOrModule,
+		char[] contents,
+		IBinaryType info, // null for modules
+		IJavaElement elementToFind) {
+
+		this.binaryTypeOrModule = typeOrModule;
+
+		// check whether it is already mapped
+		if (this.sourceRanges.get(typeOrModule) != null) return (elementToFind != null) ? getNameRange(elementToFind) : null;
+
+		this.importsTable.remove(this.binaryTypeOrModule);
+		this.importsCounterTable.remove(this.binaryTypeOrModule);
+		this.searchedElement = elementToFind;
+		this.types = new IType[1];
+		this.typeDeclarationStarts = new int[1];
+		this.typeNameRanges = new SourceRange[1];
+		this.typeModifiers = new int[1];
+		this.typeDepth = -1;
+		this.memberDeclarationStart = new int[1];
+		this.memberName = new String[1];
+		this.memberNameRange = new SourceRange[1];
+		this.methodParameterTypes = new char[1][][];
+		this.methodParameterNames = new char[1][][];
+		this.anonymousCounter = 0;
+
+		HashMap oldSourceRanges = null;
+		if (elementToFind != null) {
+			oldSourceRanges = (HashMap) this.sourceRanges.clone();
+		}
+		try {
+			IProblemFactory factory = new DefaultProblemFactory();
+			SourceElementParser parser = null;
+			boolean doFullParse = false;
+			this.anonymousClassName = 0;
+			String sourceFileName;
+			if (this.binaryTypeOrModule instanceof BinaryType) {
+				if (info == null) {
+					try {
+						info = (IBinaryType) this.binaryTypeOrModule.getElementInfo();
+					} catch(JavaModelException e) {
+						return null;
+					}
+				}
+				sourceFileName = ((BinaryType) this.binaryTypeOrModule).sourceFileName(info);
+				boolean isAnonymousClass = info.isAnonymous();
+				
+				char[] fullName = info.getName();
+				if (isAnonymousClass) {
+					String eltName = this.binaryTypeOrModule.getParent().getElementName();
+					eltName = eltName.substring(eltName.lastIndexOf('$') + 1, eltName.length());
+					try {
+						this.anonymousClassName = Integer.parseInt(eltName);
+					} catch(NumberFormatException e) {
+						// ignore
+					}
+				}
+				doFullParse = hasToRetrieveSourceRangesForLocalClass(fullName);
+			} else {
+				sourceFileName = TypeConstants.MODULE_INFO_CLASS_NAME_STRING; 
+			}
+			parser = new SourceElementParser(this, factory, new CompilerOptions(this.options), doFullParse, true/*optimize string literals*/);
+			parser.javadocParser.checkDocComment = false; // disable javadoc parsing
+			IJavaElement javaElement = this.binaryTypeOrModule.getCompilationUnit();
+			if (javaElement == null) javaElement = this.binaryTypeOrModule.getParent();
+			parser.parseCompilationUnit(
+				new BasicCompilationUnit(contents, null, sourceFileName, javaElement),
+				doFullParse,
+				null/*no progress*/);
+			if (elementToFind != null) {
+				ISourceRange range = getNameRange(elementToFind);
+				return range;
+			} else {
+				return null;
+			}
+		} finally {
+			if (elementToFind != null) {
+				this.sourceRanges = oldSourceRanges;
+			}
+			this.binaryTypeOrModule = null;
+			this.searchedElement = null;
+			this.types = null;
+			this.typeDeclarationStarts = null;
+			this.typeNameRanges = null;
+			this.typeDepth = -1;
+		}
+	}
+

@@ -1,0 +1,77 @@
+/* Ask the oracle for a type named name in the packageBinding.
+* Answer null if the name cannot be found.
+*/
+ReferenceBinding askForType(PackageBinding packageBinding, char[] name, ModuleBinding clientModule) {
+	assert clientModule != null : "lookup needs a module"; //$NON-NLS-1$
+	if (packageBinding == null) {
+		packageBinding = this.defaultPackage;
+	}
+	NameEnvironmentAnswer[] answers = null;
+	if (this.useModuleSystem) {
+		IModuleAwareNameEnvironment moduleEnv = (IModuleAwareNameEnvironment) this.nameEnvironment;
+		final PackageBinding pack = packageBinding;
+		// leverage module information from the (split?) package as to prefer NotAccessible over NotFound:
+		answers = askForTypeFromModules(null, packageBinding.getDeclaringModules(),
+				mod -> fromSplitPackageOrOracle(moduleEnv, mod, pack, name));
+	} else {
+		NameEnvironmentAnswer answer = this.nameEnvironment.findType(name, packageBinding.compoundName);
+		if (answer != null) {
+			answer.moduleBinding = this.module;
+			answers = new NameEnvironmentAnswer[] { answer };
+		}
+	}
+	if (answers == null)
+		return null;
+
+	ReferenceBinding candidate = null;
+	for (NameEnvironmentAnswer answer : answers) {
+		if (answer == null) continue;
+		ModuleBinding answerModule = answer.moduleBinding != null ? answer.moduleBinding : this.UnNamedModule;
+		PackageBinding answerPackage = packageBinding;
+		
+		if (answerModule != null) {
+			if (!answerPackage.isDeclaredIn(answerModule))
+				continue; // this answer is not reachable via the packageBinding
+			if (answerPackage instanceof SplitPackageBinding)
+				answerPackage = ((SplitPackageBinding) answerPackage).getIncarnation(answerModule);
+		}
+		if (answer.isResolvedBinding()) {
+			candidate = combine(candidate, answer.getResolvedBinding(), clientModule);
+			continue;
+		} else if (answer.isBinaryType()) {
+			// the type was found as a .class file
+			this.typeRequestor.accept(answer.getBinaryType(), answerPackage, answer.getAccessRestriction());
+			ReferenceBinding binding = answerPackage.getType0(name);
+			if (binding instanceof BinaryTypeBinding) {
+				((BinaryTypeBinding) binding).module = answerModule;
+			}
+		} else if (answer.isCompilationUnit()) {
+			// the type was found as a .java file, try to build it then search the cache
+			try {
+				this.typeRequestor.accept(answer.getCompilationUnit(), answer.getAccessRestriction());
+			} catch (AbortCompilation abort) {
+				if (CharOperation.equals(name, TypeConstants.PACKAGE_INFO_NAME))
+					return null; // silently, requestor may not be able to handle compilation units (HierarchyResolver)
+				throw abort;
+			}
+		} else if (answer.isSourceType()) {
+			// the type was found as a source model
+			this.typeRequestor.accept(answer.getSourceTypes(), answerPackage, answer.getAccessRestriction());
+			ReferenceBinding binding = answerPackage.getType0(name);
+			if (binding instanceof SourceTypeBinding) {
+				((SourceTypeBinding) binding).module = answerModule;
+			}
+			String externalAnnotationPath = answer.getExternalAnnotationPath();
+			if (externalAnnotationPath != null && this.globalOptions.isAnnotationBasedNullAnalysisEnabled && binding instanceof SourceTypeBinding) {
+				ExternalAnnotationSuperimposer.apply((SourceTypeBinding) binding, externalAnnotationPath);
+			}
+			candidate = combine(candidate, binding, clientModule);
+			continue;
+		}
+		candidate = combine(candidate, answerPackage.getType0(name), clientModule);
+		if (candidate != null && candidate.problemId() == ProblemReasons.Ambiguous)
+			return candidate; // saw enough
+	}
+	return candidate;
+}
+

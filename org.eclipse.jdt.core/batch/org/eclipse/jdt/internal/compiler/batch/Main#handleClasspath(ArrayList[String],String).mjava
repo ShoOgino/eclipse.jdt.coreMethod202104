@@ -1,0 +1,59 @@
+/*
+ * External API
+ */
+protected ArrayList<FileSystem.Classpath> handleClasspath(ArrayList<String> classpaths, String customEncoding) {
+	ArrayList<FileSystem.Classpath> initial = new ArrayList<>(DEFAULT_SIZE_CLASSPATH);
+	if (classpaths != null && classpaths.size() > 0) {
+		for (String path : classpaths) {
+			processPathEntries(DEFAULT_SIZE_CLASSPATH, initial, path, customEncoding, false, true);
+		}
+	} else {
+		// no user classpath specified.
+		String classProp = System.getProperty("java.class.path"); //$NON-NLS-1$
+		if ((classProp == null) || (classProp.length() == 0)) {
+			addPendingErrors(this.bind("configure.noClasspath")); //$NON-NLS-1$
+			final Classpath classpath = FileSystem.getClasspath(System.getProperty("user.dir"), customEncoding, null, this.options);//$NON-NLS-1$
+			if (classpath != null) {
+				initial.add(classpath);
+			}
+		} else {
+			StringTokenizer tokenizer = new StringTokenizer(classProp, File.pathSeparator);
+			String token;
+			while (tokenizer.hasMoreTokens()) {
+				token = tokenizer.nextToken();
+				FileSystem.Classpath currentClasspath = FileSystem
+						.getClasspath(token, customEncoding, null, this.options);
+				if (currentClasspath != null) {
+					initial.add(currentClasspath);
+				} else if (token.length() != 0) {
+					addPendingErrors(this.bind("configure.incorrectClasspath", token));//$NON-NLS-1$
+				}
+			}
+		}
+	}
+	ArrayList<Classpath> result = new ArrayList<>();
+	HashMap<String, Classpath> knownNames = new HashMap<>();
+	FileSystem.ClasspathSectionProblemReporter problemReporter =
+		new FileSystem.ClasspathSectionProblemReporter() {
+			public void invalidClasspathSection(String jarFilePath) {
+				addPendingErrors(bind("configure.invalidClasspathSection", jarFilePath)); //$NON-NLS-1$
+			}
+			public void multipleClasspathSections(String jarFilePath) {
+				addPendingErrors(bind("configure.multipleClasspathSections", jarFilePath)); //$NON-NLS-1$
+			}
+		};
+	while (! initial.isEmpty()) {
+		Classpath current = initial.remove(0);
+		String currentPath = current.getPath();
+		if (knownNames.get(currentPath) == null) {
+			knownNames.put(currentPath, current);
+			result.add(current);
+			List<Classpath> linkedJars = current.fetchLinkedJars(problemReporter);
+			if (linkedJars != null) {
+				initial.addAll(0, linkedJars);
+			}
+		}
+	}
+	return result;
+}
+

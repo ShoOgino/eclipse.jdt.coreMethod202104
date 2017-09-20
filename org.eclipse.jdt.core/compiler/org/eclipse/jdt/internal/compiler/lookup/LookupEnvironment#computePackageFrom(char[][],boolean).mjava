@@ -4,20 +4,57 @@ private PackageBinding computePackageFrom(char[][] constantPoolName, boolean isM
 
 	PackageBinding packageBinding = getPackage0(constantPoolName[0]);
 	if (packageBinding == null || packageBinding == TheNotFoundPackage) {
-		packageBinding = new PackageBinding(constantPoolName[0], this);
+		if (this.useModuleSystem) {
+			if (this.module.isUnnamed()) {
+				char[][] declaringModules = ((IModuleAwareNameEnvironment) this.nameEnvironment).getModulesDeclaringPackage(null, constantPoolName[0], ModuleBinding.ANY);
+				if (declaringModules != null) {
+					for (char[] mod : declaringModules) {
+						ModuleBinding declaringModule = this.root.getModule(mod);
+						if (declaringModule != null)
+							packageBinding = SplitPackageBinding.combine(declaringModule.getTopLevelPackage(constantPoolName[0]), packageBinding, this.module);
+					}
+				}
+			} else {
+				packageBinding = this.module.getTopLevelPackage(constantPoolName[0]);
+			}
+		}
+		if (packageBinding == null || packageBinding == TheNotFoundPackage) {
+			packageBinding = new PackageBinding(constantPoolName[0], this, this.module);
+		}
 		if (isMissing) packageBinding.tagBits |= TagBits.HasMissingType;
-		this.knownPackages.put(constantPoolName[0], packageBinding);
+		this.knownPackages.put(constantPoolName[0], packageBinding); // TODO: split?
 	}
 
 	for (int i = 1, length = constantPoolName.length - 1; i < length; i++) {
 		PackageBinding parent = packageBinding;
 		if ((packageBinding = parent.getPackage0(constantPoolName[i])) == null || packageBinding == TheNotFoundPackage) {
-			packageBinding = new PackageBinding(CharOperation.subarray(constantPoolName, 0, i + 1), parent, this);
+			if (this.useModuleSystem) {
+				if (this.module.isUnnamed()) {
+					char[][] declaringModules = ((IModuleAwareNameEnvironment) this.nameEnvironment).getModulesDeclaringPackage(parent.compoundName, constantPoolName[i], ModuleBinding.ANY);
+					if (declaringModules != null) {
+						for (char[] mod : declaringModules) {
+							ModuleBinding declaringModule = this.root.getModule(mod);
+							if (declaringModule != null)
+								packageBinding = SplitPackageBinding.combine(declaringModule.getPackage(parent.compoundName, constantPoolName[i]), packageBinding, this.module);
+						}
+					}
+				} else {
+					packageBinding = this.module.getVisiblePackage(parent, constantPoolName[i]);
+				}
+			}
+			if (packageBinding == null || packageBinding == TheNotFoundPackage) {
+				packageBinding = new PackageBinding(CharOperation.subarray(constantPoolName, 0, i + 1), parent, this, this.module);
+			}
 			if (isMissing) {
 				packageBinding.tagBits |= TagBits.HasMissingType;
 			}
-			parent.addPackage(packageBinding);
+			packageBinding = parent.addPackage(packageBinding, this.module, true);
 		}
+	}
+	if (packageBinding instanceof SplitPackageBinding) {
+		PackageBinding incarnation = ((SplitPackageBinding) packageBinding).getIncarnation(this.module);
+		if (incarnation != null)
+			packageBinding = incarnation;
 	}
 	return packageBinding;
 }
