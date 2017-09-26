@@ -1,0 +1,41 @@
+	// Only the project using a jar as an automatic module should be able to
+	// resolve one as such
+	public void testBug518282a() throws CoreException, IOException {
+		if (!isJRE9) return;
+		Hashtable<String, String> javaCoreOptions = JavaCore.getOptions();
+		try {
+			IJavaProject p1 = setUpJavaProject("test_automodules", "9");
+			getWorkspace().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			assertNoErrors();
+			String[] src = new String[] { 
+					"src/module-info.java",
+					"module com.greetings {\n" +
+					"	requires junit; // This should not be resolved\n" +
+					"	exports com.greetings;\n" +
+					"}",
+					"src/com/greetings/Test.java",
+					"package com.greetings;\n" +
+					"public class Test {\n" +
+					"	public String name() {\n" +
+					"		return \" My World!!\";\n" +
+					"	}\n" +
+					"}"
+			};
+			IClasspathAttribute modAttr = new ClasspathAttribute("module", "false");
+			IClasspathEntry dep = JavaCore.newLibraryEntry(p1.getProject().findMember("lib/junit.jar").getFullPath(), null, null,
+					ClasspathEntry.NO_ACCESS_RULES,
+					new IClasspathAttribute[] {modAttr},
+					false/*not exported*/);
+			IJavaProject p2 = setupModuleProject("com.greetings", src, new IClasspathEntry[] { dep });
+
+			getWorkspace().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			IMarker[] markers = p2.getProject().findMarkers(null, true, IResource.DEPTH_INFINITE);
+			assertMarkers("Unexpected markers", 
+					"junit cannot be resolved to a module", markers);
+		} finally {
+			this.deleteProject("test_automodules");
+			this.deleteProject("com.greetings");
+			JavaCore.setOptions(javaCoreOptions);
+		}
+	}
+

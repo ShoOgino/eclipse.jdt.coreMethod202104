@@ -15,8 +15,10 @@ private MethodBinding resolveTypesWithSuspendedTempErrorHandlingPolicy(MethodBin
 		if ((method.getAnnotationTagBits() & TagBits.AnnotationDeprecated) != 0)
 			method.modifiers |= ClassFileConstants.AccDeprecated;
 	}
-	if (isViewedAsDeprecated() && !method.isDeprecated())
+	if (isViewedAsDeprecated() && !method.isDeprecated()) {
 		method.modifiers |= ExtraCompilerModifiers.AccDeprecatedImplicitly;
+		method.tagBits |= this.tagBits & TagBits.AnnotationTerminallyDeprecated;
+	}
 	if (hasRestrictedAccess())
 		method.modifiers |= ExtraCompilerModifiers.AccRestrictedAccess;
 
@@ -69,6 +71,7 @@ private MethodBinding resolveTypesWithSuspendedTempErrorHandlingPolicy(MethodBin
 	}
 	final boolean reportUnavoidableGenericTypeProblems = this.scope.compilerOptions().reportUnavoidableGenericTypeProblems;
 	boolean foundArgProblem = false;
+	boolean checkAPIleak = methodDecl.scope.shouldCheckAPILeaks(this, method.isPublic());
 	Argument[] arguments = methodDecl.arguments;
 	if (arguments != null) {
 		int size = arguments.length;
@@ -106,6 +109,8 @@ private MethodBinding resolveTypesWithSuspendedTempErrorHandlingPolicy(MethodBin
 				if (leafType instanceof ReferenceBinding && (((ReferenceBinding) leafType).modifiers & ExtraCompilerModifiers.AccGenericSignature) != 0)
 					method.modifiers |= ExtraCompilerModifiers.AccGenericSignature;
 				newParameters[i] = parameterType;
+				if (checkAPIleak)
+					methodDecl.scope.detectAPILeaks(arg.type, parameterType);
 				arg.binding = new LocalVariableBinding(arg, parameterType, arg.modifiers, methodDecl.scope);
 			}
 		}
@@ -120,7 +125,8 @@ private MethodBinding resolveTypesWithSuspendedTempErrorHandlingPolicy(MethodBin
 		if ((method.tagBits & TagBits.AnnotationSafeVarargs) != 0) {
 			if (!method.isVarargs()) {
 				methodDecl.scope.problemReporter().safeVarargsOnFixedArityMethod(method);
-			} else if (!method.isStatic() && !method.isFinal() && !method.isConstructor()) {
+			} else if (!method.isStatic() && !method.isFinal() && !method.isConstructor() 
+					&& !(sourceLevel >= ClassFileConstants.JDK9 && method.isPrivate())) {
 				methodDecl.scope.problemReporter().safeVarargsOnNonFinalInstanceMethod(method);
 			}
 		} else if (method.parameters != null && method.parameters.length > 0 && method.isVarargs()) { // https://bugs.eclipse.org/bugs/show_bug.cgi?id=337795
@@ -172,6 +178,8 @@ private MethodBinding resolveTypesWithSuspendedTempErrorHandlingPolicy(MethodBin
 					method.modifiers |= ExtraCompilerModifiers.AccGenericSignature;
 				else if (leafType == TypeBinding.VOID && methodDecl.annotations != null)
 					rejectTypeAnnotatedVoidMethod(methodDecl);
+				if (checkAPIleak)
+					methodDecl.scope.detectAPILeaks(returnType, methodType);
 			}
 		}
 	} else {

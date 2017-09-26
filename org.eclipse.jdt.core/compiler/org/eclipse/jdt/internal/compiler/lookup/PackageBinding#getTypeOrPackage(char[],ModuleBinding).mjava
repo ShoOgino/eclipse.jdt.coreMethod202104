@@ -1,0 +1,58 @@
+public Binding getTypeOrPackage(char[] name, ModuleBinding mod) {
+	ReferenceBinding problemBinding = null;
+	ReferenceBinding referenceBinding = getType0(name);
+	lookForType0:
+	if (referenceBinding != null && referenceBinding != LookupEnvironment.TheNotFoundType) {
+		referenceBinding = (ReferenceBinding) BinaryTypeBinding.resolveType(referenceBinding, this.environment, false /* no raw conversion for now */);
+		if (referenceBinding.isNestedType()) {
+			return new ProblemReferenceBinding(new char[][]{name}, referenceBinding, ProblemReasons.InternalNameProvided);
+		}
+		boolean isSameModule = (this instanceof SplitPackageBinding) ? referenceBinding.module() == mod : this.enclosingModule == mod;
+		if (!isSameModule && referenceBinding.isValidBinding() && !mod.canAccess(referenceBinding.fPackage)) {
+			problemBinding = new ProblemReferenceBinding(referenceBinding.compoundName, referenceBinding, ProblemReasons.NotAccessible);
+			break lookForType0;
+		}
+		if ((referenceBinding.tagBits & TagBits.HasMissingType) == 0) {
+			return referenceBinding;
+		}
+		// referenceBinding is a MissingType, will return it if no package is found
+	}
+
+	PackageBinding packageBinding = getPackage0(name);
+	if (packageBinding != null && packageBinding != LookupEnvironment.TheNotFoundPackage) {
+		return packageBinding;
+	}
+	lookForType:
+	if (referenceBinding == null && problemBinding == null) { // have not looked for it before
+		if ((referenceBinding = this.environment.askForType(this, name, mod)) != null) {
+			if (referenceBinding.isNestedType()) {
+				return new ProblemReferenceBinding(new char[][]{name}, referenceBinding, ProblemReasons.InternalNameProvided);
+			}
+			if (referenceBinding.isValidBinding() && !mod.canAccess(referenceBinding.fPackage)) {
+				problemBinding = new ProblemReferenceBinding(referenceBinding.compoundName, referenceBinding, ProblemReasons.NotAccessible);
+				break lookForType;
+			} else {
+				return referenceBinding;
+			}
+		}
+
+		// Since name could not be found, add a problem binding
+		// to the collections so it will be reported as an error next time.
+		addNotFoundType(name);
+	}
+
+	if (packageBinding == null) { // have not looked for it before
+		if ((packageBinding = findPackage(name, mod)) != null) {
+			return packageBinding;
+		}
+		if (referenceBinding != null && referenceBinding != LookupEnvironment.TheNotFoundType) {
+			if (problemBinding != null)
+				return problemBinding;
+			return referenceBinding; // found cached missing type - check if package conflict
+		}
+		addNotFoundPackage(name);
+	}
+
+	return problemBinding;
+}
+

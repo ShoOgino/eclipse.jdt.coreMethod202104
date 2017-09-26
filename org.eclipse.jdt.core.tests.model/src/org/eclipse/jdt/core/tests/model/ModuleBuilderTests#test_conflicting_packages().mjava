@@ -1,0 +1,62 @@
+	// test that two packages with the same name result in conflict if they are both
+	// accessible to a module
+	public void test_conflicting_packages() throws CoreException {
+		if (!isJRE9) return;
+		try {
+			String[] sources = new String[] {
+				"src/module-info.java",
+				"module some.mod {\n" +
+				"	exports org.astro;\n" +
+				"}",
+				"src/org/astro/Test.java",
+				"package org.astro;\n" +
+				"public class Test { }"
+			};
+			IClasspathEntry dep = JavaCore.newContainerEntry(new Path(JavaCore.MODULE_PATH_CONTAINER_ID));
+			setupModuleProject("some.mod", sources, new IClasspathEntry[]{dep});
+			sources = new String[] {
+				"src/module-info.java",
+				"module org.astro {\n" +
+				"	exports org.astro;\n" + 
+				"}",
+				"src/org/astro/World.java",
+				"package org.astro;\n" +
+				"public interface World {\n" +
+				"	public String name();\n" +
+				"}"
+			};
+			setupModuleProject("org.astro", sources, new IClasspathEntry[]{dep});
+			String[] src = new String[] {
+				"src/module-info.java",
+				"module com.greetings {\n" +
+				"	requires some.mod;\n" +
+				"	requires org.astro;\n" +
+				"	exports com.greetings;\n" +
+				"}",
+				"src/com/greetings/MyWorld.java",
+				"package com.greetings;\n" +
+				"import org.astro.World;\n" +
+				"public class MyWorld implements World {\n" +
+				"	public String name() {\n" +
+				"		return \" My World!!\";\n" +
+				"	}\n" +
+				"}"
+			};
+			
+			IJavaProject p2 = setupModuleProject("com.greetings", src, new IClasspathEntry[] { dep });
+			p2.getProject().getWorkspace().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			IMarker[] markers = p2.getProject().findMarkers(null, true, IResource.DEPTH_INFINITE);
+			sortMarkers(markers);
+			assertMarkers("Unexpected markers",
+					// reported against both 'requires' directives & against the import:
+					"The package org.astro is accessible from more than one module: org.astro, some.mod\n" +
+					"The package org.astro is accessible from more than one module: org.astro, some.mod\n" +
+					"The package org.astro is accessible from more than one module: org.astro, some.mod",
+					markers);
+		} finally {
+			deleteProject("org.astro");
+			deleteProject("some.mod");
+			deleteProject("com.greetings");
+		}
+	}
+

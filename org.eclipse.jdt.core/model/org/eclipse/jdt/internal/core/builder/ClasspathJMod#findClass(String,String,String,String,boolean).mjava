@@ -1,0 +1,39 @@
+	public NameEnvironmentAnswer findClass(String binaryFileName, String qualifiedPackageName, String moduleName, String qualifiedBinaryFileName, boolean asBinaryOnly) {
+		if (!isPackage(qualifiedPackageName, moduleName)) return null; // most common case
+
+		try {
+			qualifiedBinaryFileName = new String(CharOperation.append(CLASSES_FOLDER, qualifiedBinaryFileName.toCharArray()));
+			IBinaryType reader = ClassFileReader.read(this.zipFile, qualifiedBinaryFileName);
+			if (reader != null) {
+				char[] modName = this.module == null ? null : this.module.name();
+				if (reader instanceof ClassFileReader) {
+					ClassFileReader classReader = (ClassFileReader) reader;
+					if (classReader.moduleName == null)
+						classReader.moduleName = modName;
+					else
+						modName = classReader.moduleName;
+				}
+				String fileNameWithoutExtension = qualifiedBinaryFileName.substring(0, qualifiedBinaryFileName.length() - SuffixConstants.SUFFIX_CLASS.length);
+				if (this.externalAnnotationPath != null) {
+					try {
+						if (this.annotationZipFile == null) {
+							this.annotationZipFile = ExternalAnnotationDecorator
+									.getAnnotationZipFile(this.externalAnnotationPath, null);
+						}
+
+						reader = ExternalAnnotationDecorator.create(reader, this.externalAnnotationPath,
+								fileNameWithoutExtension, this.annotationZipFile);
+					} catch (IOException e) {
+						// don't let error on annotations fail class reading
+					}
+				}
+				if (this.accessRuleSet == null)
+					return new NameEnvironmentAnswer(reader, null, modName);
+				return new NameEnvironmentAnswer(reader, this.accessRuleSet.getViolatedRestriction(fileNameWithoutExtension.toCharArray()), modName);
+			}
+		} catch (IOException e) { // treat as if class file is missing
+		} catch (ClassFormatException e) { // treat as if class file is missing
+		}
+		return null;
+	}
+

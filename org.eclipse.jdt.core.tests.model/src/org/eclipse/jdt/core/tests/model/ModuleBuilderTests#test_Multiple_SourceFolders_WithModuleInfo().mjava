@@ -1,0 +1,65 @@
+	public void test_Multiple_SourceFolders_WithModuleInfo() throws CoreException {
+		if (!isJRE9) return;
+		try {
+			String[] sources = new String[] {
+				"src/module-info.java",
+				"module org.astro {\n" +
+				"	exports org.astro;\n" + 
+				"}",
+				"src/org/astro/World.java",
+				"package org.astro;\n" +
+				"public interface World {\n" +
+				"	public String name();\n" +
+				"}",
+				"othersrc/org/astro/OtherWorld.java",
+				"package org.astro;\n" +
+				"import org.astro.World;\n" +
+				"public interface OtherWorld {\n" +
+				"	default public String name() {\n" +
+				"		return \" Other World!!\";\n" +
+				"	}\n" +
+				"}"
+			};
+			setupModuleProject("org.astro", new String[]{"src", "othersrc"}, sources, null);
+			String[] src = new String[] {
+				"src/module-info.java",
+				"module com.greetings {\n" +
+				"	requires org.astro;\n" +
+				"	exports com.greetings;\n" +
+				"}",
+				"src/com/greetings/MyWorld.java",
+				"package com.greetings;\n" +
+				"import org.astro.World;\n" +
+				"public class MyWorld implements World {\n" +
+				"	public String name() {\n" +
+				"		return \" My World!!\";\n" +
+				"	}\n" +
+				"}",
+				"othersrc/module-info.java",
+				"module com.greetings1 {\n" +
+				"	requires org.astro;\n" +
+				"	exports com.greetings;\n" +
+				"}",
+				"othersrc/com/greetings/AnotherWorld.java",
+				"package com.greetings;\n" +
+				"import org.astro.OtherWorld;\n" +
+				"public class AnotherWorld implements OtherWorld {\n" +
+				"	public String name() {\n" +
+				"		return \" Another World!!\";\n" +
+				"	}\n" +
+				"}"
+			};
+			IClasspathEntry dep = JavaCore.newContainerEntry(new Path(JavaCore.MODULE_PATH_CONTAINER_ID));
+			IJavaProject p2 = setupModuleProject("com.greetings", new String[]{"src", "othersrc"}, src, new IClasspathEntry[] { dep });
+			p2.getProject().getWorkspace().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			IMarker[] markers = p2.getProject().findMarkers(IJavaModelMarker.JAVA_MODEL_PROBLEM_MARKER, true, IResource.DEPTH_ZERO);
+			assertEquals(1, markers.length);
+			String msg = markers[0].getAttribute(IMarker.MESSAGE, "");
+			String expected = Messages.bind(Messages.classpath_duplicateEntryPath, TypeConstants.MODULE_INFO_FILE_NAME_STRING, p2.getElementName());
+			assertTrue("Unexpected result", msg.indexOf(expected) != -1);
+		} finally {
+			deleteProject("org.astro");
+			deleteProject("com.greetings");
+		}
+	}
+

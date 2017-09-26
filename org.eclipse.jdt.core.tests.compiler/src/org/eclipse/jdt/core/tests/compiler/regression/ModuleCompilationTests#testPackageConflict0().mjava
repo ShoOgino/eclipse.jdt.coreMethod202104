@@ -1,0 +1,95 @@
+	// conflict even without any reference to the conflicting package
+	// - three-way conflict between two direct and one indirect dependency
+	public void testPackageConflict0() {
+		File outputDirectory = new File(OUTPUT_DIR);
+		Util.flushDirectoryContent(outputDirectory);
+		String out = "bin";
+		String directory = OUTPUT_DIR + File.separator + "src";
+
+		String moduleLoc = directory + File.separator + "mod.x";
+		List<String> files = new ArrayList<>(); 
+		writeFileCollecting(files, moduleLoc, "module-info.java", 
+						"module mod.x { \n" +
+						"	exports pm;\n" +
+						"}");
+		writeFileCollecting(files, moduleLoc + File.separator + "pm", "C1x.java", 
+						"package pm;\n" +
+						"public class C1x {\n" +
+						"}\n");
+		
+		moduleLoc = directory + File.separator + "mod.y";
+		writeFileCollecting(files, moduleLoc, "module-info.java", 
+						"module mod.y { \n" +
+						"	requires transitive mod.x;\n" +
+						"}");
+		
+		moduleLoc = directory + File.separator + "mod.one";
+		writeFileCollecting(files, moduleLoc, "module-info.java", 
+						"module mod.one { \n" +
+						"	exports pm;\n" +
+						"	exports p2;\n" +
+						"}");
+		writeFileCollecting(files, moduleLoc + File.separator + "pm", "C1.java", 
+						"package pm;\n" +
+						"public class C1 {\n" +
+						"}\n");
+		writeFileCollecting(files, moduleLoc + File.separator + "p2", "C2.java", 
+						"package p2;\n" +
+						"public class C2 {\n" +
+						"}\n");
+
+		moduleLoc = directory + File.separator + "mod.two";
+		writeFileCollecting(files, moduleLoc, "module-info.java", 
+						"module mod.two { \n" +
+						"	exports pm;\n" +
+						"	exports p2.sub;\n" +
+						"}");
+		writeFileCollecting(files, moduleLoc + File.separator + "pm", "C3.java", 
+						"package pm;\n" +
+						"public class C3 {\n" +
+						"}\n");
+		writeFileCollecting(files, moduleLoc + File.separator + "p2" + File.separator + "sub", "C4.java", 
+						"package p2.sub;\n" +
+						"public class C4 {\n" +
+						"}\n");
+
+		moduleLoc = directory + File.separator + "mod.three";
+		writeFileCollecting(files, moduleLoc, "module-info.java", 
+						"module mod.three { \n" +
+						"	requires mod.one;\n" +
+						"	requires mod.two;\n" +
+						"	requires transitive mod.y;\n" +
+						"}");
+
+		StringBuffer buffer = new StringBuffer();
+		buffer.append("-d " + OUTPUT_DIR + File.separator + out )
+			.append(" -9 ")
+			.append(" -classpath \"")
+			.append(Util.getJavaClassLibsAsString())
+			.append("\" ")
+			.append(" --module-source-path " + "\"" + directory + "\"");
+
+		runNegativeModuleTest(files, 
+				buffer,
+				"",
+				"----------\n" + 
+				"1. ERROR in ---OUTPUT_DIR_PLACEHOLDER---/src/mod.three/module-info.java (at line 2)\n" + 
+				"	requires mod.one;\n" + 
+				"	^^^^^^^^^^^^^^^^\n" + 
+				"The package pm is accessible from more than one module: mod.one, mod.two, mod.x\n" + 
+				"----------\n" + 
+				"2. ERROR in ---OUTPUT_DIR_PLACEHOLDER---/src/mod.three/module-info.java (at line 3)\n" + 
+				"	requires mod.two;\n" + 
+				"	^^^^^^^^^^^^^^^^\n" + 
+				"The package pm is accessible from more than one module: mod.one, mod.two, mod.x\n" + 
+				"----------\n" + 
+				"3. ERROR in ---OUTPUT_DIR_PLACEHOLDER---/src/mod.three/module-info.java (at line 4)\n" + 
+				"	requires transitive mod.y;\n" + 
+				"	^^^^^^^^^^^^^^^^^^^^^^^^^\n" + 
+				"The package pm is accessible from more than one module: mod.one, mod.two, mod.x\n" + 
+				"----------\n" + 
+				"3 problems (3 errors)\n",
+				false,
+				"reads package pm");
+	}
+

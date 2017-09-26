@@ -1,0 +1,49 @@
+	public void testBug512023_0001() throws Exception {
+		try {
+			IJavaProject project1 = createJavaProject("ConverterTests9", new String[] {"src"}, new String[] {jcl9lib}, "bin", "9");
+			project1.open(null);
+			addClasspathEntry(project1, JavaCore.newContainerEntry(new Path("org.eclipse.jdt.MODULE_PATH")));
+			String content = 
+				"module first {\n" +
+				"    requires second.third;\n" +
+				"    exports pack1.X11 to org.eclipse.jdt;\n" +
+				"}";
+			createFile("/ConverterTests9/src/module-info.java",	content);
+			createFolder("/ConverterTests9/src/pack1");
+			createFile("/ConverterTests9/src/pack1/X11.java",
+					"package pack1;\n" +
+					"public class X11 {}\n");
+			this.workingCopy = getWorkingCopy("/ConverterTests9/src/module-info.java", false);
+			ASTNode node = buildAST(content, this.workingCopy, false);
+			assertEquals("Not a compilation unit", ASTNode.COMPILATION_UNIT, node.getNodeType());
+			CompilationUnit unit = (CompilationUnit) node;
+			ModuleDeclaration moduleDecl = unit.getModule();
+			assertFalse(moduleDecl.isOpen());
+			checkSourceRange(moduleDecl, content, content);
+			List<ModuleDirective> stmts = moduleDecl.moduleStatements();
+			assertTrue(stmts.size() > 0);
+
+			QualifiedName qName;
+			RequiresDirective req = (RequiresDirective) stmts.get(0);
+			qName = (QualifiedName) req.getName();
+			checkSourceRange(qName, "second.third", content);
+			checkSourceRange(qName.getName(), "third", content);
+			checkSourceRange(qName.getQualifier(), "second", content);
+
+			ExportsDirective exp = (ExportsDirective) stmts.get(1);
+			checkSourceRange(exp, "exports pack1.X11 to org.eclipse.jdt;", content);
+			qName = (QualifiedName) exp.getName();
+			checkSourceRange(qName, "pack1.X11", content);
+			checkSourceRange(qName.getName(), "X11", content);
+			checkSourceRange(qName.getQualifier(), "pack1", content);
+
+			List<Name> modules = exp.modules();
+			qName = (QualifiedName) modules.get(0);
+			checkSourceRange(qName, "org.eclipse.jdt", content);
+			checkSourceRange(qName.getName(), "jdt", content);
+			checkSourceRange(qName.getQualifier(), "org.eclipse", content);
+		} finally {
+			deleteProject("ConverterTests9");
+		}
+	}
+

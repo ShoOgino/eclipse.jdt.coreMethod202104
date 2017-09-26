@@ -1,22 +1,36 @@
 	public InputStream getContents() throws CoreException {
-		ZipFile zipFile = null;
-		try {
-			zipFile = getZipFile();
-			if (JavaModelManager.ZIP_ACCESS_VERBOSE) {
-				System.out.println("(" + Thread.currentThread() + ") [JarEntryFile.getContents()] Creating ZipFile on " +zipFile.getName()); //$NON-NLS-1$	//$NON-NLS-2$
+		IPackageFragmentRoot root = getPackageFragmentRoot();
+		if (Util.isJrt(root.getPath().toOSString())) {
+			try {
+				IPath rootPath = root.getPath();
+				Object target = JavaModel.getTarget(rootPath, false);
+				if (target != null && target instanceof File) {
+					return JRTUtil.getContentFromJrt((File) target, getEntryName(), root.getElementName());
+				}
+			} catch (IOException e) {
+				throw new JavaModelException(e, IJavaModelStatusConstants.IO_EXCEPTION);
 			}
-			String entryName = getEntryName();
-			ZipEntry zipEntry = zipFile.getEntry(entryName);
-			if (zipEntry == null){
-				throw new JavaModelException(new JavaModelStatus(IJavaModelStatusConstants.INVALID_PATH, entryName));
+			return null;
+		} else {
+			ZipFile zipFile = null;
+			try {
+				zipFile = getZipFile();
+				if (JavaModelManager.ZIP_ACCESS_VERBOSE) {
+					System.out.println("(" + Thread.currentThread() + ") [JarEntryFile.getContents()] Creating ZipFile on " +zipFile.getName()); //$NON-NLS-1$	//$NON-NLS-2$
+				}
+				String entryName = getEntryName();
+				ZipEntry zipEntry = zipFile.getEntry(entryName);
+				if (zipEntry == null){
+					throw new JavaModelException(new JavaModelStatus(IJavaModelStatusConstants.INVALID_PATH, entryName));
+				}
+				byte[] contents = Util.getZipEntryByteContent(zipEntry, zipFile);
+				return new ByteArrayInputStream(contents);
+			} catch (IOException e){
+				throw new JavaModelException(e, IJavaModelStatusConstants.IO_EXCEPTION);
+			} finally {
+				// avoid leaking ZipFiles
+				JavaModelManager.getJavaModelManager().closeZipFile(zipFile);
 			}
-			byte[] contents = Util.getZipEntryByteContent(zipEntry, zipFile);
-			return new ByteArrayInputStream(contents);
-		} catch (IOException e){
-			throw new JavaModelException(e, IJavaModelStatusConstants.IO_EXCEPTION);
-		} finally {
-			// avoid leaking ZipFiles
-			JavaModelManager.getJavaModelManager().closeZipFile(zipFile);
 		}
 	}
 

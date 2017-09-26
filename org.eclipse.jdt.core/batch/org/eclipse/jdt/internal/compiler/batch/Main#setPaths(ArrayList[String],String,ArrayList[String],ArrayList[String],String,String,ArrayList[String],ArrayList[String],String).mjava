@@ -1,0 +1,83 @@
+/*
+ * External API
+ */
+protected void setPaths(ArrayList<String> bootclasspaths,
+		String sourcepathClasspathArg,
+		ArrayList<String> sourcepathClasspaths,
+		ArrayList<String> classpaths,
+		String modulePath,
+		String moduleSourcepath,
+		ArrayList<String> extdirsClasspaths,
+		ArrayList<String> endorsedDirClasspaths,
+		String customEncoding) {
+
+	if (this.complianceLevel == 0) {
+		String version = this.options.get(CompilerOptions.OPTION_Compliance);
+		this.complianceLevel = CompilerOptions.versionToJdkLevel(version);
+	}
+
+	if (this.complianceLevel > ClassFileConstants.JDK1_8) {
+		if (bootclasspaths != null && bootclasspaths.size() > 0)
+			throw new IllegalArgumentException(
+				this.bind("configure.unsupportedOption", "-bootclasspath")); //$NON-NLS-1$ //$NON-NLS-2$
+		if (extdirsClasspaths != null && extdirsClasspaths.size() > 0)
+			throw new IllegalArgumentException(
+				this.bind("configure.unsupportedOption", "-extdirs")); //$NON-NLS-1$ //$NON-NLS-2$
+		if (endorsedDirClasspaths != null && endorsedDirClasspaths.size() > 0)
+			throw new IllegalArgumentException(
+				this.bind("configure.unsupportedOption", "-endorseddirs")); //$NON-NLS-1$ //$NON-NLS-2$
+	}
+	// process bootclasspath, classpath and sourcepaths
+ 	ArrayList<Classpath> allPaths = handleBootclasspath(bootclasspaths, customEncoding);
+
+	List<FileSystem.Classpath> cp = handleClasspath(classpaths, customEncoding);
+
+	List<FileSystem.Classpath> mp = handleModulepath(modulePath);
+
+	List<FileSystem.Classpath> msp = handleModuleSourcepath(moduleSourcepath);
+
+	ArrayList<FileSystem.Classpath> sourcepaths = new ArrayList<>();
+	if (sourcepathClasspathArg != null) {
+		processPathEntries(DEFAULT_SIZE_CLASSPATH, sourcepaths,
+			sourcepathClasspathArg, customEncoding, true, false);
+	}
+
+	/*
+	 * Feed endorsedDirClasspath according to:
+	 * - -extdirs first if present;
+	 * - else java.ext.dirs if defined;
+	 * - else default extensions directory for the platform.
+	 */
+	List<FileSystem.Classpath> extdirs = handleExtdirs(extdirsClasspaths);
+
+	List<FileSystem.Classpath> endorsed = handleEndorseddirs(endorsedDirClasspaths);
+
+	/*
+	 * Concatenate classpath entries
+	 * We put the bootclasspath at the beginning of the classpath
+	 * entries, followed by the extension libraries, followed by
+	 * the sourcepath followed by the classpath.  All classpath
+	 * entries are searched for both sources and binaries except
+	 * the sourcepath entries which are searched for sources only.
+	 */
+	allPaths.addAll(0, endorsed);
+	allPaths.addAll(extdirs);
+	allPaths.addAll(sourcepaths);
+	allPaths.addAll(cp);
+	allPaths.addAll(mp);
+	allPaths.addAll(msp);
+	allPaths = FileSystem.ClasspathNormalizer.normalize(allPaths);
+	this.checkedClasspaths = new FileSystem.Classpath[allPaths.size()];
+	allPaths.toArray(this.checkedClasspaths);
+	this.logger.logClasspath(this.checkedClasspaths);
+
+	if (this.annotationPaths != null && CompilerOptions.ENABLED.equals(this.options.get(CompilerOptions.OPTION_AnnotationBasedNullAnalysis))) {
+		for (FileSystem.Classpath c : this.checkedClasspaths) {
+			if (c instanceof ClasspathJar)
+				((ClasspathJar) c).annotationPaths = this.annotationPaths;
+			else if (c instanceof ClasspathJrt)
+				((ClasspathJrt) c).annotationPaths = this.annotationPaths;
+		}
+	}
+}
+

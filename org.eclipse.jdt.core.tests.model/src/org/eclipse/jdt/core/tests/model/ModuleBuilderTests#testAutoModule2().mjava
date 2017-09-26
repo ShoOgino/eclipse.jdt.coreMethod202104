@@ -1,0 +1,59 @@
+	public void testAutoModule2() throws Exception {
+		if (!isJRE9) return;
+		IJavaProject javaProject = null;
+		try {
+			String[] sources = {
+				"p/a/X.java",
+				"package p.a;\n" +
+				"public class X {}\n;",
+			};
+			String[] mfSource = {
+				"META-INF/MANIFEST.MF",
+				"Manifest-Version: 1.0\n" + 
+				"Automatic-Module-Name: org.eclipse.lib.x\n"
+			};
+			String outputDirectory = Util.getOutputDirectory();
+
+			String jarPath = outputDirectory + File.separator + "lib-x.jar";
+			Util.createJar(sources, mfSource, jarPath, "1.8");
+			
+			javaProject = createJava9Project("mod.one", new String[] {"src"});
+			IClasspathAttribute[] attributes = { JavaCore.newClasspathAttribute(IClasspathAttribute.MODULE, "true") };
+			addClasspathEntry(javaProject, JavaCore.newLibraryEntry(new Path(jarPath), null, null, null, attributes, false));
+
+			String srcMod =
+				"module mod.one { \n" +
+				"	requires org.eclipse.lib.x;\n" + // from jar attribute
+				"}";
+			createFile("/mod.one/src/module-info.java", 
+				srcMod);
+			createFolder("mod.one/src/q");
+			String srcX =
+				"package q;\n" +
+				"public class X {\n" +
+				"	p.a.X f;\n" +
+				"}";
+			createFile("/mod.one/src/q/X.java", srcX);
+
+			this.problemRequestor.initialize(srcMod.toCharArray());
+			getWorkingCopy("/mod.one/module-info.java", srcMod, true);
+			assertProblems("module-info should have no problems",
+					"----------\n" + 
+					"----------\n",
+					this.problemRequestor);
+
+			this.problemRequestor.initialize(srcX.toCharArray());
+			getWorkingCopy("/mod.one/src/q/X.java", srcX, true);
+			assertProblems("X should have no problems",
+					"----------\n" + 
+					"----------\n",
+					this.problemRequestor);
+
+			javaProject.getProject().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			assertNoErrors();
+		} finally {
+			if (javaProject != null)
+				deleteProject(javaProject);
+		}
+	}
+

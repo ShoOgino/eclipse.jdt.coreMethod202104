@@ -1,0 +1,50 @@
+	// test that a package declared in a non-modular project conflicts with a package with the same name
+	// exported by a named module on it's build path
+	public void test_conflict_unnamed_declaredvsexported() throws CoreException {
+		if (!isJRE9) return;
+		try {
+			IClasspathEntry dep = JavaCore.newContainerEntry(new Path(JavaCore.MODULE_PATH_CONTAINER_ID));
+			String[] sources = new String[] {
+				"src/module-info.java",
+				"module org.astro {\n" +
+				"	exports org.astro;\n" + 
+				"}",
+				"src/org/astro/World.java",
+				"package org.astro;\n" +
+				"public interface World {\n" +
+				"	public String name();\n" +
+				"}"
+			};
+			IJavaProject p1 = setupModuleProject("org.astro", sources, new IClasspathEntry[]{dep});
+			String[] src = new String[] {
+				"src/org/astro/Test.java",
+				"package org.astro;\n" +
+				"public class Test {\n" +
+				"	public String name() {\n" +
+				"		return \" My World!!\";\n" +
+				"	}\n" +
+				"}",
+				"src/com/greetings/MyWorld.java",
+				"package com.greetings;\n" +
+				"public class MyWorld implements org.astro.World {\n" +
+				"	public String name() {\n" +
+				"		return \" My World!!\";\n" +
+				"	}\n" +
+				"}"
+			};
+			IClasspathAttribute modAttr = new ClasspathAttribute("module", "true");
+			IClasspathEntry dep1 = JavaCore.newProjectEntry(p1.getPath(), null, false,
+				new IClasspathAttribute[] {modAttr},
+				false/*not exported*/);
+			IJavaProject p2 = setupModuleProject("com.greetings", src, new IClasspathEntry[] { dep1 });
+			p2.getProject().getWorkspace().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			IMarker[] markers = p2.getProject().findMarkers(null, true, IResource.DEPTH_INFINITE);
+			assertMarkers("Unexpected markers", 
+					"The package org.astro conflicts with a package accessible from another module: org.astro",
+					markers);
+		} finally {
+			deleteProject("org.astro");
+			deleteProject("com.greetings");
+		}
+	}
+

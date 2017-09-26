@@ -3,7 +3,7 @@ void buildTypeBindings(AccessRestriction accessRestriction) {
 	boolean firstIsSynthetic = false;
 	if (this.referenceContext.compilationResult.compilationUnit != null) {
 		char[][] expectedPackageName = this.referenceContext.compilationResult.compilationUnit.getPackageName();
-		if (expectedPackageName != null
+		if (expectedPackageName != null && !this.referenceContext.isModuleInfo()
 				&& !CharOperation.equals(this.currentPackageName, expectedPackageName)) {
 
 			// only report if the unit isn't structurally empty
@@ -18,6 +18,15 @@ void buildTypeBindings(AccessRestriction accessRestriction) {
 	if (this.currentPackageName == CharOperation.NO_CHAR_CHAR) {
 		// environment default package is never null
 		this.fPackage = this.environment.defaultPackage;
+		if (this.referenceContext.isModuleInfo()) { // cannot have a package as per grammar
+			ModuleDeclaration moduleDecl = this.referenceContext.moduleDeclaration;
+			if (moduleDecl != null) {
+				moduleDecl.createScope(this);
+				moduleDecl.checkAndSetModifiers();
+			}
+		} else if (this.environment.module != this.environment.UnNamedModule) {
+			problemReporter().unnamedPackageInNamedModule(this.environment.module);
+		}
 	} else {
 		if ((this.fPackage = this.environment.createPackage(this.currentPackageName)) == null) {
 			if (this.referenceContext.currentPackage != null) {
@@ -51,8 +60,10 @@ void buildTypeBindings(AccessRestriction accessRestriction) {
 		if (this.environment.isProcessingAnnotations && this.environment.isMissingType(typeDecl.name))
 			throw new SourceTypeCollisionException(); // resolved a type ref before APT generated the type
 		ReferenceBinding typeBinding = this.fPackage.getType0(typeDecl.name);
+		if (Binding.isValid(typeBinding) && this.fPackage instanceof SplitPackageBinding && !this.environment.module.canAccess(typeBinding.fPackage))
+			typeBinding = null;
 		recordSimpleReference(typeDecl.name); // needed to detect collision cases
-		if (typeBinding != null && typeBinding.isValidBinding() && !(typeBinding instanceof UnresolvedReferenceBinding)) {
+		if (Binding.isValid(typeBinding) && !(typeBinding instanceof UnresolvedReferenceBinding)) {
 			// if its an unresolved binding - its fixed up whenever its needed, see UnresolvedReferenceBinding.resolve()
 			if (this.environment.isProcessingAnnotations)
 				throw new SourceTypeCollisionException(); // resolved a type ref before APT generated the type
@@ -61,11 +72,6 @@ void buildTypeBindings(AccessRestriction accessRestriction) {
 			// and it can be an unresolved type which is now being defined
 			problemReporter().duplicateTypes(this.referenceContext, typeDecl);
 			continue nextType;
-		}
-		if (this.fPackage != this.environment.defaultPackage && this.fPackage.getPackage(typeDecl.name) != null) {
-			// if a package exists, it must be a valid package - cannot be a NotFound problem package
-			// this is now a warning since a package does not really 'exist' until it contains a type, see JLS v2, 7.4.3
-			problemReporter().typeCollidesWithPackage(this.referenceContext, typeDecl);
 		}
 
 		if ((typeDecl.modifiers & ClassFileConstants.AccPublic) != 0) {

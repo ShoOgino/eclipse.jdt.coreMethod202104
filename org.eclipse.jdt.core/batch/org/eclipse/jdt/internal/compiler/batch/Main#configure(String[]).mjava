@@ -27,10 +27,18 @@ public void configure(String[] argv) {
 	final int INSIDE_CLASS_NAMES = 20;
 	final int INSIDE_WARNINGS_PROPERTIES = 21;
 	final int INSIDE_ANNOTATIONPATH_start = 22;
+	final int INSIDE_MODULEPATH_start = 23;
+	final int INSIDE_MODULESOURCEPATH_start = 24;
+	final int INSIDE_ADD_EXPORTS = 25;
+	final int INSIDE_ADD_READS = 26;
+	final int INSIDE_SYSTEM = 27;
+	final int INSIDE_PROCESSOR_MODULE_PATH_start = 28;
 
 	final int DEFAULT = 0;
 	ArrayList<String> bootclasspaths = new ArrayList<>(DEFAULT_SIZE_CLASSPATH);
 	String sourcepathClasspathArg = null;
+	String modulepathArg = null;
+	String moduleSourcepathArg = null;
 	ArrayList<String> sourcepathClasspaths = new ArrayList<>(DEFAULT_SIZE_CLASSPATH);
 	ArrayList<String> classpaths = new ArrayList<>(DEFAULT_SIZE_CLASSPATH);
 	ArrayList<String> extdirsClasspaths = null;
@@ -56,6 +64,7 @@ public void configure(String[] argv) {
 	String customDestinationPath = null;
 	String currentSourceDirectory = null;
 	String currentArg = Util.EMPTY_STRING;
+	String moduleName = null;
 	
 	Set<String> specifiedEncodings = null;
 
@@ -187,9 +196,21 @@ public void configure(String[] argv) {
 				}
 
 				if (currentArg.endsWith(SuffixConstants.SUFFIX_STRING_java)) {
+					if (moduleName == null) {
+						// If the module-info.java was supplied via command line, that will be the
+						// de facto module for the other source files supplied via command line.
+						// TODO: This needs revisit in case a source file specified in command line is
+						// part of a --module-source-path
+						IModule mod = extractModuleDesc(currentArg);
+						if (mod != null) {
+							moduleName = new String(mod.name());
+							this.module = mod;
+						}
+					}
 					if (this.filenames == null) {
 						this.filenames = new String[argCount - index];
 						this.encodings = new String[argCount - index];
+						this.modNames = new String[argCount - index];
 						this.destinationPaths = new String[argCount - index];
 					} else if (filesCount == this.filenames.length) {
 						int length = this.filenames.length;
@@ -211,8 +232,15 @@ public void configure(String[] argv) {
 							(this.destinationPaths = new String[length + argCount - index]),
 							0,
 							length);
+						System.arraycopy(
+								this.modNames,
+								0,
+								(this.modNames = new String[length + argCount - index]),
+								0,
+								length);
 					}
 					this.filenames[filesCount] = currentArg;
+					this.modNames[filesCount] = moduleName;
 					this.encodings[filesCount++] = customEncoding;
 					// destination path cannot be specified upon an individual file
 					customEncoding = null;
@@ -308,6 +336,16 @@ public void configure(String[] argv) {
 					mode = DEFAULT;
 					continue;
 				}
+				if (currentArg.equals("-1.9") || currentArg.equals("-9") || currentArg.equals("-9.0")) { //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+					if (didSpecifyCompliance) {
+						throw new IllegalArgumentException(
+							this.bind("configure.duplicateCompliance", currentArg)); //$NON-NLS-1$
+					}
+					didSpecifyCompliance = true;
+					this.options.put(CompilerOptions.OPTION_Compliance, CompilerOptions.VERSION_9);
+					mode = DEFAULT;
+					continue;
+				}
 				if (currentArg.equals("-d")) { //$NON-NLS-1$
 					if (this.destinationPath != null) {
 						StringBuffer errorMessage = new StringBuffer();
@@ -341,6 +379,29 @@ public void configure(String[] argv) {
 					mode = INSIDE_BOOTCLASSPATH_start;
 					continue;
 				}
+				if (currentArg.equals("--system")) { //$NON-NLS-1$
+					mode = INSIDE_SYSTEM;
+					continue;
+				}
+				if (currentArg.equals("--module-path") || currentArg.equals("-p") || currentArg.equals("--processor-module-path")) { //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+					mode = INSIDE_MODULEPATH_start;
+					continue;
+				}
+				if (currentArg.equals("--module-source-path")) { //$NON-NLS-1$
+					if (sourcepathClasspathArg != null) {
+						throw new IllegalArgumentException(this.bind("configure.OneOfModuleOrSourcePath")); //$NON-NLS-1$
+					}
+					mode = INSIDE_MODULESOURCEPATH_start;
+					continue;
+				}
+				if (currentArg.equals("--add-exports")) { //$NON-NLS-1$
+					mode = INSIDE_ADD_EXPORTS;
+					continue;
+				}
+				if (currentArg.equals("--add-reads")) { //$NON-NLS-1$
+					mode = INSIDE_ADD_READS;
+					continue;
+				}
 				if (currentArg.equals("-sourcepath")) {//$NON-NLS-1$
 					if (sourcepathClasspathArg != null) {
 						StringBuffer errorMessage = new StringBuffer();
@@ -351,6 +412,9 @@ public void configure(String[] argv) {
 						}
 						throw new IllegalArgumentException(
 							this.bind("configure.duplicateSourcepath", errorMessage.toString())); //$NON-NLS-1$
+					}
+					if (moduleSourcepathArg != null) {
+						throw new IllegalArgumentException(this.bind("configure.OneOfModuleOrSourcePath")); //$NON-NLS-1$
 					}
 					mode = INSIDE_SOURCE_PATH_start;
 					continue;
@@ -726,6 +790,10 @@ public void configure(String[] argv) {
 					mode = INSIDE_PROCESSOR_start;
 					continue;
 				}
+				if (currentArg.equals("--processor-module-path")) { //$NON-NLS-1$
+					mode = INSIDE_PROCESSOR_MODULE_PATH_start;
+					continue;
+				}
 				if (currentArg.equals("-proc:only")) { //$NON-NLS-1$
 					this.options.put(
 						CompilerOptions.OPTION_GenerateClassFiles,
@@ -802,6 +870,8 @@ public void configure(String[] argv) {
 					this.options.put(CompilerOptions.OPTION_TargetPlatform, CompilerOptions.VERSION_1_7);
 				} else if (currentArg.equals("1.8") || currentArg.equals("8") || currentArg.equals("8.0")) { //$NON-NLS-1$//$NON-NLS-2$ //$NON-NLS-3$
 					this.options.put(CompilerOptions.OPTION_TargetPlatform, CompilerOptions.VERSION_1_8);
+				} else if (currentArg.equals("1.9") || currentArg.equals("9") || currentArg.equals("9.0")) { //$NON-NLS-1$//$NON-NLS-2$ //$NON-NLS-3$
+					this.options.put(CompilerOptions.OPTION_TargetPlatform, CompilerOptions.VERSION_9);
 				}
 				else if (currentArg.equals("jsr14")) { //$NON-NLS-1$
 					this.options.put(CompilerOptions.OPTION_TargetPlatform, CompilerOptions.VERSION_JSR14);
@@ -858,6 +928,8 @@ public void configure(String[] argv) {
 					this.options.put(CompilerOptions.OPTION_Source, CompilerOptions.VERSION_1_7);
 				} else if (currentArg.equals("1.8") || currentArg.equals("8") || currentArg.equals("8.0")) { //$NON-NLS-1$//$NON-NLS-2$ //$NON-NLS-3$
 					this.options.put(CompilerOptions.OPTION_Source, CompilerOptions.VERSION_1_8);
+				} else if (currentArg.equals("1.9") || currentArg.equals("9") || currentArg.equals("9.0")) { //$NON-NLS-1$//$NON-NLS-2$ //$NON-NLS-3$
+					this.options.put(CompilerOptions.OPTION_Source, CompilerOptions.VERSION_9);
 				} else {
 					throw new IllegalArgumentException(this.bind("configure.source", currentArg)); //$NON-NLS-1$
 				}
@@ -895,6 +967,37 @@ public void configure(String[] argv) {
 			case INSIDE_DESTINATION_PATH :
 				setDestinationPath(currentArg.equals(NONE) ? NONE : currentArg);
 				mode = DEFAULT;
+				continue;
+			case INSIDE_SYSTEM:
+				mode = DEFAULT;
+				setJavaHome(currentArg);
+				continue;
+			case INSIDE_MODULEPATH_start:
+				mode = DEFAULT;
+				String[] modulepaths = new String[1];
+				index += processPaths(newCommandLineArgs, index, currentArg, modulepaths);
+				modulepathArg = modulepaths[0];
+				continue;
+			case INSIDE_MODULESOURCEPATH_start:
+				mode = DEFAULT;
+				String[] moduleSourcepaths = new String[1];
+				index += processPaths(newCommandLineArgs, index, currentArg, moduleSourcepaths);
+				moduleSourcepathArg = moduleSourcepaths[0];
+				continue;
+			case INSIDE_ADD_EXPORTS:
+				mode = DEFAULT;
+				// TODO: better to validate the option before processing it further?
+				if (this.addonExports == Collections.EMPTY_LIST) {
+					this.addonExports = new ArrayList<>();
+				}
+				this.addonExports.add(currentArg);
+				continue;
+			case INSIDE_ADD_READS:
+				mode = DEFAULT;
+				if (this.addonReads == Collections.EMPTY_LIST) {
+					this.addonReads = new ArrayList<>();
+				}
+				this.addonReads.add(currentArg);
 				continue;
 			case INSIDE_CLASSPATH_start:
 				mode = DEFAULT;
@@ -949,6 +1052,9 @@ public void configure(String[] argv) {
 				continue;
 			case INSIDE_PROCESSOR_start :
 				// nothing to do here. This is consumed again by the AnnotationProcessorManager
+				mode = DEFAULT;
+				continue;
+			case INSIDE_PROCESSOR_MODULE_PATH_start :
 				mode = DEFAULT;
 				continue;
 			case INSIDE_S_start :
@@ -1012,7 +1118,7 @@ public void configure(String[] argv) {
 			throw new IllegalArgumentException(
 				this.bind("configure.unrecognizedOption", currentSourceDirectory)); //$NON-NLS-1$
 		}
-		String[] result = FileFinder.find(dir, SuffixConstants.SUFFIX_STRING_JAVA);
+		String[] result = FileFinder.find(dir, SuffixConstants.SUFFIX_STRING_java);
 		if (NONE.equals(customDestinationPath)) {
 			customDestinationPath = NONE; // ensure == comparison
 		}
@@ -1037,10 +1143,17 @@ public void configure(String[] argv) {
 				(this.destinationPaths = new String[length + filesCount]),
 				0,
 				filesCount);
+			System.arraycopy(
+					this.modNames,
+					0,
+					(this.modNames = new String[length + filesCount]),
+					0,
+					filesCount);
 			System.arraycopy(result, 0, this.filenames, filesCount, length);
 			for (int i = 0; i < length; i++) {
 				this.encodings[filesCount + i] = customEncoding;
 				this.destinationPaths[filesCount + i] = customDestinationPath;
+				this.modNames[filesCount + i] = moduleName;
 			}
 			filesCount += length;
 			customEncoding = null;
@@ -1051,6 +1164,7 @@ public void configure(String[] argv) {
 			filesCount = this.filenames.length;
 			this.encodings = new String[filesCount];
 			this.destinationPaths = new String[filesCount];
+			this.modNames = new String[filesCount];
 			for (int i = 0; i < filesCount; i++) {
 				this.encodings[i] = customEncoding;
 				this.destinationPaths[i] = customDestinationPath;
@@ -1097,7 +1211,6 @@ public void configure(String[] argv) {
 			CompilerOptions.OPTION_ReportMissingJavadocTagsVisibility,
 			CompilerOptions.PRIVATE);
 	}
-
 	if (printUsageRequired || (filesCount == 0 && classCount == 0)) {
 		if (usageSection ==  null) {
 			printUsage(); // default
@@ -1156,6 +1269,8 @@ public void configure(String[] argv) {
 			sourcepathClasspathArg,
 			sourcepathClasspaths,
 			classpaths,
+			modulepathArg,
+			moduleSourcepathArg,
 			extdirsClasspaths,
 			endorsedDirClasspaths,
 			customEncoding);
