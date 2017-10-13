@@ -85,56 +85,65 @@
 							}
 						}
 					}
-					UsesStatement[] uses = this.moduleDeclaration.uses;
-					if (uses != null) {
-						for (int i = 0, l = uses.length; i < l; ++i) {
-							TypeReference usesReference = uses[i].serviceInterface;
-							if (usesReference instanceof CompletionOnUsesSingleTypeReference ||
-									usesReference instanceof CompletionOnUsesQualifiedTypeReference) {
-								this.lookupEnvironment.buildTypeBindings(parsedUnit, null);
-								if ((this.unitScope = parsedUnit.scope) != null) {
-									contextAccepted = true;
-									buildContext(usesReference, null, parsedUnit, null, null);
-									findTypeReferences(usesReference, true);
-									debugPrintf();
+					try {
+						UsesStatement[] uses = this.moduleDeclaration.uses;
+						if (uses != null) {
+							for (int i = 0, l = uses.length; i < l; ++i) {
+								UsesStatement usesStatement = uses[i];
+								this.parser.enclosingNode = usesStatement;
+								TypeReference usesReference = usesStatement.serviceInterface;
+								if (usesReference instanceof CompletionOnUsesSingleTypeReference ||
+										usesReference instanceof CompletionOnUsesQualifiedTypeReference) {
+									contextAccepted = checkForCNF(usesReference, parsedUnit, true);
 									return;
 								}
 							}
 						}
-					}
-					ProvidesStatement[] providesStmts = this.moduleDeclaration.services;
-					for (int i = 0, l = providesStmts != null ? providesStmts.length : 0; i < l; ++i) {
-						ProvidesStatement providesStmt = providesStmts[i];
-						TypeReference pInterface = providesStmt.serviceInterface;
-						if (pInterface instanceof CompletionOnProvidesInterfacesSingleTypeReference ||
-								pInterface instanceof CompletionOnProvidesInterfacesQualifiedTypeReference) {
-							this.lookupEnvironment.buildTypeBindings(parsedUnit, null);
-							if ((this.unitScope = parsedUnit.scope) != null) {
-								contextAccepted = true;
-								buildContext(pInterface, null, parsedUnit, null, null);
-								findTypeReferences(pInterface, true);
-								debugPrintf();
+						ProvidesStatement[] providesStmts = this.moduleDeclaration.services;
+						for (int i = 0, l = providesStmts != null ? providesStmts.length : 0; i < l; ++i) {
+							ProvidesStatement providesStmt = providesStmts[i];
+							this.parser.enclosingNode = providesStmt;
+							TypeReference pInterface = providesStmt.serviceInterface;
+							if (pInterface instanceof CompletionOnProvidesInterfacesSingleTypeReference ||
+									pInterface instanceof CompletionOnProvidesInterfacesQualifiedTypeReference) {
+								contextAccepted = checkForCNF(pInterface, parsedUnit, true);
 								return;
 							}
-						}
-						TypeReference[] implementations = providesStmt.implementations;
-						for (int j = 0, k = implementations.length; j < k; ++j) {
-							TypeReference implementation = implementations[i];
-							
-							if (implementation instanceof CompletionOnProvidesImplementationsSingleTypeReference ||
-									implementation instanceof CompletionOnProvidesImplementationsQualifiedTypeReference) {
-								this.lookupEnvironment.buildTypeBindings(parsedUnit, null);
-								if ((this.unitScope = parsedUnit.scope) != null) {
-									contextAccepted = true;
-									buildContext(implementation, null, parsedUnit, null, null);
-									findImplementations(providesStmt, i/* stmtIndex */, j/* implIndex */);
-									debugPrintf();
+							TypeReference[] implementations = providesStmt.implementations;
+							for (int j = 0, k = implementations.length; j < k; ++j) {
+								TypeReference implementation = implementations[j];
+								if (implementation instanceof CompletionOnProvidesImplementationsSingleTypeReference ||
+										implementation instanceof CompletionOnProvidesImplementationsQualifiedTypeReference) {
+									contextAccepted = checkForCNF(implementation, parsedUnit, false);
 									return;
+								} else if (implementation instanceof CompletionOnKeyword) {
+									contextAccepted = true;
+									processModuleKeywordCompletion(parsedUnit, implementation, (CompletionOnKeyword) implementation);
 								}
-							} else if (implementation instanceof CompletionOnKeyword) {
-								contextAccepted = true;
-								processModuleKeywordCompletion(parsedUnit, implementation, (CompletionOnKeyword) implementation);
 							}
+						}
+					} catch (CompletionNodeFound e) {
+						//					completionNodeFound = true;
+						if (e.astNode != null) {
+							// if null then we found a problem in the completion node
+							if(DEBUG) {
+								System.out.print("COMPLETION - Completion node : "); //$NON-NLS-1$
+								System.out.println(e.astNode.toString());
+								if(this.parser.assistNodeParent != null) {
+									System.out.print("COMPLETION - Parent Node : ");  //$NON-NLS-1$
+									System.out.println(this.parser.assistNodeParent);
+								}
+							}
+							this.lookupEnvironment.unitBeingCompleted = parsedUnit; // better resilient to further error reporting
+							contextAccepted =
+									complete(
+											e.astNode,
+											this.parser.assistNodeParent,
+											this.parser.enclosingNode,
+											parsedUnit,
+											e.qualifiedBinding,
+											e.scope,
+											e.insideTypeAnnotation);
 						}
 					}
 				}
