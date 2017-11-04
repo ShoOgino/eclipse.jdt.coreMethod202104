@@ -1,0 +1,40 @@
+// named module uses the same JDT options
+public void testBug522554_3() throws CoreException {
+	if (!isJRE9) return;
+	IJavaProject prj = null;
+	try {
+		IClasspathAttribute[] jreAttributes = {
+			JavaCore.newClasspathAttribute(IClasspathAttribute.ADD_EXPORTS, "java.activation/com.sun.activation.registries=mod1"),
+			JavaCore.newClasspathAttribute(IClasspathAttribute.LIMIT_MODULES, "java.se,jdk.security.auth,jdk.security.jgss,jdk.net,java.activation")
+		};
+		prj = createJava9ProjectWithJREAttributes("mod1", new String[] {"src" }, jreAttributes);
+		createFolder("/mod1/src/modify");
+		createFile("/mod1/src/modify/Test.java",
+				"package modify;\n" + 
+				"\n" + 
+				"import com.sun.activation.registries.*; \n" + 
+				"\n" + 
+				"public class Test {\n" + 
+				"	LogSupport logger;\n" + 
+				"}\n");
+		createFile("/mod1/src/module-info.java",
+				"module mod1 {\n" +
+				"	requires java.activation;\n" +
+				"}\n");
+		prj.getProject().getWorkspace().build(IncrementalProjectBuilder.AUTO_BUILD, null);
+		IMarker[] markers = prj.getProject().findMarkers(null, true, IResource.DEPTH_INFINITE);
+		assertMarkers("Unexpected markers", "",  markers);
+
+		IClasspathEntry systemLibrary = prj.getRawClasspath()[1];
+		assertEquals("Should be system library", getJRE9Path(), systemLibrary.getPath());
+		String argLine = JavaModelAccess.getModuleCLIOptions(prj, systemLibrary);
+		assertEquals("Unexpected CLI options",
+				"--add-exports java.activation/com.sun.activation.registries=mod1 " +
+				"--limit-modules java.activation,java.se,jdk.net,jdk.security.auth,jdk.security.jgss",
+				argLine);
+	} finally {
+		if (prj != null)
+			deleteProject(prj);
+	}
+}
+
