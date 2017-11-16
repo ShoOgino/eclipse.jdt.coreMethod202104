@@ -1,0 +1,50 @@
+	public synchronized char[][] getModulesDeclaringPackage(String qualifiedPackageName, String moduleName) {
+		// Ignore moduleName as this has nothing to do with modules (as of now)
+		if (this.packageCache != null)
+			return singletonModuleNameIf(this.packageCache.contains(qualifiedPackageName));
+
+		this.packageCache = new HashSet<>(41);
+		this.packageCache.add(Util.EMPTY_STRING);
+		List<String> sub = new ArrayList<>();
+		try (DirectoryStream<java.nio.file.Path> stream = Files.newDirectoryStream(this.releasePath)) {
+			for (final java.nio.file.Path subdir: stream) {
+				String rel = subdir.getFileName().toString();
+				if (rel.contains(this.release)) {
+					sub.add(rel);
+				} else {
+					continue;
+				}
+				Files.walkFileTree(subdir, new FileVisitor<java.nio.file.Path>() {
+					@Override
+					public FileVisitResult preVisitDirectory(java.nio.file.Path dir, BasicFileAttributes attrs) throws IOException {
+						if (dir.getNameCount() <= 1)
+							return FileVisitResult.CONTINUE;
+						Path relative = dir.subpath(1, dir.getNameCount());
+						addToPackageCache(relative.toString(), false);
+						return FileVisitResult.CONTINUE;
+					}
+
+					@Override
+					public FileVisitResult visitFile(java.nio.file.Path f, BasicFileAttributes attrs) throws IOException {
+						return FileVisitResult.CONTINUE;
+					}
+
+					@Override
+					public FileVisitResult visitFileFailed(java.nio.file.Path f, IOException exc) throws IOException {
+						return FileVisitResult.CONTINUE;
+					}
+
+					@Override
+					public FileVisitResult postVisitDirectory(java.nio.file.Path dir, IOException exc) throws IOException {
+						return FileVisitResult.CONTINUE;
+					}
+				});
+			}
+		} catch (IOException e) {
+			e.printStackTrace();
+			// Rethrow
+		}
+		this.subReleases = sub.toArray(new String[sub.size()]);
+		return singletonModuleNameIf(this.packageCache.contains(qualifiedPackageName));
+	}
+

@@ -34,6 +34,8 @@ public void configure(String[] argv) {
 	final int INSIDE_SYSTEM = 27;
 	final int INSIDE_PROCESSOR_MODULE_PATH_start = 28;
 	final int INSIDE_ADD_MODULES = 29;
+	final int INSIDE_RELEASE = 30;
+	final int INSIDE_LIMIT_MODULES = 31;
 
 	final int DEFAULT = 0;
 	ArrayList<String> bootclasspaths = new ArrayList<>(DEFAULT_SIZE_CLASSPATH);
@@ -269,6 +271,10 @@ public void configure(String[] argv) {
 					mode = INSIDE_MAX_PROBLEMS;
 					continue;
 				}
+				if (currentArg.equals("--release")) { //$NON-NLS-1$
+					mode = INSIDE_RELEASE;
+					continue;
+				}
 				if (currentArg.equals("-source")) { //$NON-NLS-1$
 					mode = INSIDE_SOURCE;
 					continue;
@@ -405,6 +411,10 @@ public void configure(String[] argv) {
 				}
 				if (currentArg.equals("--add-modules")) { //$NON-NLS-1$
 					mode = INSIDE_ADD_MODULES;
+					continue;
+				}
+				if (currentArg.equals("--limit-modules")) { //$NON-NLS-1$
+					mode = INSIDE_LIMIT_MODULES;
 					continue;
 				}
 				if (currentArg.equals("-sourcepath")) {//$NON-NLS-1$
@@ -858,6 +868,10 @@ public void configure(String[] argv) {
 					throw new IllegalArgumentException(
 						this.bind("configure.duplicateTarget", currentArg));//$NON-NLS-1$
 				}
+				if (this.releaseVersion != null) {
+					throw new IllegalArgumentException(
+							this.bind("configure.unsupportedWithRelease", "-target"));//$NON-NLS-1$ //$NON-NLS-2$
+				}
 				this.didSpecifyTarget = true;
 				if (currentArg.equals("1.1")) { //$NON-NLS-1$
 					this.options.put(CompilerOptions.OPTION_TargetPlatform, CompilerOptions.VERSION_1_1);
@@ -915,10 +929,37 @@ public void configure(String[] argv) {
 				}
 				mode = DEFAULT;
 				continue;
+			case INSIDE_RELEASE:
+				// If release is < 9, the following are diasllowed:
+				// bootclasspath, -Xbootclasspath, -Xbootclasspath/a:, -Xbootclasspath/p:, 
+				// -endorseddirs, -Djava.endorsed.dirs, -extdirs, -Djava.ext.dirs
+
+				// If release >= 9, the following are disallowed
+				// --system and --upgrade-module-path
+
+				// -source and -target are diasllowed for any --release
+				this.releaseVersion = currentArg;
+				long releaseToJDKLevel = CompilerOptions.releaseToJDKLevel(currentArg);
+				if (releaseToJDKLevel == 0) {
+					throw new IllegalArgumentException(
+							this.bind("configure.unsupportedReleaseVersion", currentArg)); //$NON-NLS-1$
+				}
+				// Let's treat it as regular compliance mode
+				this.complianceLevel = releaseToJDKLevel;
+				String versionAsString = CompilerOptions.versionFromJdkLevel(releaseToJDKLevel);
+				this.options.put(CompilerOptions.OPTION_Compliance, versionAsString);
+				this.options.put(CompilerOptions.OPTION_Source, versionAsString);
+				this.options.put(CompilerOptions.OPTION_TargetPlatform, versionAsString);
+				mode = DEFAULT;
+				continue;
 			case INSIDE_SOURCE :
 				if (this.didSpecifySource) {
 					throw new IllegalArgumentException(
 						this.bind("configure.duplicateSource", currentArg));//$NON-NLS-1$
+				}
+				if (this.releaseVersion != null) {
+					throw new IllegalArgumentException(
+							this.bind("configure.unsupportedWithRelease", "-source"));//$NON-NLS-1$ //$NON-NLS-2$
 				}
 				this.didSpecifySource = true;
 				if (currentArg.equals("1.3")) { //$NON-NLS-1$
@@ -1012,6 +1053,16 @@ public void configure(String[] argv) {
 				StringTokenizer tokenizer = new StringTokenizer(currentArg, ","); //$NON-NLS-1$
 				while (tokenizer.hasMoreTokens()) {
 					this.rootModules.add(tokenizer.nextToken().trim());
+				}
+				continue;
+			case INSIDE_LIMIT_MODULES:
+				mode = DEFAULT;
+				tokenizer = new StringTokenizer(currentArg, ","); //$NON-NLS-1$
+				while (tokenizer.hasMoreTokens()) {
+					if (this.limitedModules == null) {
+						this.limitedModules = new HashSet<>();
+					}
+					this.limitedModules.add(tokenizer.nextToken().trim());
 				}
 				continue;
 			case INSIDE_CLASSPATH_start:
