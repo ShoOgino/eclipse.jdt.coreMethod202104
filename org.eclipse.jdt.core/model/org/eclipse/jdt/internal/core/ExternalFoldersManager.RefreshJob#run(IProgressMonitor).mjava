@@ -1,24 +1,30 @@
 		protected IStatus run(IProgressMonitor pm) {
-			try {
-				if (this.externalFolders == null)
-					return Status.OK_STATUS;
-				IPath externalPath = null;
-				for (int index = 0; index < this.externalFolders.size(); index++ ) {
-					if ((externalPath = this.externalFolders.get(index)) != null) {
-						IFolder folder = getFolder(externalPath);
-						// https://bugs.eclipse.org/bugs/show_bug.cgi?id=321358
-						if (folder != null)
-							folder.refreshLocal(IResource.DEPTH_INFINITE, pm);
+			MultiStatus errors = new MultiStatus(JavaCore.PLUGIN_ID, IStatus.OK,
+					"Exception while refreshing external folders", null); //$NON-NLS-1$
+			while (true) {
+				IPath externalPath;
+				synchronized (this.externalFolders) {
+					if (this.externalFolders.isEmpty()) {
+						return errors.isOK()? Status.OK_STATUS : errors;
 					}
-					// Set the processed ones to null instead of removing the element altogether,
-					// so that they will not be considered as duplicates.
-					// This will also avoid elements being shifted to the left every time an element
-					// is removed. However, there is a risk of Collection size to be increased more often.
-					this.externalFolders.setElementAt(null, index);
+					// keep the path in the list to avoid re-adding it while we are working
+					externalPath = this.externalFolders.iterator().next();
 				}
-			} catch (CoreException e) {
-				return e.getStatus();
+
+				try {
+					IFolder folder = getExternalFoldersManager().getFolder(externalPath);
+					// https://bugs.eclipse.org/bugs/show_bug.cgi?id=321358
+					if (folder != null) {
+						folder.refreshLocal(IResource.DEPTH_INFINITE, pm);
+					}
+				} catch (CoreException e) {
+					errors.merge(e.getStatus());
+				} finally {
+					// we should always remove the path to avoid endless loop trying to refresh it
+					synchronized (this.externalFolders) {
+						this.externalFolders.remove(externalPath);
+					}
+				}
 			}
-			return Status.OK_STATUS;
 		}
 
