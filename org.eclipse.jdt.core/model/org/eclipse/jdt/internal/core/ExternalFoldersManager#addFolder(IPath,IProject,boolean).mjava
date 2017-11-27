@@ -1,21 +1,31 @@
 	private IFolder addFolder(IPath externalFolderPath, IProject externalFoldersProject, boolean scheduleForCreation) {
 		Map knownFolders = getFolders();
-		Object existing = knownFolders.get(externalFolderPath);
-		if (existing != null) {
-			return (IFolder) existing;
+
+		Object existing;
+		synchronized (this) {
+			existing = knownFolders.get(externalFolderPath);
+			if (existing != null) {
+				return (IFolder) existing;
+			}
 		}
+
 		IFolder result;
 		do {
-			result = externalFoldersProject.getFolder(LINKED_FOLDER_NAME + this.counter++);
+			result = externalFoldersProject.getFolder(LINKED_FOLDER_NAME + this.counter.incrementAndGet());
 		} while (result.exists());
-		if (scheduleForCreation) {
-			synchronized(this) {
+
+		synchronized (this) {
+			if (scheduleForCreation) {
 				if (this.pendingFolders == null)
 					this.pendingFolders = Collections.synchronizedSet(new HashSet());
+				this.pendingFolders.add(externalFolderPath);
 			}
-			this.pendingFolders.add(externalFolderPath);
+			existing = knownFolders.get(externalFolderPath);
+			if (existing != null) {
+				return (IFolder) existing;
+			}
+			knownFolders.put(externalFolderPath, result);
 		}
-		knownFolders.put(externalFolderPath, result);
 		return result;
 	}
 
