@@ -1,0 +1,48 @@
+private HashSet<String> getModuleGraph(String mName, TypeDeclarationPattern typePattern, HashSet<String> mGraph) {
+	mGraph.add(mName);
+	SearchPattern modulePattern = SearchPattern.createPattern(mName,
+			IJavaSearchConstants.MODULE, IJavaSearchConstants.DECLARATIONS, typePattern.getMatchRule());
+	if (modulePattern == null) return mGraph;
+	final HashSet<String> tmpGraph = new HashSet<>();
+	final SearchParticipant participant = new JavaSearchParticipant() {
+		public void locateMatches(SearchDocument[] indexMatches, SearchPattern mPattern,
+				IJavaSearchScope scope, SearchRequestor requestor, IProgressMonitor monitor) throws CoreException {
+			MatchLocator matchLocator =	new MatchLocator(mPattern,	requestor,	scope,	monitor);
+			/* eliminating false matches and locating them */
+			if (monitor != null && monitor.isCanceled()) throw new OperationCanceledException();
+			matchLocator.locateMatches(indexMatches);
+			addRequiredModules(matchLocator);
+		}
+		private void addRequiredModules(MatchLocator matchLocator) {
+			if (matchLocator.matchBinding == null) return;
+			for (Binding b :matchLocator.matchBinding.values()) {
+				if (b instanceof ModuleBinding &&  ((ModuleBinding) b).moduleName != null) {
+					ModuleBinding m = (ModuleBinding) b;
+					tmpGraph.add(new String(m.moduleName));
+					for (ModuleBinding r : m.getAllRequiredModules()) {
+						char[] name = r.moduleName;
+						if (name == null || CharOperation.equals(name, CharOperation.NO_CHAR)) continue;
+						tmpGraph.add(new String(name));
+					}
+				}
+			}
+		}
+	};
+	final SearchRequestor requestor = new SearchRequestor() {	
+		@Override
+		public void acceptSearchMatch(SearchMatch searchMatch) throws CoreException {
+			System.out.println(searchMatch.toString());
+			// do nothing
+		}
+	};
+	try {
+		new SearchEngine().search(modulePattern, new SearchParticipant[] {participant},
+				JavaModelManager.getJavaModelManager().getWorkspaceScope(),
+				requestor,	null);
+	} catch (CoreException e) {
+		// do nothing
+	}
+	mGraph.addAll(tmpGraph);
+	return mGraph;
+}
+
