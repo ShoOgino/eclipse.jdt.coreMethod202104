@@ -24,7 +24,8 @@ protected void runJavac(
 		String expectedErrorString,
 		boolean shouldFlushOutputDirectory,
 		JavacTestOptions options,
-		String[] vmArguments) {
+		String[] vmArguments,
+		String[] classLibraries) {
 	// WORK we're probably doing too much around class libraries in general - java should be able to fetch its own runtime libs
 	// WORK reorder parameters
 	if (options == JavacTestOptions.SKIP) {
@@ -35,10 +36,22 @@ protected void runJavac(
 	}
 	String newOptions = options.getCompilerOptions();
 	if (newOptions.indexOf(" -d ") < 0) {
-		options.setCompilerOptions(newOptions.concat(" -d ."));
+		newOptions = newOptions.concat(" -d .");
 	}
 	if (newOptions.indexOf(" -Xlint") < 0) {
-		options.setCompilerOptions(newOptions.concat(" -Xlint"));
+		newOptions = newOptions.concat(" -Xlint");
+	}
+	if (classLibraries != null) {
+		List<String> filteredLibs = new ArrayList<>();
+		for (String lib : classLibraries) {
+			if (!lib.startsWith(jdkRootDirPath.toString())) // this can fail if jdkRootDirPath is a symlink
+				filteredLibs.add(lib);
+		}
+		if (!filteredLibs.isEmpty()) {
+			newOptions = newOptions
+					.concat(" -classpath ")
+					.concat(String.join(File.pathSeparator, filteredLibs.toArray(new String[filteredLibs.size()])));
+		}
 	}
 	String testName = testName();
 	Iterator compilers = javacCompilers.iterator();
@@ -81,7 +94,7 @@ protected void runJavac(
 					sourceFileNames[j] = testFiles[i];
 				}
 				// compile
-				long compilerResult = compiler.compile(javacOutputDirectory, options.getCompilerOptions() /* options */, sourceFileNames, compilerLog);
+				long compilerResult = compiler.compile(javacOutputDirectory, newOptions /* options */, sourceFileNames, compilerLog);
 				// check cumulative javac results
 				// WORK need to use a per compiler approach
 				if (! testName.equals(javacTestName)) {
@@ -127,8 +140,10 @@ protected void runJavac(
 			String output = null;
 			String err = null;
 			try {
+				String className = testFiles[0].substring(0, testFiles[0].length() - 5);
 				if ((expectedOutputString != null || expectedErrorString != null) &&
-						!javacTestErrorFlag && mismatch == 0 && sourceFileNames != null) {
+						!javacTestErrorFlag && mismatch == 0 && sourceFileNames != null &&
+						!className.endsWith(PACKAGE_INFO_NAME) && !className.endsWith(MODULE_INFO_NAME)) {
 					JavaRuntime runtime = JavaRuntime.runtimeFor(compiler);
 					StringBuffer stderr = new StringBuffer();
 					StringBuffer stdout = new StringBuffer();
@@ -144,7 +159,7 @@ protected void runJavac(
 							vmOptions = buffer.toString();
 						}
 					}
-					runtime.execute(javacOutputDirectory, vmOptions, testFiles[0].substring(0, testFiles[0].length() - 5), stdout, stderr);
+					runtime.execute(javacOutputDirectory, vmOptions, className, stdout, stderr);
 					if (expectedOutputString != null /* null skips output test */) {
 						output = stdout.toString().trim();
 						if (!expectedOutputString.equals(output)) {
