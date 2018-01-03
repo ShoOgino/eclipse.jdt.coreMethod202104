@@ -1,0 +1,44 @@
+	public void testPatchModule2() throws CoreException, IOException {
+		if (!isJRE9) return;
+		try {
+			IClasspathAttribute[] attributes = {
+					JavaCore.newClasspathAttribute(IClasspathAttribute.MODULE, "true"),
+					JavaCore.newClasspathAttribute(IClasspathAttribute.PATCH_MODULE, "java.base")
+			};
+			IJavaProject patchProject = createJava9ProjectWithJREAttributes("org.astro.patch", new String[]{"src", "src2"}, attributes);
+
+			String[] patchSources = {
+				"src/org/astro/Test2.java",
+				"package org.astro;\n" +
+				"class Test2 {\n" +
+				"	int test(jdk.internal.misc.Unsafe unsafe) {\n" +
+				"		return unsafe.addressSize();\n" +
+				"	}\n" +
+				"}\n",
+				"src2/jdk/internal/misc/Test3.java",
+				"package jdk.internal.misc;\n" +
+				"class Test3 {\n" +
+				"	Signal.NativeHandler handler;\n" + // package access
+				"}\n"
+			};
+			createSourceFiles(patchProject, patchSources);
+			
+			getWorkspace().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			
+			attributes = new IClasspathAttribute[] {
+				JavaCore.newClasspathAttribute(IClasspathAttribute.MODULE, "true"),
+			};
+			setJRECPAttributes(patchProject, attributes);
+			
+			getWorkspace().build(IncrementalProjectBuilder.AUTO_BUILD, null);
+
+			IMarker[] markers = patchProject.getProject().findMarkers(null, true, IResource.DEPTH_INFINITE);
+			assertMarkers("Unexpected markers",
+					"The type jdk.internal.misc.Unsafe is not accessible\n" + 
+					"Signal cannot be resolved to a type",
+					markers);
+		} finally {
+			this.deleteProject("org.astro.patch");
+		}
+	}
+

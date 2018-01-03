@@ -1,0 +1,58 @@
+	// testing auto rebuild after change of limit-modules
+	public void testLimitModules3() throws CoreException, IOException {
+		if (!isJRE9) return;
+		try {
+			IClasspathAttribute[] attributes = {
+					JavaCore.newClasspathAttribute(IClasspathAttribute.MODULE, "true"),
+					JavaCore.newClasspathAttribute(IClasspathAttribute.LIMIT_MODULES, "java.se") // test transitive closure
+			};
+			IJavaProject project = createJava9ProjectWithJREAttributes("org.astro", new String[]{"src", "src2"}, attributes);
+
+			String[] sources = {
+				"src/module-info.java",
+				"module org.astro {\n" +
+				"	requires java.base;\n" +
+				"	requires java.desktop;\n" +
+				"	requires java.datatransfer;\n" +
+				"	requires java.sql;\n" +
+				"}\n",
+				"src/org/astro/Test2.java",
+				"package org.astro;\n" +
+				"class Test2 {\n" +
+				"	java.awt.Window window;\n" +
+				"}\n",
+				"src2/org/astro/Test3.java",
+				"package org.astro;\n" +
+				"class Test3 {\n" +
+				"	java.awt.datatransfer.Clipboard clippy;\n" +
+				"}\n"
+			};
+			createSourceFiles(project, sources);
+
+			getWorkspace().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			IMarker[] markers = project.getProject().findMarkers(null, true, IResource.DEPTH_INFINITE);
+			assertMarkers("Unexpected markers",
+					"",
+					markers);
+
+			IClasspathAttribute[] newLimits = {
+					JavaCore.newClasspathAttribute(IClasspathAttribute.MODULE, "true"),
+					JavaCore.newClasspathAttribute(IClasspathAttribute.LIMIT_MODULES, "java.base,java.sql") // no more awt etc
+			};
+			setJRECPAttributes(project, newLimits);
+
+			getWorkspace().build(IncrementalProjectBuilder.AUTO_BUILD, null);
+
+			markers = project.getProject().findMarkers(null, true, IResource.DEPTH_INFINITE);
+			Arrays.sort(markers, (a,b) -> a.getAttribute(IMarker.CHAR_START, 0) - b.getAttribute(IMarker.CHAR_START, 0));
+			assertMarkers("Unexpected markers",
+					"java.awt cannot be resolved to a type\n" + 
+					"java.awt cannot be resolved to a type\n" +
+					"java.desktop cannot be resolved to a module\n" + 
+					"java.datatransfer cannot be resolved to a module",
+					markers);
+		} finally {
+			this.deleteProject("org.astro");
+		}
+	}
+
