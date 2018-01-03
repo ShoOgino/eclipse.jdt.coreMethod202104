@@ -1,0 +1,67 @@
+	public void testAddExports_classFolder() throws CoreException, IOException {
+		if (!isJRE9) return;
+		try {
+			String[] sources = {
+				"src/module-info.java",
+				"module org.astro {\n" +
+				"	requires java.base;\n" +
+				"	requires java.desktop;\n" +
+				"	requires java.datatransfer;\n" +
+				"	requires java.sql;\n" +
+				"}\n",
+				"src/org/astro/Test2.java",
+				"package org.astro;\n" +
+				"public class Test2 {\n" +
+				"	java.awt.Window window;\n" +
+				"}\n",
+				"src2/org/astro/sub/Test3.java",
+				"package org.astro.sub;\n" +
+				"public class Test3 {\n" +
+				"	java.awt.datatransfer.Clipboard clippy;\n" +
+				"}\n"
+			};
+			IJavaProject project = setupModuleProject("org.astro", new String[] {"src", "src2"}, sources, null);
+
+			sources = new String[] {
+					"src/module-info.java",
+					"module test {\n" +
+					"	requires org.astro;\n" +
+					"}\n",
+					"src/test/Test.java",
+					"package test;\n" +
+					"class Test {\n" +
+					"	org.astro.Test2 t;\n" +
+					"	org.astro.sub.Test3 t3;\n" +
+					"}\n"
+				};
+			IClasspathAttribute[] attributes = {
+					JavaCore.newClasspathAttribute(IClasspathAttribute.MODULE, "true"),
+					JavaCore.newClasspathAttribute(IClasspathAttribute.ADD_EXPORTS, "org.astro/org.astro=test")
+			};
+			IClasspathEntry cp = JavaCore.newLibraryEntry(project.getProject().findMember("bin").getFullPath(), null,
+					null, null, attributes, false);
+			IJavaProject p2 = setupModuleProject("test", sources, new IClasspathEntry[] {cp});
+			getWorkspace().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			IMarker[] markers = p2.getProject().findMarkers(null, true, IResource.DEPTH_INFINITE);
+			assertMarkers("Unexpected markers",
+					"The type org.astro.sub.Test3 is not accessible",
+					markers);
+
+			IClasspathAttribute[] newAttrs = {
+					JavaCore.newClasspathAttribute(IClasspathAttribute.MODULE, "true"),
+					JavaCore.newClasspathAttribute(IClasspathAttribute.ADD_EXPORTS, "org.astro/org.astro=test:org.astro/org.astro.sub=test")
+			};
+			setCPAttributes(p2, newAttrs, cp);
+
+			getWorkspace().build(IncrementalProjectBuilder.AUTO_BUILD, null);
+
+			markers = p2.getProject().findMarkers(null, true, IResource.DEPTH_INFINITE);
+			assertMarkers("Unexpected markers",
+					"",
+					markers);
+		} finally {
+			this.deleteProject("org.astro");
+			this.deleteProject("test");
+		}
+	}
+
