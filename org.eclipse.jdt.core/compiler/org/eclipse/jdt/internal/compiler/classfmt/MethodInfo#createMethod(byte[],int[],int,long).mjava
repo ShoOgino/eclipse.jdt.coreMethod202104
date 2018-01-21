@@ -1,9 +1,9 @@
-public static MethodInfo createAnnotationMethod(byte classFileBytes[], int offsets[], int offset) {
-	MethodInfo methodInfo = new MethodInfo(classFileBytes, offsets, offset);
+public static MethodInfo createMethod(byte classFileBytes[], int offsets[], int offset, long version) {
+	MethodInfo methodInfo = new MethodInfo(classFileBytes, offsets, offset, version);
 	int attributesCount = methodInfo.u2At(6);
 	int readOffset = 8;
 	AnnotationInfo[] annotations = null;
-	Object defaultValue = null;
+	AnnotationInfo[][] parameterAnnotations = null;
 	TypeAnnotationInfo[] typeAnnotations = null;
 	for (int i = 0; i < attributesCount; i++) {
 		// check the name of each attribute
@@ -11,13 +11,9 @@ public static MethodInfo createAnnotationMethod(byte classFileBytes[], int offse
 		char[] attributeName = methodInfo.utf8At(utf8Offset + 3, methodInfo.u2At(utf8Offset + 1));
 		if (attributeName.length > 0) {
 			switch(attributeName[0]) {
-				case 'A':
-					if (CharOperation.equals(attributeName, AttributeNamesConstants.AnnotationDefaultName)) {
-						// readOffset + 6 so the offset is at the start of the 'member_value' entry
-						// u2 attribute_name_index + u4 attribute_length = + 6
-						AnnotationInfo info =
-							new AnnotationInfo(methodInfo.reference, methodInfo.constantPoolOffsets, readOffset + 6 + methodInfo.structOffset);
-						defaultValue = info.decodeDefaultValue();
+				case 'M' :
+					if (CharOperation.equals(attributeName, AttributeNamesConstants.MethodParametersName)) {
+						methodInfo.decodeMethodParameters(readOffset, methodInfo);
 					}
 					break;
 				case 'S' :
@@ -26,11 +22,16 @@ public static MethodInfo createAnnotationMethod(byte classFileBytes[], int offse
 					break;
 				case 'R' :
 					AnnotationInfo[] methodAnnotations = null;
+					AnnotationInfo[][] paramAnnotations = null;
 					TypeAnnotationInfo[] methodTypeAnnotations = null;
 					if (CharOperation.equals(attributeName, AttributeNamesConstants.RuntimeVisibleAnnotationsName)) {
 						methodAnnotations = decodeMethodAnnotations(readOffset, true, methodInfo);
 					} else if (CharOperation.equals(attributeName, AttributeNamesConstants.RuntimeInvisibleAnnotationsName)) {
 						methodAnnotations = decodeMethodAnnotations(readOffset, false, methodInfo);
+					} else if (CharOperation.equals(attributeName, AttributeNamesConstants.RuntimeVisibleParameterAnnotationsName)) {
+						paramAnnotations = decodeParamAnnotations(readOffset, true, methodInfo);
+					} else if (CharOperation.equals(attributeName, AttributeNamesConstants.RuntimeInvisibleParameterAnnotationsName)) {
+						paramAnnotations = decodeParamAnnotations(readOffset, false, methodInfo);
 					} else if (CharOperation.equals(attributeName, AttributeNamesConstants.RuntimeVisibleTypeAnnotationsName)) {
 						methodTypeAnnotations = decodeTypeAnnotations(readOffset, true, methodInfo);
 					} else if (CharOperation.equals(attributeName, AttributeNamesConstants.RuntimeInvisibleTypeAnnotationsName)) {
@@ -45,6 +46,26 @@ public static MethodInfo createAnnotationMethod(byte classFileBytes[], int offse
 							System.arraycopy(annotations, 0, newAnnotations, 0, length);
 							System.arraycopy(methodAnnotations, 0, newAnnotations, length, methodAnnotations.length);
 							annotations = newAnnotations;
+						}
+					} else if (paramAnnotations != null) {
+						int numberOfParameters = paramAnnotations.length;
+						if (parameterAnnotations == null) {
+							parameterAnnotations = paramAnnotations;
+						} else {
+							for (int p = 0; p < numberOfParameters; p++) {
+								int numberOfAnnotations = paramAnnotations[p] == null ? 0 : paramAnnotations[p].length;
+								if (numberOfAnnotations > 0) {
+									if (parameterAnnotations[p] == null) {
+										parameterAnnotations[p] = paramAnnotations[p];
+									} else {
+										int length = parameterAnnotations[p].length;
+										AnnotationInfo[] newAnnotations = new AnnotationInfo[length + numberOfAnnotations];
+										System.arraycopy(parameterAnnotations[p], 0, newAnnotations, 0, length);
+										System.arraycopy(paramAnnotations[p], 0, newAnnotations, length, numberOfAnnotations);
+										parameterAnnotations[p] = newAnnotations;
+									}
+								}
+							}
 						}
 					} else if (methodTypeAnnotations != null) {
 						if (typeAnnotations == null) {
@@ -64,16 +85,10 @@ public static MethodInfo createAnnotationMethod(byte classFileBytes[], int offse
 	}
 	methodInfo.attributeBytes = readOffset;
 
-	if (defaultValue != null) {
-		if (typeAnnotations != null)
-			return new AnnotationMethodInfoWithTypeAnnotations(methodInfo, defaultValue, annotations, typeAnnotations);
-		if (annotations != null) {
-			return new AnnotationMethodInfoWithAnnotations(methodInfo, defaultValue, annotations);
-		}
-		return new AnnotationMethodInfo(methodInfo, defaultValue);
-	}
 	if (typeAnnotations != null)
-		return new MethodInfoWithTypeAnnotations(methodInfo, annotations, null, typeAnnotations);
+		return new MethodInfoWithTypeAnnotations(methodInfo, annotations, parameterAnnotations, typeAnnotations);
+	if (parameterAnnotations != null)
+		return new MethodInfoWithParameterAnnotations(methodInfo, annotations, parameterAnnotations);
 	if (annotations != null)
 		return new MethodInfoWithAnnotations(methodInfo, annotations);
 	return methodInfo;

@@ -159,8 +159,27 @@ void cachePartsFrom(IBinaryType binaryType, boolean needFieldsAndMethods) {
 				}
 			}
 		}
-		if (this.environment.globalOptions.storeAnnotations)
-			setAnnotations(createAnnotations(binaryType.getAnnotations(), this.environment, missingTypeNames));
+		if (this.environment.globalOptions.storeAnnotations) {
+			setAnnotations(createAnnotations(binaryType.getAnnotations(), this.environment, missingTypeNames), false);
+		} else if (sourceLevel >= ClassFileConstants.JDK9 && isDeprecated() && binaryType.getAnnotations() != null) {
+			// prior to Java 9 all standard annotations were marker annotations, not needing to be stored,
+			// but since Java 9 we need more information from the @Deprecated annotation:
+			for (IBinaryAnnotation annotation : binaryType.getAnnotations()) {
+				if (annotation.isDeprecatedAnnotation()) {
+					AnnotationBinding[] annotationBindings = createAnnotations(new IBinaryAnnotation[] { annotation }, this.environment, missingTypeNames);
+					setAnnotations(annotationBindings, true); // force storing
+					for (ElementValuePair elementValuePair : annotationBindings[0].getElementValuePairs()) {
+						if (CharOperation.equals(elementValuePair.name, TypeConstants.FOR_REMOVAL)) {
+							if (elementValuePair.value instanceof BooleanConstant && ((BooleanConstant) elementValuePair.value).booleanValue()) {
+								this.tagBits |= TagBits.AnnotationTerminallyDeprecated;
+								markImplicitTerminalDeprecation(this);
+							}
+						}
+					}
+					break;
+				}
+			}
+		}
 		if (this.isAnnotationType())
 			scanTypeForContainerAnnotation(binaryType, missingTypeNames);
 	} finally {
