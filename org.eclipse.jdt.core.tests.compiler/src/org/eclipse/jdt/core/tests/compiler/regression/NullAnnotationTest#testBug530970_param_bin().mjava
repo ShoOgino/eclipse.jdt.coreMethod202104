@@ -1,0 +1,79 @@
+//apply null default to parameters:
+public void testBug530970_param_bin() {
+	Map customOptions = getCompilerOptions();
+	customOptions.put(JavaCore.COMPILER_NULLABLE_ANNOTATION_NAME, "annotation.Nullable");
+	customOptions.put(JavaCore.COMPILER_NONNULL_ANNOTATION_NAME, "annotation.NonNull");
+	customOptions.put(JavaCore.COMPILER_NONNULL_BY_DEFAULT_ANNOTATION_NAME, "annotation.NonNullByDefault");
+	customOptions.put(JavaCore.COMPILER_PB_DEAD_CODE, JavaCore.IGNORE);
+	runConformTestWithLibs(
+		new String[] {
+			"annotation/DefaultLocation.java",
+			"package annotation;\n" +
+			"\n" +
+			"public enum DefaultLocation {\n" +
+			"    PARAMETER, RETURN_TYPE, FIELD\n" +
+			"}\n" +
+			"",
+			"annotation/NonNull.java",
+			"package annotation;\n" +
+			"\n" +
+			"public @interface NonNull {\n" +
+			"}\n" +
+			"",
+			"annotation/NonNullByDefault.java",
+			"package annotation;\n" +
+			"\n" +
+			"import static annotation.DefaultLocation.*;\n" +
+			" \n" +
+			"public @interface NonNullByDefault {\n" +
+			"	DefaultLocation[] value() default { PARAMETER, RETURN_TYPE, FIELD };\n" +
+			"}\n" +
+			"",
+			"annotation/Nullable.java",
+			"package annotation;\n" +
+			"\n" +
+			"public @interface Nullable {\n" +
+			"}\n" +
+			"",
+		}, 
+		customOptions,
+		""
+	);
+	runConformTestWithLibs(
+		false,
+		new String[] {
+			"X.java",
+			"import annotation.*;\n" +
+			"@NonNullByDefault(DefaultLocation.PARAMETER)\n" +
+			"public class X {\n" +
+			"	Number test1(Number in) {\n" +
+			"		return null; // OK\n" +
+			"	}\n" +
+			"}\n"
+		},
+		customOptions,
+		"");
+	runNegativeTestWithLibs(
+		new String[] {
+			"Y.java",
+			"import annotation.*;\n" +
+			"public class Y {\n" +
+			"	@NonNull Number test(X x) {\n" +
+			"		return x.test1(null); // error at arg, unchecked at return\n" +
+			"	}\n" +
+			"}\n"
+		},
+		customOptions,
+		"----------\n" + 
+		"1. WARNING in Y.java (at line 4)\n" + 
+		"	return x.test1(null); // error at arg, unchecked at return\n" + 
+		"	       ^^^^^^^^^^^^^\n" + 
+		"Null type safety: The expression of type \'Number\' needs unchecked conversion to conform to \'@NonNull Number\'\n" + 
+		"----------\n" + 
+		"2. ERROR in Y.java (at line 4)\n" + 
+		"	return x.test1(null); // error at arg, unchecked at return\n" + 
+		"	               ^^^^\n" + 
+		"Null type mismatch: required \'@NonNull Number\' but the provided value is null\n" + 
+		"----------\n");
+}
+
