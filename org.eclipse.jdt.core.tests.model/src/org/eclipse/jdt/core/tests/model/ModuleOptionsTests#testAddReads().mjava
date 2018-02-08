@@ -1,0 +1,81 @@
+	public void testAddReads() throws CoreException, IOException {
+		if (!isJRE9) return;
+		String libPath = "externalLib/mod.one.jar";
+		try {
+			String[] sources = new String[] {
+					"src/module-info.java",
+					"module org.astro {\n" +
+					"	exports org.astro;\n" + 
+					"}",
+					"src/org/astro/World.java",
+					"package org.astro;\n" +
+					"public interface World {\n" +
+					"	public String name();\n" +
+					"}"
+			};
+			IJavaProject p = setupModuleProject("org.astro", sources);
+
+			String[] src1 = new String[] {
+					"src/module-info.java",
+					"module mod.one {\n" +
+					"	exports one.p;\n" +
+					"}\n",
+					"src/org/astro/World.java",
+					"package org.astro;\n" +
+					"public interface World { public String name(); }\n",
+					"src/one/p/C.java",
+					"package one.p;\n" +
+					"public class C implements org.astro.World {\n" +
+					"	public String name() {\n" +
+					"		return \"C\";\n" +
+					"	}\n" +
+					"}\n"
+			};
+			IJavaProject p1 = setupModuleProject("mod.one", src1);
+			getWorkspace().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			// jar-up without the required class, should be supplied by the other module
+			deleteFile("/mod.one/src/org/astro/World.java");
+			deleteFile("/mod.one/bin/org/astro/World.class");
+			File rootDir = new File(p1.getProject().findMember("bin").getLocation().toString());
+			Util.zip(rootDir, getExternalResourcePath(libPath));
+
+			String[] src2 = new String[] {
+				"src/module-info.java",
+				"module com.greetings {\n" +
+				"	requires mod.one;\n" +
+				"}",
+				"src/com/greetings/MyTest.java",
+				"package com.greetings;\n" +
+				"public class MyTest extends one.p.C {}"
+			};
+			IClasspathEntry dep1 = JavaCore.newProjectEntry(p.getPath(), null, false,
+															new IClasspathAttribute[] {new ClasspathAttribute("module", "true")},
+															false/*not exported*/);
+			IClasspathEntry dep2 = JavaCore.newLibraryEntry(new Path(getExternalResourcePath(libPath)), null, null, null,
+															new IClasspathAttribute[] {
+																	new ClasspathAttribute("module", "true"),
+																	new ClasspathAttribute(IClasspathAttribute.ADD_READS, "mod.one=org.astro")
+															},
+															false/*not exported*/);
+			IJavaProject p2 = setupModuleProject("com.greetings", src2, new IClasspathEntry[] { dep1, dep2 });
+			getWorkspace().build(IncrementalProjectBuilder.FULL_BUILD, null);
+			IMarker[] markers = p2.getProject().findMarkers(null, true, IResource.DEPTH_INFINITE);
+			assertMarkers("Unexpected markers",	"",  markers);
+			IClasspathAttribute[] attrs = new IClasspathAttribute[] {
+					JavaCore.newClasspathAttribute(IClasspathAttribute.MODULE, "true")
+			};
+			setCPAttributes(p2, attrs, dep2);
+			getWorkspace().build(IncrementalProjectBuilder.AUTO_BUILD, null);
+			markers = p2.getProject().findMarkers(null, true, IResource.DEPTH_INFINITE);
+			assertMarkers("Unexpected markers",	
+					"The project was not built since its build path is incomplete. Cannot find the class file for org.astro.World. Fix the build path then try building this project\n" + 
+					"The type org.astro.World cannot be resolved. It is indirectly referenced from required .class files",
+					markers);
+		} finally {
+			deleteExternalResource(libPath);
+			deleteProject("mod.one");
+			deleteProject("org.astro");
+			deleteProject("com.greetings");
+		}
+	}
+
