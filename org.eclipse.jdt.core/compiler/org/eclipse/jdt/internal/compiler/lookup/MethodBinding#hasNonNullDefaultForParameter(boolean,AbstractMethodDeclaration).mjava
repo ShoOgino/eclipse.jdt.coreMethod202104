@@ -1,0 +1,46 @@
+//pre: null annotation analysis is enabled
+public ParameterNonNullDefaultProvider hasNonNullDefaultForParameter(boolean useTypeAnnotations, AbstractMethodDeclaration srcMethod) {
+	int len = this.parameters.length;
+	boolean[] result = new boolean[len];
+	boolean trueFound = false;
+	boolean falseFound = false;
+	for (int i = 0; i < len; i++) {
+		int start = srcMethod == null || srcMethod.arguments == null || srcMethod.arguments.length == 0 ? -1
+				: srcMethod.arguments[i].declarationSourceStart;
+		int nonNullByDefaultValue = srcMethod != null && start >= 0
+				? srcMethod.scope.localNonNullByDefaultValue(start)
+				: 0;
+		if (nonNullByDefaultValue == 0) {
+			AnnotationBinding[][] parameterAnnotations = getParameterAnnotations();
+			if (parameterAnnotations != null) {
+				AnnotationBinding[] annotationBindings = parameterAnnotations[i];
+				for (AnnotationBinding annotationBinding : annotationBindings) {
+					ReferenceBinding annotationType = annotationBinding.getAnnotationType();
+					if (!annotationType.hasNullBit(TypeIds.BitNonNullByDefaultAnnotation)) {
+						continue;
+					}
+					nonNullByDefaultValue = getNonNullByDefaultValue(annotationBinding);
+					break;
+				}
+			}
+		}
+		boolean b;
+		if (nonNullByDefaultValue != 0) {
+			// parameter specific NNBD found
+			b = (nonNullByDefaultValue & Binding.DefaultLocationParameter) != 0;
+		} else {
+			b = hasNonNullDefaultFor(Binding.DefaultLocationParameter, useTypeAnnotations, srcMethod, start);
+		}
+		if (b) {
+			trueFound = true;
+		} else {
+			falseFound = true;
+		}
+		result[i] = b;
+	}
+		if (trueFound && falseFound) {
+			return new ParameterNonNullDefaultProvider.MixedProvider(result);
+		}
+		return trueFound ? ParameterNonNullDefaultProvider.TRUE_PROVIDER : ParameterNonNullDefaultProvider.FALSE_PROVIDER;
+	}
+
