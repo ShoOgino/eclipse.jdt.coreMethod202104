@@ -17,53 +17,101 @@
 		boolean aptEnabled = AptConfig.isEnabled(javaProj);
 		// test 1: make sure apt is disabled by default
 		assertEquals(false, aptEnabled);
-		final GeneratedSourceFolderManager gsfm = AptPlugin.getAptProject(javaProj).getGeneratedSourceFolderManager();
+		final GeneratedSourceFolderManager gsfm = AptPlugin.getAptProject(javaProj).getGeneratedSourceFolderManager(false);
+		final GeneratedSourceFolderManager testgsfm = AptPlugin.getAptProject(javaProj).getGeneratedSourceFolderManager(true);
 		IFolder srcFolder = gsfm.getFolder();
+		IFolder testSrcFolder = testgsfm.getFolder();
 		String folderName = srcFolder.getProjectRelativePath().toOSString();
+		String testFolderName = testSrcFolder.getProjectRelativePath().toOSString();
 		// test 2: apt is disabled, then folder should not exists 
 		assertEquals(srcFolder.exists(), false);
+		assertEquals(testSrcFolder.exists(), false);
+
 		// test 3: folder name has not been configured, then it should be the default.
 		// folder name should be the default name.
 		assertEquals(folderName, AptPreferenceConstants.DEFAULT_GENERATED_SOURCE_FOLDER_NAME);
+		assertEquals(testFolderName, AptPreferenceConstants.DEFAULT_GENERATED_TEST_SOURCE_FOLDER_NAME);
 		
 		// set folder name while apt is disabled
 		String newName = ".gensrcdir";
+		String newTestName = ".gentestsrcdir";
+
 		AptConfig.setGenSrcDir(javaProj, newName);
+		AptConfig.setGenTestSrcDir(javaProj, newTestName);
+		
 		srcFolder = gsfm.getFolder();
+		testSrcFolder = testgsfm.getFolder();
+
 		folderName = srcFolder.getProjectRelativePath().toOSString();
+		testFolderName = testSrcFolder.getProjectRelativePath().toOSString();
+
 		// test 4: apt still disabled but folder name changed, make sure the folder is not on disk.
 		assertEquals(false, srcFolder.exists());
+		assertEquals(false, testSrcFolder.exists());
+		
 		// test 5: make sure we got the new name
 		assertEquals(newName, folderName);
+		assertEquals(newTestName, testFolderName);
+
 		// test 6: make sure the source folder is not on the classpath.
 		assertEquals( false, isOnClasspath(javaProj, srcFolder.getFullPath()) );
+		assertEquals( false, isOnClasspath(javaProj, testSrcFolder.getFullPath()) );
 		
 		// enable apt
 		AptConfig.setEnabled(javaProj, true);
 		aptEnabled = AptConfig.isEnabled(javaProj);
 		// test 7: make sure it's enabled after we called the API to enable it. 
 		assertEquals(true, aptEnabled);
-		srcFolder = gsfm.getFolder();		
+		srcFolder = gsfm.getFolder();
+		testSrcFolder = testgsfm.getFolder();
+
 		folderName = srcFolder.getProjectRelativePath().toOSString();
+		testFolderName = testSrcFolder.getProjectRelativePath().toOSString();
+
 		// test 8: apt enabled, the source folder should be on disk
 		assertEquals(true, srcFolder.exists());
+		// generated test source folder should NOT exist, as the project has no test source folder
+		assertEquals(false, testSrcFolder.exists());
+		
 		// test 9: make sure the name matches
 		assertEquals(newName, folderName);
+		assertEquals(newTestName, testFolderName);
+
 		// test 10: apt is enabled, folder must be on classpath.
 		assertEquals( true, isOnClasspath(javaProj, srcFolder.getFullPath()) );
-		
+		// generated test source folder should NOT be on classpath, as the project has no test source folder
+		assertEquals( false, isOnClasspath(javaProj, testSrcFolder.getFullPath()) );
+
+		// test 11: now add a test source folder, generated test source folder should then exist and be on classpath
+		env.removePackageFragmentRoot(projectPath, "");
+		env.setOutputFolder(projectPath, "bin"); //$NON-NLS-1$ 
+		env.addPackageFragmentRoot( projectPath, "src" );
+		env.addPackageFragmentRoot(javaProj.getPath(), "src-tests", null, null,
+				"bin-tests", true);
+		fullBuild( javaProj.getProject().getFullPath() );
+		assertEquals(true, testSrcFolder.exists());
+		assertEquals(true, isOnClasspath(javaProj, testSrcFolder.getFullPath()) );
+
+
 		// now disable apt.
 		AptConfig.setEnabled(javaProj, false);
 		aptEnabled = AptConfig.isEnabled(javaProj);
 		// test 11: make sure it's disabled.
 		assertEquals(false, aptEnabled);
+
 		srcFolder = gsfm.getFolder();
+		testSrcFolder = testgsfm.getFolder();
+
 		folderName = srcFolder.getProjectRelativePath().toOSString();
+		testFolderName = testSrcFolder.getProjectRelativePath().toOSString();
 		// test 12: make sure we deleted the source folder when we disable apt
 		assertEquals(false, srcFolder.exists());
+		assertEquals(false, testSrcFolder.exists());
 		// test 13: make sure we didn't overwrite the configure folder name
 		assertEquals(newName, folderName);
+		assertEquals(newTestName, testFolderName);
 		// test 14: make sure we cleaned up the classpath.
 		assertEquals( false, isOnClasspath(javaProj, srcFolder.getFullPath()) );
+		assertEquals( false, isOnClasspath(javaProj, testSrcFolder.getFullPath()) );
 	}
 
