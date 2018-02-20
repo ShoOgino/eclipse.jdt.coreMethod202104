@@ -1,0 +1,41 @@
+	/**
+	 * Test for Bug 531382.
+	 *
+	 * We create {@link AbstractImageBuilder#MAX_AT_ONCE} sources (e.g. 2000 sources).
+	 *
+	 * A build participant generates one more source during the build.
+	 *
+	 * We expect that this generated source is also compiled after the build.
+	 * To check this we generate the source with an error for it, and we check for the error.
+	 */
+	public void testBug531382() throws Exception {
+		IFolder srcPackageFolder = env.getWorkspace().getRoot().getFolder(this.srcPackage);
+		assertTrue("package in source must exist", srcPackageFolder.exists());
+
+		for (int i = 0; i < AbstractImageBuilder.MAX_AT_ONCE; ++i) {
+			env.addClass(this.src, "p", "X" + i, "package p;\n public class X" + i + " {}");
+		}
+
+		final IFile generatedFile = srcPackageFolder.getFile("Generated.java");
+		final String contents = "package p;\n public class NameMismatch {}";
+
+		class GenerateBrokenSource extends BuildTestParticipant {
+			public void buildStarting(BuildContext[] files, boolean isBatch) {
+				if (files.length > 0 && !generatedFile.exists()) {
+					BuildContext context = files[0];
+					createFile(generatedFile, contents);
+					IFile[] generatedFiles = { generatedFile };
+					context.recordAddedGeneratedFiles(generatedFiles);
+				}
+			}
+		}
+		// Creating this sets the build participant singleton.
+		new GenerateBrokenSource();
+
+		assertFalse("source to be generated from build participant should not exist before build", generatedFile.exists());
+		fullBuild(this.project);
+		assertTrue("expected source to be generated from build participant", generatedFile.exists());
+
+		expectCompileProblem("The public type NameMismatch must be defined in its own file");
+	}
+
