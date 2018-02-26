@@ -1,0 +1,85 @@
+	private void handleJavadocTagAlignment(Javadoc node) {
+		// Lists of tag tokens: index 0 for tag name, index 1 for param name (may be null), the rest for description
+		List<List<Token>> javadocRootTags = new ArrayList<>();
+		List<TagElement> tagElements = node.tags();
+		for (TagElement tagElement : tagElements) {
+			String tagName = tagElement.getTagName();
+			if (tagName == null || tagName.length() <= 1)
+				continue;
+			int startIndex = tokenStartingAt(tagElement.getStartPosition());
+			int nodeEnd = tagElement.getStartPosition() + tagElement.getLength() - 1;
+			while (ScannerHelper.isWhitespace(this.ctm.charAt(nodeEnd)))
+				nodeEnd--;
+			int endIndex = tokenEndingAt(nodeEnd);
+
+			List<Token> tagTokens = new ArrayList<>();
+			tagTokens.add(this.ctm.get(startIndex));
+			if (!PARAM_TAGS.contains(tagName) || tagElement.fragments().isEmpty()
+					|| !(tagElement.fragments().get(0) instanceof SimpleName)) {
+				tagTokens.add(null);
+			}
+			for (int i = startIndex + 1; i <= endIndex; i++) {
+				tagTokens.add(this.ctm.get(i));
+			}
+			javadocRootTags.add(tagTokens);
+		}
+		
+		// indent is used temporarily, tokens that are actually first in line
+		// will have this changed to align (indent is reserved for code inside <pre> tags)
+		if (this.options.comment_align_tags_names_descriptions) {
+			int maxTagNameLength = 0;
+			int maxParamNameLength = 0;
+			for (List<Token> tagTokens : javadocRootTags) {
+				Token tagName = tagTokens.get(0);
+				Token paramName = tagTokens.get(1);
+				maxTagNameLength = Math.max(maxTagNameLength, this.tm.getLength(tagName, 0));
+				if (paramName != null)
+					maxParamNameLength = Math.max(maxParamNameLength, this.tm.getLength(paramName, 0));
+			}
+			int paramNameAlign = maxTagNameLength + 1;
+			int descriptionAlign = paramNameAlign;
+			if (maxParamNameLength > 0)
+				descriptionAlign += maxParamNameLength + 1;
+			for (List<Token> tagTokens : javadocRootTags) {
+				if (tagTokens.get(1) != null)
+					tagTokens.get(1).setIndent(paramNameAlign);
+				for (int i = 2; i < tagTokens.size(); i++)
+					tagTokens.get(i).setIndent(descriptionAlign);
+			}
+		} else if (this.options.comment_align_tags_descriptions_grouped) {
+			int groupStart = 0;
+			String groupTagName = null;
+			int descriptionAlign = 0;
+			for (int i = 0; i < javadocRootTags.size(); i++) {
+				List<Token> tagTokens = javadocRootTags.get(i);
+				String tagName = this.ctm.toString(tagTokens.get(0));
+				if (!tagName.equals(groupTagName)) {
+					for (int j = groupStart; j < i; j++) {
+						List<Token> tokens = javadocRootTags.get(j);
+						for (int k = 2; k < tokens.size(); k++)
+							tokens.get(k).setIndent(descriptionAlign);
+					}
+					groupStart = i;
+					groupTagName = tagName;
+					descriptionAlign = 0;
+				}
+				int indent = tagName.length() + 1;
+				if (tagTokens.get(1) != null)
+					indent += 1 + this.ctm.getLength(tagTokens.get(1), 0);
+				descriptionAlign = Math.max(descriptionAlign, indent);
+			}
+			for (int j = groupStart; j < javadocRootTags.size(); j++) {
+				List<Token> tokens = javadocRootTags.get(j);
+				for (int k = 2; k < tokens.size(); k++)
+					tokens.get(k).setIndent(descriptionAlign);
+			}
+		} else if (this.options.comment_indent_root_tags) {
+			for (List<Token> tagTokens : javadocRootTags) {
+				Token tagName = tagTokens.get(0);
+				int indent = this.ctm.getLength(tagName, 0) + 1;
+				for (int i = 2; i < tagTokens.size(); i++)
+					tagTokens.get(i).setIndent(indent);
+			}
+		}
+	}
+
