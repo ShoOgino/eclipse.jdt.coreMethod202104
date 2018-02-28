@@ -137,6 +137,7 @@
 				if ((indexLocation = index.getIndexLocation()) != null) {
 					indexPath = new Path(indexLocation.getCanonicalFilePath());
 				}
+				boolean hasModuleInfoClass = false;
 				for (Enumeration e = zip.entries(); e.hasMoreElements();) {
 					if (this.isCancelled) {
 						if (JobManager.VERBOSE)
@@ -149,11 +150,20 @@
 					String zipEntryName = ze.getName();
 					if (Util.isClassFileName(zipEntryName) && 
 							isValidPackageNameForClassOrisModule(zipEntryName)) {
+						hasModuleInfoClass |= zipEntryName.contains(TypeConstants.MODULE_INFO_NAME_STRING);
 						// index only classes coming from valid packages - https://bugs.eclipse.org/bugs/show_bug.cgi?id=293861
 						final byte[] classFileBytes = org.eclipse.jdt.internal.compiler.util.Util.getZipEntryByteContent(ze, zip);
 						JavaSearchDocument entryDocument = new JavaSearchDocument(ze, zipFilePath, classFileBytes, participant);
 						this.manager.indexDocument(entryDocument, participant, index, indexPath);
 					}
+				}
+				if (!hasModuleInfoClass) {
+					char[] autoModuleName = AutomaticModuleNaming.determineAutomaticModuleName(this.containerPath.toOSString());
+					final char[] contents = CharOperation.append(CharOperation.append(TypeConstants.AUTOMATIC_MODULE_NAME.toCharArray(), ':'), autoModuleName);
+					// adding only the automatic module entry here - can be extended in the future to include other fields.
+					ZipEntry ze = new ZipEntry(TypeConstants.AUTOMATIC_MODULE_NAME);
+					JavaSearchDocument entryDocument = new JavaSearchDocument(ze, zipFilePath, new String(contents).getBytes(Charset.defaultCharset()), participant);
+					this.manager.indexDocument(entryDocument, participant, index, indexPath);
 				}
 				if(this.forceIndexUpdate) {
 					this.manager.savePreBuiltIndex(index);
