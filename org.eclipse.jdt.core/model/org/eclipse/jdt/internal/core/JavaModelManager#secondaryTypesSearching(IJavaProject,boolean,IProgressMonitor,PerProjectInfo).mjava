@@ -2,7 +2,7 @@
 	 * Perform search request to get all secondary types of a given project.
 	 * If not waiting for indexes and indexing is running, will return types found in current built indexes...
 	 */
-	private Map secondaryTypesSearching(IJavaProject project, boolean waitForIndexes, IProgressMonitor monitor, final PerProjectInfo projectInfo) throws JavaModelException {
+	private static Map<String, Map<String, IType>> secondaryTypesSearching(IJavaProject project, boolean waitForIndexes, IProgressMonitor monitor, final PerProjectInfo projectInfo) throws JavaModelException {
 		if (VERBOSE || BasicSearchEngine.VERBOSE) {
 			StringBuffer buffer = new StringBuffer("JavaModelManager.secondaryTypesSearch("); //$NON-NLS-1$
 			buffer.append(project.getElementName());
@@ -12,15 +12,15 @@
 			Util.verbose(buffer.toString());
 		}
 
-		final Hashtable secondaryTypes = new Hashtable(3);
+		final Hashtable<String, Map<String, String>> secondaryTypesSearch = new Hashtable<>(3);
 		IRestrictedAccessTypeRequestor nameRequestor = new IRestrictedAccessTypeRequestor() {
 			@Override
 			public void acceptType(int modifiers, char[] packageName, char[] simpleTypeName, char[][] enclosingTypeNames, String path, AccessRestriction access) {
 				String key = packageName==null ? "" : new String(packageName); //$NON-NLS-1$
-				HashMap types = (HashMap) secondaryTypes.get(key);
-				if (types == null) types = new HashMap(3);
+				Map<String, String> types = secondaryTypesSearch.get(key);
+				if (types == null) types = new HashMap<>(3);
 				types.put(new String(simpleTypeName), path);
-				secondaryTypes.put(key, types);
+				secondaryTypesSearch.put(key, types);
 			}
 		};
 
@@ -41,16 +41,14 @@
 		new BasicSearchEngine().searchAllSecondaryTypeNames(allSourceFolders, nameRequestor, waitForIndexes, monitor);
 
 		// Build types from paths
-		Iterator packages = secondaryTypes.values().iterator();
-		while (packages.hasNext()) {
-			HashMap types = (HashMap) packages.next();
-			HashMap tempTypes = new HashMap(types.size());
-			Iterator names = types.entrySet().iterator();
-			while (names.hasNext()) {
-				Map.Entry entry = (Map.Entry) names.next();
-				String typeName = (String) entry.getKey();
-				String path = (String) entry.getValue();
-				names.remove();
+		final Hashtable<String, Map<String, IType>> secondaryTypes = new Hashtable<>(secondaryTypesSearch.size());
+		for (Entry<String, Map<String, String>> packageEntry : secondaryTypesSearch.entrySet()) {
+			String packageName = packageEntry.getKey();
+			Map<String, String> types = packageEntry.getValue();
+			Map<String, IType> tempTypes = new HashMap<>(types.size());
+			for (Entry<String, String> entry : types.entrySet()) {
+				String typeName = entry.getKey();
+				String path = entry.getValue();
 				if (org.eclipse.jdt.internal.core.util.Util.isJavaLikeFileName(path)) {
 					IFile file = ResourcesPlugin.getWorkspace().getRoot().getFile(new Path(path));
 					ICompilationUnit unit = JavaModelManager.createCompilationUnitFrom(file, null);
@@ -58,19 +56,19 @@
 					tempTypes.put(typeName, type);
 				}
 			}
-			types.putAll(tempTypes);
+			secondaryTypes.put(packageName, tempTypes);
 		}
 
 		// Store result in per project info cache if still null or there's still an indexing cache (may have been set by another thread...)
-		if (projectInfo.secondaryTypes == null || projectInfo.secondaryTypes.get(INDEXED_SECONDARY_TYPES) != null) {
+		if (projectInfo.secondaryTypes == null || projectInfo.indexingSecondaryCache != null) {
 			projectInfo.secondaryTypes = secondaryTypes;
 			if (VERBOSE || BasicSearchEngine.VERBOSE) {
 				System.out.print(Thread.currentThread() + "	-> secondary paths stored in cache: ");  //$NON-NLS-1$
 				System.out.println();
-				Iterator entries = secondaryTypes.entrySet().iterator();
+				Iterator<Entry<String, Map<String, IType>>> entries = secondaryTypes.entrySet().iterator();
 				while (entries.hasNext()) {
-					Map.Entry entry = (Map.Entry) entries.next();
-					String qualifiedName = (String) entry.getKey();
+					Entry<String, Map<String, IType>> entry = entries.next();
+					String qualifiedName = entry.getKey();
 					Util.verbose("		- "+qualifiedName+'-'+ entry.getValue()); //$NON-NLS-1$
 				}
 			}
