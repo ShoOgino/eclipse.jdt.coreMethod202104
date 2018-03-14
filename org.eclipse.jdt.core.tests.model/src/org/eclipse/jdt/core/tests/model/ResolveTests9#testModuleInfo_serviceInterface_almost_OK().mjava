@@ -1,27 +1,41 @@
-	public void testModuleInfo_serviceInterface_OK() throws CoreException {
+	public void testModuleInfo_serviceInterface_almost_OK() throws CoreException {
 		IFile modInfo = null;
 		IFolder testFolder = null;
+		IndexManager indexManager = JavaModelManager.getIndexManager();
 		try {
+			// block the index manager to ensure it's not ready when code select is performed:
+			indexManager.request(new IndexRequest(new Path("blocker"), indexManager) {
+				@Override
+				public boolean execute(IProgressMonitor progress) {
+					try {
+						while (!this.isCancelled)
+							Thread.sleep(1000);
+					} catch (InterruptedException e) { /* ignore */ }
+					return false;
+				}
+			});
 			testFolder = createFolder("/Resolve/src/test");
 			createFile(
 					"/Resolve/src/test/ITest.java",
-					"package test;\n" +
-					"public interface ITest {}\n");
+					"public interface ITest {}\n"); // missing package declaration
 			createFile(
 					"/Resolve/src/test/TestClass.java",
 					"public class TestClass implements ITest {}\n");
-		
+
 			this.wc = getWorkingCopy(
 					"/Resolve/src/module-info.java",
 					"module com.test {\n" +
 					"  provides test.ITest with test.TestClass;\n" +
 					"}\n");
-		
+
 			String str = this.wc.getSource();
 			String selection = "ITest";
 			int start = str.indexOf(selection);
 			int length = selection.length();
 		
+			// still, if we get here before indexes are ready,
+			// then OperationCanceledException will send us into SearchableEnvironment.findTypes(String, ISearchRequestor, int),
+			// which succeeds:
 			IJavaElement[] elements = this.wc.codeSelect(start, length);
 			assertElementsEqual(
 				"Unexpected elements",
@@ -33,6 +47,7 @@
 				deleteResource(modInfo);
 			if (testFolder != null)
 				deleteResource(testFolder);
+			indexManager.discardJobs("blocker");
 		}
 	}
 
