@@ -1,0 +1,42 @@
+    @Override
+	public ReferenceBinding downwardsProjection(Scope scope, TypeBinding[] mentionedTypeVariables) {
+		TypeBinding[] typeVariables = this.arguments;
+		if (typeVariables == null) return this; // How would that be possible?
+		
+		TypeBinding[] a_i_primes = new TypeBinding[typeVariables.length];
+		for (int i = 0, length = typeVariables.length; i < length; i++) {
+			TypeBinding a_i = typeVariables[i];
+			
+			// If Ai does not mention any restricted type variable, then Ai' = Ai.
+			int typeVariableKind = a_i.kind();
+			if (! a_i.mentionsAny(mentionedTypeVariables, -1)) {
+				a_i_primes[i] = a_i;
+			} else if (typeVariableKind != Binding.WILDCARD_TYPE) {
+				return null;
+			} else  { 
+				WildcardBinding wildcard = (WildcardBinding)a_i;
+				if (wildcard.boundKind() == Wildcard.EXTENDS) {
+					// Ai is an upper-bounded wildcard that mentions a restricted type variable,
+					TypeBinding u = wildcard.bound().downwardsProjection(scope, mentionedTypeVariables);
+					// then if the downward projection of the wildcard bound is U, then Ai' is a wildcard ? extends U;
+					if (u != null) {
+						// Ai' is a wildcard ? extends U.
+						a_i_primes[i] = this.environment().createWildcard(null, 0, u, null, Wildcard.EXTENDS);
+					} else {
+						// if the downward projection of the wildcard bound is undefined, then Ai' is undefined.
+						return null;
+					}
+				} else if (wildcard.boundKind() == Wildcard.SUPER) {
+					// If Ai is a lower-bounded wildcard that mentions a restricted type variable,
+					// then let L be the upward projection of the wildcard bound.
+					TypeBinding l = wildcard.bound().upwardsProjection(scope, mentionedTypeVariables);
+					//  Ai' is a wildcard ? super L.
+					a_i_primes[i] = this.environment().createWildcard(null, 0, l, null, Wildcard.SUPER);
+				} else {
+					return null;
+				}
+			}
+		}
+		return this.environment.createParameterizedType(this.type, a_i_primes, this.enclosingType);
+	}
+

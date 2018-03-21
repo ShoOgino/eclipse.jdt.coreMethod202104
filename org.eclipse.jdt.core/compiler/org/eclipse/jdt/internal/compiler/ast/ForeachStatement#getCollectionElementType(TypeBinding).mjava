@@ -1,0 +1,41 @@
+	private TypeBinding getCollectionElementType(TypeBinding collectionType) {
+		if (collectionType == null) return null;
+		
+		boolean isTargetJsr14 = this.scope.compilerOptions().targetJDK == ClassFileConstants.JDK1_4;
+		if (collectionType.isCapture()) {
+			TypeBinding upperBound = ((CaptureBinding)collectionType).firstBound;
+			if (upperBound != null && upperBound.isArrayType())
+				collectionType = upperBound; // partially anticipating the fix for https://bugs.openjdk.java.net/browse/JDK-8013843
+		}
+		if (collectionType.isArrayType()) { // for(E e : E[])
+			return ((ArrayBinding) collectionType).elementsType();
+		} else if (collectionType instanceof ReferenceBinding) {
+			ReferenceBinding iterableType = ((ReferenceBinding)collectionType).findSuperTypeOriginatingFrom(T_JavaLangIterable, false /*Iterable is not a class*/);
+			if (iterableType == null && isTargetJsr14) {
+				iterableType = ((ReferenceBinding)collectionType).findSuperTypeOriginatingFrom(T_JavaUtilCollection, false /*Iterable is not a class*/);
+			}
+			if (iterableType == null) return null;
+
+			TypeBinding[] arguments = null;
+			switch (iterableType.kind()) {
+				case Binding.RAW_TYPE : // for(Object o : Iterable)
+					return this.scope.getJavaLangObject();
+
+				case Binding.GENERIC_TYPE : // for (T t : Iterable<T>) - in case used inside Iterable itself
+					arguments = iterableType.typeVariables();
+					break;
+
+				case Binding.PARAMETERIZED_TYPE : // for(E e : Iterable<E>)
+					arguments = ((ParameterizedTypeBinding)iterableType).arguments;
+					break;
+
+				default:
+					return null;
+			}
+			// generic or parameterized case
+			if (arguments.length != 1) return null; // per construction can only be one
+			return arguments[0];
+		}
+		return null;
+	}
+

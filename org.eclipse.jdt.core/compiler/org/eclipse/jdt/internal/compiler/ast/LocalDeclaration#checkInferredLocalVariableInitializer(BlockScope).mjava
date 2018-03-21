@@ -1,0 +1,31 @@
+	/*
+	 * Checks the initializer for simple errors, and reports an error as needed. If error is found,
+	 * returns a reasonable match for further type checking.
+	 */
+	private TypeBinding checkInferredLocalVariableInitializer(BlockScope scope) {
+		TypeBinding errorType = null;
+		if (this.initialization instanceof ArrayInitializer) {
+			scope.problemReporter().varLocalCannotBeArrayInitalizers(this);
+			errorType = scope.createArrayType(scope.getJavaLangObject(), 1); // Treat as array of anything
+		} else {
+			// Catch-22: isPolyExpression() is not reliable BEFORE resolveType, so we need to peek to suppress the errors
+			Expression polyExpression = findPolyExpression(this.initialization);
+			if (polyExpression instanceof ReferenceExpression) {
+				scope.problemReporter().varLocalCannotBeMethodReference(this);
+				errorType = TypeBinding.NULL;
+			} else if (polyExpression != null) { // Should be instanceof LambdaExpression, but this is safer
+				scope.problemReporter().varLocalCannotBeLambda(this);
+				errorType = TypeBinding.NULL;
+			}
+		}
+		if (this.type.dimensions() > 0 || this.type.extraDimensions() > 0) {
+			scope.problemReporter().varLocalCannotBeArray(this);
+			errorType = scope.createArrayType(scope.getJavaLangObject(), 1); // This is just to quell some warnings
+		}
+		if ((this.bits & ASTNode.IsAdditionalDeclarator) != 0) {
+			scope.problemReporter().varLocalMultipleDeclarators(this);
+			errorType = this.initialization.resolveType(scope);
+		}
+		return errorType;
+	}
+
