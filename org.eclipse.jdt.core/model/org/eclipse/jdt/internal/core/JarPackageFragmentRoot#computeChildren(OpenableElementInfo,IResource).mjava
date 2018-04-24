@@ -6,6 +6,7 @@
 	@Override
 	protected boolean computeChildren(OpenableElementInfo info, IResource underlyingResource) throws JavaModelException {
 		final HashtableOfArrayToObject rawPackageInfo = new HashtableOfArrayToObject();
+		final Set<String> overridden = new HashSet<>();
 		IJavaElement[] children;
 		try {
 			// always create the default package
@@ -42,15 +43,28 @@
 			// contain an up-to-date entry for this .jar) then fetch it directly from the .jar
 			if (!usedIndex) {
 				Object file = JavaModel.getTarget(getPath(), true);
-				long level = Util.getJdkLevel(file);
-				String compliance = CompilerOptions.versionFromJdkLevel(level);
+				long classLevel = Util.getJdkLevel(file);
+				String projectCompliance = this.getJavaProject().getOption(JavaCore.COMPILER_COMPLIANCE, true);
+				long projectLevel = CompilerOptions.versionToJdkLevel(projectCompliance);
 				ZipFile jar = null;
 				try {
 					jar = getJar();
-
+					String version = "META-INF/versions/" + projectCompliance + "/";  //$NON-NLS-1$//$NON-NLS-2$
+					int versionPathLength = version.length();
+					if (projectLevel >= ClassFileConstants.JDK9 && jar.getEntry(version) != null) {
+						this.multiVersion = true;
+						this.versionPath = version;
+					}
 					for (Enumeration e= jar.entries(); e.hasMoreElements();) {
 						ZipEntry member= (ZipEntry) e.nextElement();
-						initRawPackageInfo(rawPackageInfo, member.getName(), member.isDirectory(), compliance);
+						String name = member.getName();
+						if (this.multiVersion && name.length() > versionPathLength && name.startsWith(version)) {
+							name = name.substring(version.length());
+							if (org.eclipse.jdt.internal.compiler.util.Util.isClassFileName(name)) {
+								overridden.add(name);
+							}
+						}
+						initRawPackageInfo(rawPackageInfo, name, member.isDirectory(), CompilerOptions.versionFromJdkLevel(classLevel));
 					}
 				}  finally {
 					JavaModelManager.getJavaModelManager().closeZipFile(jar);
@@ -79,6 +93,7 @@
 
 		info.setChildren(children);
 		((JarPackageFragmentRootInfo) info).rawPackageInfo = rawPackageInfo;
+		((JarPackageFragmentRootInfo) info).overriddenClasses = overridden;
 		return true;
 	}
 
