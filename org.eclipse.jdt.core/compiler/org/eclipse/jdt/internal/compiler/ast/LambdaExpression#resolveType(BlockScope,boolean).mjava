@@ -8,6 +8,7 @@
 	public TypeBinding resolveType(BlockScope blockScope, boolean skipKosherCheck) {
 		
 		boolean argumentsTypeElided = argumentsTypeElided();
+		boolean argumentsTypeVar = argumentsTypeVar(blockScope);
 		int argumentsLength = this.arguments == null ? 0 : this.arguments.length;
 		
 		if (this.constant != Constant.NotAConstant) {
@@ -16,7 +17,7 @@
 			if (this.original == this)
 				this.ordinal = recordFunctionalType(blockScope);
 			
-			if (!argumentsTypeElided) {
+			if (!argumentsTypeElided && !argumentsTypeVar) {
 				for (int i = 0; i < argumentsLength; i++)
 					this.argumentTypes[i] = this.arguments[i].type.resolveType(blockScope, true /* check bounds*/);
 			}
@@ -49,7 +50,7 @@
 			int parametersLength = this.descriptor.parameters.length;
 			if (parametersLength != argumentsLength) {
             	this.scope.problemReporter().lambdaSignatureMismatched(this);
-            	if (argumentsTypeElided || this.original != this) // no interest in continuing to error check copy.
+            	if (argumentsTypeElided || argumentsTypeVar || this.original != this) // no interest in continuing to error check copy.
             		return this.resolvedType = null; // FUBAR, bail out ...
             	else {
             		this.resolvedType = null; // continue to type check.
@@ -74,7 +75,7 @@
 			
 			TypeBinding argumentType;
 			final TypeBinding expectedParameterType = haveDescriptor && i < this.descriptor.parameters.length ? this.descriptor.parameters[i] : null;
-			argumentType = argumentsTypeElided ? expectedParameterType : this.argumentTypes[i];
+			argumentType = (argumentsTypeElided || argumentsTypeVar) ? expectedParameterType : this.argumentTypes[i];
 			if (argumentType == null) {
 				argumentsHaveErrors = true;
 			} else if (argumentType == TypeBinding.VOID) {
@@ -89,7 +90,7 @@
 				}
 			}
 		}
-		if (!argumentsTypeElided && !argumentsHaveErrors) {
+		if (!argumentsTypeElided && !argumentsTypeVar && !argumentsHaveErrors) {
 			ReferenceBinding groundType = null;
 			ReferenceBinding expectedSAMType = null;
 			if (this.expectedType instanceof IntersectionTypeBinding18)
@@ -124,7 +125,7 @@
 			Argument argument = this.arguments[i];
 			TypeBinding argumentType;
 			final TypeBinding expectedParameterType = haveDescriptor && i < this.descriptor.parameters.length ? this.descriptor.parameters[i] : null;
-			argumentType = argumentsTypeElided ? expectedParameterType : this.argumentTypes[i];
+			argumentType = (argumentsTypeElided || argumentsTypeVar) ? expectedParameterType : this.argumentTypes[i];
 			if (argumentType != null && argumentType != TypeBinding.VOID) {
 				if (haveDescriptor && expectedParameterType != null && argumentType.isValidBinding() && TypeBinding.notEquals(argumentType, expectedParameterType)) {
 					if (expectedParameterType.isProperType(true)) {
@@ -161,7 +162,7 @@
 				this.binding.setParameterAnnotations(parameterAnnotations);
 		}
 	
-		if (!argumentsTypeElided && !argumentsHaveErrors && this.binding.isVarargs()) {
+		if (!argumentsTypeElided && !argumentsTypeVar && !argumentsHaveErrors && this.binding.isVarargs()) {
 			if (!this.binding.parameters[this.binding.parameters.length - 1].isReifiable()) {
 				this.scope.problemReporter().possibleHeapPollutionFromVararg(this.arguments[this.arguments.length - 1]);
 			}
@@ -191,7 +192,7 @@
 		} // TODO (stephan): else? (can that happen?)
 
 		if (haveDescriptor && !argumentsHaveErrors && blockScope.compilerOptions().isAnnotationBasedNullAnalysisEnabled) {
-			if (!argumentsTypeElided) {
+			if (!argumentsTypeElided && !argumentsTypeVar) {
 				AbstractMethodDeclaration.createArgumentBindings(this.arguments, this.binding, this.scope); // includes validation
 				// no application of null-ness default, hence also no warning regarding redundant null annotation
 				mergeParameterNullAnnotations(blockScope);
