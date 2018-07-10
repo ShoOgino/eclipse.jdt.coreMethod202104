@@ -1,6 +1,6 @@
 	void runNegativeModuleTest(String[] testFiles, String commandLine,
 			String expectedFailureOutOutputString, String expectedFailureErrOutputString,
-			boolean shouldFlushOutputDirectory, String javacErrorMatch, String output)
+			boolean shouldFlushOutputDirectory, String javacErrorMatch, String output, JavacTestOptions options)
 	{
 		this.runNegativeTest(testFiles, commandLine, expectedFailureOutOutputString, expectedFailureErrOutputString, shouldFlushOutputDirectory);
 		if (RUN_JAVAC) {
@@ -15,8 +15,11 @@
 				JavacCompiler javacCompiler = (JavacCompiler) comp;
 				if (javacCompiler.compliance < ClassFileConstants.JDK9)
 					continue;
+				JavacTestOptions.Excuse excuse = options.excuseFor(javacCompiler);
+
 				commandLine = adjustForJavac(commandLine);
 				StringBuffer log = new StringBuffer();
+				int mismatch = 0;
 				try {
 					long compileResult = javacCompiler.compile(
 											outputDir, /* directory */
@@ -24,17 +27,20 @@
 											testFileNames /* source file names */,
 											log);
 					if (compileResult == 0) {
+						mismatch = JavacTestOptions.MismatchType.EclipseErrorsJavacNone;
+						javacErrorMatch = expectedFailureErrOutputString;
 						System.err.println("Previous error was from "+testName());
-						fail(testName()+": Unexpected success from javac");
-					}
-					if (!log.toString().contains(javacErrorMatch)) {
+					} else if (!log.toString().contains(javacErrorMatch)) {
+						mismatch = JavacTestOptions.MismatchType.CompileErrorMismatch;
 						System.err.println(testName()+": Error match " + javacErrorMatch + " not found in \n"+log.toString());
-						fail("Expected error match not found: "+javacErrorMatch);
 					}
 				} catch (IOException | InterruptedException e) {
 					e.printStackTrace();
 					throw new AssertionFailedError(e.getMessage());
 				}
+				handleMismatch(javacCompiler, testName(), testFiles, javacErrorMatch,
+						"", "", log, "", "",
+						excuse, mismatch);
 				final Set<String> expectedFiles = new HashSet<>(outFiles);
 				walkOutFiles(output, expectedFiles, false);
 				for (String missingFile : expectedFiles)
