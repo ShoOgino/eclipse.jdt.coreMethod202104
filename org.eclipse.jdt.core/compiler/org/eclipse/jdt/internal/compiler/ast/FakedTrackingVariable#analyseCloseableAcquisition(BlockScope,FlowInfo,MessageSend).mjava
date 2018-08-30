@@ -1,0 +1,32 @@
+	/** 
+	 * Check if a message send acquires a closeable from its receiver, see:
+	 * Bug 463320 - [compiler][resource] potential "resource leak" problem disappears when local variable inlined
+	 */
+	public static FlowInfo analyseCloseableAcquisition(BlockScope scope, FlowInfo flowInfo, MessageSend acquisition) {
+		// client has checked that the resolvedType is an AutoCloseable, hence the following cast is safe:
+		if (((ReferenceBinding)acquisition.resolvedType).hasTypeBit(TypeIds.BitResourceFreeCloseable)) {
+			// remove unnecessary attempts (closeable is not relevant)
+			if (acquisition.closeTracker != null) {
+				acquisition.closeTracker.withdraw();
+				acquisition.closeTracker = null;
+			}
+			return flowInfo;
+		} else { // regular resource
+			FakedTrackingVariable tracker = acquisition.closeTracker;
+			if (tracker != null) {
+				// pre-connected tracker means: directly assigning the acquisition to a local, forget special treatment:
+				tracker.withdraw();
+				acquisition.closeTracker = null;
+				return flowInfo;
+			} else {
+				tracker = new FakedTrackingVariable(scope, acquisition, flowInfo, FlowInfo.UNKNOWN); // no local available, closeable is unassigned
+				acquisition.closeTracker = tracker;
+			}
+			tracker.acquisition = acquisition;
+			FlowInfo outsideInfo = flowInfo.copy();
+			outsideInfo.markAsDefinitelyNonNull(tracker.binding);
+			flowInfo.markAsDefinitelyNull(tracker.binding);
+			return FlowInfo.conditional(outsideInfo, flowInfo);
+		}
+	}
+
