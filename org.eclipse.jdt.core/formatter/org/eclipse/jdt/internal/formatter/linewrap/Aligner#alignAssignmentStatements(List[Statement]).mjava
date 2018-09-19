@@ -1,0 +1,30 @@
+	private void alignAssignmentStatements(List<Statement> statements) {
+		List<List<ExpressionStatement>> assignmentGroups = toAlignGroups(statements,
+				n -> optionalCast(n, ExpressionStatement.class)
+						.filter(es -> es.getExpression() instanceof Assignment));
+		this.alignGroups.addAll(assignmentGroups);
+
+		AlignIndexFinder<ExpressionStatement> assignFinder = es -> {
+			Assignment a = (Assignment) es.getExpression();
+			int operatorIndex = this.tm.firstIndexBefore(a.getRightHandSide(), -1);
+			while (this.tm.get(operatorIndex).isComment())
+				operatorIndex--;
+			return Optional.of(operatorIndex);
+		};
+		assignmentGroups.forEach(ag -> alignNodes(ag, assignFinder));
+
+		if (this.options.align_with_spaces || this.options.tab_char != DefaultCodeFormatterOptions.TAB) {
+			// align assign operators on their right side (e.g. +=, >>=)
+			for (List<ExpressionStatement> group : assignmentGroups) {
+				List<Token> assignTokens = group.stream()
+						.map(assignFinder::findIndex)
+						.filter(Optional::isPresent)
+						.map(o -> this.tm.get(o.get()))
+						.collect(toList());
+				int maxWidth = assignTokens.stream().mapToInt(Token::countChars).max().orElse(0);
+				for (Token token : assignTokens)
+					token.setAlign(token.getAlign() + maxWidth - token.countChars());
+			}
+		}
+	}
+

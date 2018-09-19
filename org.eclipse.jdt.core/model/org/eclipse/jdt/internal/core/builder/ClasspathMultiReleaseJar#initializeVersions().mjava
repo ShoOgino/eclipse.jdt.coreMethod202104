@@ -1,9 +1,13 @@
 	private void initializeVersions() {
 		Path filePath = Paths.get(this.zipFilename);
 		if (Files.exists(filePath)) {
-			URI uri = URI.create("jar:" + filePath.toUri());  //$NON-NLS-1$
+			URI uri = URI.create("jar:" + filePath.toUri()); //$NON-NLS-1$
 			try {
-				this.fs = FileSystems.getFileSystem(uri);
+				try {
+					this.fs = FileSystems.getFileSystem(uri);
+				} catch (FileSystemNotFoundException e) {
+					// move on
+				}
 				if (this.fs == null) {
 					HashMap<String, ?> env = new HashMap<>();
 					this.fs = FileSystems.newFileSystem(uri, env);
@@ -13,17 +17,25 @@
 			} catch (IOException e) {
 				// move on
 			}
-			if (this.fs == null) {
-				this.releasePath = null;
-			} else {
-				this.releasePath = this.fs.getPath("/", "META-INF", "versions", this.compliance); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
-				if (!Files.exists(this.releasePath)) {
-					this.releasePath = null;
-					try {
-						this.fs.close();
-					} catch (IOException e) {
-						// ignore
-					}
+			if (this.fs == null)
+				return;
+			this.rootPath = this.fs.getPath("/"); //$NON-NLS-1$
+			int earliestJavaVersion = ClassFileConstants.MAJOR_VERSION_9;
+			long latestJDK = CompilerOptions.versionToJdkLevel(this.compliance);
+			int latestJavaVer = (int) (latestJDK >> 16);
+			List<Path> versions = new ArrayList<>();
+			for (int i = latestJavaVer; i >= earliestJavaVersion; i--) {
+				Path path = this.fs.getPath("/", "META-INF", "versions", "" + (i - 44)); //$NON-NLS-1$//$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+				if (Files.exists(path)) {
+					versions.add(this.rootPath.relativize(path));
+				}
+			}
+			this.supportedVersions = versions.toArray(new Path[versions.size()]);
+			if (this.supportedVersions.length <= 0) {
+				try {
+					this.fs.close();
+				} catch (IOException e) {
+					// ignore
 				}
 			}
 		}
