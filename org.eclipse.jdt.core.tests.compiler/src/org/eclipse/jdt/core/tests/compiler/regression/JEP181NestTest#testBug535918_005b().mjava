@@ -1,0 +1,49 @@
+//nestmate sibling constructor call - no synthetic and appropriate call site params
+public void testBug535918_005b() throws Exception {
+	Map<String, String> options = getCompilerOptions();
+	options.put(CompilerOptions.OPTION_Source, CompilerOptions.VERSION_11);
+	options.put(CompilerOptions.OPTION_TargetPlatform, CompilerOptions.VERSION_11);
+
+	this.runConformTest(
+			new String[] {
+					"pack1/X.java",
+					"package pack1;\n" +
+					"public class X {\n" +
+					"	class Z {\n" +
+					"		private Z() {\n" +
+					"		}\n" +
+					"	}\n" +
+					"	class Y {\n" +
+					"		Z d;\n" +
+					"		private Y() {\n" +
+					"			this.d = new Z();\n" +
+					"		}\n" +
+					"	}\n" +
+					"	@Override\n" +
+					"	public String toString() {\n" +
+					"		return \"SUCCESS\";\n" +
+					"	}\n" +
+					"  public static void main(String[] argv) {\n" +
+					"    System.out.println(new X());\n" +
+					"  }\n" +
+					"}\n",
+			},
+			"SUCCESS",
+			options
+	);
+
+	String XFile = getClassFileContents("pack1/X.class", ClassFileBytesDisassembler.SYSTEM);
+	String XYFile = getClassFileContents("pack1/X$Y.class", ClassFileBytesDisassembler.SYSTEM);
+	String XZFile = getClassFileContents("pack1/X$Z.class", ClassFileBytesDisassembler.SYSTEM);
+	String partialOutput = "Nest Members:\n" + 
+			"   #38 pack1/X$Y,\n" + 
+			"   #41 pack1/X$Z";
+	verifyOutputPositive(XFile, partialOutput);
+	verifyOutputPositive(XYFile, "Nest Host: #30 pack1/X");
+	verifyOutputPositive(XZFile, "Nest Host: #22 pack1/X");
+	verifyOutputPositive(XYFile, "invokespecial pack1.X$Z(pack1.X)"); //only one param
+
+	verifyOutputNegative(XZFile, "synthetic X$Z");
+	verifyOutputNegative(XYFile, "invokespecial pack1.X$Z(pack1.X$Y, pack1.X$Z)");
+}
+
