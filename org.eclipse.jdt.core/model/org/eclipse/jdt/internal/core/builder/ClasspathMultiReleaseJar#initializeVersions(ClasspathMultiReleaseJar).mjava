@@ -1,47 +1,26 @@
 	private static synchronized void initializeVersions(ClasspathMultiReleaseJar jar) {
-		Path filePath = Paths.get(jar.zipFilename);
-		try {
-			if (Files.exists(filePath)) {
-				URI uri = URI.create("jar:" + filePath.toUri()); //$NON-NLS-1$
-				try {
-					try {
-						jar.fs = FileSystems.getFileSystem(uri);
-					} catch (FileSystemNotFoundException e) {
-						// move on
-					}
-					if (jar.fs == null) {
-						jar.fs = FileSystems.newFileSystem(uri, new HashMap<>());
-					}
-				} catch (IllegalArgumentException | FileSystemNotFoundException | ProviderNotFoundException
-						| FileSystemAlreadyExistsException | IOException | SecurityException e) {
-					Util.log(e, "Failed to initialize versions for: " + jar);  //$NON-NLS-1$
-					jar.supportedVersions = new Path[0];
-				}
-				if (jar.fs == null) {
-					return;
-				}
-				jar.rootPath = jar.fs.getPath("/"); //$NON-NLS-1$
-				int earliestJavaVersion = ClassFileConstants.MAJOR_VERSION_9;
-				long latestJDK = CompilerOptions.versionToJdkLevel(jar.compliance);
-				int latestJavaVer = (int) (latestJDK >> 16);
-				List<Path> versions = new ArrayList<>();
-				for (int i = latestJavaVer; i >= earliestJavaVersion; i--) {
-					Path path = jar.fs.getPath("/", "META-INF", "versions", "" + (i - 44)); //$NON-NLS-1$//$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
-					if (Files.exists(path)) {
-						versions.add(jar.rootPath.relativize(path));
-					}
-				}
-				jar.supportedVersions = versions.toArray(new Path[versions.size()]);
+		if (jar.zipFile == null) {
+			if (org.eclipse.jdt.internal.core.JavaModelManager.ZIP_ACCESS_VERBOSE) {
+				System.out.println("(" + Thread.currentThread() + ") [ClasspathMultiReleaseJar.initializeVersions(String)] Creating ZipFile on " + jar.zipFilename); //$NON-NLS-1$	//$NON-NLS-2$
 			}
-		} finally {
-			if ((jar.supportedVersions == null || jar.supportedVersions.length <= 0) 
-					&& (jar.fs != null && jar.fs.isOpen())) {
-				try {
-					jar.fs.close();
-				} catch (IOException e) {
-					// ignore
-				}
+			try {
+				jar.zipFile = new ZipFile(jar.zipFilename);
+			} catch (IOException e) {
+				return;
+			}
+			jar.closeZipFileAtEnd = true;
+		}
+		int earliestJavaVersion = ClassFileConstants.MAJOR_VERSION_9;
+		long latestJDK = CompilerOptions.versionToJdkLevel(jar.compliance);
+		int latestJavaVer = (int) (latestJDK >> 16);
+		List<String> versions = new ArrayList<>();
+		for (int i = latestJavaVer; i >= earliestJavaVersion; i--) {
+			String name = META_INF_VERSIONS+ (i - 44);
+			ZipEntry entry = jar.zipFile.getEntry(name);
+			if (entry != null) {
+				versions.add(name);
 			}
 		}
+		jar.supportedVersions = versions.toArray(new String[versions.size()]);
 	}
 
