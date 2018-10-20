@@ -1,5 +1,5 @@
 	// Given parent is visible in this module, see if there is sub package named name visible in this module
-	PackageBinding getVisiblePackage(PackageBinding parent, char[] name) {
+	PackageBinding getVisiblePackage(PackageBinding parent, char[] name, boolean considerRequiredModules) {
 		// check caches:
 		char[][] parentName = parent == null ? CharOperation.NO_CHAR_CHAR : parent.compoundName;
 		char[][] subPkgCompoundName = CharOperation.arrayConcat(parentName, name);
@@ -19,6 +19,7 @@
 		}
 
 		PackageBinding binding = null;
+		boolean packageMayBeIncomplete = !considerRequiredModules;
 		if (this.environment.useModuleSystem) {
 			IModuleAwareNameEnvironment moduleEnv = (IModuleAwareNameEnvironment) this.environment.nameEnvironment;
 			char[][] declaringModuleNames = moduleEnv.getModulesDeclaringPackage(parentName, name, nameForLookup());
@@ -26,19 +27,23 @@
 				if (!this.isUnnamed() && CharOperation.containsEqual(declaringModuleNames, this.moduleName)) {
 					// declared here, not yet known, so create it now:
 					binding = new PackageBinding(subPkgCompoundName, parent, this.environment, this);
-				} else {
+				} else if (considerRequiredModules) {
 					// visible but foreign (when current is unnamed or auto):
 					for (char[] declaringModuleName : declaringModuleNames) {
 						ModuleBinding declaringModule = this.environment.root.getModule(declaringModuleName);
-						if (declaringModule != null && !declaringModule.isPackageLookupActive) {
-							PackageBinding declaredPackage = declaringModule.getDeclaredPackage(parentName, name);
-							if (declaredPackage != null) {
-								// don't add foreign package to 'parent' (below), but to its own parent:
-								if (declaredPackage.parent != null)
-									declaredPackage.parent.addPackage(declaredPackage, declaringModule, true);
-								parent = null;
-								//
-								binding = SplitPackageBinding.combine(declaredPackage, binding, this);
+						if (declaringModule != null) {
+							if (declaringModule.isPackageLookupActive) {
+								packageMayBeIncomplete = true;
+							} else {
+								PackageBinding declaredPackage = declaringModule.getDeclaredPackage(parentName, name);
+								if (declaredPackage != null) {
+									// don't add foreign package to 'parent' (below), but to its own parent:
+									if (declaredPackage.parent != null)
+										declaredPackage.parent.addPackage(declaredPackage, declaringModule, true);
+									parent = null;
+									//
+									binding = SplitPackageBinding.combine(declaredPackage, binding, this);
+								}
 							}
 						}
 					}
@@ -50,11 +55,11 @@
 		}
 
 		// enrich with split-siblings from visible modules:
-		if (!isUnnamed()) {
+		if (!isUnnamed() && considerRequiredModules) {
 			binding = combineWithPackagesFromRequired(binding, subPkgCompoundName);
 		}
 		if (binding == null || !binding.isValidBinding()) {
-			if (parent != null)
+			if (parent != null && !packageMayBeIncomplete) // don't remember package that may still lack some siblings
 				parent.knownPackages.put(name, binding == null ? LookupEnvironment.TheNotFoundPackage : binding);
 			return null;
 		}
