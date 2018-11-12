@@ -1,0 +1,276 @@
+	@Override
+	public TypeBinding resolveType(BlockScope upperScope) {
+		try {
+			// JLS12 15.29.1
+			boolean isEnumSwitch = false;
+			boolean isStringSwitch = false;
+			TypeBinding expressionType = this.expression.resolveType(upperScope);
+			CompilerOptions compilerOptions = upperScope.compilerOptions();
+			
+			/* The type of the selector expression must be char, byte, short, int, Character, Byte, Short, Integer, String,
+			 * or an enum type (8.9), or a compile-time error occurs.
+			 */
+			if (expressionType != null) {
+				this.expression.computeConversion(upperScope, expressionType, expressionType);
+				checkType: {
+					if (!expressionType.isValidBinding()) {
+						expressionType = null; // fault-tolerance: ignore type mismatch from constants from hereon
+						break checkType;
+					} else if (expressionType.isBaseType()) {
+						if (this.expression.isConstantValueOfTypeAssignableToType(expressionType, TypeBinding.INT))
+							break checkType;
+						if (expressionType.isCompatibleWith(TypeBinding.INT))
+							break checkType;
+					} else if (expressionType.isEnum()) {
+						isEnumSwitch = true;
+						break checkType;
+					} else if (upperScope.isBoxingCompatibleWith(expressionType, TypeBinding.INT)) {
+						this.expression.computeConversion(upperScope, TypeBinding.INT, expressionType);
+						break checkType;
+					} else if (expressionType.id == TypeIds.T_JavaLangString) {
+						isStringSwitch = true;
+						break checkType;
+					}
+					upperScope.problemReporter().incorrectSwitchType(this.expression, expressionType);
+					expressionType = null; // fault-tolerance: ignore type mismatch from constants from hereon
+				}
+			}
+			if (isStringSwitch) {
+				// the secret variable should be created before iterating over the switch's statements that could
+				// create more locals. This must be done to prevent overlapping of locals
+				// See https://bugs.eclipse.org/bugs/show_bug.cgi?id=356002 [ref SwitchStatement]
+				this.dispatchStringCopy  = new LocalVariableBinding(SecretStringVariableName, upperScope.getJavaLangString(), ClassFileConstants.AccDefault, false);
+				upperScope.addLocalVariable(this.dispatchStringCopy);
+				this.dispatchStringCopy.setConstant(Constant.NotAConstant);
+				this.dispatchStringCopy.useFlag = LocalVariableBinding.USED;
+			}
+			
+			SwitchExprArm arms[] = this.exprArms;
+			if (arms == null || arms.length == 0) {
+				//	Report Error JLS 12 15.29.1  The switch block must not be empty.
+				upperScope.problemReporter().switchExpressionEmptySwitchBlock(this);
+				return null;
+			}
+
+			// At this point, this.exprArms.length > 0
+			this.scope = new BlockScope(upperScope);
+			LookupEnvironment env = this.scope.environment();
+
+			int length;
+			// collection of cases is too big but we will only iterate until caseCount
+			this.cases = new CaseStatement[length = this.exprArms.length];
+			if (!isStringSwitch) {
+				this.constants = new int[length];
+			} else {
+				this.stringConstants = new String[length];
+			}
+			int counter = 0;
+			for (int i = 0; i < length; i++) {
+				Constant constant1;
+				final SwitchExprArm arm = this.exprArms[i];
+				if ((constant1 = arm.resolveCase(this.scope, expressionType, this)) != Constant.NotAConstant) {
+					if (!isStringSwitch) {
+						int key = constant1.intValue();
+						//----check for duplicate case statement------------
+						for (int j = 0; j < counter; j++) {
+							if (this.constants[j] == key) {
+								reportDuplicateCase(arm.getLhs(), this.cases[j], length);
+							}
+						}
+						this.constants[counter++] = key;
+					} else {
+						String key = constant1.stringValue();
+						//----check for duplicate case statement------------
+						for (int j = 0; j < counter; j++) {
+							if (this.stringConstants[j].equals(key)) {
+								reportDuplicateCase(arm.getLhs(), this.cases[j], length);
+							}
+						}
+						this.stringConstants[counter++] = key;			
+					}
+				}
+			}
+			if (length != counter) { // resize constants array
+				if (!isStringSwitch) {
+					System.arraycopy(this.constants, 0, this.constants = new int[counter], 0, counter);
+				} else {
+					System.arraycopy(this.stringConstants, 0, this.stringConstants = new String[counter], 0, counter);
+				}
+			}
+
+			// check default case for all kinds of switch:
+			if (this.defaultCase == null) {
+				if (compilerOptions.getSeverity(CompilerOptions.MissingDefaultCase) == ProblemSeverities.Ignore) {
+					if (isEnumSwitch) {
+						upperScope.methodScope().hasMissingSwitchDefault = true;
+					}
+				}
+				// cannot ignore in SwitchExpressions - this is a compile-time error
+				if (!isEnumSwitch) // check for all cases of enum below and report if there an entry missing
+					upperScope.problemReporter().missingDefaultCase(this, false /* isEnumSwitch */, expressionType);
+			}
+			// for enum switch, check if all constants are accounted for (perhaps depending on existence of a default case)
+			if (isEnumSwitch) {
+				if (this.defaultCase == null || compilerOptions.reportMissingEnumCaseDespiteDefault) {
+					int constantCount = this.constants == null ? 0 : this.constants.length; // could be null if no case statement
+					if (constantCount == this.caseCount
+							&& this.caseCount != ((ReferenceBinding)expressionType).enumConstantCount()) {
+						FieldBinding[] enumFields = ((ReferenceBinding)expressionType.erasure()).fields();
+						for (int i = 0, max = enumFields.length; i <max; i++) {
+							FieldBinding enumConstant = enumFields[i];
+							if ((enumConstant.modifiers & ClassFileConstants.AccEnum) == 0) continue;
+							findConstant : {
+								for (int j = 0; j < this.caseCount; j++) {
+									if ((enumConstant.id + 1) == this.constants[j]) // zero should not be returned see bug 141810
+										break findConstant;
+								}
+								// enum constant did not get referenced from switch
+								boolean suppress = (this.defaultCase != null && (this.defaultCase.bits & DocumentedCasesOmitted) != 0);
+								if (!suppress) {
+									upperScope.problemReporter().missingEnumConstantCase(this, enumConstant);
+								}
+							}
+						}
+					}
+				}
+			}
+			// now we are done with case constants, let us collect the result expressions
+			collectResultExpressions();
+			
+			int resultExpressionsCount = this.resultExpressions != null ? this.resultExpressions.size() : 0;
+			if (resultExpressionsCount == 0) {
+				//  Report Error JLS 12 15.29.1 
+				// It is a compile-time error if a switch expression has no result expressions.
+				upperScope.problemReporter().switchExpressionNoResultExpressions(this);
+				return null;
+			}
+
+			//A switch expression is a poly expression if it appears in an assignment context or an invocation context (5.2, 5.3). 
+			//Otherwise, it is a standalone expression.
+			if (this.expressionContext == ASSIGNMENT_CONTEXT || this.expressionContext == INVOCATION_CONTEXT) {
+				for (Expression e : this.resultExpressions) {
+					//Where a poly switch expression appears in a context of a particular kind with target type T,
+					//its result expressions similarly appear in a context of the same kind with target type T.
+					e.setExpressionContext(this.expressionContext);
+					e.setExpectedType(this.expectedType);
+				}
+			}
+			
+			if (this.constant != Constant.NotAConstant) {
+				this.constant = Constant.NotAConstant;
+				this.originalValueResultExpressionTypes = new TypeBinding[resultExpressionsCount];
+				for (int i = 0; i < resultExpressionsCount; ++i) {
+					this.originalValueResultExpressionTypes[i] = this.resultExpressions.get(i).resolveType(this.scope);
+				}
+				// TODO: should we return if one of the types is null? to check
+			} else {
+				for (int i = 0; i < resultExpressionsCount; ++i) {
+					if (this.originalValueResultExpressionTypes[i].kind() == Binding.POLY_TYPE)
+						this.originalValueResultExpressionTypes[i] = this.resultExpressions.get(i).resolveType(this.scope);
+				}
+				// TODO: should we return if one of the types is null? to check
+			}
+			this.finalValueResultExpressionTypes = new TypeBinding[resultExpressionsCount];
+			for (int i = 0; i < resultExpressionsCount; ++i)
+				this.finalValueResultExpressionTypes[i] = this.originalValueResultExpressionTypes[i];
+			
+			if (isPolyExpression()) { //The type of a poly switch expression is the same as its target type.
+				if (this.expectedType == null || !this.expectedType.isProperType(true)) {
+					return new PolyTypeBinding(this);
+				}
+				return this.resolvedType = computeConversions(this.scope, this.expectedType) ? this.expectedType : null;
+			}
+			
+			if (resultExpressionsCount == 1)
+				return this.originalValueResultExpressionTypes[0];
+			
+			boolean typeUniformAcrossAllArms = true;
+			TypeBinding tmp = this.originalValueResultExpressionTypes[0];
+			for (int i = 1, l = this.originalValueResultExpressionTypes.length; i < l; ++i) {
+				if (TypeBinding.notEquals(tmp, this.originalValueResultExpressionTypes[i])) {
+					typeUniformAcrossAllArms = false;
+					break;
+				}
+			}
+			// If the result expressions all have the same type (which may be the null type), 
+			// then that is the type of the switch expression.
+			if (typeUniformAcrossAllArms) {
+				tmp = this.originalValueResultExpressionTypes[0];
+				for (int i = 0; i < resultExpressionsCount; ++i) {
+					tmp = NullAnnotationMatching.moreDangerousType(tmp, this.originalValueResultExpressionTypes[i]);
+				}
+				return this.resolvedType = tmp;
+			}
+			
+			boolean typeBbolean = true;
+			for (TypeBinding t : this.originalValueResultExpressionTypes) {
+				typeBbolean &= t.id == T_boolean || t.id == T_JavaLangBoolean;
+			}
+			/*
+			 * Otherwise, if the type of each result expression is boolean or Boolean,
+			 * an unboxing conversion (5.1.8) is applied to each result expression of type Boolean,
+			 * and the switch expression has type boolean.
+			 */
+			if (typeBbolean) {
+				for (int i = 0; i < resultExpressionsCount; ++i) {
+					if (this.originalValueResultExpressionTypes[i].id == T_boolean) continue;
+					this.finalValueResultExpressionTypes[i] = env.computeBoxingType(this.originalValueResultExpressionTypes[i]);
+					this.resultExpressions.get(i).computeConversion(this.scope, this.finalValueResultExpressionTypes[i], this.originalValueResultExpressionTypes[i]);
+				}
+				return this.resolvedType = TypeBinding.BOOLEAN;
+			}
+			
+			/*
+			 * Otherwise, if the type of each result expression is convertible to a numeric type (5.1.8),
+			 * the type of the switch expression is given by numeric promotion (5.6.3) applied to the result expressions.
+			 */
+			boolean typeNumeric = true;
+			TypeBinding resultNumeric = this.originalValueResultExpressionTypes[0];
+			HashSet<TypeBinding> typeSet = new HashSet<>(); // for inconclusive in first attempt
+			for (int i = 0; i < resultExpressionsCount; ++i) {
+				tmp = this.originalValueResultExpressionTypes[i].isNumericType() ? this.originalValueResultExpressionTypes[i] : env.computeBoxingType(this.originalValueResultExpressionTypes[i]);
+				if (!tmp.isNumericType()) {
+					typeNumeric = false;
+					break;
+				}
+				resultNumeric = getFirstResults(tmp, this.resultExpressions.get(i), resultNumeric);
+				typeSet.add(TypeBinding.wellKnownType(this.scope, tmp.id));
+			}
+			if (typeNumeric) {
+				resultNumeric = resultNumeric != null ? resultNumeric : getResultNumeric(typeSet, this.originalValueResultExpressionTypes);
+				typeSet = null; // hey gc!
+				for (int i = 0; i < resultExpressionsCount; ++i) {
+					// auto-unboxing and/or widening/narrrowing JLS 12 5.6.3
+					this.resultExpressions.get(i).computeConversion(this.scope, resultNumeric, this.originalValueResultExpressionTypes[i]);
+					this.finalValueResultExpressionTypes[i] = resultNumeric;
+				}
+				// After the conversion(s), if any, value set conversion (5.1.13) is then applied to each result expression.
+				// TODO: check whether 5.6.3 automatically done - check CE.resolveType() as well.
+				return this.resolvedType = resultNumeric;
+			}
+			
+			/* Otherwise, boxing conversion (5.1.7) is applied to each result expression that has a primitive type,
+			 * after which the type of the switch expression is the result of applying capture conversion (5.1.10)
+			 * to the least upper bound (4.10.4) of the types of the result expressions.
+			 */
+			
+			for (int i = 0; i < resultExpressionsCount; ++i) {
+				if (this.finalValueResultExpressionTypes[i].isBaseType())
+					this.finalValueResultExpressionTypes[i] = env.computeBoxingType(this.finalValueResultExpressionTypes[i]);
+			}
+			TypeBinding commonType = this.scope.lowerUpperBound(this.finalValueResultExpressionTypes);
+			if (commonType != null) {
+				for (int i = 0, l = arms.length; i < l; ++i) {
+					this.resultExpressions.get(i).computeConversion(this.scope, commonType, this.originalValueResultExpressionTypes[i]);
+					this.finalValueResultExpressionTypes[i] = commonType;
+				}
+				return this.resolvedType = commonType.capture(this.scope, this.sourceStart, this.sourceEnd);
+			}
+			this.scope.problemReporter().switchExpressionIncompatibleResultExpressions(this);
+			return null;
+		} finally {
+			if (this.scope != null) this.scope.enclosingCase = null; // no longer inside switch case block
+
+		}
+	}
+
