@@ -1,0 +1,46 @@
+public void testAnnotationPath9() throws CoreException, IOException {
+	// tests annotationpath & add-exports in memento for a jrt system library:
+	if (!isJRE9) return;
+	try {
+		IClasspathAttribute[] annPathAttr = {
+			JavaCore.newClasspathAttribute(IClasspathAttribute.EXTERNAL_ANNOTATION_PATH, "annots"),
+			JavaCore.newClasspathAttribute(IClasspathAttribute.ADD_EXPORTS, "jdk.rmic/sun.rmi.rmic=ALL-UNNAMED")
+		};
+		IJavaProject project = createJava9ProjectWithJREAttributes("Test", new String[] {"src"}, annPathAttr);
+		String attributesMemento = "=/annotationpath=/annots=/add-exports=/jdk.rmic\\/sun.rmi.rmic\\=ALL-UNNAMED";
+
+		// Module java.base:
+		String expectedIdentifier = "=Test/"+getEscapedJrtJarPath()+"`java.base"+attributesMemento; // for specific PFR (see below)
+		IModuleDescription module = project.findModule("java.base", null);
+		String moduleIdentifier = expectedIdentifier+"<'`java.base"; // PFR - PackageFragment - ModularClassFile - Module
+		assertEquals("Module mementos", moduleIdentifier, module.getHandleIdentifier());
+		IJavaElement module2 = JavaCore.create(module.getHandleIdentifier(), null);
+		assertTrue("Module existence", module2.exists());
+		assertEquals("Module equivalence", module, module2);
+
+		// JrtPackageFragmentRoot - for module java.base:
+		IPackageFragmentRoot packageRoot = (IPackageFragmentRoot) module.getAncestor(IJavaElement.PACKAGE_FRAGMENT_ROOT);
+		String handleIdentifier = packageRoot.getHandleIdentifier();
+		assertEquals("Root mementos", expectedIdentifier, handleIdentifier);
+		IJavaElement element = JavaCore.create(handleIdentifier, null);
+		assertEquals("Root equivalence", packageRoot, element);
+
+		// PackageFragment
+		IPackageFragment test = packageRoot.getPackageFragment("java.lang");
+		handleIdentifier = test.getHandleIdentifier();
+		String expected = expectedIdentifier+"<java.lang"; 
+		assertEquals("PackageFragment mementos", expected, handleIdentifier);
+		element = JavaCore.create(handleIdentifier, null);
+		assertEquals("PackageFragment equivalence", test, element);
+
+		// ClassFile:
+		IClassFile classFile = test.getClassFile("Object.class");
+		handleIdentifier = classFile.getHandleIdentifier();
+		assertEquals("ClassFile mementos", expected+"(Object.class", handleIdentifier);
+		element = JavaCore.create(handleIdentifier);
+		assertEquals("ClassFile equivalence", classFile, element);
+	} finally {
+		deleteProject("Test");
+	}
+}
+
