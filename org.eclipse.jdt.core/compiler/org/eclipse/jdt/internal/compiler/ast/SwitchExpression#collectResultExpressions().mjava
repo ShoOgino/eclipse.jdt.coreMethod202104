@@ -3,28 +3,78 @@
 			return; // already calculated.
 
 		class ResultExpressionsCollector extends ASTVisitor {
-			Stack<SwitchExpression> seStack = new Stack<>();
-			@SuppressWarnings("synthetic-access")
-			@Override
-			public boolean visit(SwitchExpression switchExpression, BlockScope blockScope) {
-				switchExpression.resultExpressions = new ArrayList<>(0); // by default
-				this.seStack.add(switchExpression);
-				return true; // do nothing by default, keep traversing
+			SwitchExpression targetSwitchExpression;
+			public ResultExpressionsCollector(SwitchExpression se) {
+				this.targetSwitchExpression = se;
 			}
 			@Override
-			public void endVisit(SwitchExpression switchExpression, BlockScope blockScope) {
-				this.seStack.pop();
+			public boolean visit(SwitchExpression switchExpression, BlockScope blockScope) {
+				return false; 
 			}
 			@SuppressWarnings("synthetic-access")
 			@Override
 			public boolean visit(BreakStatement breakStatement, BlockScope blockScope) {
-				if (breakStatement.expression != null && !this.seStack.isEmpty()) {
-					this.seStack.peek().resultExpressions.add(breakStatement.expression);
+				if (breakStatement.expression != null) {
+					this.targetSwitchExpression.resultExpressions.add(breakStatement.expression);
+					breakStatement.switchExpression = this.targetSwitchExpression;
 				}
+				return false;			
+			}
+			@Override
+			public boolean visit(DoStatement stmt, BlockScope blockScope) {
+				return false;
+			}
+			@Override
+			public boolean visit(ForStatement stmt, BlockScope blockScope) {
+				return false;
+			}
+			@Override
+			public boolean visit(ForeachStatement stmt, BlockScope blockScope) {
+				return false;
+			}
+			@Override
+			public boolean visit(SwitchStatement stmt, BlockScope blockScope) {
+				return false;
+			}
+			@Override
+			public boolean visit(TypeDeclaration stmt, BlockScope blockScope) {
+				return false;
+			}
+			@Override
+			public boolean visit(WhileStatement stmt, BlockScope blockScope) {
+				return false;
+			}
+			@Override
+			public boolean visit(CaseStatement caseStatement, BlockScope blockScope) {
 				return true; // do nothing by default, keep traversing
 			}
 		}
-		ResultExpressionsCollector reCollector = new ResultExpressionsCollector();
-		this.traverse(reCollector, this.scope);
+		this.resultExpressions = new ArrayList<>(0); // indicates processed
+		for (int i = 0, l = this.statements.length; i < l; ++i) {
+			Statement stmt = this.statements[i];
+			if (stmt instanceof CaseStatement) {
+				CaseStatement caseStatement = (CaseStatement) stmt;
+				if (!caseStatement.isExpr) continue;
+				stmt = this.statements[++i];
+				if (stmt instanceof Expression) {
+					this.resultExpressions.add((Expression) stmt);
+					continue;
+				} else if (stmt instanceof ThrowStatement) {
+					// TODO: Throw Expression Processing. Anything to be done here for resolve?
+					continue;
+				}
+			}
+			// break statement and block statement of SwitchLabelRule or block statement of ':'
+			ResultExpressionsCollector reCollector = new ResultExpressionsCollector(this);
+			stmt.traverse(reCollector, this.scope);
+
+			/*TODO: Do the following error check in analyseCode() rather than here - JLS 12 15.29
+			 * Given a switch expression, if the switch block consists of switch labeled rules, then
+			 * it is a compile-time error if any switch labeled block can complete normally. If, on  the
+			 * other hand, the switch block consists of switch labeled statement groups, then it is a
+			 * compile-time error if either the last statement in the switch block can complete
+			 * normally, or the switch block includes one or more switch labels at the end.
+			 */
+		}
 	}
 
