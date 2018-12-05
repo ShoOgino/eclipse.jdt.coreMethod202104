@@ -1,0 +1,55 @@
+	@Override
+	public void endVisit(Block node) {
+		ASTNode parent = node.getParent();
+		List<Statement> statements = node.statements();
+		if (parent.getLength() == 0)
+			return; // this is a fake block created by parsing in statements mode
+		String oneLineOption;
+		if (parent instanceof MethodDeclaration) {
+			oneLineOption = this.options.keep_method_body_on_one_line;
+			if (this.options.keep_simple_getter_setter_on_one_line) {
+				MethodDeclaration method = (MethodDeclaration) parent;
+				String name = method.getName().getIdentifier();
+				Type returnType = method.getReturnType2();
+				boolean returnsVoid = returnType instanceof PrimitiveType
+						&& ((PrimitiveType) returnType).getPrimitiveTypeCode() == PrimitiveType.VOID;
+				boolean isGetter = name.matches("(is|get)\\p{Lu}.*") //$NON-NLS-1$
+						&& !method.isConstructor() && !returnsVoid && method.parameters().isEmpty()
+						&& statements.size() == 1 && statements.get(0) instanceof ReturnStatement;
+				boolean isSetter = name.matches("set\\p{Lu}.*") //$NON-NLS-1$
+						&& !method.isConstructor() && returnsVoid && method.parameters().size() == 1
+						&& statements.size() == 1 && statements.get(0) instanceof ExpressionStatement
+						&& ((ExpressionStatement) statements.get(0)).getExpression() instanceof Assignment;
+				if (isGetter || isSetter)
+					oneLineOption = DefaultCodeFormatterConstants.ONE_LINE_ALWAYS;
+			}
+		} else if (parent instanceof IfStatement && ((IfStatement) parent).getElseStatement() == null) {
+			oneLineOption = this.options.keep_if_then_body_block_on_one_line;
+			if (this.options.keep_guardian_clause_on_one_line) {
+				boolean isGuardian = statements.size() == 1 && (statements.get(0) instanceof ReturnStatement
+						|| statements.get(0) instanceof ThrowStatement);
+				// guard clause cannot start with a comment: https://bugs.eclipse.org/58565
+				int openBraceIndex = this.tm.firstIndexIn(node, TokenNameLBRACE);
+				isGuardian = isGuardian && !this.tm.get(openBraceIndex + 1).isComment();
+				if (isGuardian)
+					oneLineOption = DefaultCodeFormatterConstants.ONE_LINE_ALWAYS;
+			}
+		} else if (parent instanceof LambdaExpression) {
+			oneLineOption = this.options.keep_lambda_body_block_on_one_line;
+		} else if (parent instanceof ForStatement || parent instanceof EnhancedForStatement
+				|| parent instanceof WhileStatement) {
+			oneLineOption = this.options.keep_loop_body_block_on_one_line;
+		} else if (parent instanceof DoStatement) {
+			oneLineOption = this.options.keep_loop_body_block_on_one_line;
+			int openBraceIndex = this.tm.firstIndexIn(node, TokenNameLBRACE);
+			int closeBraceIndex = this.tm.lastIndexIn(node, TokenNameRBRACE);
+			Token whileToken = this.tm.firstTokenAfter(node, TokenNamewhile);
+			int lastIndex = whileToken.getLineBreaksBefore() == 0 ? this.tm.lastIndexIn(parent, -1) : closeBraceIndex;
+			tryKeepOnOneLine(openBraceIndex, closeBraceIndex, lastIndex, statements, oneLineOption);
+			return;
+		} else {
+			oneLineOption = this.options.keep_code_block_on_one_line;
+		}
+		tryKeepOnOneLine(node, null, statements, oneLineOption);
+	}
+

@@ -1,22 +1,29 @@
 	public void testBug526054() throws Exception {
-		if (!isJRE9) return;
+		if (!isJRE9 || isJRE12) return;
 		ClasspathJrt.resetCaches();
 		try {
-			IJavaProject javaProject = createJava9Project("mod1", new String[] {"src"});
+			// jdk.rmic is not be visible to code in an unnamed module, but using requires we can see the module.
+			// only, there's nothing exported from it (which is why JEP 261 hides it from unnamed), so we --add-reads:
+			IClasspathAttribute[] attrs = new IClasspathAttribute[] {
+				JavaCore.newClasspathAttribute(IClasspathAttribute.ADD_EXPORTS, "jdk.rmic/sun.rmi.rmic=mod1")
+			};
+			IJavaProject javaProject = createJava9ProjectWithJREAttributes("mod1", new String[] {"src"}, attrs);
 
 			String srcMod =
-				"@SuppressWarnings(\"removal\")\n" + // javax.xml.ws.annotation is deprecated for removal
 				"module mod1 {\n" + 
 				"	exports com.mod1.pack1;\n" + 
-				"	requires java.xml.ws.annotation;\n" + 
+				"	requires jdk.rmic;\n" + 
 				"}";
 			createFile("/mod1/src/module-info.java", 
 				srcMod);
 			createFolder("/mod1/src/com/mod1/pack1");
 			String srcX =
 				"package com.mod1.pack1;\n" +
-				"@javax.annotation.Generated(\"com.acme.generator.CodeGen\")\n" +
+				"import sun.rmi.rmic.Main;\n" +
 				"public class Dummy {\n" +
+				"	String test() {\n" +
+				"		return Main.getString(\"in\");\n" +
+				"	}\n" +
 				"}";
 			createFile("/mod1/src/com/mod1/pack1/Dummy.java", srcX);
 
