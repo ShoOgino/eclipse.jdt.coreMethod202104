@@ -1,0 +1,41 @@
+	private void doHandleWrap(int wrappingOption, boolean wrapPreceedingComments, ASTNode parentNode) {
+		if (this.wrapIndexes.isEmpty())
+			return;
+		assert this.wrapParentIndex >= 0 && this.wrapParentIndex < this.wrapIndexes.get(0);
+		assert this.wrapGroupEnd >= this.wrapIndexes.get(this.wrapIndexes.size() - 1);
+
+		while (this.tm.get(this.wrapParentIndex).isComment() && this.wrapParentIndex > 0)
+			this.wrapParentIndex--;
+
+		float penalty = this.wrapPenalties.isEmpty() ? 1 : this.wrapPenalties.get(0);
+		WrapPolicy policy = getWrapPolicy(wrappingOption, penalty, true, parentNode);
+
+		WrapPolicy existing = this.tm.get(this.wrapIndexes.get(0)).getWrapPolicy();
+		if (existing != null && existing.wrapMode == WrapMode.TOP_PRIORITY) {
+			// SEPARATE_LINES_IF_WRAPPED
+			assert existing.wrapParentIndex == this.wrapParentIndex;
+			this.wrapGroupEnd = existing.groupEndIndex;
+			policy = new WrapPolicy(WrapMode.TOP_PRIORITY, policy.wrapParentIndex, this.wrapGroupEnd, policy.extraIndent,
+					policy.structureDepth, policy.penaltyMultiplier, true, policy.indentOnColumn);
+		}
+
+		setTokenWrapPolicy(0, policy, true);
+
+		for (int i = 1; i < this.wrapIndexes.size(); i++) {
+			penalty = this.wrapPenalties.size() > i ? this.wrapPenalties.get(i) : 1;
+			if (penalty != policy.penaltyMultiplier || i == 1)
+				policy = getWrapPolicy(wrappingOption, penalty, false, parentNode);
+			setTokenWrapPolicy(i, policy, wrapPreceedingComments);
+		}
+
+		if (!this.secondaryWrapIndexes.isEmpty()) {
+			int optionNoAlignment = (wrappingOption & ~Alignment.SPLIT_MASK) | Alignment.M_NO_ALIGNMENT;
+			policy = getWrapPolicy(optionNoAlignment, 1, false, parentNode);
+			for (int index : this.secondaryWrapIndexes) {
+				Token token = this.tm.get(index);
+				if (token.getWrapPolicy() == null)
+					token.setWrapPolicy(policy);
+			}
+		}
+	}
+

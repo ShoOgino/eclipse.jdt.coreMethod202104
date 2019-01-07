@@ -6,16 +6,24 @@ private Binding findImport(char[][] compoundName, int length) {
 	foundNothingOrType: if (binding != null) {
 		PackageBinding packageBinding = (PackageBinding) binding;
 		while (i < length) {
-			binding = packageBinding.getTypeOrPackage(compoundName[i++], module);
+			binding = packageBinding.getTypeOrPackage(compoundName[i++], module, i<length);
 			if (binding instanceof ReferenceBinding && binding.problemId() == ProblemReasons.NotAccessible) {
 				return this.environment.convertToRawType((TypeBinding) binding, false /*do not force conversion of enclosing types*/);
 			}
-			if (binding == null || !binding.isValidBinding()) {
+			if (binding == null) {
+				break foundNothingOrType;
+			} else if (!binding.isValidBinding()) {
+				if (binding.problemId() == ProblemReasons.Ambiguous && packageBinding instanceof SplitPackageBinding)
+					return packageBinding; // pass the split package to the caller so they can report conflictingPackagesFromModules()
 				binding = null;
 				break foundNothingOrType;
 			}
-			if (!(binding instanceof PackageBinding))
+			if (!(binding instanceof PackageBinding)) {
+				PackageBinding visibleFor = packageBinding.getVisibleFor(module, false); // filter out empty parent-packages
+				if (visibleFor instanceof SplitPackageBinding)
+					return visibleFor;
 				break foundNothingOrType;
+			}
 
 			packageBinding = (PackageBinding) binding;
 		}

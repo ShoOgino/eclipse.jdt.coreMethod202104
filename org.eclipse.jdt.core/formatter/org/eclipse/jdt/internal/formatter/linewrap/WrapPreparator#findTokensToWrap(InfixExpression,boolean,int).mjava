@@ -1,0 +1,37 @@
+	private void findTokensToWrap(InfixExpression node, boolean wrapBeforeOperator, int depth) {
+		Expression left = node.getLeftOperand();
+		if (left instanceof InfixExpression && samePrecedence(node, (InfixExpression) left)) {
+			findTokensToWrap((InfixExpression) left, wrapBeforeOperator, depth + 1);
+		} else if (this.wrapIndexes.isEmpty() // always add first operand, it will be taken as wrap parent
+				|| !wrapBeforeOperator) {
+			this.wrapIndexes.add(this.tm.firstIndexIn(left, -1));
+		}
+
+		Expression right = node.getRightOperand();
+		List<Expression> extended = node.extendedOperands();
+		for (int i = -1; i < extended.size(); i++) {
+			Expression operand = (i == -1) ? right : extended.get(i);
+			if (operand instanceof InfixExpression && samePrecedence(node, (InfixExpression) operand)) {
+				findTokensToWrap((InfixExpression) operand, wrapBeforeOperator, depth + 1);
+			}
+			int indexBefore = this.tm.firstIndexBefore(operand, -1);
+			while (this.tm.get(indexBefore).isComment())
+				indexBefore--;
+			assert node.getOperator().toString().equals(this.tm.toString(indexBefore));
+			int indexAfter = this.tm.firstIndexIn(operand, -1);
+			this.wrapIndexes.add(wrapBeforeOperator ? indexBefore : indexAfter);
+			this.secondaryWrapIndexes.add(wrapBeforeOperator ? indexAfter : indexBefore);
+
+			if (!this.options.join_wrapped_lines) {
+				// TODO there should be an option for never joining wraps on opposite side of the operator
+				if (wrapBeforeOperator) {
+					if (this.tm.countLineBreaksBetween(this.tm.get(indexAfter - 1), this.tm.get(indexAfter)) > 0)
+						this.wrapIndexes.add(indexAfter);
+				} else {
+					if (this.tm.countLineBreaksBetween(this.tm.get(indexBefore), this.tm.get(indexBefore - 1)) > 0)
+						this.wrapIndexes.add(indexBefore);
+				}
+			}
+		}
+	}
+
