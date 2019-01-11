@@ -1,7 +1,7 @@
 	@Override
 	public TypeBinding resolveType(BlockScope upperScope) {
 		try {
-			// JLS12 15.29.1
+			this.constant = Constant.NotAConstant;
 
 			// tag break statements and (alongwih in the same pass) collect the result expressions
 			collectResultExpressions();
@@ -31,7 +31,7 @@
 					e.setExpectedType(this.expectedType);
 				}
 			}
-			
+
 			if (this.originalValueResultExpressionTypes == null) {
 				this.originalValueResultExpressionTypes = new TypeBinding[resultExpressionsCount];
 				this.finalValueResultExpressionTypes = new TypeBinding[resultExpressionsCount];
@@ -46,10 +46,10 @@
 				}
 				return this.resolvedType = computeConversions(this.scope, this.expectedType) ? this.expectedType : null;
 			}
-			
+
 			if (resultExpressionsCount == 1)
 				return this.originalValueResultExpressionTypes[0];
-			
+
 			boolean typeUniformAcrossAllArms = true;
 			TypeBinding tmp = this.originalValueResultExpressionTypes[0];
 			for (int i = 1, l = this.originalValueResultExpressionTypes.length; i < l; ++i) {
@@ -86,14 +86,19 @@
 				}
 				return this.resolvedType = TypeBinding.BOOLEAN;
 			}
-			
+
 			/*
-			 * Otherwise, if the type of each result expression is convertible to a numeric type (5.1.8),
-			 * the type of the switch expression is given by numeric promotion (5.6.3) applied to the result expressions.
+			 * Otherwise, if the type of each result expression is convertible to a numeric type (5.1.8), the type
+			 * of the switch expression is given by numeric promotion (5.6.3) applied to the result expressions.
 			 */
 			boolean typeNumeric = true;
-			TypeBinding resultNumeric = this.originalValueResultExpressionTypes[0];
-			HashSet<TypeBinding> typeSet = new HashSet<>(); // for inconclusive in first attempt
+			TypeBinding resultNumeric = null;
+			HashSet<TypeBinding> typeSet = new HashSet<>();
+			/*  JLS 12 5.6.3 Switch Numeric Promotion
+			 * When a switch expression applies numeric promotion to a set of result expressions, each of which
+			 * must denote a value that is convertible to a numeric type, the following rules apply, in order:
+			 *  If any result expression is of a reference type, it is subjected to unboxing conversion (5.1.8).
+			 */
 			for (int i = 0; i < resultExpressionsCount; ++i) {
 				tmp = this.originalValueResultExpressionTypes[i].isNumericType() ?
 						this.originalValueResultExpressionTypes[i] :
@@ -102,12 +107,34 @@
 					typeNumeric = false;
 					break;
 				}
-				resultNumeric = getFirstResults(tmp, this.resultExpressions.get(i), resultNumeric);
 				typeSet.add(TypeBinding.wellKnownType(this.scope, tmp.id));
 			}
 			if (typeNumeric) {
-				resultNumeric = resultNumeric != null ? resultNumeric :
-					getResultNumeric(typeSet, this.originalValueResultExpressionTypes);
+				 /* If any result expression is of type double, then other result expressions that are not of type double
+				 *  are widened to double.
+				 *  Otherwise, if any result expression is of type float, then other result expressions that are not of
+				 *  type float are widened to float.
+				 *  Otherwise, if any result expression is of type long, then other result expressions that are not of 
+				 *  type long are widened to long.
+				 */
+				TypeBinding[] dfl = new TypeBinding[]{// do not change the order JLS 12 5.6.3
+						TypeBinding.DOUBLE,
+						TypeBinding.FLOAT,
+						TypeBinding.LONG};
+				for (TypeBinding binding : dfl) {
+					if (typeSet.contains(binding)) {
+						resultNumeric = binding;
+						break;
+					}
+				}
+
+				 /*  Otherwise, if any result expression is of type int and is not a constant expression, the other 
+				 *  result expressions that are not of type int are widened to int.
+				 */
+				resultNumeric = resultNumeric != null ? resultNumeric : check_nonconstant_int();
+
+				resultNumeric = resultNumeric != null ? resultNumeric : // one among the first few rules applied.
+					getResultNumeric(typeSet, this.originalValueResultExpressionTypes); // check the rest
 				typeSet = null; // hey gc!
 				for (int i = 0; i < resultExpressionsCount; ++i) {
 					// auto-unboxing and/or widening/narrrowing JLS 12 5.6.3
@@ -116,14 +143,13 @@
 					this.finalValueResultExpressionTypes[i] = resultNumeric;
 				}
 				// After the conversion(s), if any, value set conversion (5.1.13) is then applied to each result expression.
-				// TODO: check whether 5.6.3 automatically done - check CE.resolveType() as well.
 				return this.resolvedType = resultNumeric;
 			}
-			
+
 			/* Otherwise, boxing conversion (5.1.7) is applied to each result expression that has a primitive type,
 			 * after which the type of the switch expression is the result of applying capture conversion (5.1.10)
 			 * to the least upper bound (4.10.4) of the types of the result expressions.
-			 */		
+			 */
 			for (int i = 0; i < resultExpressionsCount; ++i) {
 				if (this.finalValueResultExpressionTypes[i].isBaseType())
 					this.finalValueResultExpressionTypes[i] = env.computeBoxingType(this.finalValueResultExpressionTypes[i]);
@@ -140,7 +166,6 @@
 			return null;
 		} finally {
 			if (this.scope != null) this.scope.enclosingCase = null; // no longer inside switch case block
-
 		}
 	}
 
