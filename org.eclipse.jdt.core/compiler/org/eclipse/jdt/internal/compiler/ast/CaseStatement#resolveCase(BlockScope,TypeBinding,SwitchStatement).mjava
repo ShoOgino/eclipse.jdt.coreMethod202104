@@ -3,7 +3,7 @@
  * see org.eclipse.jdt.internal.compiler.ast.Statement#resolveCase(org.eclipse.jdt.internal.compiler.lookup.BlockScope, org.eclipse.jdt.internal.compiler.lookup.TypeBinding, org.eclipse.jdt.internal.compiler.ast.SwitchStatement)
  */
 @Override
-public Constant resolveCase(BlockScope scope, TypeBinding switchExpressionType, SwitchStatement switchStatement) {
+public Constant[] resolveCase(BlockScope scope, TypeBinding switchExpressionType, SwitchStatement switchStatement) {
 	// switchExpressionType maybe null in error case
 	scope.enclosingCase = this; // record entering in a switch case block
 
@@ -14,42 +14,37 @@ public Constant resolveCase(BlockScope scope, TypeBinding switchExpressionType, 
 
 		// on error the last default will be the selected one ...
 		switchStatement.defaultCase = this;
-		return Constant.NotAConstant;
+		return Constant.NotAConstantList;
 	}
 	// add into the collection of cases of the associated switch statement
 	switchStatement.cases[switchStatement.caseCount++] = this;
-	// tag constant name with enum type for privileged access to its members
 	if (switchExpressionType != null && switchExpressionType.isEnum() && (this.constantExpression instanceof SingleNameReference)) {
 		((SingleNameReference) this.constantExpression).setActualReceiverType((ReferenceBinding)switchExpressionType);
 	}
 	TypeBinding caseType = this.constantExpression.resolveType(scope);
-	if (caseType == null || switchExpressionType == null) return Constant.NotAConstant;
-	if (this.constantExpression.isConstantValueOfTypeAssignableToType(caseType, switchExpressionType)
-			|| caseType.isCompatibleWith(switchExpressionType)) {
-		if (caseType.isEnum()) {
-			if (((this.constantExpression.bits & ASTNode.ParenthesizedMASK) >> ASTNode.ParenthesizedSHIFT) != 0) {
-				scope.problemReporter().enumConstantsCannotBeSurroundedByParenthesis(this.constantExpression);
-			}
+	if (caseType == null || switchExpressionType == null) return Constant.NotAConstantList;
+	// tag constant name with enum type for privileged access to its members
 
-			if (this.constantExpression instanceof NameReference
-					&& (this.constantExpression.bits & ASTNode.RestrictiveFlagMASK) == Binding.FIELD) {
-				NameReference reference = (NameReference) this.constantExpression;
-				FieldBinding field = reference.fieldBinding();
-				if ((field.modifiers & ClassFileConstants.AccEnum) == 0) {
-					 scope.problemReporter().enumSwitchCannotTargetField(reference, field);
-				} else 	if (reference instanceof QualifiedNameReference) {
-					 scope.problemReporter().cannotUseQualifiedEnumConstantInCaseLabel(reference, field);
+	if (this.constantExpressions != null && this.constantExpressions.length > 1) {
+		List<Constant> cases = new ArrayList<>();
+		for (Expression e : this.constantExpressions) {
+			if (e != this.constantExpression) {
+				if (switchExpressionType.isEnum() && (this.constantExpression instanceof SingleNameReference)) {
+					((SingleNameReference) e).setActualReceiverType((ReferenceBinding)switchExpressionType);
 				}
-				return IntConstant.fromValue(field.original().id + 1); // (ordinal value + 1) zero should not be returned see bug 141810
+				e.resolveType(scope);
 			}
-		} else {
-			return this.constantExpression.constant;
+			Constant con = resolveConstantExpression(scope, caseType, switchExpressionType, switchStatement, e);
+			if (con != Constant.NotAConstant) {
+				cases.add(con);
+			}
 		}
-	} else if (isBoxingCompatible(caseType, switchExpressionType, this.constantExpression, scope)) {
-		// constantExpression.computeConversion(scope, caseType, switchExpressionType); - do not report boxing/unboxing conversion
-		return this.constantExpression.constant;
+		if (cases.size() > 0) {
+			return cases.toArray(new Constant[cases.size()]);
+		}
+	} else {
+		return new Constant[] { resolveConstantExpression(scope, caseType, switchExpressionType, switchStatement, this.constantExpression) };
 	}
-	scope.problemReporter().typeMismatchError(caseType, switchExpressionType, this.constantExpression, switchStatement.expression);
-	return Constant.NotAConstant;
+	return Constant.NotAConstantList;
 }
 

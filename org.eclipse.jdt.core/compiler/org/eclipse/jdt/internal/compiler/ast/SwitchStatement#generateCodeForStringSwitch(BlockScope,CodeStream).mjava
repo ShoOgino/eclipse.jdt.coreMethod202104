@@ -42,33 +42,60 @@
 					       "case " + this.hashCode + ":(" + this.string + ")\n"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$	       
 				}
 			}
-
+			/*
+			 * With multi constant case statements, the number of case statements (hence branch labels)
+			 * and number of constants (hence hashcode labels) could be different. For e.g:
+			  
+			  switch(s) {
+			  	case "FB", "c":
+			  		System.out.println("A/C");
+			 		break;
+			  	case "Ea":
+					System.out.println("B");
+					break;
+					
+				With the above code, we will have 
+				2 branch labels for FB and c
+				3 stringCases for FB, c and Ea
+				2 hashCodeCaseLabels one for FB, Ea and one for c
+				
+				Should produce something like this: 
+				lookupswitch  { // 2
+                      99: 32
+                    2236: 44
+                 default: 87
+				
+				"FB" and "Ea" producing the same hashcode values, but still belonging in different case statements.
+				First, produce the two branch labels pertaining to the case statements
+				And the three string cases and use the this.constMapping to get the correct branch label.
+			 */
 			final boolean hasCases = this.caseCount != 0;
-
-			StringSwitchCase [] stringCases = new StringSwitchCase[this.caseCount]; // may have to shrink later if multiple strings hash to same code.
+			int constSize = hasCases ? this.stringConstants.length : 0;
 			BranchLabel[] sourceCaseLabels = new BranchLabel[this.caseCount];
-			CaseLabel [] hashCodeCaseLabels = new CaseLabel[this.caseCount];
-			this.constants = new int[this.caseCount];  // hashCode() values.
 			for (int i = 0, max = this.caseCount; i < max; i++) {
 				this.cases[i].targetLabel = (sourceCaseLabels[i] = new BranchLabel(codeStream));  // A branch label, not a case label.
 				sourceCaseLabels[i].tagBits |= BranchLabel.USED;
-				stringCases[i] = new StringSwitchCase(this.stringConstants[i].hashCode(), this.stringConstants[i], sourceCaseLabels[i]);
+			}
+			StringSwitchCase [] stringCases = new StringSwitchCase[constSize]; // may have to shrink later if multiple strings hash to same code.
+			CaseLabel [] hashCodeCaseLabels = new CaseLabel[constSize];
+			this.constants = new int[constSize];  // hashCode() values.
+			for (int i = 0; i < constSize; i++) {
+				stringCases[i] = new StringSwitchCase(this.stringConstants[i].hashCode(), this.stringConstants[i], sourceCaseLabels[this.constMapping[i]]);
 				hashCodeCaseLabels[i] = new CaseLabel(codeStream);
 				hashCodeCaseLabels[i].tagBits |= BranchLabel.USED;
-				
 			}
 			Arrays.sort(stringCases);
 
 			int uniqHashCount = 0;
 			int lastHashCode = 0; 
-			for (int i = 0, length = this.caseCount; i < length; ++i) {
+			for (int i = 0, length = constSize; i < length; ++i) {
 				int hashCode = stringCases[i].hashCode;
 				if (i == 0 || hashCode != lastHashCode) {
 					lastHashCode = this.constants[uniqHashCount++] = hashCode;
 				}
 			}
 				
-			if (uniqHashCount != this.caseCount) { // multiple keys hashed to the same value.
+			if (uniqHashCount != constSize) { // multiple keys hashed to the same value.
 				System.arraycopy(this.constants, 0, this.constants = new int[uniqHashCount], 0, uniqHashCount);
 				System.arraycopy(hashCodeCaseLabels, 0, hashCodeCaseLabels = new CaseLabel[uniqHashCount], 0, uniqHashCount);
 			}
@@ -95,7 +122,7 @@
 			codeStream.invokeStringHashCode();
 			if (hasCases) {
 				codeStream.lookupswitch(defaultCaseLabel, this.constants, sortedIndexes, hashCodeCaseLabels);
-				for (int i = 0, j = 0, max = this.caseCount; i < max; i++) {
+				for (int i = 0, j = 0, max = constSize; i < max; i++) {
 					int hashCode = stringCases[i].hashCode;
 					if (i == 0 || hashCode != lastHashCode) {
 						lastHashCode = hashCode;

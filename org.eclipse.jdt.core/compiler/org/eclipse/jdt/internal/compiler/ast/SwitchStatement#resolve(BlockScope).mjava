@@ -49,32 +49,52 @@
 				this.cases = new CaseStatement[length = this.statements.length];
 				if (!isStringSwitch) {
 					this.constants = new int[length];
+					this.constMapping = new int[length];
 				} else {
 					this.stringConstants = new String[length];
+					this.constMapping = new int[length];
 				}
 				int counter = 0;
 				for (int i = 0; i < length; i++) {
-					Constant constant1;
+					Constant[] constantsList;
 					final Statement statement = this.statements[i];
-					if ((constant1 = statement.resolveCase(this.scope, expressionType, this)) != Constant.NotAConstant) {
-						if (!isStringSwitch) {
-							int key = constant1.intValue();
-							//----check for duplicate case statement------------
-							for (int j = 0; j < counter; j++) {
-								if (this.constants[j] == key) {
-									reportDuplicateCase((CaseStatement) statement, this.cases[j], length);
+					if (!(statement instanceof CaseStatement))  {
+						statement.resolve(this.scope);
+						continue;
+					}
+					if ((constantsList = statement.resolveCase(this.scope, expressionType, this)) != Constant.NotAConstantList) {
+						for (Constant con : constantsList) {
+							if (con == Constant.NotAConstant) 
+								continue;
+							if (!isStringSwitch) {
+								int key = con.intValue();
+								//----check for duplicate case statement------------
+								for (int j = 0; j < counter; j++) {
+									if (this.constants[j] == key) {
+										reportDuplicateCase((CaseStatement) statement, this.cases[j], length);
+									}
 								}
-							}
-							this.constants[counter++] = key;
-						} else {
-							String key = constant1.stringValue();
-							//----check for duplicate case statement------------
-							for (int j = 0; j < counter; j++) {
-								if (this.stringConstants[j].equals(key)) {
-									reportDuplicateCase((CaseStatement) statement, this.cases[j], length);
+								if (this.constants.length == counter) {
+									System.arraycopy(this.constants, 0, this.constants = new int[counter+1], 0, counter);
+									System.arraycopy(this.constMapping, 0, this.constMapping = new int[counter+1], 0, counter);
 								}
+								this.constants[counter] = key;
+								this.constMapping[counter++] = this.caseCount - 1;
+							} else {
+								String key = con.stringValue();
+								//----check for duplicate case statement------------
+								for (int j = 0; j < counter; j++) {
+									if (this.stringConstants[j].equals(key)) {
+										reportDuplicateCase((CaseStatement) statement, this.cases[j], length);
+									}
+								}
+								if (this.stringConstants.length == counter) {
+									System.arraycopy(this.stringConstants, 0, this.stringConstants = new String[counter+1], 0, counter);
+									System.arraycopy(this.constMapping, 0, this.constMapping = new int[counter+1], 0, counter);
+								}
+								this.stringConstants[counter] = key;
+								this.constMapping[counter++] = this.caseCount - 1;
 							}
-							this.stringConstants[counter++] = key;			
 						}
 					}
 				}
@@ -84,6 +104,7 @@
 					} else {
 						System.arraycopy(this.stringConstants, 0, this.stringConstants = new String[counter], 0, counter);
 					}
+					System.arraycopy(this.constMapping, 0, this.constMapping = new int[counter], 0, counter);
 				}
 			} else {
 				if ((this.bits & UndocumentedEmptyBlock) != 0) {
@@ -105,14 +126,14 @@
 			if (isEnumSwitch && compilerOptions.complianceLevel >= ClassFileConstants.JDK1_5) {
 				if (this.defaultCase == null || compilerOptions.reportMissingEnumCaseDespiteDefault) {
 					int constantCount = this.constants == null ? 0 : this.constants.length; // could be null if no case statement
-					if (constantCount == this.caseCount
-							&& this.caseCount != ((ReferenceBinding)expressionType).enumConstantCount()) {
+					if (constantCount >= this.caseCount
+							&& constantCount != ((ReferenceBinding)expressionType).enumConstantCount()) {
 						FieldBinding[] enumFields = ((ReferenceBinding)expressionType.erasure()).fields();
 						for (int i = 0, max = enumFields.length; i <max; i++) {
 							FieldBinding enumConstant = enumFields[i];
 							if ((enumConstant.modifiers & ClassFileConstants.AccEnum) == 0) continue;
 							findConstant : {
-								for (int j = 0; j < this.caseCount; j++) {
+								for (int j = 0; j < constantCount; j++) {
 									if ((enumConstant.id + 1) == this.constants[j]) // zero should not be returned see bug 141810
 										break findConstant;
 								}
