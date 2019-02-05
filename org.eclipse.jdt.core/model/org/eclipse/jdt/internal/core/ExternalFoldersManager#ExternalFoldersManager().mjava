@@ -2,7 +2,33 @@
 		// Prevent instantiation
 		// https://bugs.eclipse.org/bugs/show_bug.cgi?id=377806
 		if (Platform.isRunning()) {
-			getFolders();
+			/*
+			 * The code here runs during JavaCore start-up.
+			 * So if we need to open the external folders project, we do this from a job.
+			 * Otherwise workspace jobs that attempt to access JDT core functionality can cause a deadlock.
+			 *
+			 * See https://bugs.eclipse.org/bugs/show_bug.cgi?id=542860.
+			 */
+			class InitializeFolders extends WorkspaceJob {
+				public InitializeFolders() {
+					super("Initialize external folders"); //$NON-NLS-1$
+				}
+
+				@Override
+				public IStatus runInWorkspace(IProgressMonitor monitor) {
+					getFolders();
+					return Status.OK_STATUS;
+				}
+
+				@Override
+				public boolean belongsTo(Object family) {
+					return family == InitializeFolders.class;
+				}
+			}
+			InitializeFolders initializeFolders = new InitializeFolders();
+			IProject project = getExternalFoldersProject();
+			initializeFolders.setRule(project);
+			initializeFolders.schedule();
 		}
 	}
 
