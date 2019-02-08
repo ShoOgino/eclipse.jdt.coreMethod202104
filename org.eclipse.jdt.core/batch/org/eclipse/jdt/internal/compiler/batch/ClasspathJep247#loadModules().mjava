@@ -5,52 +5,59 @@
 			super.loadModules();
 			return;
 		}
-		final Path modPath = this.fs.getPath(this.releaseInHex + "-modules"); //$NON-NLS-1$
-		if (!Files.exists(modPath)) {
-			throw new IllegalArgumentException("release " + this.compliance + " is not found in the system");  //$NON-NLS-1$//$NON-NLS-2$
-		}
+		final Path modPath = this.fs.getPath(this.releaseInHex);
+//		if (!Files.exists(modPath)) {
+//			throw new IllegalArgumentException("release " + this.compliance + " is not found in the system");  //$NON-NLS-1$//$NON-NLS-2$
+//		}
 		this.modulePath = this.file.getPath() + "|" + modPath.toString(); //$NON-NLS-1$
-		Map<String, IModule> cache = ModulesCache.get(this.modulePath);
-		if (cache == null) {
-			try (DirectoryStream<java.nio.file.Path> stream = Files.newDirectoryStream(modPath)) {
+		this.modules = ModulesCache.get(this.modulePath);
+		if (this.modules == null) {
+			try (DirectoryStream<java.nio.file.Path> stream = Files.newDirectoryStream(this.releasePath)) {
 				for (final java.nio.file.Path subdir: stream) {
-						Files.walkFileTree(subdir, new FileVisitor<java.nio.file.Path>() {
+					String rel = subdir.getFileName().toString();
+					if (!rel.contains(this.releaseInHex)) {
+						continue;
+					}
+					Files.walkFileTree(subdir, Collections.EMPTY_SET, 2, new FileVisitor<java.nio.file.Path>() {
 
-							@Override
-							public FileVisitResult preVisitDirectory(java.nio.file.Path dir, BasicFileAttributes attrs)
-									throws IOException {
-								return FileVisitResult.CONTINUE;
-							}
+						@Override
+						public FileVisitResult preVisitDirectory(java.nio.file.Path dir, BasicFileAttributes attrs)
+								throws IOException {
+							return FileVisitResult.CONTINUE;
+						}
 
-							@Override
-							public FileVisitResult visitFile(java.nio.file.Path f, BasicFileAttributes attrs) throws IOException {
-								byte[] content = null;
-								if (Files.exists(f)) {
-									content = JRTUtil.safeReadBytes(f);
-									if (content == null)
-										return FileVisitResult.CONTINUE;
-									ClasspathJep247.this.acceptModule(content);
-									ClasspathJep247.this.moduleNamesCache.add(f.getFileName().toString());
-								}
+						@Override
+						public FileVisitResult visitFile(java.nio.file.Path f, BasicFileAttributes attrs) throws IOException {
+							if (attrs.isDirectory() || f.getNameCount() < 3) 
 								return FileVisitResult.CONTINUE;
+							byte[] content = null;
+							if (Files.exists(f)) {
+								content = JRTUtil.safeReadBytes(f);
+								if (content == null)
+									return FileVisitResult.CONTINUE;
+								Path m = f.subpath(1, f.getNameCount() - 1);
+								ClasspathJep247.this.acceptModule(m.getFileName().toString(), content);
+								ClasspathJep247.this.moduleNamesCache.add(m.getFileName().toString());
 							}
+							return FileVisitResult.SKIP_SIBLINGS;
+						}
 
-							@Override
-							public FileVisitResult visitFileFailed(java.nio.file.Path f, IOException exc) throws IOException {
-								return FileVisitResult.CONTINUE;
-							}
+						@Override
+						public FileVisitResult visitFileFailed(java.nio.file.Path f, IOException exc) throws IOException {
+							return FileVisitResult.CONTINUE;
+						}
 
-							@Override
-							public FileVisitResult postVisitDirectory(java.nio.file.Path dir, IOException exc) throws IOException {
-								return FileVisitResult.CONTINUE;
-							}
-						});
+						@Override
+						public FileVisitResult postVisitDirectory(java.nio.file.Path dir, IOException exc) throws IOException {
+							return FileVisitResult.CONTINUE;
+						}
+					});
 				}
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
 		} else {
-			this.moduleNamesCache.addAll(cache.keySet());
+			this.moduleNamesCache.addAll(this.modules.keySet());
 		}
 	}
 
