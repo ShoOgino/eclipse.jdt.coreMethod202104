@@ -1,0 +1,64 @@
+	@Override
+	public NameEnvironmentAnswer findClass(String binaryFileName, String qualifiedPackageName, String moduleName,
+			String qualifiedBinaryFileName, boolean asBinaryOnly, Predicate<String> moduleNameFilter) {
+
+		if (this.fs == null) {
+			return super.findClass(binaryFileName, qualifiedPackageName, moduleName, qualifiedBinaryFileName,
+					asBinaryOnly, moduleNameFilter);
+		}
+		if (!isPackage(qualifiedPackageName, moduleName))
+			return null; // most common case
+
+		try {
+			IBinaryType reader = null;
+			byte[] content = null;
+			String fileNameWithoutExtension = qualifiedBinaryFileName.substring(0,
+												qualifiedBinaryFileName.length() - SuffixConstants.SUFFIX_CLASS.length);
+			if (this.subReleases != null && this.subReleases.length > 0) {
+				qualifiedBinaryFileName = qualifiedBinaryFileName.replace(".class", ".sig"); //$NON-NLS-1$ //$NON-NLS-2$
+				outer: for (String rel : this.subReleases) {
+					Path p = null;
+					inner: if (this.isJRE12Plus) {
+						if (moduleName != null) {
+							p = this.fs.getPath(rel, moduleName, qualifiedBinaryFileName);
+						} 
+						else {
+							try (DirectoryStream<java.nio.file.Path> stream = Files
+									.newDirectoryStream(this.fs.getPath(rel))) {
+								for (final java.nio.file.Path subdir : stream) {
+									p = subdir.resolve(qualifiedBinaryFileName);
+									if (Files.exists(p)) {
+										if (subdir.getNameCount() == 2 ) {
+											moduleName = subdir.getName(1).toString();
+										}
+										break inner;
+									}
+								}
+							}
+						}
+					} else {
+						p = this.fs.getPath(rel, qualifiedBinaryFileName);
+					}
+					if (Files.exists(p)) {
+						content = JRTUtil.safeReadBytes(p);
+						if (content != null) {
+							reader = new ClassFileReader(content, qualifiedBinaryFileName.toCharArray());
+							if (moduleName != null)
+								((ClassFileReader) reader).moduleName = moduleName.toCharArray();
+							break outer;
+						}
+					}
+				}
+			} else {
+				reader = ClassFileReader.readFromModule(new File(this.zipFilename), moduleName, qualifiedBinaryFileName,
+						moduleNameFilter);
+			}
+			return createAnswer(fileNameWithoutExtension, reader);
+		} catch (ClassFormatException e) { 
+			// treat as if class file is missing
+		} catch (IOException e) { 
+			// treat as if class file is missing
+		}
+		return null;
+	}
+

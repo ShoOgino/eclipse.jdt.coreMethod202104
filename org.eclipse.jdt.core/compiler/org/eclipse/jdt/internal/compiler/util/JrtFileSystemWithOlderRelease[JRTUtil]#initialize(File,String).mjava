@@ -1,0 +1,47 @@
+	void initialize(File jdk, String rel) throws IOException {
+		super.initialize(jdk);
+		this.fs = null;// reset and proceed, TODO: this is crude and need to be removed.
+		this.releaseInHex = Integer.toHexString(Integer.parseInt(this.release)).toUpperCase();
+		Path ct = Paths.get(this.jdkHome, "lib", "ct.sym"); //$NON-NLS-1$ //$NON-NLS-2$
+		if (!Files.exists(ct)) {
+			return;
+		}
+		URI uri = URI.create("jar:file:" + ct.toUri().getRawPath()); //$NON-NLS-1$
+		try {
+			this.fs = FileSystems.getFileSystem(uri);
+		} catch(FileSystemNotFoundException fne) {
+			// Ignore and move on
+		}
+		if (this.fs == null) {
+			HashMap<String, ?> env = new HashMap<>();
+			try {
+				this.fs = FileSystems.newFileSystem(uri, env);
+			} catch (IOException e) {
+				return;
+			}
+		}
+		Path releasePath = this.fs.getPath("/"); //$NON-NLS-1$
+		if (!Files.exists(this.fs.getPath(this.releaseInHex))
+				|| Files.exists(this.fs.getPath(this.releaseInHex, "system-modules"))) { //$NON-NLS-1$
+			this.fs = null;
+		}
+		if (this.release != null) {
+			List<String> sub = new ArrayList<>();
+			try (DirectoryStream<java.nio.file.Path> stream = Files.newDirectoryStream(releasePath)) {
+				for (final java.nio.file.Path subdir: stream) {
+					String r = subdir.getFileName().toString();
+					if (r.contains(this.releaseInHex)) {
+						sub.add(r);
+					} else {
+						continue;
+					}
+				}
+			} catch (IOException e) {
+				e.printStackTrace();
+				// Rethrow?
+			}
+			this.subReleases = sub.toArray(new String[sub.size()]);
+		}
+		// Ensure walkJrtForModules() is not called
+	}
+
