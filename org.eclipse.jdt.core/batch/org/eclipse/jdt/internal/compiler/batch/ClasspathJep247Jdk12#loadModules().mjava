@@ -1,0 +1,60 @@
+	@Override
+	public void loadModules() {
+		// Modules below level 8 are not dealt with here. Leave it to ClasspathJrt
+		if (this.jdklevel <= ClassFileConstants.JDK1_8) {
+			super.loadModules();
+			return;
+		}
+		final Path modPath = this.fs.getPath(this.releaseInHex);
+		this.modulePath = this.file.getPath() + "|" + modPath.toString(); //$NON-NLS-1$
+		this.modules = ModulesCache.get(this.modulePath);
+		if (this.modules == null) {
+			try (DirectoryStream<java.nio.file.Path> stream = Files.newDirectoryStream(this.releasePath)) {
+				for (final java.nio.file.Path subdir: stream) {
+					String rel = subdir.getFileName().toString();
+					if (!rel.contains(this.releaseInHex)) {
+						continue;
+					}
+					Files.walkFileTree(subdir, Collections.EMPTY_SET, 2, new FileVisitor<java.nio.file.Path>() {
+
+						@Override
+						public FileVisitResult preVisitDirectory(java.nio.file.Path dir, BasicFileAttributes attrs)
+								throws IOException {
+							return FileVisitResult.CONTINUE;
+						}
+
+						@Override
+						public FileVisitResult visitFile(java.nio.file.Path f, BasicFileAttributes attrs) throws IOException {
+							if (attrs.isDirectory() || f.getNameCount() < 3) 
+								return FileVisitResult.CONTINUE;
+							byte[] content = null;
+							if (Files.exists(f)) {
+								content = JRTUtil.safeReadBytes(f);
+								if (content == null)
+									return FileVisitResult.CONTINUE;
+								Path m = f.subpath(1, f.getNameCount() - 1);
+								ClasspathJep247Jdk12.this.acceptModule(m.getFileName().toString(), content);
+								ClasspathJep247Jdk12.this.moduleNamesCache.add(m.getFileName().toString());
+							}
+							return FileVisitResult.SKIP_SIBLINGS;
+						}
+
+						@Override
+						public FileVisitResult visitFileFailed(java.nio.file.Path f, IOException exc) throws IOException {
+							return FileVisitResult.CONTINUE;
+						}
+
+						@Override
+						public FileVisitResult postVisitDirectory(java.nio.file.Path dir, IOException exc) throws IOException {
+							return FileVisitResult.CONTINUE;
+						}
+					});
+				}
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		} else {
+			this.moduleNamesCache.addAll(this.modules.keySet());
+		}
+	}
+
