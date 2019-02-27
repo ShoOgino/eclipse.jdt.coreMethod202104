@@ -1,0 +1,65 @@
+	/*
+	 * Set up the paths where modules and regular classes need to be read. We need to deal with two different kind of
+	 * formats of cy.sym: Post JDK 12: ct.sym -> 9 -> java/ -> lang/* 9-modules -> java.base -> module-info.sig
+	 * 
+	 * From JDK 12 onward: ct.sym -> 9 -> java.base -> module-info.sig java/ -> lang/* Notably, 1) in JDK 12 modules
+	 * classes and ordinary classes are located in the same location 2) in JDK 12, ordinary classes are found inside
+	 * their respective modules
+	 * 
+	 */
+	protected void initialize() throws CoreException {
+		this.releaseInHex = Integer.toHexString(Integer.parseInt(this.release)).toUpperCase();
+		Path lib = Paths.get(this.zipFilename).getParent();
+		Path filePath = Paths.get(lib.toString(), "ct.sym"); //$NON-NLS-1$
+		URI t = filePath.toUri();
+		if (!Files.exists(filePath)) {
+			return;
+		}
+		URI uri = URI.create("jar:file:" + t.getRawPath()); //$NON-NLS-1$
+		try {
+			this.fs = FileSystems.getFileSystem(uri);
+		} catch (FileSystemNotFoundException fne) {
+			// Ignore and move on
+		}
+		if (this.fs == null) {
+			HashMap<String, ?> env = new HashMap<>();
+			try {
+				this.fs = FileSystems.newFileSystem(uri, env);
+			} catch (IOException e) {
+				return;
+			}
+		}
+		Path releasePath = this.fs.getPath("/"); //$NON-NLS-1$
+		this.isJRE12Plus = isJRE12Plus(releasePath);
+		Path modPath = this.fs.getPath(this.releaseInHex + (this.isJRE12Plus ? "" : "-modules")); //$NON-NLS-1$ //$NON-NLS-2$
+		if (Files.exists(modPath)) {
+			this.modulePath = modPath;
+			this.modPathString = this.zipFilename + "|"+ modPath.toString(); //$NON-NLS-1$
+		}
+		
+		if (!Files.exists(releasePath.resolve(this.releaseInHex))) {
+			Exception e = new IllegalArgumentException("release " + this.release + " is not found in the system"); //$NON-NLS-1$//$NON-NLS-2$
+			throw new CoreException(new Status(IStatus.ERROR, JavaCore.PLUGIN_ID, e.getMessage(), e));
+		}
+		if (Files.exists(this.fs.getPath(this.releaseInHex, "system-modules"))) { //$NON-NLS-1$
+			this.fs = null;  // Fallback to default version
+			return;
+		}
+		if (this.release != null) {
+			List<String> sub = new ArrayList<>();
+			try (DirectoryStream<java.nio.file.Path> stream = Files.newDirectoryStream(releasePath)) {
+				for (final java.nio.file.Path subdir : stream) {
+					String rel = subdir.getFileName().toString();
+					if (rel.contains(this.releaseInHex)) {
+						sub.add(rel);
+					} else {
+						continue;
+					}
+				}
+			} catch (IOException e) {
+				this.fs = null; // Fallback to default version
+			}
+			this.subReleases = sub.toArray(new String[sub.size()]);
+		}
+	}
+
