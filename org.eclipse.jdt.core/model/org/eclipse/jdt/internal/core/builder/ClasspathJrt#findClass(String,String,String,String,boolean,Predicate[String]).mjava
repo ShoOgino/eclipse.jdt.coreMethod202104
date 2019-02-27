@@ -4,9 +4,41 @@ public NameEnvironmentAnswer findClass(String binaryFileName, String qualifiedPa
 	if (!isPackage(qualifiedPackageName, moduleName)) return null; // most common case
 
 	try {
+		IBinaryType reader = null;
+		byte[] content = null;
 		String fileNameWithoutExtension = qualifiedBinaryFileName.substring(0, qualifiedBinaryFileName.length() - SuffixConstants.SUFFIX_CLASS.length);
-		IBinaryType reader = ClassFileReader.readFromModule(new File(this.zipFilename), moduleName, qualifiedBinaryFileName, moduleNameFilter);
-		return createAnswer(fileNameWithoutExtension, reader);
+		if (this.subReleases != null && this.subReleases.length > 0) {
+			qualifiedBinaryFileName = qualifiedBinaryFileName.replace(".class", ".sig"); //$NON-NLS-1$ //$NON-NLS-2$
+			for (String rel : this.subReleases) {
+				Path p = this.fs.getPath(rel, qualifiedBinaryFileName);
+				if (Files.exists(p)) {
+					content = JRTUtil.safeReadBytes(p);
+					if (content != null) {
+						reader = new ClassFileReader(content, qualifiedBinaryFileName.toCharArray());
+						break;
+					}
+				}
+			}
+		} else {
+			reader = ClassFileReader.readFromModule(new File(this.zipFilename), moduleName, qualifiedBinaryFileName, moduleNameFilter);
+		}
+		if (reader != null) {
+			if (this.externalAnnotationPath != null) {
+				try {
+					if (this.annotationZipFile == null) {
+						this.annotationZipFile = ExternalAnnotationDecorator.getAnnotationZipFile(this.externalAnnotationPath, null);
+					}
+					reader = ExternalAnnotationDecorator.create(reader, this.externalAnnotationPath, fileNameWithoutExtension, this.annotationZipFile);
+				} catch (IOException e) {
+					// don't let error on annotations fail class reading
+				}
+			}
+			if (this.accessRuleSet == null)
+				return new NameEnvironmentAnswer(reader, null, reader.getModule());
+			return new NameEnvironmentAnswer(reader,
+					this.accessRuleSet.getViolatedRestriction(fileNameWithoutExtension.toCharArray()),
+					reader.getModule());
+		}
 	} catch (ClassFormatException e) { // treat as if class file is missing
 	} catch (IOException e) { // treat as if class file is missing
 	}
