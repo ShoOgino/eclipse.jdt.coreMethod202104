@@ -26,8 +26,16 @@
 			declaringModuleNames = moduleEnv.getUniqueModulesDeclaringPackage(parentName, name, nameForLookup());
 			if (declaringModuleNames != null) {
 				if (CharOperation.containsEqual(declaringModuleNames, this.moduleName)) {
-					// declared here, not yet known, so create it now:
-					binding = new PackageBinding(subPkgCompoundName, parent, this.environment, this);
+					if (parent instanceof SplitPackageBinding) {
+						// parent.getPackage0() may have been too shy, so drill into the split:
+						PackageBinding singleParent = ((SplitPackageBinding) parent).getIncarnation(this);
+						if (singleParent != null)
+							binding = singleParent.getPackage0(name);
+					}
+					if (binding == null) {
+						// declared here, not yet known, so create it now:
+						binding = new PackageBinding(subPkgCompoundName, parent, this.environment, this);
+					}
 				} else if (considerRequiredModules) {
 					// visible but foreign (when current is unnamed or auto):
 					for (char[] declaringModuleName : declaringModuleNames) {
@@ -57,6 +65,8 @@
 
 		// enrich with split-siblings from visible modules:
 		if (considerRequiredModules) {
+			if (parent != null && binding != null)
+				parent.addPackage(binding, this); // preliminarily add to avoid creating duplicates, will be updated below
 			binding = combineWithPackagesFromOtherRelevantModules(binding, subPkgCompoundName, declaringModuleNames);
 		}
 		if (binding == null || !binding.isValidBinding()) {
@@ -69,10 +79,13 @@
 			return null;
 		}
 		// remember
-		if (parentName.length == 0)
+		if (parentName.length == 0) {
 			binding.environment.knownPackages.put(name, binding);
-		else if (parent != null)
+		} else if (parent != null) {
 			binding = parent.addPackage(binding, this);
+		}
+		if (packageMayBeIncomplete)
+			return binding;
 		return addPackage(binding, false);
 	}
 
