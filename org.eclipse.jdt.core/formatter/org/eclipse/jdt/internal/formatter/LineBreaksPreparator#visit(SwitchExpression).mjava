@@ -1,0 +1,51 @@
+	@Override
+	public boolean visit(SwitchExpression node) {
+		handleBracedCode(node, node.getExpression(), this.options.brace_position_for_switch,
+				this.options.indent_switchstatements_compare_to_switch);
+
+		List<Statement> statements = node.statements();
+		if (this.options.indent_switchstatements_compare_to_cases) {
+			int nonBreakStatementEnd = -1;
+			for (Statement statement : statements) {
+				boolean isBreaking = statement instanceof BreakStatement || statement instanceof ReturnStatement
+						|| statement instanceof ContinueStatement || statement instanceof Block;
+				if (isBreaking && !(statement instanceof Block))
+					adjustEmptyLineAfter(this.tm.lastIndexIn(statement, -1), -1);
+				if (statement instanceof SwitchCase) {
+					if (nonBreakStatementEnd >= 0) {
+						// indent only comments between previous and current statement
+						this.tm.get(nonBreakStatementEnd + 1).indent();
+						this.tm.firstTokenIn(statement, -1).unindent();
+					}
+				} else if (!(statement instanceof BreakStatement || statement instanceof Block)) {
+					indent(statement);
+				}
+				nonBreakStatementEnd = isBreaking ? -1 : this.tm.lastIndexIn(statement, -1);
+			}
+			if (nonBreakStatementEnd >= 0) {
+				// indent comments between last statement and closing brace 
+				this.tm.get(nonBreakStatementEnd + 1).indent();
+				this.tm.lastTokenIn(node, TokenNameRBRACE).unindent();
+			}
+		}
+		if (this.options.indent_breaks_compare_to_cases) {
+			for (Statement statement : statements) {
+				if (statement instanceof BreakStatement)
+					indent(statement);
+			}
+		}
+
+		boolean arrowMode = statements.stream()
+				.anyMatch(s -> s instanceof SwitchCase && ((SwitchCase) s).isSwitchLabeledRule());
+		for (Statement statement : statements) {
+			if (statement instanceof Block)
+				continue; // will add break in visit(Block) if necessary
+			if (arrowMode && !(statement instanceof SwitchCase))
+				continue;
+			if (this.options.put_empty_statement_on_new_line || !(statement instanceof EmptyStatement))
+				breakLineBefore(statement);
+		}
+
+		return true;
+	}
+

@@ -18,11 +18,32 @@
 
 			// prepare the labels and constants
 			this.breakLabel.initialize(codeStream);
-			CaseLabel[] caseLabels = new CaseLabel[this.caseCount];
-			for (int i = 0, max = this.caseCount; i < max; i++) {
-				this.cases[i].targetLabel = (caseLabels[i] = new CaseLabel(codeStream));
-				caseLabels[i].tagBits |= BranchLabel.USED;
+			int constantCount = this.constants == null ? 0 : this.constants.length;
+			int nCaseLabels = 0;
+			CaseLabel[] caseLabels;
+			if (currentScope.compilerOptions().complianceLevel >= ClassFileConstants.JDK12) {
+				for (int i = 0, max = this.caseCount; i < max; i++) {
+					int l = this.cases[i].constantExpressions.length;
+					nCaseLabels += l;
+					this.cases[i].targetLabels = new BranchLabel[l]; 
+				}
+				caseLabels = new CaseLabel[nCaseLabels];
+				int j = 0;
+				for (int i = 0, max = this.caseCount; i < max; i++) {
+					CaseStatement stmt = this.cases[i];
+					for (int k = 0, l = stmt.constantExpressions.length; k < l; ++k) {
+						stmt.targetLabels[k] = (caseLabels[j] = new CaseLabel(codeStream));
+						caseLabels[j++].tagBits |= BranchLabel.USED;
+					}
+				}
+			} else {
+				caseLabels = new CaseLabel[this.caseCount];
+				for (int i = 0, max = this.caseCount; i < max; i++) {
+					this.cases[i].targetLabel = (caseLabels[i] = new CaseLabel(codeStream));
+					caseLabels[i].tagBits |= BranchLabel.USED;
+				}
 			}
+
 			CaseLabel defaultLabel = new CaseLabel(codeStream);
 			final boolean hasCases = this.caseCount != 0;
 			if (hasCases) defaultLabel.tagBits |= BranchLabel.USED;
@@ -30,19 +51,20 @@
 				this.defaultCase.targetLabel = defaultLabel;
 			}
 
-			final TypeBinding resolvedType = this.expression.resolvedType;
+			final TypeBinding resolvedType1 = this.expression.resolvedType;
 			boolean valueRequired = false;
-			if (resolvedType.isEnum()) {
+			if (resolvedType1.isEnum()) {
 				// go through the translation table
 				codeStream.invoke(Opcodes.OPC_invokestatic, this.synthetic, null /* default declaringClass */);
 				this.expression.generateCode(currentScope, codeStream, true);
 				// get enum constant ordinal()
-				codeStream.invokeEnumOrdinal(resolvedType.constantPoolName());
+				codeStream.invokeEnumOrdinal(resolvedType1.constantPoolName());
 				codeStream.iaload();
 				if (!hasCases) {
 					// we can get rid of the generated ordinal value
 					codeStream.pop();
 				}
+				valueRequired = hasCases;
 			} else {
 				valueRequired = this.expression.constant == Constant.NotAConstant || hasCases;
 				// generate expression
@@ -50,18 +72,18 @@
 			}
 			// generate the appropriate switch table/lookup bytecode
 			if (hasCases) {
-				int[] sortedIndexes = new int[this.caseCount];
+				int[] sortedIndexes = new int[constantCount];
 				// we sort the keys to be able to generate the code for tableswitch or lookupswitch
-				for (int i = 0; i < this.caseCount; i++) {
+				for (int i = 0; i < constantCount; i++) {
 					sortedIndexes[i] = i;
 				}
 				int[] localKeysCopy;
-				System.arraycopy(this.constants, 0, (localKeysCopy = new int[this.caseCount]), 0, this.caseCount);
-				CodeStream.sort(localKeysCopy, 0, this.caseCount - 1, sortedIndexes);
+				System.arraycopy(this.constants, 0, (localKeysCopy = new int[constantCount]), 0, constantCount);
+				CodeStream.sort(localKeysCopy, 0, constantCount - 1, sortedIndexes);
 
-				int max = localKeysCopy[this.caseCount - 1];
+				int max = localKeysCopy[constantCount - 1];
 				int min = localKeysCopy[0];
-				if ((long) (this.caseCount * 2.5) > ((long) max - (long) min)) {
+				if ((long) (constantCount * 2.5) > ((long) max - (long) min)) {
 
 					// work-around 1.3 VM bug, if max>0x7FFF0000, must use lookup bytecode
 					// see http://dev.eclipse.org/bugs/show_bug.cgi?id=21557
@@ -75,6 +97,7 @@
 							max,
 							this.constants,
 							sortedIndexes,
+							this.constMapping,
 							caseLabels);
 					}
 				} else {
@@ -90,7 +113,7 @@
 			if (this.statements != null) {
 				for (int i = 0, maxCases = this.statements.length; i < maxCases; i++) {
 					Statement statement = this.statements[i];
-					if ((caseIndex < this.caseCount) && (statement == this.cases[caseIndex])) { // statements[i] is a case
+					if ((caseIndex < constantCount) && (statement == this.cases[caseIndex])) { // statements[i] is a case
 						this.scope.enclosingCase = this.cases[caseIndex]; // record entering in a switch case block
 						if (this.preSwitchInitStateIndex != -1) {
 							codeStream.removeNotDefinitelyAssignedVariables(currentScope, this.preSwitchInitStateIndex);
@@ -104,8 +127,29 @@
 							}
 						}
 					}
-					statement.generateCode(this.scope, codeStream);
+					statementGenerateCode(currentScope, codeStream, statement);
 				}
+			}
+			boolean enumInSwitchExpression =  resolvedType1.isEnum() && this instanceof SwitchExpression;
+			boolean isEnumSwitchWithoutDefaultCase = this.defaultCase == null && enumInSwitchExpression;
+			if (isEnumSwitchWithoutDefaultCase) {
+				// we want to force an line number entry to get an end position after the switch statement
+				if (this.preSwitchInitStateIndex != -1) {
+					codeStream.removeNotDefinitelyAssignedVariables(currentScope, this.preSwitchInitStateIndex);
+				}
+				defaultLabel.place();
+				/* a default case is not needed for enum if all enum values are used in the switch expression
+				 * we need to handle the default case to throw an error (IncompatibleClassChangeError) in order
+				 * to make the stack map consistent. All cases will return a value on the stack except the missing default
+				 * case.
+				 * There is no returned value for the default case so we handle it with an exception thrown. An
+				 * IllegalClassChangeError seems legitimate as this would mean the enum type has been recompiled with more 
+				 * enum constants and the class that is using the switch on the enum has not been recompiled
+				 */
+				codeStream.newJavaLangIncompatibleClassChangeError();
+				codeStream.dup();
+				codeStream.invokeJavaLangIncompatibleClassChangeErrorDefaultConstructor();
+				codeStream.athrow();
 			}
 			// May loose some local variable initializations : affecting the local variable attributes
 			if (this.mergedInitStateIndex != -1) {
@@ -117,10 +161,20 @@
 			}
 			// place the trailing labels (for break and default case)
 			this.breakLabel.place();
-			if (this.defaultCase == null) {
+			if (this.defaultCase == null && !enumInSwitchExpression) {
 				// we want to force an line number entry to get an end position after the switch statement
 				codeStream.recordPositionsFrom(codeStream.position, this.sourceEnd, true);
 				defaultLabel.place();
+			}
+			if (this instanceof SwitchExpression) {
+				TypeBinding switchResolveType = this.resolvedType;
+				if (this.expectedType() != null) {
+					switchResolveType = this.expectedType().erasure();
+				}
+				boolean optimizedGoto = codeStream.lastAbruptCompletion == -1;
+				// if the last bytecode was an optimized goto (value is already on the stack) or an enum switch without default case, then we need to adjust the 
+				// stack depth to reflect the fact that there is an value on the stack (return type of the switch expression)
+				codeStream.recordExpressionType(switchResolveType, optimizedGoto ? 0 : 1, optimizedGoto || isEnumSwitchWithoutDefaultCase);
 			}
 			codeStream.recordPositionsFrom(pc, this.sourceStart);
 		} finally {
