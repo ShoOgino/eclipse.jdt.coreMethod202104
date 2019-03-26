@@ -5,59 +5,65 @@
  */
 private IBinaryMethod[] createMethods(IBinaryMethod[] iMethods, IBinaryType binaryType, long sourceLevel, char[][][] missingTypeNames) {
 	if (!isPrototype()) throw new IllegalStateException();
-	int total = 0, initialTotal = 0, iClinit = -1;
-	int[] toSkip = null;
-	if (iMethods != null) {
-		total = initialTotal = iMethods.length;
-		boolean keepBridgeMethods = sourceLevel < ClassFileConstants.JDK1_5; // https://bugs.eclipse.org/bugs/show_bug.cgi?id=330347
-		for (int i = total; --i >= 0;) {
-			IBinaryMethod method = iMethods[i];
-			if ((method.getModifiers() & ClassFileConstants.AccSynthetic) != 0) {
-				if (keepBridgeMethods && (method.getModifiers() & ClassFileConstants.AccBridge) != 0)
-					continue; // want to see bridge methods as real methods
-				// discard synthetics methods
-				if (toSkip == null) toSkip = new int[iMethods.length];
-				toSkip[i] = -1;
-				total--;
-			} else if (iClinit == -1) {
-				char[] methodName = method.getSelector();
-				if (methodName.length == 8 && methodName[0] == Util.C_GENERIC_START) {
-					// discard <clinit>
-					iClinit = i;
+	boolean save = this.environment.mayTolerateMissingType;
+	this.environment.mayTolerateMissingType = true;
+	try {
+		int total = 0, initialTotal = 0, iClinit = -1;
+		int[] toSkip = null;
+		if (iMethods != null) {
+			total = initialTotal = iMethods.length;
+			boolean keepBridgeMethods = sourceLevel < ClassFileConstants.JDK1_5; // https://bugs.eclipse.org/bugs/show_bug.cgi?id=330347
+			for (int i = total; --i >= 0;) {
+				IBinaryMethod method = iMethods[i];
+				if ((method.getModifiers() & ClassFileConstants.AccSynthetic) != 0) {
+					if (keepBridgeMethods && (method.getModifiers() & ClassFileConstants.AccBridge) != 0)
+						continue; // want to see bridge methods as real methods
+					// discard synthetics methods
+					if (toSkip == null) toSkip = new int[iMethods.length];
+					toSkip[i] = -1;
 					total--;
+				} else if (iClinit == -1) {
+					char[] methodName = method.getSelector();
+					if (methodName.length == 8 && methodName[0] == Util.C_GENERIC_START) {
+						// discard <clinit>
+						iClinit = i;
+						total--;
+					}
 				}
 			}
 		}
-	}
-	if (total == 0) {
-		this.methods = Binding.NO_METHODS;
-		return NO_BINARY_METHODS;
-	}
-
-	boolean hasRestrictedAccess = hasRestrictedAccess();
-	MethodBinding[] methods1 = new MethodBinding[total];
-	if (total == initialTotal) {
-		for (int i = 0; i < initialTotal; i++) {
-			MethodBinding method = createMethod(iMethods[i], binaryType, sourceLevel, missingTypeNames);
-			if (hasRestrictedAccess)
-				method.modifiers |= ExtraCompilerModifiers.AccRestrictedAccess;
-			methods1[i] = method;
+		if (total == 0) {
+			this.methods = Binding.NO_METHODS;
+			return NO_BINARY_METHODS;
 		}
-		this.methods = methods1;
-		return iMethods;
-	} else {
-		IBinaryMethod[] mappedBinaryMethods = new IBinaryMethod[total];
-		for (int i = 0, index = 0; i < initialTotal; i++) {
-			if (iClinit != i && (toSkip == null || toSkip[i] != -1)) {
+
+		boolean hasRestrictedAccess = hasRestrictedAccess();
+		MethodBinding[] methods1 = new MethodBinding[total];
+		if (total == initialTotal) {
+			for (int i = 0; i < initialTotal; i++) {
 				MethodBinding method = createMethod(iMethods[i], binaryType, sourceLevel, missingTypeNames);
 				if (hasRestrictedAccess)
 					method.modifiers |= ExtraCompilerModifiers.AccRestrictedAccess;
-				mappedBinaryMethods[index] = iMethods[i];
-				methods1[index++] = method;
+				methods1[i] = method;
 			}
+			this.methods = methods1;
+			return iMethods;
+		} else {
+			IBinaryMethod[] mappedBinaryMethods = new IBinaryMethod[total];
+			for (int i = 0, index = 0; i < initialTotal; i++) {
+				if (iClinit != i && (toSkip == null || toSkip[i] != -1)) {
+					MethodBinding method = createMethod(iMethods[i], binaryType, sourceLevel, missingTypeNames);
+					if (hasRestrictedAccess)
+						method.modifiers |= ExtraCompilerModifiers.AccRestrictedAccess;
+					mappedBinaryMethods[index] = iMethods[i];
+					methods1[index++] = method;
+				}
+			}
+			this.methods = methods1;
+			return mappedBinaryMethods;
 		}
-		this.methods = methods1;
-		return mappedBinaryMethods;
+	} finally {
+		this.environment.mayTolerateMissingType = save;
 	}
 }
 
