@@ -1,10 +1,22 @@
+/**
+ * Use a flyweight cache for the char arrays to avoid duplicated arrays with the same contents.
+ * After calling this method, identity comparison on the array contents of the resulting array
+ * will work for arrays with equal content.
+ *
+ * Optionally drops very common qualified names from the array to spare some bytes.
+ *
+ * @return a new array with interned elements.
+ */
 public static char[][][] internQualifiedNames(char[][][] qualifiedNames, boolean keepWellKnown) {
 	if (qualifiedNames == null) return EmptyQualifiedNames;
 	int length = qualifiedNames.length;
 	if (length == 0) return EmptyQualifiedNames;
 
 	char[][][] keepers = new char[length][][];
+	char[][] prev = null;
+	boolean isSorted = true;
 	int index = 0;
+
 	next : for (int i = 0; i < length; i++) {
 		char[][] qualifiedName = qualifiedNames[i];
 		int qLength = qualifiedName.length;
@@ -14,6 +26,13 @@ public static char[][][] internQualifiedNames(char[][][] qualifiedNames, boolean
 				break; // all remaining well known names are shorter
 			if (CharOperation.equals(qualifiedName, wellKnownName)) {
 				if (keepWellKnown) {
+					// This code is duplicated to encourage the JIT to inline more stuff
+					if (isSorted) {
+						if (prev != null && compareCharCharArray(prev, qualifiedName) > 0) {
+							isSorted = false;
+						}
+						prev = qualifiedName;
+					}
 					keepers[index++] = wellKnownName;
 				}
 				continue next;
@@ -24,12 +43,22 @@ public static char[][][] internQualifiedNames(char[][][] qualifiedNames, boolean
 		// InternedQualifiedNames[1] is for size 2...
 		// InternedQualifiedNames[6] is for size 7
 		QualifiedNameSet internedNames = InternedQualifiedNames[qLength <= MaxQualifiedNames ? qLength - 1 : 0];
-		qualifiedName = internSimpleNames(qualifiedName, false);
+		qualifiedName = internSimpleNames(qualifiedName, false, false);
+		// This code is duplicated to encourage the JIT to inline more stuff
+		if (isSorted) {
+			if (prev != null && compareCharCharArray(prev, qualifiedName) > 0) {
+				isSorted = false;
+			}
+			prev = qualifiedName;
+		}
 		keepers[index++] = internedNames.add(qualifiedName);
 	}
 	if (length > index) {
 		if (index == 0) return EmptyQualifiedNames;
 		System.arraycopy(keepers, 0, keepers = new char[index][][], 0, index);
+	}
+	if (!isSorted) {
+		Arrays.sort(keepers, CHAR_CHAR_ARR_COMPARATOR);
 	}
 	return keepers;
 }
