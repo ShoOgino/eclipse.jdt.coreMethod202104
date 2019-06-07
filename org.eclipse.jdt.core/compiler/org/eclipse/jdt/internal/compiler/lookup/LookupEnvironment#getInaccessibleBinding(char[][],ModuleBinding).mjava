@@ -1,0 +1,40 @@
+public Binding getInaccessibleBinding(char[][] compoundName, ModuleBinding clientModule) {
+	if (this.root != this)
+		return this.root.getInaccessibleBinding(compoundName, clientModule);
+	if (this.nameEnvironment instanceof IModuleAwareNameEnvironment) {
+		IModuleAwareNameEnvironment moduleEnv = (IModuleAwareNameEnvironment) this.nameEnvironment;
+		int length = compoundName.length;
+		for (int j=length; j>0; j--) {
+			char[][] candidateName = CharOperation.subarray(compoundName, 0, j);
+			char[][] moduleNames = moduleEnv.getModulesDeclaringPackage(candidateName, ModuleBinding.ANY);
+			if (moduleNames != null) {
+				// in some module a package named candidateName exists, verify observability & inaccessibility:
+				PackageBinding inaccessiblePackage = null;
+				for (char[] moduleName : moduleNames) {
+					if (moduleName == ModuleBinding.UNOBSERVABLE)
+						continue;
+					ModuleBinding mod = getModule(moduleName);
+					if (mod != null) {
+						PackageBinding pack = mod.getVisiblePackage(candidateName);
+						if (pack != null && pack.isValidBinding()) {
+							if (clientModule.canAccess(pack))
+								return null;
+							inaccessiblePackage = pack;
+						}
+					}
+				}
+				if (inaccessiblePackage == null)
+					return null;
+				if (j < length) {
+					// does the package even contain a type of the next name segment?
+					TypeBinding type = inaccessiblePackage.getType(compoundName[j], inaccessiblePackage.enclosingModule);
+					if (type instanceof ReferenceBinding && type.isValidBinding())
+						return new ProblemReferenceBinding(compoundName, (ReferenceBinding) type, ProblemReasons.NotAccessible);
+				}
+				return new ProblemPackageBinding(candidateName, ProblemReasons.NotAccessible, this);
+			}
+		}
+	}
+	return null;
+}
+

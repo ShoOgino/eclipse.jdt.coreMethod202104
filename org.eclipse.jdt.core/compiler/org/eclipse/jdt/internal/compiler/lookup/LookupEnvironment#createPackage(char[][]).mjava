@@ -4,13 +4,19 @@
  * 3. Create the method bindings
  */
 public PackageBinding createPackage(char[][] compoundName) {
-	PackageBinding packageBinding = getPackage0(compoundName[0]);
-	if (packageBinding == null || packageBinding == TheNotFoundPackage) {
-		packageBinding = new PackageBinding(compoundName[0], this, this.module);
-		this.knownPackages.put(compoundName[0], packageBinding);
-		if (this.module != null) {
-			packageBinding = this.module.addPackage(packageBinding, true);
-			this.knownPackages.put(compoundName[0], packageBinding); // update in case of split package
+	PackageBinding packageBinding = this.module.getDeclaredPackage(CharOperation.concatWith(compoundName, '.'));
+	if (packageBinding != null && packageBinding.isValidBinding()) {
+		// restart from the toplevel package to proceed with clash analysis below
+		packageBinding = this.getTopLevelPackage(compoundName[0]);
+	} else {
+		packageBinding = getPackage0(compoundName[0]);
+		if (packageBinding == null || packageBinding == TheNotFoundPackage) {
+			packageBinding = new PlainPackageBinding(compoundName[0], this, this.module);
+			this.knownPackages.put(compoundName[0], packageBinding);
+			if (this.module != null) {
+				packageBinding = this.module.addPackage(packageBinding, true);
+				this.knownPackages.put(compoundName[0], packageBinding); // update in case of split package
+			}
 		}
 	}
 
@@ -21,8 +27,7 @@ public PackageBinding createPackage(char[][] compoundName) {
 		// unless its an unresolved type which is referenced from an inconsistent class file
 		// NOTE: empty packages are not packages according to changes in JLS v2, 7.4.3
 		// so not all types cause collision errors when they're created even though the package did exist
-		ReferenceBinding type = packageBinding.getType0(compoundName[i]);
-		if (type != null && type != TheNotFoundType && !(type instanceof UnresolvedReferenceBinding))
+		if (packageBinding.hasType0Any(compoundName[i]))
 			return null;
 
 		PackageBinding parent = packageBinding;
@@ -43,20 +48,17 @@ public PackageBinding createPackage(char[][] compoundName) {
 					return null;
 				}
 			}
-			if (parent instanceof SplitPackageBinding) {
+			PackageBinding singleParent = parent.getIncarnation(this.module);
+			if (singleParent != parent && singleParent != null) {
 				// parent.getPackage0() may have been too shy, so drill into the split:
-				PackageBinding singleParent = ((SplitPackageBinding) parent).getIncarnation(this.module);
-				if (singleParent != null)
-					packageBinding = singleParent.getPackage0(compoundName[i]);
+				packageBinding = singleParent.getPackage0(compoundName[i]);
 			}
 			if (packageBinding == null) {
-				packageBinding = new PackageBinding(CharOperation.subarray(compoundName, 0, i + 1), parent, this, this.module);
+				packageBinding = new PlainPackageBinding(CharOperation.subarray(compoundName, 0, i + 1), parent, this, this.module);
 				packageBinding = parent.addPackage(packageBinding, this.module);
 			}
 		}
 	}
-	if (packageBinding instanceof SplitPackageBinding)
-		packageBinding = ((SplitPackageBinding) packageBinding).getIncarnation(this.module);
-	return packageBinding;
+	return packageBinding.getIncarnation(this.module);
 }
 
