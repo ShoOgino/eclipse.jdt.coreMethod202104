@@ -1,0 +1,34 @@
+	private void doTestBug548456_concurrentCallBinaryTypeExists(int numberOfThreads) throws Exception {
+		final IJavaProject project = setUpJavaProject(PROJECT_NAME);
+		try {
+			buildProject(project);
+			assertHasNoBuildProblems(project);
+
+			CountDownLatch latch = new CountDownLatch(numberOfThreads);
+			List<CheckIfTypeExists> runnables = new ArrayList<>(numberOfThreads);
+			for (int i = 0; i < numberOfThreads; ++i) {
+				CheckIfTypeExists runnable = new CheckIfTypeExists(project, latch);
+				runnables.add(runnable);
+			}
+
+			List<Thread> threads = startThreads(runnables);
+
+			boolean interrupted = false;
+			for (Thread thread : threads) {
+				try {
+					thread.join();
+				} catch (InterruptedException e) {
+					// we join all threads regardless of interruption, to be sure we don't leave running threads after this method done
+					interrupted = true;
+				}
+			}
+			assertFalse("waiting on test threads to finish must not be interrupted", interrupted);
+
+			for (CheckIfTypeExists runnable : runnables) {
+				assertTrue("expected type for test source to exist, despite concurrent access to JavaModelManager", runnable.typeExists);
+			}
+		} finally {
+			deleteProject(PROJECT_NAME);
+		}
+	}
+
