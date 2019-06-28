@@ -9,14 +9,26 @@ public ReferenceBinding getMemberType(char[] typeName) {
 		return memberType == null ? null : this.environment.createMemberType(memberType, this);
 	}
 
-	ReferenceBinding[] members = sortedMemberTypes();
-	int memberTypeIndex = unresolvedTypesAwareBinarySearch(typeName, members);
-	if (memberTypeIndex >= 0) {
-		ReferenceBinding memberType = members[memberTypeIndex];
-		if (memberType instanceof UnresolvedReferenceBinding) {
-			return members[memberTypeIndex] = (ReferenceBinding) resolveType(memberType, this.environment, false /* no raw conversion for now */);
+	ReferenceBinding[] members = maybeSortedMemberTypes();
+	// do not try to binary search while we are still resolving and the array is not necessarily sorted
+	if (!this.memberTypesSorted) {
+		for (int i = members.length; --i >= 0;) {
+		    ReferenceBinding memberType = members[i];
+		    if (memberType instanceof UnresolvedReferenceBinding) {
+				char[] name = memberType.sourceName; // source name is qualified with enclosing type name
+				int prefixLength = this.compoundName[this.compoundName.length - 1].length + 1; // enclosing$
+				if (name.length == (prefixLength + typeName.length)) // enclosing $ typeName
+					if (CharOperation.fragmentEquals(typeName, name, prefixLength, true)) // only check trailing portion
+						return members[i] = (ReferenceBinding) resolveType(memberType, this.environment, false /* no raw conversion for now */);
+		    } else if (CharOperation.equals(typeName, memberType.sourceName)) {
+		        return memberType;
+		    }
 		}
-		return memberType;
+		return null;
+	}
+	int memberTypeIndex = ReferenceBinding.binarySearch(typeName, members);
+	if (memberTypeIndex >= 0) {
+		return members[memberTypeIndex];
 	}
 	return null;
 }
