@@ -10,7 +10,7 @@
 			if (pkg == LookupEnvironment.TheNotFoundPackage)
 				return null;
 			else
-				return addPackage(pkg, false);
+				return pkg;
 		}
 
 		// check cached plain PackageBinding in declaredPackages (which may need combining with siblings):
@@ -35,7 +35,7 @@
 						}
 						if (binding == null) {
 							// declared here, not yet known, so create it now:
-							binding = new PlainPackageBinding(subPkgCompoundName, parent, this.environment, this);
+							binding = this.createDeclaredPackage(subPkgCompoundName, parent);
 						}
 					} else {
 						// visible but foreign (when current is unnamed or auto):
@@ -43,14 +43,7 @@
 							ModuleBinding declaringModule = this.environment.root.getModule(declaringModuleName);
 							if (declaringModule != null) {
 								PlainPackageBinding declaredPackage = declaringModule.getDeclaredPackage(fullFlatName);
-								if (declaredPackage != null) {
-									// don't add foreign package to 'parent' (below), but to its own parent:
-									if (declaredPackage.parent != null)
-										declaredPackage.parent.addPackage(declaredPackage, declaringModule);
-									parent = null;
-									//
-									binding = SplitPackageBinding.combine(declaredPackage, binding, this);
-								}
+								binding = SplitPackageBinding.combine(declaredPackage, binding, this);
 							}
 						}
 					}
@@ -58,31 +51,31 @@
 			}
 		} else {
 			if (this.environment.nameEnvironment.isPackage(parentName, name))
-				binding = new PlainPackageBinding(subPkgCompoundName, parent, this.environment, this);
+				binding = this.createDeclaredPackage(subPkgCompoundName, parent);
 		}
-
-		// enrich with split-siblings from visible modules:
-		if (parent != null && binding != null)
-			parent.addPackage(binding, this); // preliminarily add to avoid creating duplicates, will be updated below
+		
 		binding = combineWithPackagesFromOtherRelevantModules(binding, subPkgCompoundName, declaringModuleNames);
+
+		assert binding == null || binding instanceof PlainPackageBinding || binding.enclosingModule == this;
+		
 		if (binding == null || !binding.isValidBinding()) {
-			if (parent != null
-					&& !(parent instanceof SplitPackageBinding)) // don't store problem into SPB, because from different focus things may look differently
-			{
+			if (parent != null) {
 				if (binding == null) {
 					parent.addNotFoundPackage(name);
 				} else {
 					parent.knownPackages.put(name, binding);
 				}
+			} else {
+				this.environment.knownPackages.put(name, LookupEnvironment.TheNotFoundPackage);
 			}
 			return null;
 		}
 		// remember
 		if (parentName.length == 0) {
-			binding.environment.knownPackages.put(name, binding);
+			this.environment.knownPackages.put(name, binding);
 		} else if (parent != null) {
 			binding = parent.addPackage(binding, this);
 		}
-		return addPackage(binding, false);
+		return binding;
 	}
 
