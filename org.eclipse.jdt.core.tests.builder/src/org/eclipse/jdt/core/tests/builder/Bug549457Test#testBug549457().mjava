@@ -1,0 +1,38 @@
+	/**
+	 * Test for Bug 549457.
+	 *
+	 * We expect that a JDT compiler setting change triggers a build, resulting in a build problem.
+	 */
+	public void testBug549457() throws Exception {
+		IFolder srcPackageFolder = env.getWorkspace().getRoot().getFolder(this.srcPackage);
+		assertTrue("package in source must exist", srcPackageFolder.exists());
+
+		env.addClass(this.src, "p", "X", "package p;\n public interface X { default void foo() { /* cause an error with Java 7 */ } }");
+
+		fullBuild(this.project);
+		// For this test, the default is not Java 8. If this changes, we can expect no problems here. The test cares only that the source was compiled.
+		expectCompileProblem(this.project, "Default methods are allowed only at source level 1.8 or above");
+
+		IWorkspaceRoot workspaceRoot = ResourcesPlugin.getWorkspace().getRoot();
+		IProject testProject = workspaceRoot.getProject("Bug549457Test");
+		IJavaProject javaProject = JavaCore.create(testProject);
+		javaProject.setOption(CompilerOptions.OPTION_Compliance, "1.8");
+		javaProject.setOption(CompilerOptions.OPTION_Source, "1.8");
+		testProject.refreshLocal(IResource.DEPTH_INFINITE, new NullProgressMonitor());
+		waitForAutoBuild();
+		fullBuild(this.project);
+		expectNoCompileProblems(this.project);
+
+		String jdtCorePreferencesFile = JavaProject.DEFAULT_PREFERENCES_DIRNAME + IPath.SEPARATOR + JavaProject.JAVA_CORE_PREFS_FILE;
+		IFile settingsFile = testProject.getFile(jdtCorePreferencesFile);
+		assertTrue("expected \"" + jdtCorePreferencesFile + "\" to exist after setting compiler compliance to Java 1.7", settingsFile.exists());
+
+		String newContents = String.join(
+				CompilerOptions.OPTION_Compliance + "=1.7",
+				CompilerOptions.OPTION_Source + "=1.7");
+
+		settingsFile.setContents(new ByteArrayInputStream(newContents.getBytes()), IResource.FORCE, new NullProgressMonitor());
+		waitForAutoBuild();
+		expectCompileProblem(this.project, "Default methods are allowed only at source level 1.8 or above");
+	}
+
