@@ -1,0 +1,71 @@
+	/*
+	 * Resolve @uses tags while block scope
+	 */
+	private void resolveUsesTags(BlockScope scope, boolean reportMissing) {
+		ModuleDeclaration moduleDecl = (ModuleDeclaration)scope.referenceContext();
+		int usesTagsSize = this.usesReferences == null ? 0 : this.usesReferences.length;
+
+		// If no referenced module then report a problem for each uses tag
+		if (moduleDecl == null) {
+			for (int i = 0; i < usesTagsSize; i++) {
+				IJavadocTypeReference uses = this.usesReferences[i];
+				scope.problemReporter().javadocUnexpectedTag(uses.getTagSourceStart(), uses.getTagSourceEnd());
+			}
+			return;
+		}
+
+		// If no uses tags then report a problem for each uses reference
+		int usesSize = moduleDecl.usesCount;
+		if (usesTagsSize == 0) {
+			if (reportMissing) {
+				for (int i = 0; i < usesSize; i++) {
+					UsesStatement uses = moduleDecl.uses[i];
+					scope.problemReporter().javadocMissingUsesTag(uses.serviceInterface, uses.sourceStart, uses.sourceEnd, moduleDecl.binding.modifiers);
+				}
+			}
+		} else {
+			TypeBinding[] bindings = new TypeBinding[usesTagsSize];
+			int maxBindings = 0;
+
+			// Scan all @uses tags
+			for (int i = 0; i < usesTagsSize; i++) {
+				TypeReference usesRef = (TypeReference)this.usesReferences[i];
+				try {
+					usesRef.resolve(scope);
+					if (usesRef.resolvedType != null && usesRef.resolvedType.isValidBinding()) {
+						// Verify duplicated tags
+						boolean found = false;
+						for (int j = 0; j < maxBindings && !found; j++) {
+							if (bindings[j].equals(usesRef.resolvedType)) {
+								scope.problemReporter().javadocDuplicatedUsesTag(usesRef.sourceStart, usesRef.sourceEnd);
+								found = true;
+							}
+						}
+						if (!found) {
+							bindings[maxBindings++] = usesRef.resolvedType;
+						}
+					}
+				} catch (Exception e) {
+					scope.problemReporter().javadocInvalidUsesClass(usesRef.sourceStart, usesRef.sourceEnd);
+				}
+			}
+
+			// Look for undocumented uses
+			if (reportMissing) {
+				for (int i = 0; i < usesSize; i++) {
+					UsesStatement uses = moduleDecl.uses[i];
+					boolean found = false;
+					for (int j = 0; j < maxBindings && !found; j++) {
+						TypeBinding binding = bindings[j];
+						if (uses.serviceInterface.getTypeBinding(scope).equals(binding)) {
+							found = true;
+						}
+					}
+					if (!found) {
+						scope.problemReporter().javadocMissingUsesTag(uses.serviceInterface, uses.sourceStart, uses.sourceEnd, moduleDecl.binding.modifiers);
+					}
+				}
+			}
+		}
+	}
+

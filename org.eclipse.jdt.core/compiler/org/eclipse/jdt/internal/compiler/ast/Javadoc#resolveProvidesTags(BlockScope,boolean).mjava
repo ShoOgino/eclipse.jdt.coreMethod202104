@@ -1,0 +1,71 @@
+	/*
+	 * Resolve @provides tags while block scope
+	 */
+	private void resolveProvidesTags(BlockScope scope, boolean reportMissing) {
+		ModuleDeclaration moduleDecl = (ModuleDeclaration)scope.referenceContext();
+		int providesTagsSize = this.providesReferences == null ? 0 : this.providesReferences.length;
+
+		// If no referenced module then report a problem for each uses tag
+		if (moduleDecl == null) {
+			for (int i = 0; i < providesTagsSize; i++) {
+				IJavadocTypeReference provides = this.providesReferences[i];
+				scope.problemReporter().javadocUnexpectedTag(provides.getTagSourceStart(), provides.getTagSourceEnd());
+			}
+			return;
+		}
+
+		// If no uses tags then report a problem for each uses reference
+		int providesSize = moduleDecl.servicesCount;
+		if (providesTagsSize == 0) {
+			if (reportMissing) {
+				for (int i = 0; i < providesSize; i++) {
+					ProvidesStatement provides = moduleDecl.services[i];
+					scope.problemReporter().javadocMissingProvidesTag(provides.serviceInterface, provides.sourceStart, provides.sourceEnd, moduleDecl.binding.modifiers);
+				}
+			}
+		} else {
+			TypeBinding[] bindings = new TypeBinding[providesTagsSize];
+			int maxBindings = 0;
+
+			// Scan all @provides tags
+			for (int i = 0; i < providesTagsSize; i++) {
+				TypeReference providesRef = (TypeReference)this.providesReferences[i];
+				try {
+					providesRef.resolve(scope);
+					if (providesRef.resolvedType != null && providesRef.resolvedType.isValidBinding()) {
+						// Verify duplicated tags
+						boolean found = false;
+						for (int j = 0; j < maxBindings && !found; j++) {
+							if (bindings[j].equals(providesRef.resolvedType)) {
+								scope.problemReporter().javadocDuplicatedProvidesTag(providesRef.sourceStart, providesRef.sourceEnd);
+								found = true;
+							}
+						}
+						if (!found) {
+							bindings[maxBindings++] = providesRef.resolvedType;
+						}
+					}
+				} catch (Exception e) {
+					scope.problemReporter().javadocInvalidProvidesClass(providesRef.sourceStart, providesRef.sourceEnd);
+				}
+			}
+
+			// Look for undocumented uses
+			if (reportMissing) {
+				for (int i = 0; i < providesSize; i++) {
+					ProvidesStatement provides = moduleDecl.services[i];
+					boolean found = false;
+					for (int j = 0; j < maxBindings && !found; j++) {
+						TypeBinding binding = bindings[j];
+						if (provides.serviceInterface.getTypeBinding(scope).equals(binding)) {
+							found = true;
+						}
+					}
+					if (!found) {
+						scope.problemReporter().javadocMissingProvidesTag(provides.serviceInterface, provides.sourceStart, provides.sourceEnd, moduleDecl.binding.modifiers);
+					}
+				}
+			}
+		}
+	}
+
