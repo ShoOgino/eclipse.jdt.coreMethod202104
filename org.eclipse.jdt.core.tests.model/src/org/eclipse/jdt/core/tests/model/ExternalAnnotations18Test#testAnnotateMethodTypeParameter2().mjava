@@ -1,0 +1,93 @@
+	public void testAnnotateMethodTypeParameter2() throws Exception {
+		myCreateJavaProject("TestLibs");
+		String lib1Content =
+				"package libs;\n" +
+				"import java.util.List;\n" + 
+				"\n" +
+				"public abstract class Entry<KK,VV> {\n" +
+				"	 public static <K, V extends Comparable<? super V>> Comparator<Entry<K,V>> comparingByValue() { return null; }\n" +
+				"}\n";
+		addLibraryWithExternalAnnotations(this.project, "lib1.jar", "annots", new String[] {
+				"/UnannotatedLib/libs/Comparator.java",
+				"package libs;\n" +
+				"public class Comparator<T> {}\n",
+				"/UnannotatedLib/libs/Entry.java",
+				lib1Content
+			}, null);
+
+		// acquire library AST:
+		IType type = this.project.findType("libs.Entry");
+		ICompilationUnit libWorkingCopy = type.getClassFile().getWorkingCopy(this.wcOwner, null);
+		ASTParser parser = ASTParser.newParser(getJLS8());
+		parser.setSource(libWorkingCopy);
+		parser.setResolveBindings(true);
+		parser.setStatementsRecovery(false);
+		parser.setBindingsRecovery(false);
+		CompilationUnit unit = (CompilationUnit) parser.createAST(null);
+		libWorkingCopy.discardWorkingCopy();
+
+		// find method binding:
+		int start = lib1Content.indexOf("comparingByValue");
+		ASTNode name = NodeFinder.perform(unit, start, 0);
+		assertTrue("should be simple name", name.getNodeType() == ASTNode.SIMPLE_NAME);
+		ASTNode method = name.getParent();
+		IMethodBinding methodBinding = ((MethodDeclaration)method).resolveBinding();
+
+		// find annotation file (not yet existing):
+		IFile annotationFile = ExternalAnnotationUtil.getAnnotationFile(this.project, methodBinding.getDeclaringClass(), null);
+		assertFalse("file should not exist", annotationFile.exists());
+		assertEquals("file path", "/TestLibs/annots/libs/Entry.eea", annotationFile.getFullPath().toString());
+
+		// annotate:
+		String originalSignature = ExternalAnnotationUtil.extractGenericSignature(methodBinding);
+		// preview:
+		String[] annotatedSign = ExternalAnnotationUtil.annotateTypeParameter(
+				originalSignature, 
+				"1K:Ljava/lang/Object;",  // <- @NonNull K
+				0,
+				MergeStrategy.OVERWRITE_ANNOTATIONS);
+		assertEquals("dry-run result", "[<, " + 
+				"K:Ljava/lang/Object;, " + 
+				"1K:Ljava/lang/Object;, " +  // <- K
+				"V::Ljava/lang/Comparable<-TV;>;>()Llibs/Comparator<Llibs/Entry<TK;TV;>;>;]",
+				Arrays.toString(annotatedSign));
+		// perform:
+		ExternalAnnotationUtil.annotateMethodTypeParameter("libs/Entry", annotationFile,
+				"comparingByValue",
+				originalSignature,
+				"1K:Ljava/lang/Object;", // <- @NonNull K
+				0, // annotate 1st type parameter (K)
+				MergeStrategy.OVERWRITE_ANNOTATIONS, null);
+		assertTrue("file should exist", annotationFile.exists());
+
+		// type check sources:
+		IPackageFragment fragment = this.project.getPackageFragmentRoots()[0].createPackageFragment("tests", true, null);
+		ICompilationUnit cu = fragment.createCompilationUnit("Test1.java",
+				"package tests;\n" + 
+				"import org.eclipse.jdt.annotation.*;\n" + 
+				"import libs.*;\n" + 
+				"\n" + 
+				"public class Test1 {\n" + 
+				"	Object test0() {\n" + 
+				"		Comparator<Entry<@Nullable String,String>> c = Entry.comparingByValue();\n" +
+				"		return c;\n" + 
+				"	}\n" +
+				"}\n",
+				true, new NullProgressMonitor()).getWorkingCopy(new NullProgressMonitor());
+		CompilationUnit reconciled = cu.reconcile(getJLS8(), true, null, new NullProgressMonitor());
+		assertProblems(reconciled.getProblems(), new String[] {
+				"Pb(953) Null type mismatch (type annotations): required 'Comparator<Entry<@Nullable String,String>>' but this expression has type 'Comparator<Entry<@NonNull String,String>>'",
+		}, new int[] { 7 });
+		
+		// un-annotate:
+		annotatedSign = ExternalAnnotationUtil.annotateTypeParameter(
+				originalSignature, 
+				"@K:Ljava/lang/Object;",  // <- <del>1</del> K
+				0, MergeStrategy.OVERWRITE_ANNOTATIONS);
+		assertEquals("dry-run result", "[<, " + 
+				"K:Ljava/lang/Object;, " + 
+				"K:Ljava/lang/Object;, " +  // <- K
+				"V::Ljava/lang/Comparable<-TV;>;>()Llibs/Comparator<Llibs/Entry<TK;TV;>;>;]",
+				Arrays.toString(annotatedSign));
+	}
+

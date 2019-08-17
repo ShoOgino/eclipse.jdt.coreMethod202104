@@ -12,7 +12,9 @@
 			newContent.append(ExternalAnnotationProvider.CLASS_PREFIX);
 			newContent.append(typeName).append('\n');
 			// new entry:
-			newContent.append(selector).append('\n');
+			if (selector != null) { // otherwise we are annotating a class type parameter
+				newContent.append(selector).append('\n');
+			}
 			newContent.append(' ').append(originalSignature).append('\n');
 			newContent.append(' ').append(annotatedSignature).append('\n');
 
@@ -21,9 +23,22 @@
 			BufferedReader reader = new BufferedReader(new InputStreamReader(file.getContents()));
 			StringBuffer newContent = new StringBuffer();
 			try {
+				// type references get the previous signature from the existing type binding:
+				String previousSignature = originalSignature;
 				newContent.append(reader.readLine()).append('\n'); // skip class name
 				String line;
 				while ((line = reader.readLine()) != null) {
+					if (selector == null) { // annotating a type parameter?
+						if (line.trim().startsWith("<")) { //$NON-NLS-1$
+							line = reader.readLine();
+							assert line.trim().startsWith("<"); // reading old annotated type parameters //$NON-NLS-1$
+							// bindings of type parameters (being declarations) don't include annotations in their signature,
+							// so we need to preserve the previous signature from the .eea:
+							previousSignature = line.trim();
+							line = reader.readLine();
+						}
+						break;
+					}
 					if (line.isEmpty()) {
 						newContent.append('\n');
 						continue;
@@ -84,9 +99,10 @@
 					}
 				}
 				// add new entry:
-				newContent.append(selector).append('\n');
+				if (selector != null)
+					newContent.append(selector).append('\n');
 				newContent.append(' ').append(originalSignature).append('\n');
-				annotatedSignature = updateSignature(originalSignature, annotatedSignature, updatePosition, mergeStrategy);
+				annotatedSignature = updateSignature(previousSignature, annotatedSignature, updatePosition, mergeStrategy);
 				writeFile(file, newContent, annotatedSignature, line, reader, monitor);
 			} finally {
 				reader.close();

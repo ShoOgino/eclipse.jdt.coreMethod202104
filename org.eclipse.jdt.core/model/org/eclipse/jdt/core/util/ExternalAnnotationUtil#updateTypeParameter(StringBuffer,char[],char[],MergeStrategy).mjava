@@ -1,0 +1,57 @@
+	/**
+	 * similar to updateType() but for type parameters, syntax:
+	 * 		[Annot] Identifier ClassBound {InterfaceBound}
+	 */
+	private static boolean updateTypeParameter(StringBuffer buf, char[] oldType, char[] newType, MergeStrategy mergeStrategy) {
+		if (mergeStrategy == MergeStrategy.REPLACE_SIGNATURE) {
+			buf.append(newType);
+			return false;
+		}			
+		try {
+			SignatureWrapper oWrap = new SignatureWrapper(oldType, true, true); // may already contain annotations
+			SignatureWrapper nWrap = new SignatureWrapper(newType, true, true); // may already contain annotations
+			// [Annot]
+			mergeAnnotation(buf, oWrap, nWrap, mergeStrategy);
+			// Identifier:
+			char[] oName = oWrap.wordUntil(':');
+			char[] nName = nWrap.wordUntil(':');
+			if (!CharOperation.equals(oName, nName)) {
+				StringBuilder msg = new StringBuilder("Structural mismatch between type parameters ").append(oName).append(" and ").append(nName); //$NON-NLS-1$ //$NON-NLS-2$
+				throw new IllegalArgumentException(msg.toString());
+			}
+			buf.append(oName);
+			// one or more bounds each starting with ':'
+			while (match(buf, oWrap, nWrap, ':', false)) {
+				int oStart = oWrap.start;
+				int nStart = nWrap.start;
+				nWrap.skipAngleContents(nWrap.computeEnd());
+				char[] nType = nWrap.getFrom(nStart);
+				char[] oType;
+				if (oWrap.charAtStart() == ':') {
+					// old bound is empty!
+					if (CharOperation.equals(nType, new char[]{':'})) {
+						nWrap.start--; // unget second ':'
+						continue; // both bounds empty
+					}
+					if (CharOperation.equals(nType, ConstantPool.JavaLangObjectSignature)) {
+						// new: j.l.Object => skip
+						continue;
+					}
+					// new is not exactly Ljava/lang/Object; (perhaps already annotated?) => replace old with j.l.Object for decoration:
+					oType = ConstantPool.JavaLangObjectSignature;
+				} else {
+					oWrap.skipAngleContents(oWrap.computeEnd());
+					oType = oWrap.getFrom(oStart);
+				}
+				if (updateType(buf, oType, nType, mergeStrategy))
+					mergeAnnotation(buf, oWrap, nWrap, mergeStrategy);
+				if (oWrap.atEnd() || nWrap.atEnd())
+					return false;
+			}
+		} catch (ArrayIndexOutOfBoundsException aioobe) { // from several locations inside match() or mergeAnnotation().
+			StringBuilder msg = new StringBuilder("Structural mismatch between ").append(oldType).append(" and ").append(newType); //$NON-NLS-1$ //$NON-NLS-2$
+			throw new IllegalArgumentException(msg.toString(), aioobe);
+		}
+		return false;
+	}
+
