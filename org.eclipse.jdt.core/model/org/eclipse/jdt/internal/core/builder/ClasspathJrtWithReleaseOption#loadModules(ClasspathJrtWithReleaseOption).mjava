@@ -7,10 +7,12 @@
 			return;
 		Set<IModule> cache = ModulesCache.get(jrt.modPathString);
 		if (cache == null) {
-			try (DirectoryStream<java.nio.file.Path> stream = Files.newDirectoryStream(jrt.modulePath)) {
+			try (DirectoryStream<java.nio.file.Path> stream = Files.newDirectoryStream(jrt.releasePath)) {
 				for (final java.nio.file.Path subdir : stream) {
-
-					Files.walkFileTree(subdir, Collections.EMPTY_SET, 1, new FileVisitor<java.nio.file.Path>() {
+					if (!subdir.getFileName().toString().contains(jrt.releaseInHex)) {
+						continue;
+					}
+					Files.walkFileTree(subdir, Collections.EMPTY_SET, 2, new FileVisitor<java.nio.file.Path>() {
 						@Override
 						public FileVisitResult preVisitDirectory(java.nio.file.Path dir, BasicFileAttributes attrs)
 								throws IOException {
@@ -20,14 +22,16 @@
 						@Override
 						public FileVisitResult visitFile(java.nio.file.Path f, BasicFileAttributes attrs)
 								throws IOException {
-							byte[] content = null;
-							if (Files.exists(f)) {
-								content = JRTUtil.safeReadBytes(f);
+							if (attrs.isDirectory() || f.getNameCount() < 3) {
+								return FileVisitResult.CONTINUE;
+							}
+							if (f.getFileName().toString().equals(MODULE_INFO)) {
+								byte[] content = JRTUtil.safeReadBytes(f);
 								if (content == null)
 									return FileVisitResult.CONTINUE;
 								jrt.acceptModule(content);
 							}
-							return FileVisitResult.CONTINUE;
+							return FileVisitResult.SKIP_SIBLINGS;
 						}
 
 						@Override
