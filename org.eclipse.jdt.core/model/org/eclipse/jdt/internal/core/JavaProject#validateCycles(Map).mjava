@@ -16,30 +16,35 @@
 		HashSet traversed = new HashSet();
 
 		// compute cycle participants
-		ArrayList prereqChain = new ArrayList();
+		List<IPath> prereqChain = new ArrayList<>();
+		Map<IPath,List<CycleInfo>> cyclesPerProject = new HashMap<>();
 		for (int i = 0; i < length; i++){
 			if (hasJavaNature(rscProjects[i])) {
 				JavaProject project = (projects[i] = (JavaProject)JavaCore.create(rscProjects[i]));
 				if (!traversed.contains(project.getPath())){
 					prereqChain.clear();
-					project.updateCycleParticipants(prereqChain, cycleParticipants, workspaceRoot, traversed, preferredClasspaths);
+					project.updateCycleParticipants(prereqChain, cycleParticipants, cyclesPerProject, workspaceRoot, traversed, preferredClasspaths);
 				}
 			}
 		}
 		//System.out.println("updateAllCycleMarkers: " + (System.currentTimeMillis() - start) + " ms");
 
-		String cycleString = cycleParticipants.stream()
-			.map(path -> workspaceRoot.findMember(path))
-			.filter(r -> r != null)
-			.map(r -> JavaCore.create((IProject)r))
-			.filter(p -> p != null)
-			.map(p -> p.getElementName())
-			.collect(Collectors.joining(", ")); //$NON-NLS-1$
-
 		for (int i = 0; i < length; i++){
 			JavaProject project = projects[i];
 			if (project != null) {
-				if (cycleParticipants.contains(project.getPath())) {
+				List<CycleInfo> cycles = cyclesPerProject.get(project.getPath());
+				if (cycles != null) {
+					StringBuilder cycleString = new StringBuilder();
+					boolean first = true;
+					for (CycleInfo cycleInfo : cycles) {
+						if (!first) cycleString.append('\n');
+						cycleString.append(cycleInfo.pathToCycleAsString());
+						cycleString.append("->{"); //$NON-NLS-1$
+						cycleString.append(cycleInfo.cycleAsString());
+						cycleString.append('}');
+						first = false;
+					}
+					
 					IMarker cycleMarker = project.getCycleMarker();
 					String circularCPOption = project.getOption(JavaCore.CORE_CIRCULAR_CLASSPATH, true);
 					int circularCPSeverity = JavaCore.ERROR.equals(circularCPOption) ? IMarker.SEVERITY_ERROR : IMarker.SEVERITY_WARNING;
@@ -52,7 +57,7 @@
 							}
 							String existingMessage = cycleMarker.getAttribute(IMarker.MESSAGE, ""); //$NON-NLS-1$
 							String newMessage = new JavaModelStatus(IJavaModelStatusConstants.CLASSPATH_CYCLE,
-									project, cycleString).getMessage();
+									project, cycleString.toString()).getMessage();
 							if (!newMessage.equals(existingMessage)) {
 								cycleMarker.setAttribute(IMarker.MESSAGE, newMessage);
 							}
@@ -62,7 +67,7 @@
 					} else {
 						// create new marker
 						project.createClasspathProblemMarker(
-							new JavaModelStatus(IJavaModelStatusConstants.CLASSPATH_CYCLE, project, cycleString));
+							new JavaModelStatus(IJavaModelStatusConstants.CLASSPATH_CYCLE, project, cycleString.toString()));
 					}
 				} else {
 					project.flushClasspathProblemMarkers(true, false, false);

@@ -1,0 +1,53 @@
+	public void testCycle8() throws JavaModelException {
+		// specifically tests projects with (transitive) dependencies on a cycle, i.e., error messages with a non-empty prefix
+		Hashtable options = JavaCore.getOptions();
+		Hashtable newOptions = JavaCore.getOptions();
+		newOptions.put(JavaCore.CORE_CIRCULAR_CLASSPATH, JavaCore.WARNING);
+
+		JavaCore.setOptions(newOptions);
+
+		IPath p1 = env.addProject("P1");
+		IPath p2 = env.addProject("P2");
+		IPath p3 = env.addProject("P3");
+		IPath p4 = env.addProject("P4");
+
+		// Dependencies
+		IPath[] accessiblePaths = new IPath[] {new Path("java/lang/*")};
+		IPath[] forbiddenPaths = new IPath[] {new Path("**/*")};
+		env.addRequiredProject(p1, p2, accessiblePaths, forbiddenPaths, false);
+		env.addRequiredProject(p2, p3, accessiblePaths, forbiddenPaths, false);
+		env.addRequiredProject(p3, p4, accessiblePaths, forbiddenPaths, false);
+		env.addRequiredProject(p4, p3, accessiblePaths, forbiddenPaths, false);
+
+		try {
+			env.waitForManualRefresh();
+			fullBuild();
+			env.waitForAutoBuild();
+			expectingOnlySpecificProblemsFor(p1,new Problem[]{
+				new Problem("p1",
+					"One or more cycles were detected in the build path of project 'P1'. The paths towards the cycle and cycle are:\n" +
+					"P1, P2->{P3, P4}",
+					p1, -1, -1, CategorizedProblem.CAT_BUILDPATH, IMarker.SEVERITY_WARNING)
+			});
+			expectingOnlySpecificProblemsFor(p2,new Problem[]{
+				new Problem("p2",
+					"One or more cycles were detected in the build path of project 'P2'. The paths towards the cycle and cycle are:\n" +
+					"P2->{P3, P4}",
+					p2, -1, -1, CategorizedProblem.CAT_BUILDPATH, IMarker.SEVERITY_WARNING),
+			});
+			expectingOnlySpecificProblemsFor(p3,new Problem[]{
+				new Problem("p3",
+					"One or more cycles were detected in the build path of project 'P3'. The paths towards the cycle and cycle are:\n" +
+					"->{P3, P4}",
+					p3, -1,-1, CategorizedProblem.CAT_BUILDPATH, IMarker.SEVERITY_WARNING)
+			});
+
+		} finally {
+			JavaCore.setOptions(options);
+			env.removeProject(p1);
+			env.removeProject(p2);
+			env.removeProject(p3);
+			env.removeProject(p4);
+		}
+	}
+

@@ -1,0 +1,1068 @@
+	public List traverse(
+			MethodBinding methodBinding,
+			int maxLocals,
+			byte[] bytecodes,
+			int codeOffset,
+			int codeLength,
+			Map<Integer, StackMapFrame> frames,
+			boolean isClinit,
+			Scope scope) {
+		Set realJumpTarget = new HashSet(); 
+
+		StackMapFrameCodeStream stackMapFrameCodeStream = (StackMapFrameCodeStream) this.codeStream;
+		int[] framePositions = stackMapFrameCodeStream.getFramePositions();
+		int pc = codeOffset;
+		int index;
+		int[] constantPoolOffsets = this.constantPool.offsets;
+		byte[] poolContents = this.constantPool.poolContent;
+
+		// set initial values for frame positions
+		int indexInFramePositions = 0;
+		int framePositionsLength = framePositions.length;
+		int currentFramePosition = framePositions[0];
+
+		// set initial values for exception markers
+		int indexInExceptionMarkers = 0;
+		ExceptionMarker[] exceptionMarkers= stackMapFrameCodeStream.getExceptionMarkers();
+		int exceptionsMarkersLength = exceptionMarkers == null ? 0 : exceptionMarkers.length;
+		boolean hasExceptionMarkers = exceptionsMarkersLength != 0;
+		ExceptionMarker exceptionMarker = null;
+		if (hasExceptionMarkers) {
+			exceptionMarker = exceptionMarkers[0];
+		}
+
+		StackMapFrame frame = new StackMapFrame(maxLocals);
+		if (!isClinit) {
+			initializeDefaultLocals(frame, methodBinding, maxLocals, codeLength);
+		}
+		frame.pc = -1;
+		add(frames, frame.duplicate(), scope);
+		addRealJumpTarget(realJumpTarget, -1);
+		for (int i = 0, max = this.codeStream.exceptionLabelsCounter; i < max; i++) {
+			ExceptionLabel exceptionLabel = this.codeStream.exceptionLabels[i];
+			if (exceptionLabel != null) {
+				addRealJumpTarget(realJumpTarget, exceptionLabel.position);
+			}
+		}
+		while (true) {
+			int currentPC = pc - codeOffset;
+			if (hasExceptionMarkers && exceptionMarker.pc == currentPC) {
+				frame.numberOfStackItems = 0;
+				frame.addStackItem(new VerificationTypeInfo(exceptionMarker.getBinding()));
+				indexInExceptionMarkers++;
+				if (indexInExceptionMarkers < exceptionsMarkersLength) {
+					exceptionMarker = exceptionMarkers[indexInExceptionMarkers];
+				} else {
+					hasExceptionMarkers = false;
+				}
+			}
+			if (currentFramePosition < currentPC) {
+				do {
+					indexInFramePositions++;
+					if (indexInFramePositions < framePositionsLength) {
+						currentFramePosition = framePositions[indexInFramePositions];
+					} else {
+						currentFramePosition = Integer.MAX_VALUE;
+					}
+				} while (currentFramePosition < currentPC);
+			}
+			if (currentFramePosition == currentPC) {
+				// need to build a new frame and create a stack map attribute entry
+				StackMapFrame currentFrame = frames.get(Integer.valueOf(currentPC));
+				if (currentFrame == null) {
+					currentFrame = createNewFrame(currentPC, frame, isClinit, methodBinding);
+					add(frames, currentFrame, scope);
+				} else {
+					frame = currentFrame.merge(frame.duplicate(), scope).duplicate();
+				}
+				indexInFramePositions++;
+				if (indexInFramePositions < framePositionsLength) {
+					currentFramePosition = framePositions[indexInFramePositions];
+				} else {
+					currentFramePosition = Integer.MAX_VALUE;
+				}
+			}
+			byte opcode = (byte) u1At(bytecodes, 0, pc);
+			switch (opcode) {
+				case Opcodes.OPC_nop:
+					pc++;
+					break;
+				case Opcodes.OPC_aconst_null:
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.NULL));
+					pc++;
+					break;
+				case Opcodes.OPC_iconst_m1:
+				case Opcodes.OPC_iconst_0:
+				case Opcodes.OPC_iconst_1:
+				case Opcodes.OPC_iconst_2:
+				case Opcodes.OPC_iconst_3:
+				case Opcodes.OPC_iconst_4:
+				case Opcodes.OPC_iconst_5:
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.INT));
+					pc++;
+					break;
+				case Opcodes.OPC_lconst_0:
+				case Opcodes.OPC_lconst_1:
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.LONG));
+					pc++;
+					break;
+				case Opcodes.OPC_fconst_0:
+				case Opcodes.OPC_fconst_1:
+				case Opcodes.OPC_fconst_2:
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.FLOAT));
+					pc++;
+					break;
+				case Opcodes.OPC_dconst_0:
+				case Opcodes.OPC_dconst_1:
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.DOUBLE));
+					pc++;
+					break;
+				case Opcodes.OPC_bipush:
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.BYTE));
+					pc += 2;
+					break;
+				case Opcodes.OPC_sipush:
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.SHORT));
+					pc += 3;
+					break;
+				case Opcodes.OPC_ldc:
+					index = u1At(bytecodes, 1, pc);
+					switch (u1At(poolContents, 0, constantPoolOffsets[index])) {
+						case ClassFileConstants.StringTag:
+							frame
+									.addStackItem(new VerificationTypeInfo(scope.getJavaLangString()));
+							break;
+						case ClassFileConstants.IntegerTag:
+							frame.addStackItem(new VerificationTypeInfo(TypeBinding.INT));
+							break;
+						case ClassFileConstants.FloatTag:
+							frame.addStackItem(new VerificationTypeInfo(TypeBinding.FLOAT));
+							break;
+						case ClassFileConstants.ClassTag:
+							frame.addStackItem(new VerificationTypeInfo(scope.getJavaLangClass()));
+					}
+					pc += 2;
+					break;
+				case Opcodes.OPC_ldc_w:
+					index = u2At(bytecodes, 1, pc);
+					switch (u1At(poolContents, 0, constantPoolOffsets[index])) {
+						case ClassFileConstants.StringTag:
+							frame
+									.addStackItem(new VerificationTypeInfo(scope.getJavaLangString()));
+							break;
+						case ClassFileConstants.IntegerTag:
+							frame.addStackItem(new VerificationTypeInfo(TypeBinding.INT));
+							break;
+						case ClassFileConstants.FloatTag:
+							frame.addStackItem(new VerificationTypeInfo(TypeBinding.FLOAT));
+							break;
+						case ClassFileConstants.ClassTag:
+							frame.addStackItem(new VerificationTypeInfo(scope.getJavaLangClass()));
+					}
+					pc += 3;
+					break;
+				case Opcodes.OPC_ldc2_w:
+					index = u2At(bytecodes, 1, pc);
+					switch (u1At(poolContents, 0, constantPoolOffsets[index])) {
+						case ClassFileConstants.DoubleTag:
+							frame.addStackItem(new VerificationTypeInfo(TypeBinding.DOUBLE));
+							break;
+						case ClassFileConstants.LongTag:
+							frame.addStackItem(new VerificationTypeInfo(TypeBinding.LONG));
+							break;
+					}
+					pc += 3;
+					break;
+				case Opcodes.OPC_iload:
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.INT));
+					pc += 2;
+					break;
+				case Opcodes.OPC_lload:
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.LONG));
+					pc += 2;
+					break;
+				case Opcodes.OPC_fload:
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.FLOAT));
+					pc += 2;
+					break;
+				case Opcodes.OPC_dload:
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.DOUBLE));
+					pc += 2;
+					break;
+				case Opcodes.OPC_aload:
+					index = u1At(bytecodes, 1, pc);
+					VerificationTypeInfo localsN = retrieveLocal(currentPC, index);
+					frame.addStackItem(localsN);
+					pc += 2;
+					break;
+				case Opcodes.OPC_iload_0:
+				case Opcodes.OPC_iload_1:
+				case Opcodes.OPC_iload_2:
+				case Opcodes.OPC_iload_3:
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.INT));
+					pc++;
+					break;
+				case Opcodes.OPC_lload_0:
+				case Opcodes.OPC_lload_1:
+				case Opcodes.OPC_lload_2:
+				case Opcodes.OPC_lload_3:
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.LONG));
+					pc++;
+					break;
+				case Opcodes.OPC_fload_0:
+				case Opcodes.OPC_fload_1:
+				case Opcodes.OPC_fload_2:
+				case Opcodes.OPC_fload_3:
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.FLOAT));
+					pc++;
+					break;
+				case Opcodes.OPC_dload_0:
+				case Opcodes.OPC_dload_1:
+				case Opcodes.OPC_dload_2:
+				case Opcodes.OPC_dload_3:
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.DOUBLE));
+					pc++;
+					break;
+				case Opcodes.OPC_aload_0:
+					VerificationTypeInfo locals0 = frame.locals[0];
+					if (locals0 == null || locals0.tag != VerificationTypeInfo.ITEM_UNINITIALIZED_THIS) {
+						// special case to handle uninitialized object
+						locals0 = retrieveLocal(currentPC, 0);
+					}
+					frame.addStackItem(locals0);
+					pc++;
+					break;
+				case Opcodes.OPC_aload_1:
+					VerificationTypeInfo locals1 = retrieveLocal(currentPC, 1);
+					frame.addStackItem(locals1);
+					pc++;
+					break;
+				case Opcodes.OPC_aload_2:
+					VerificationTypeInfo locals2 = retrieveLocal(currentPC, 2);
+					frame.addStackItem(locals2);
+					pc++;
+					break;
+				case Opcodes.OPC_aload_3:
+					VerificationTypeInfo locals3 = retrieveLocal(currentPC, 3);
+					frame.addStackItem(locals3);
+					pc++;
+					break;
+				case Opcodes.OPC_iaload:
+					frame.numberOfStackItems -=2;
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.INT));
+					pc++;
+					break;
+				case Opcodes.OPC_laload:
+					frame.numberOfStackItems -=2;
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.LONG));
+					pc++;
+					break;
+				case Opcodes.OPC_faload:
+					frame.numberOfStackItems -=2;
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.FLOAT));
+					pc++;
+					break;
+				case Opcodes.OPC_daload:
+					frame.numberOfStackItems -=2;
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.DOUBLE));
+					pc++;
+					break;
+				case Opcodes.OPC_aaload:
+					frame.numberOfStackItems--;
+					frame.replaceWithElementType();
+					pc++;
+					break;
+				case Opcodes.OPC_baload:
+					frame.numberOfStackItems -=2;
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.BYTE));
+					pc++;
+					break;
+				case Opcodes.OPC_caload:
+					frame.numberOfStackItems -=2;
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.CHAR));
+					pc++;
+					break;
+				case Opcodes.OPC_saload:
+					frame.numberOfStackItems -=2;
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.SHORT));
+					pc++;
+					break;
+				case Opcodes.OPC_istore:
+				case Opcodes.OPC_lstore:
+				case Opcodes.OPC_fstore:
+				case Opcodes.OPC_dstore:
+					frame.numberOfStackItems--;
+					pc += 2;
+					break;
+				case Opcodes.OPC_astore:
+					index = u1At(bytecodes, 1, pc);
+					frame.numberOfStackItems--;
+					pc += 2;
+					break;
+				case Opcodes.OPC_astore_0:
+					frame.locals[0] = frame.stackItems[frame.numberOfStackItems - 1];
+					frame.numberOfStackItems--;
+					pc++;
+					break;
+				case Opcodes.OPC_astore_1:
+				case Opcodes.OPC_astore_2:
+				case Opcodes.OPC_astore_3:
+				case Opcodes.OPC_istore_0:
+				case Opcodes.OPC_istore_1:
+				case Opcodes.OPC_istore_2:
+				case Opcodes.OPC_istore_3:
+				case Opcodes.OPC_lstore_0:
+				case Opcodes.OPC_lstore_1:
+				case Opcodes.OPC_lstore_2:
+				case Opcodes.OPC_lstore_3:
+				case Opcodes.OPC_fstore_0:
+				case Opcodes.OPC_fstore_1:
+				case Opcodes.OPC_fstore_2:
+				case Opcodes.OPC_fstore_3:
+				case Opcodes.OPC_dstore_0:
+				case Opcodes.OPC_dstore_1:
+				case Opcodes.OPC_dstore_2:
+				case Opcodes.OPC_dstore_3:
+					frame.numberOfStackItems--;
+					pc++;
+					break;
+				case Opcodes.OPC_iastore:
+				case Opcodes.OPC_lastore:
+				case Opcodes.OPC_fastore:
+				case Opcodes.OPC_dastore:
+				case Opcodes.OPC_aastore:
+				case Opcodes.OPC_bastore:
+				case Opcodes.OPC_castore:
+				case Opcodes.OPC_sastore:
+					frame.numberOfStackItems-=3;
+					pc++;
+					break;
+				case Opcodes.OPC_pop:
+					frame.numberOfStackItems--;
+					pc++;
+					break;
+				case Opcodes.OPC_pop2:
+					int numberOfStackItems = frame.numberOfStackItems;
+					switch(frame.stackItems[numberOfStackItems - 1].id()) {
+						case TypeIds.T_long :
+						case TypeIds.T_double :
+							frame.numberOfStackItems--;
+							break;
+						default:
+							frame.numberOfStackItems -= 2;
+					}
+					pc++;
+					break;
+				case Opcodes.OPC_dup:
+					frame.addStackItem(frame.stackItems[frame.numberOfStackItems - 1]);
+					pc++;
+					break;
+				case Opcodes.OPC_dup_x1:
+					VerificationTypeInfo info = frame.stackItems[frame.numberOfStackItems - 1];
+					frame.numberOfStackItems--;
+					VerificationTypeInfo info2 = frame.stackItems[frame.numberOfStackItems - 1];
+					frame.numberOfStackItems--;
+					frame.addStackItem(info);
+					frame.addStackItem(info2);
+					frame.addStackItem(info);
+					pc++;
+					break;
+				case Opcodes.OPC_dup_x2:
+					info = frame.stackItems[frame.numberOfStackItems - 1];
+					frame.numberOfStackItems--;
+					info2 = frame.stackItems[frame.numberOfStackItems - 1];
+					frame.numberOfStackItems--;
+					switch(info2.id()) {
+						case TypeIds.T_long :
+						case TypeIds.T_double :
+							frame.addStackItem(info);
+							frame.addStackItem(info2);
+							frame.addStackItem(info);
+							break;
+						default:
+							numberOfStackItems = frame.numberOfStackItems;
+							VerificationTypeInfo info3 = frame.stackItems[numberOfStackItems - 1];
+							frame.numberOfStackItems--;
+							frame.addStackItem(info);
+							frame.addStackItem(info3);
+							frame.addStackItem(info2);
+							frame.addStackItem(info);
+					}
+					pc++;
+					break;
+				case Opcodes.OPC_dup2:
+					info = frame.stackItems[frame.numberOfStackItems - 1];
+					frame.numberOfStackItems--;
+					switch(info.id()) {
+						case TypeIds.T_double :
+						case TypeIds.T_long :
+							frame.addStackItem(info);
+							frame.addStackItem(info);
+							break;
+						default:
+							info2 = frame.stackItems[frame.numberOfStackItems - 1];
+							frame.numberOfStackItems--;
+							frame.addStackItem(info2);
+							frame.addStackItem(info);
+							frame.addStackItem(info2);
+							frame.addStackItem(info);
+					}
+					pc++;
+					break;
+				case Opcodes.OPC_dup2_x1:
+					info = frame.stackItems[frame.numberOfStackItems - 1];
+					frame.numberOfStackItems--;
+					info2 = frame.stackItems[frame.numberOfStackItems - 1];
+					frame.numberOfStackItems--;
+					switch(info.id()) {
+						case TypeIds.T_double :
+						case TypeIds.T_long :
+							frame.addStackItem(info);
+							frame.addStackItem(info2);
+							frame.addStackItem(info);
+							break;
+						default:
+							VerificationTypeInfo info3 = frame.stackItems[frame.numberOfStackItems - 1];
+							frame.numberOfStackItems--;
+							frame.addStackItem(info2);
+							frame.addStackItem(info);
+							frame.addStackItem(info3);
+							frame.addStackItem(info2);
+							frame.addStackItem(info);
+					}
+					pc++;
+					break;
+				case Opcodes.OPC_dup2_x2:
+					numberOfStackItems = frame.numberOfStackItems;
+					info = frame.stackItems[numberOfStackItems - 1];
+					frame.numberOfStackItems--;
+					info2 = frame.stackItems[frame.numberOfStackItems - 1];
+					frame.numberOfStackItems--;
+					switch(info.id()) {
+						case TypeIds.T_long :
+						case TypeIds.T_double :
+							switch(info2.id()) {
+								case TypeIds.T_long :
+								case TypeIds.T_double :
+									// form 4
+									frame.addStackItem(info);
+									frame.addStackItem(info2);
+									frame.addStackItem(info);
+									break;
+								default:
+									// form 2
+									numberOfStackItems = frame.numberOfStackItems;
+									VerificationTypeInfo info3 = frame.stackItems[numberOfStackItems - 1];
+									frame.numberOfStackItems--;
+									frame.addStackItem(info);
+									frame.addStackItem(info3);
+									frame.addStackItem(info2);
+									frame.addStackItem(info);
+							}
+							break;
+						default:
+							numberOfStackItems = frame.numberOfStackItems;
+							VerificationTypeInfo info3 = frame.stackItems[numberOfStackItems - 1];
+							frame.numberOfStackItems--;
+							switch(info3.id()) {
+								case TypeIds.T_long :
+								case TypeIds.T_double :
+									// form 3
+									frame.addStackItem(info2);
+									frame.addStackItem(info);
+									frame.addStackItem(info3);
+									frame.addStackItem(info2);
+									frame.addStackItem(info);
+									break;
+								default:
+									// form 1
+									numberOfStackItems = frame.numberOfStackItems;
+									VerificationTypeInfo info4 = frame.stackItems[numberOfStackItems - 1];
+									frame.numberOfStackItems--;
+									frame.addStackItem(info2);
+									frame.addStackItem(info);
+									frame.addStackItem(info4);
+									frame.addStackItem(info3);
+									frame.addStackItem(info2);
+									frame.addStackItem(info);
+							}
+					}
+					pc++;
+					break;
+				case Opcodes.OPC_swap:
+					numberOfStackItems = frame.numberOfStackItems;
+					info = frame.stackItems[numberOfStackItems - 1];
+					info2 = frame.stackItems[numberOfStackItems - 2];
+					frame.stackItems[numberOfStackItems - 1] = info2;
+					frame.stackItems[numberOfStackItems - 2] = info;
+					pc++;
+					break;
+				case Opcodes.OPC_iadd:
+				case Opcodes.OPC_ladd:
+				case Opcodes.OPC_fadd:
+				case Opcodes.OPC_dadd:
+				case Opcodes.OPC_isub:
+				case Opcodes.OPC_lsub:
+				case Opcodes.OPC_fsub:
+				case Opcodes.OPC_dsub:
+				case Opcodes.OPC_imul:
+				case Opcodes.OPC_lmul:
+				case Opcodes.OPC_fmul:
+				case Opcodes.OPC_dmul:
+				case Opcodes.OPC_idiv:
+				case Opcodes.OPC_ldiv:
+				case Opcodes.OPC_fdiv:
+				case Opcodes.OPC_ddiv:
+				case Opcodes.OPC_irem:
+				case Opcodes.OPC_lrem:
+				case Opcodes.OPC_frem:
+				case Opcodes.OPC_drem:
+				case Opcodes.OPC_ishl:
+				case Opcodes.OPC_lshl:
+				case Opcodes.OPC_ishr:
+				case Opcodes.OPC_lshr:
+				case Opcodes.OPC_iushr:
+				case Opcodes.OPC_lushr:
+				case Opcodes.OPC_iand:
+				case Opcodes.OPC_land:
+				case Opcodes.OPC_ior:
+				case Opcodes.OPC_lor:
+				case Opcodes.OPC_ixor:
+				case Opcodes.OPC_lxor:
+					frame.numberOfStackItems--;
+					pc++;
+					break;
+				case Opcodes.OPC_ineg:
+				case Opcodes.OPC_lneg:
+				case Opcodes.OPC_fneg:
+				case Opcodes.OPC_dneg:
+					pc++;
+					break;
+				case Opcodes.OPC_iinc:
+					pc += 3;
+					break;
+				case Opcodes.OPC_i2l:
+					frame.stackItems[frame.numberOfStackItems - 1] = new VerificationTypeInfo(TypeBinding.LONG);
+					pc++;
+					break;
+				case Opcodes.OPC_i2f:
+					frame.stackItems[frame.numberOfStackItems - 1] = new VerificationTypeInfo(TypeBinding.FLOAT);
+					pc++;
+					break;
+				case Opcodes.OPC_i2d:
+					frame.stackItems[frame.numberOfStackItems - 1] = new VerificationTypeInfo(TypeBinding.DOUBLE);
+					pc++;
+					break;
+				case Opcodes.OPC_l2i:
+					frame.stackItems[frame.numberOfStackItems - 1] = new VerificationTypeInfo(TypeBinding.INT);
+					pc++;
+					break;
+				case Opcodes.OPC_l2f:
+					frame.stackItems[frame.numberOfStackItems - 1] = new VerificationTypeInfo(TypeBinding.FLOAT);
+					pc++;
+					break;
+				case Opcodes.OPC_l2d:
+					frame.stackItems[frame.numberOfStackItems - 1] = new VerificationTypeInfo(TypeBinding.DOUBLE);
+					pc++;
+					break;
+				case Opcodes.OPC_f2i:
+					frame.stackItems[frame.numberOfStackItems - 1] = new VerificationTypeInfo(TypeBinding.INT);
+					pc++;
+					break;
+				case Opcodes.OPC_f2l:
+					frame.stackItems[frame.numberOfStackItems - 1] = new VerificationTypeInfo(TypeBinding.LONG);
+					pc++;
+					break;
+				case Opcodes.OPC_f2d:
+					frame.stackItems[frame.numberOfStackItems - 1] = new VerificationTypeInfo(TypeBinding.DOUBLE);
+					pc++;
+					break;
+				case Opcodes.OPC_d2i:
+					frame.stackItems[frame.numberOfStackItems - 1] = new VerificationTypeInfo(TypeBinding.INT);
+					pc++;
+					break;
+				case Opcodes.OPC_d2l:
+					frame.stackItems[frame.numberOfStackItems - 1] = new VerificationTypeInfo(TypeBinding.LONG);
+					pc++;
+					break;
+				case Opcodes.OPC_d2f:
+					frame.stackItems[frame.numberOfStackItems - 1] = new VerificationTypeInfo(TypeBinding.FLOAT);
+					pc++;
+					break;
+				case Opcodes.OPC_i2b:
+					frame.stackItems[frame.numberOfStackItems - 1] = new VerificationTypeInfo(TypeBinding.BYTE);
+					pc++;
+					break;
+				case Opcodes.OPC_i2c:
+					frame.stackItems[frame.numberOfStackItems - 1] = new VerificationTypeInfo(TypeBinding.CHAR);
+					pc++;
+					break;
+				case Opcodes.OPC_i2s:
+					frame.stackItems[frame.numberOfStackItems - 1] = new VerificationTypeInfo(TypeBinding.SHORT);
+					pc++;
+					break;
+				case Opcodes.OPC_lcmp:
+				case Opcodes.OPC_fcmpl:
+				case Opcodes.OPC_fcmpg:
+				case Opcodes.OPC_dcmpl:
+				case Opcodes.OPC_dcmpg:
+					frame.numberOfStackItems-=2;
+					frame.addStackItem(new VerificationTypeInfo(TypeBinding.INT));
+					pc++;
+					break;
+				case Opcodes.OPC_ifeq:
+				case Opcodes.OPC_ifne:
+				case Opcodes.OPC_iflt:
+				case Opcodes.OPC_ifge:
+				case Opcodes.OPC_ifgt:
+				case Opcodes.OPC_ifle:
+					frame.numberOfStackItems--;
+					int jumpPC = currentPC + i2At(bytecodes, 1, pc);
+					addRealJumpTarget(realJumpTarget, jumpPC, frames, createNewFrame(jumpPC, frame, isClinit, methodBinding), scope);
+					pc += 3;
+					break;
+				case Opcodes.OPC_if_icmpeq:
+				case Opcodes.OPC_if_icmpne:
+				case Opcodes.OPC_if_icmplt:
+				case Opcodes.OPC_if_icmpge:
+				case Opcodes.OPC_if_icmpgt:
+				case Opcodes.OPC_if_icmple:
+				case Opcodes.OPC_if_acmpeq:
+				case Opcodes.OPC_if_acmpne:
+					frame.numberOfStackItems -= 2;
+					jumpPC = currentPC + i2At(bytecodes, 1, pc);
+					addRealJumpTarget(realJumpTarget, jumpPC, frames, createNewFrame(jumpPC, frame, isClinit, methodBinding), scope);
+					pc += 3;
+					break;
+				case Opcodes.OPC_goto:
+					jumpPC = currentPC + i2At(bytecodes, 1, pc);
+					addRealJumpTarget(realJumpTarget, jumpPC, frames, createNewFrame(jumpPC, frame, isClinit, methodBinding), scope);
+					pc += 3;
+					addRealJumpTarget(realJumpTarget, pc - codeOffset);
+					break;
+				case Opcodes.OPC_tableswitch:
+					frame.numberOfStackItems--;
+					pc++;
+					while (((pc - codeOffset) & 0x03) != 0) {
+						pc++;
+					}
+					// default offset
+					jumpPC = currentPC + i4At(bytecodes, 0, pc);
+					addRealJumpTarget(realJumpTarget, jumpPC, frames, createNewFrame(jumpPC, frame, isClinit, methodBinding), scope);
+					pc += 4; // default
+					int low = i4At(bytecodes, 0, pc);
+					pc += 4;
+					int high = i4At(bytecodes, 0, pc);
+					pc += 4;
+					int length = high - low + 1;
+					for (int i = 0; i < length; i++) {
+						// pair offset
+						jumpPC = currentPC + i4At(bytecodes, 0, pc);
+						addRealJumpTarget(realJumpTarget, jumpPC, frames, createNewFrame(jumpPC, frame, isClinit, methodBinding), scope);
+						pc += 4;
+					}
+					break;
+				case Opcodes.OPC_lookupswitch:
+					frame.numberOfStackItems--;
+					pc++;
+					while (((pc - codeOffset) & 0x03) != 0) {
+						pc++;
+					}
+					jumpPC = currentPC + i4At(bytecodes, 0, pc);
+					addRealJumpTarget(realJumpTarget, jumpPC, frames, createNewFrame(jumpPC, frame, isClinit, methodBinding), scope);
+					pc += 4; // default offset
+					int npairs = (int) u4At(bytecodes, 0, pc);
+					pc += 4; // npair value
+					for (int i = 0; i < npairs; i++) {
+						pc += 4; // case value
+						// pair offset
+						jumpPC = currentPC + i4At(bytecodes, 0, pc);
+						addRealJumpTarget(realJumpTarget, jumpPC, frames, createNewFrame(jumpPC, frame, isClinit, methodBinding), scope);
+						pc += 4;
+					}
+					break;
+				case Opcodes.OPC_ireturn:
+				case Opcodes.OPC_lreturn:
+				case Opcodes.OPC_freturn:
+				case Opcodes.OPC_dreturn:
+				case Opcodes.OPC_areturn:
+					frame.numberOfStackItems--;
+					pc++;
+					addRealJumpTarget(realJumpTarget, pc - codeOffset);
+					break;
+				case Opcodes.OPC_return:
+					pc++;
+					addRealJumpTarget(realJumpTarget, pc - codeOffset);
+					break;
+				case Opcodes.OPC_getstatic:
+					index = u2At(bytecodes, 1, pc);
+					int nameAndTypeIndex = u2At(poolContents, 3,
+							constantPoolOffsets[index]);
+					int utf8index = u2At(poolContents, 3,
+							constantPoolOffsets[nameAndTypeIndex]);
+					char[] descriptor = utf8At(poolContents,
+							constantPoolOffsets[utf8index] + 3, u2At(
+									poolContents, 1,
+									constantPoolOffsets[utf8index]));
+					TypeBinding typeBinding = getTypeBinding(descriptor, scope, false);
+					if (typeBinding != null) {
+						frame.addStackItem(new VerificationTypeInfo(typeBinding));
+					}
+					pc += 3;
+					break;
+				case Opcodes.OPC_putstatic:
+					frame.numberOfStackItems--;
+					pc += 3;
+					break;
+				case Opcodes.OPC_getfield:
+					index = u2At(bytecodes, 1, pc);
+					nameAndTypeIndex = u2At(poolContents, 3,
+							constantPoolOffsets[index]);
+					utf8index = u2At(poolContents, 3,
+							constantPoolOffsets[nameAndTypeIndex]);
+					descriptor = utf8At(poolContents,
+							constantPoolOffsets[utf8index] + 3, u2At(
+									poolContents, 1,
+									constantPoolOffsets[utf8index]));
+					frame.numberOfStackItems--;
+					typeBinding = getTypeBinding(descriptor, scope, false);
+					if (typeBinding != null) {
+						frame.addStackItem(new VerificationTypeInfo(typeBinding));
+					}
+					pc += 3;
+					break;
+				case Opcodes.OPC_putfield:
+					frame.numberOfStackItems -= 2;
+					pc += 3;
+					break;
+				case Opcodes.OPC_invokevirtual:
+					index = u2At(bytecodes, 1, pc);
+					nameAndTypeIndex = u2At(poolContents, 3,
+							constantPoolOffsets[index]);
+					utf8index = u2At(poolContents, 3,
+							constantPoolOffsets[nameAndTypeIndex]);
+					descriptor = utf8At(poolContents,
+							constantPoolOffsets[utf8index] + 3, u2At(
+									poolContents, 1,
+									constantPoolOffsets[utf8index]));
+					utf8index = u2At(poolContents, 1,
+							constantPoolOffsets[nameAndTypeIndex]);
+					char[] name = utf8At(poolContents,
+							constantPoolOffsets[utf8index] + 3, u2At(
+									poolContents, 1,
+									constantPoolOffsets[utf8index]));
+					frame.numberOfStackItems -= (getParametersCount(descriptor) + 1);
+					char[] returnType = getReturnType(descriptor);
+					typeBinding = getTypeBinding(returnType, scope, false);
+					if (typeBinding != null) {
+						frame.addStackItem(new VerificationTypeInfo(typeBinding));
+					}
+					pc += 3;
+					break;
+				case Opcodes.OPC_invokedynamic:
+					index = u2At(bytecodes, 1, pc);
+					nameAndTypeIndex = u2At(poolContents, 3,
+							constantPoolOffsets[index]);
+					utf8index = u2At(poolContents, 3,
+							constantPoolOffsets[nameAndTypeIndex]);
+					descriptor = utf8At(poolContents,
+							constantPoolOffsets[utf8index] + 3, u2At(
+									poolContents, 1,
+									constantPoolOffsets[utf8index]));
+					frame.numberOfStackItems -= getParametersCount(descriptor);
+					returnType = getReturnType(descriptor);
+					typeBinding = getTypeBinding(returnType, scope, false);
+					if (typeBinding != null) {
+						frame.addStackItem(new VerificationTypeInfo(typeBinding));
+					}
+					pc += 5;
+					break;
+				case Opcodes.OPC_invokespecial:
+					index = u2At(bytecodes, 1, pc);
+					nameAndTypeIndex = u2At(poolContents, 3,
+							constantPoolOffsets[index]);
+					utf8index = u2At(poolContents, 3,
+							constantPoolOffsets[nameAndTypeIndex]);
+					descriptor = utf8At(poolContents,
+							constantPoolOffsets[utf8index] + 3, u2At(
+									poolContents, 1,
+									constantPoolOffsets[utf8index]));
+					utf8index = u2At(poolContents, 1,
+							constantPoolOffsets[nameAndTypeIndex]);
+					name = utf8At(poolContents,
+							constantPoolOffsets[utf8index] + 3, u2At(
+									poolContents, 1,
+									constantPoolOffsets[utf8index]));
+					frame.numberOfStackItems -= getParametersCount(descriptor);
+					if (CharOperation.equals(ConstantPool.Init, name)) {
+						// constructor
+						frame.stackItems[frame.numberOfStackItems - 1].tag = VerificationTypeInfo.ITEM_OBJECT;
+					}
+					frame.numberOfStackItems--;
+					returnType = getReturnType(descriptor);
+					typeBinding = getTypeBinding(returnType, scope, false);
+					if (typeBinding != null) {
+						frame.addStackItem(new VerificationTypeInfo(typeBinding));
+					}
+					pc += 3;
+					break;
+				case Opcodes.OPC_invokestatic:
+					index = u2At(bytecodes, 1, pc);
+					nameAndTypeIndex = u2At(poolContents, 3,
+							constantPoolOffsets[index]);
+					utf8index = u2At(poolContents, 3,
+							constantPoolOffsets[nameAndTypeIndex]);
+					descriptor = utf8At(poolContents,
+							constantPoolOffsets[utf8index] + 3, u2At(
+									poolContents, 1,
+									constantPoolOffsets[utf8index]));
+					utf8index = u2At(poolContents, 1,
+							constantPoolOffsets[nameAndTypeIndex]);
+					name = utf8At(poolContents,
+							constantPoolOffsets[utf8index] + 3, u2At(
+									poolContents, 1,
+									constantPoolOffsets[utf8index]));
+					frame.numberOfStackItems -= getParametersCount(descriptor);
+					returnType = getReturnType(descriptor);
+					typeBinding = getTypeBinding(returnType, scope, false);
+					if (typeBinding != null) {
+						frame.addStackItem(new VerificationTypeInfo(typeBinding));
+					}
+					pc += 3;
+					break;
+				case Opcodes.OPC_invokeinterface:
+					index = u2At(bytecodes, 1, pc);
+					nameAndTypeIndex = u2At(poolContents, 3,
+							constantPoolOffsets[index]);
+					utf8index = u2At(poolContents, 3,
+							constantPoolOffsets[nameAndTypeIndex]);
+					descriptor = utf8At(poolContents,
+							constantPoolOffsets[utf8index] + 3, u2At(
+									poolContents, 1,
+									constantPoolOffsets[utf8index]));
+					utf8index = u2At(poolContents, 1,
+							constantPoolOffsets[nameAndTypeIndex]);
+					name = utf8At(poolContents,
+							constantPoolOffsets[utf8index] + 3, u2At(
+									poolContents, 1,
+									constantPoolOffsets[utf8index]));
+					// we don't need count and args
+					// u1At(bytecodes, 3, pc); // count
+					// u1At(bytecodes, 4, pc); // extra args
+					frame.numberOfStackItems -= (getParametersCount(descriptor) + 1);
+					returnType = getReturnType(descriptor);
+					typeBinding = getTypeBinding(returnType, scope, false);
+					if (typeBinding != null) {
+						frame.addStackItem(new VerificationTypeInfo(typeBinding));
+					}
+					pc += 5;
+					break;
+				case Opcodes.OPC_new:
+					index = u2At(bytecodes, 1, pc);
+					utf8index = u2At(poolContents, 1,
+							constantPoolOffsets[index]);
+					char[] className = utf8At(poolContents,
+							constantPoolOffsets[utf8index] + 3, u2At(
+									poolContents, 1,
+									constantPoolOffsets[utf8index]));
+					typeBinding =  getNewTypeBinding(className, scope);
+					VerificationTypeInfo verificationTypeInfo = new VerificationTypeInfo(VerificationTypeInfo.ITEM_UNINITIALIZED, typeBinding);
+					verificationTypeInfo.offset = currentPC;
+					frame.addStackItem(verificationTypeInfo);
+					pc += 3;
+					break;
+				case Opcodes.OPC_newarray:
+					TypeBinding arrayType = null;
+					switch (u1At(bytecodes, 1, pc)) {
+						case ClassFileConstants.INT_ARRAY :
+							arrayType = scope.createArrayType(TypeBinding.INT, 1);
+							break;
+						case ClassFileConstants.BYTE_ARRAY :
+							arrayType = scope.createArrayType(TypeBinding.BYTE, 1);
+							break;
+						case ClassFileConstants.BOOLEAN_ARRAY :
+							arrayType = scope.createArrayType(TypeBinding.BOOLEAN, 1);
+							break;
+						case ClassFileConstants.SHORT_ARRAY :
+							arrayType = scope.createArrayType(TypeBinding.SHORT, 1);
+							break;
+						case ClassFileConstants.CHAR_ARRAY :
+							arrayType = scope.createArrayType(TypeBinding.CHAR, 1);
+							break;
+						case ClassFileConstants.LONG_ARRAY :
+							arrayType = scope.createArrayType(TypeBinding.LONG, 1);
+							break;
+						case ClassFileConstants.FLOAT_ARRAY :
+							arrayType = scope.createArrayType(TypeBinding.FLOAT, 1);
+							break;
+						case ClassFileConstants.DOUBLE_ARRAY :
+							arrayType = scope.createArrayType(TypeBinding.DOUBLE, 1);
+							break;
+					}
+					frame.stackItems[frame.numberOfStackItems - 1] = new VerificationTypeInfo(arrayType);
+					pc += 2;
+					break;
+				case Opcodes.OPC_anewarray:
+					index = u2At(bytecodes, 1, pc);
+					utf8index = u2At(poolContents, 1,
+							constantPoolOffsets[index]);
+					className = utf8At(poolContents,
+							constantPoolOffsets[utf8index] + 3, u2At(
+									poolContents, 1,
+									constantPoolOffsets[utf8index]));
+					frame.numberOfStackItems--;
+					typeBinding = getANewArrayTypeBinding(className, scope);
+					if (typeBinding != null) {
+						if (typeBinding.isArrayType()) {
+							ArrayBinding arrayBinding = (ArrayBinding) typeBinding;
+							frame.addStackItem(new VerificationTypeInfo(scope.createArrayType(arrayBinding.leafComponentType(), arrayBinding.dimensions + 1)));
+						} else {
+							frame.addStackItem(new VerificationTypeInfo(scope.createArrayType(typeBinding, 1)));
+						}
+					}
+					pc += 3;
+					break;
+				case Opcodes.OPC_arraylength:
+					frame.stackItems[frame.numberOfStackItems - 1] = new VerificationTypeInfo(TypeBinding.INT);
+					pc++;
+					break;
+				case Opcodes.OPC_athrow:
+					frame.numberOfStackItems--;
+					pc++;
+					addRealJumpTarget(realJumpTarget, pc - codeOffset);
+					break;
+				case Opcodes.OPC_checkcast:
+					index = u2At(bytecodes, 1, pc);
+					utf8index = u2At(poolContents, 1,
+							constantPoolOffsets[index]);
+					className = utf8At(poolContents,
+							constantPoolOffsets[utf8index] + 3, u2At(
+									poolContents, 1,
+									constantPoolOffsets[utf8index]));
+					typeBinding = getTypeBinding(className, scope, true);
+					if (typeBinding != null) {
+						frame.stackItems[frame.numberOfStackItems - 1] = new VerificationTypeInfo(typeBinding);
+					}
+					pc += 3;
+					break;
+				case Opcodes.OPC_instanceof:
+					// no need to know the class index = u2At(bytecodes, 1, pc);
+					frame.stackItems[frame.numberOfStackItems - 1] = new VerificationTypeInfo(TypeBinding.INT);
+					pc += 3;
+					break;
+				case Opcodes.OPC_monitorenter:
+				case Opcodes.OPC_monitorexit:
+					frame.numberOfStackItems--;
+					pc++;
+					break;
+				case Opcodes.OPC_wide:
+					opcode = (byte) u1At(bytecodes, 1, pc);
+					if (opcode == Opcodes.OPC_iinc) {
+						// index = u2At(bytecodes, 2, pc);
+						// i2At(bytecodes, 4, pc); // const
+						// we don't need the index and the const value
+						pc += 6;
+					} else {
+						index = u2At(bytecodes, 2, pc);
+						// need to handle iload, fload, aload, lload, dload, istore, fstore, astore, lstore or dstore
+						switch(opcode) {
+							case Opcodes.OPC_iload :
+								frame.addStackItem(new VerificationTypeInfo(TypeBinding.INT));
+								break;
+							case Opcodes.OPC_fload :
+								frame.addStackItem(new VerificationTypeInfo(TypeBinding.FLOAT));
+								break;
+							case Opcodes.OPC_aload :
+								localsN = frame.locals[index];
+								if (localsN == null) {
+									localsN = retrieveLocal(currentPC, index);
+								}
+								frame.addStackItem(localsN);
+								break;
+							case Opcodes.OPC_lload :
+								frame.addStackItem(new VerificationTypeInfo(TypeBinding.LONG));
+								break;
+							case Opcodes.OPC_dload :
+								frame.addStackItem(new VerificationTypeInfo(TypeBinding.DOUBLE));
+								break;
+							case Opcodes.OPC_istore :
+								frame.numberOfStackItems--;
+								break;
+							case Opcodes.OPC_fstore :
+								frame.numberOfStackItems--;
+								break;
+							case Opcodes.OPC_astore :
+								frame.locals[index] = frame.stackItems[frame.numberOfStackItems - 1];
+								frame.numberOfStackItems--;
+								break;
+							case Opcodes.OPC_lstore :
+								frame.numberOfStackItems--;
+								break;
+							case Opcodes.OPC_dstore :
+								frame.numberOfStackItems--;
+								break;
+						}
+						pc += 4;
+					}
+					break;
+				case Opcodes.OPC_multianewarray:
+					index = u2At(bytecodes, 1, pc);
+					utf8index = u2At(poolContents, 1,
+							constantPoolOffsets[index]);
+					className = utf8At(poolContents,
+							constantPoolOffsets[utf8index] + 3, u2At(
+									poolContents, 1,
+									constantPoolOffsets[utf8index]));
+					int dimensions = u1At(bytecodes, 3, pc); // dimensions
+					frame.numberOfStackItems -= dimensions;
+					// class name is already the name of the right array type with all dimensions
+					typeBinding = getTypeBinding(className, scope, false);
+					if (typeBinding != null) {
+						frame.addStackItem(new VerificationTypeInfo(typeBinding));
+					}
+					pc += 4;
+					break;
+				case Opcodes.OPC_ifnull:
+				case Opcodes.OPC_ifnonnull:
+					frame.numberOfStackItems--;
+					jumpPC =  currentPC + i2At(bytecodes, 1, pc);
+					addRealJumpTarget(realJumpTarget, jumpPC, frames, createNewFrame(jumpPC, frame, isClinit, methodBinding), scope);
+					pc += 3;
+					break;
+				case Opcodes.OPC_goto_w:
+					jumpPC =  currentPC + i4At(bytecodes, 1, pc);
+					addRealJumpTarget(realJumpTarget, jumpPC, frames, createNewFrame(jumpPC, frame, isClinit, methodBinding), scope);
+					pc += 5;
+					addRealJumpTarget(realJumpTarget, pc - codeOffset); // handle infinite loop
+					break;
+				default: // should not occur
+					if (this.codeStream.methodDeclaration != null) {
+						this.codeStream.methodDeclaration.scope.problemReporter().abortDueToInternalError(
+								Messages.bind(
+										Messages.abort_invalidOpcode,
+										new Object[] {
+												Byte.valueOf(opcode),
+												Integer.valueOf(pc),
+												new String(methodBinding.shortReadableName()),
+										}),
+										this.codeStream.methodDeclaration);
+					} else {
+						this.codeStream.lambdaExpression.scope.problemReporter().abortDueToInternalError(
+								Messages.bind(
+										Messages.abort_invalidOpcode,
+										new Object[] {
+												Byte.valueOf(opcode),
+												Integer.valueOf(pc),
+												new String(methodBinding.shortReadableName()),
+										}),
+										this.codeStream.lambdaExpression);
+					}
+				break;
+			}
+			if (pc >= (codeLength + codeOffset)) {
+				break;
+			}
+		}
+		return filterFakeFrames(realJumpTarget, frames, codeLength);
+	}
+

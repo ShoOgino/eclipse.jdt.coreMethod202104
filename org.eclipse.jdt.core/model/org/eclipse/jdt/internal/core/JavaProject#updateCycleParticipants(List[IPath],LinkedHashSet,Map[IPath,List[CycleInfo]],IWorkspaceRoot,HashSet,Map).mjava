@@ -1,0 +1,92 @@
+	/**
+	 * If a cycle is detected, then cycleParticipants contains all the paths of projects involved in this cycle (directly and indirectly),
+	 * no cycle if the set is empty (and started empty)
+	 * @param prereqChain ArrayList
+	 * @param cycleParticipants HashSet
+	 * @param workspaceRoot IWorkspaceRoot
+	 * @param traversed HashSet
+	 * @param preferredClasspaths Map
+	 */
+	public void updateCycleParticipants(
+			List<IPath> prereqChain,
+			LinkedHashSet cycleParticipants,
+			Map<IPath,List<CycleInfo>> cyclesPerProject,
+			IWorkspaceRoot workspaceRoot,
+			HashSet traversed,
+			Map preferredClasspaths){
+
+		IPath path = getPath();
+		prereqChain.add(path);
+		traversed.add(path);
+		try {
+			IClasspathEntry[] classpath = null;
+			if (preferredClasspaths != null) classpath = (IClasspathEntry[])preferredClasspaths.get(this);
+			if (classpath == null) classpath = getResolvedClasspath();
+			for (int i = 0, length = classpath.length; i < length; i++) {
+				IClasspathEntry entry = classpath[i];
+
+				if (entry.getEntryKind() == IClasspathEntry.CPE_PROJECT){
+					IPath prereqProjectPath = entry.getPath();
+					int prereqIndex = prereqChain.indexOf(prereqProjectPath);
+					if (prereqIndex > -1) {
+						// record a new cycle:
+						List<IPath> cycle = prereqChain.subList(prereqIndex, prereqChain.size());
+						// empty-prefix CycleInfo for all members of the cycle:
+						List<IPath> prefix = Collections.emptyList();
+						for (IPath prjInCycle : cycle) {
+							CycleInfo.add(prjInCycle, prefix, cycle, cyclesPerProject);
+						}
+						// also record with all members of the prereqChain with transitive dependency on the cycle:
+						for (int j = 0; j < prereqIndex; j++) {
+							CycleInfo.add(prereqChain.get(j), prereqChain.subList(j, prereqIndex), cycle, cyclesPerProject);
+						}
+					} else if (cycleParticipants.contains(prereqProjectPath)) {
+						// record existing cycle as dependency of each project in prereqChain:
+						Optional<CycleInfo> cycle = CycleInfo.findCycleContaining(cyclesPerProject.values(), prereqProjectPath);
+						if (cycle.isPresent()) {
+							List<IPath> theCycle = cycle.get().cycle;
+							for (int j = 0; j < prereqChain.size(); j++) {
+								IPath prereq = prereqChain.get(j);
+								List<IPath> prereqSubList = prereqChain.subList(j, prereqChain.size());
+								int joinIndex1 = theCycle.indexOf(prereq);
+								if (joinIndex1 != -1) {
+									// prereqSubList -> prereqProjectPath + theCycle create a new cycle
+									List<IPath> newCycle = new ArrayList<>(prereqSubList);
+									int joinIndex2 = theCycle.indexOf(prereqProjectPath); // always != -1 since that's how we found 'cycle'
+									while (joinIndex2 != joinIndex1) {
+										newCycle.add(theCycle.get(joinIndex2++));
+										if (joinIndex2 == theCycle.size())
+											joinIndex2 = 0; // it's a cycle :)
+									}
+									for (IPath newMember : newCycle) {
+										CycleInfo.add(newMember, Collections.emptyList(), newCycle, cyclesPerProject);
+									}
+									break; // the rest of prereqChain is already included via newCycle
+								} else {
+									CycleInfo.add(prereq, prereqSubList, theCycle, cyclesPerProject);
+								}
+							}
+						}
+						prereqIndex = 0;
+					} else {
+						if (!traversed.contains(prereqProjectPath)) {
+							IResource member = workspaceRoot.findMember(prereqProjectPath);
+							if (member != null && member.getType() == IResource.PROJECT){
+								JavaProject javaProject = (JavaProject)JavaCore.create((IProject)member);
+								javaProject.updateCycleParticipants(prereqChain, cycleParticipants, cyclesPerProject, workspaceRoot, traversed, preferredClasspaths);
+							}
+						}
+						continue;
+					}
+					// fall through from both positive branches above
+					for (int index = prereqIndex, size = prereqChain.size(); index < size; index++) {
+						cycleParticipants.add(prereqChain.get(index));
+					}
+				}
+			}
+		} catch(JavaModelException e){
+			// project doesn't exist: ignore
+		}
+		prereqChain.remove(path);
+	}
+

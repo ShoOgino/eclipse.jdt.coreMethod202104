@@ -1,0 +1,50 @@
+	@Override
+	public boolean visit(TextBlock node) {
+		int indentOption = this.options.text_block_indentation;
+		if (indentOption == Alignment.M_INDENT_PRESERVE)
+			return true;
+		Token block = this.tm.firstTokenIn(node, TokenNameTextBlock);
+		ArrayList<Token> lines = new ArrayList<>();
+		lines.add(new Token(block.originalStart, block.originalStart + 2, 0)); // first line; """
+		int incidentalWhitespace = Integer.MAX_VALUE;
+		int blankLines = -1; // will go to 0 on line break after first line
+		int i = block.originalStart + 3;
+		while (i <= block.originalEnd) {
+			int lineStart = i;
+			int firstNonBlank = -1;
+			int lastNonBlank = -1;
+			while (i <= block.originalEnd) {
+				char c = this.tm.charAt(i++);
+				if (c == '\r' || c == '\n') {
+					char c2 = this.tm.charAt(i);
+					if ((c2 == '\r' || c2 == '\n') && c2 != c)
+						i++;
+					break;
+				}
+				if (c != ' ' && c != '\t') {
+					if (firstNonBlank == -1)
+						firstNonBlank = i - 1;
+					lastNonBlank = i - 1;
+				}
+			}
+			if (firstNonBlank != -1) {
+				Token line = new Token(lineStart, lastNonBlank, 0);
+				line.putLineBreaksBefore(blankLines + 1);
+				blankLines = 0;
+				lines.add(line);
+				incidentalWhitespace = Math.min(incidentalWhitespace, firstNonBlank - lineStart);
+			} else {
+				blankLines++;
+			}
+		}
+		WrapPolicy wrapPolicy = new WrapPolicy(WrapMode.DISABLED, 0, -1, 0, 0, 1, false, false);
+		for (i = 1; i < lines.size(); i++) {
+			Token t = lines.get(i);
+			Token line = new Token(t, t.originalStart + incidentalWhitespace, t.originalEnd, TokenNameTextBlock);
+			line.setWrapPolicy(wrapPolicy);
+			lines.set(i, line);
+		}
+		block.setInternalStructure(lines);
+		return true;
+	}
+

@@ -1,5 +1,7 @@
 		@Override
 		protected boolean token(Token token, int index) {
+			setIndent(token, this.lineIndent);
+
 			if (token.hasNLSTag())
 				this.isNLSTagInLine = true;
 
@@ -28,19 +30,30 @@
 				this.counter++;
 			}
 
-			if (!token.isComment()) {
-				this.counter += WrapExecutor.this.tm.getLength(token, this.counter);
+			if (token.tokenType == TokenNameTextBlock) {
+				List<Token> lines = token.getInternalStructure();
+				if (lines == null) {
+					this.counter = this.tm2.getLength(token, 0);
+				} else {
+					this.lineWidthExtent = Math.max(this.lineWidthExtent,
+							this.counter + this.tm2.getLength(lines.get(0), this.counter));
+					this.counter = this.lineIndent + lines.get(1).getIndent();
+					lines.stream().skip(1).forEach(e -> this.lineWidthExtent = Math.max(this.lineWidthExtent,
+							this.counter + this.tm2.getLength(e, this.counter)));
+					this.counter += this.tm2.getLength(lines.get(lines.size() - 1), this.counter);
+				}
+			} else if (!token.isComment()) {
+				this.counter += this.tm2.getLength(token, this.counter);
 			} else if (token.tokenType != TokenNameCOMMENT_LINE) {
 				this.counter = this.commentWrapper.wrapMultiLineComment(token, this.counter, true, this.isNLSTagInLine);
 				this.extraLines += this.commentWrapper.getLinesCount() - 1;
 				this.extraLinesPerComment.add(this.commentWrapper.getLinesCount() - 1);
 			}
 
-			this.lineExceeded = this.counter > WrapExecutor.this.options.page_width;
-			if (this.lineExceeded && this.firstPotentialWrap >= 0) {
+			this.lineWidthExtent = Math.max(this.lineWidthExtent, this.counter);
+			if (this.lineWidthExtent > WrapExecutor.this.options.page_width && this.firstPotentialWrap >= 0) {
 				return false;
 			}
-			token.setIndent(this.lineIndent);
 
 			if (getNext() != null && getNext().isWrappable() && getLineBreaksAfter() > 0) {
 				this.isNextLineWrapped = true;
@@ -49,9 +62,8 @@
 				return false; 
 			}
 
-			boolean isLineEnd = getLineBreaksAfter() > 0 || getNext() == null
-					|| (getNext().isNextLineOnWrap() && WrapExecutor.this.tm
-							.get(WrapExecutor.this.tm.findFirstTokenInLine(index)).isWrappable());
+			boolean isLineEnd = getLineBreaksAfter() > 0 || getNext() == null || (getNext().isNextLineOnWrap()
+					&& this.tm2.get(this.tm2.findFirstTokenInLine(index)).isWrappable());
 			return !isLineEnd;
 		}
 
