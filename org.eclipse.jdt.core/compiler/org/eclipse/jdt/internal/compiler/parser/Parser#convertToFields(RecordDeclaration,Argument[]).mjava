@@ -1,9 +1,22 @@
 private void convertToFields(RecordDeclaration rd, Argument[] args) {
 	int length = args.length;
 	FieldDeclaration[] fields = new FieldDeclaration[length];
+	int nFields = 0;
+	Set<String> argsSet = new HashSet<>();
 	for (int i = 0, max = args.length; i < max; i++) {
 		Argument arg = args[i];
-		FieldDeclaration f = fields[i] = createFieldDeclaration(arg.name, arg.sourceStart, arg.sourceEnd);
+		arg.bits |= ASTNode.IsRecordComponent;
+		String argName = new String(arg.name);
+		if (RecordDeclaration.disallowedComponentNames.contains(argName)) {
+			problemReporter().recordIllegalComponentNameInRecord(arg, rd);
+			continue;
+		}
+		if (argsSet.contains(argName)) {
+			// flag the error at the place where duplicate params of methods would have been flagged.
+			continue;
+		}
+		argsSet.add(argName);
+		FieldDeclaration f = fields[nFields++] = createFieldDeclaration(arg.name, arg.sourceStart, arg.sourceEnd);
 		f.annotations = arg.annotations;
 		f.bits = arg.bits;
 		f.declarationSourceStart = arg.declarationSourceStart;
@@ -46,7 +59,13 @@ private void convertToFields(RecordDeclaration rd, Argument[] args) {
 			f.bits |= ASTNode.HasTypeAnnotations;
 		}
 	}
+	if (nFields < fields.length) {
+		// Note: This happens only if there are errors in the code.
+		FieldDeclaration[] tmp = new FieldDeclaration[nFields];
+		System.arraycopy(fields	, 0, tmp, 0, nFields);
+		fields = tmp;
+	}
 	rd.fields = fields;
-	rd.nRecordComponents = length;
+	rd.nRecordComponents = fields.length;
 }
 
