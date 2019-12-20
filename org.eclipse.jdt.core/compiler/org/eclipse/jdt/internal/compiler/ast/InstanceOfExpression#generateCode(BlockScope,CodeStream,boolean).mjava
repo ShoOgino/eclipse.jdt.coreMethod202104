@@ -7,9 +7,29 @@
 */
 @Override
 public void generateCode(BlockScope currentScope, CodeStream codeStream, boolean valueRequired) {
+	initializePatternVariables(currentScope, codeStream);
+	
 	int pc = codeStream.position;
 	this.expression.generateCode(currentScope, codeStream, true);
 	codeStream.instance_of(this.type, this.type.resolvedType);
+	if (this.elementVariable != null) {
+		BranchLabel actionLabel = new BranchLabel(codeStream);
+		codeStream.dup();
+		codeStream.ifeq(actionLabel);
+		// Kludge
+		if (this.expression instanceof ArrayReference) {
+			ArrayReference array = (ArrayReference) this.expression;
+			codeStream.load(array.receiver.localVariableBinding());
+			array.position.generateCode(currentScope, codeStream, true);
+			codeStream.arrayAt(array.resolvedType.id);
+		} else {
+			codeStream.load(this.expression.localVariableBinding());
+		}
+		codeStream.checkcast(this.type, this.type.resolvedType, codeStream.position);
+		codeStream.store(this.elementVariable.binding, false);
+		codeStream.recordPositionsFrom(codeStream.position, this.sourceEnd);
+		actionLabel.place();
+	}
 	if (valueRequired) {
 		codeStream.generateImplicitConversion(this.implicitConversion);
 	} else {
