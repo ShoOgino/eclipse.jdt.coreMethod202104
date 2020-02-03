@@ -4,29 +4,44 @@
 	 * @param providedBits null tagBits of the provided type
 	 * @param nullStatus -1 means: don't use, other values see constants in FlowInfo
 	 * @param mode check mode (see {@link CheckMode})
-	 * @param requiredIsTypeVariable is the required type a type variable (possibly: "free type variable")?
+	 * @param requiredType the required type, used, e.g., to check if it is a type variable (possibly: "free type variable")?
 	 * @return see {@link #severity} for interpretation of values
 	 */
-	private static Severity computeNullProblemSeverity(long requiredBits, long providedBits, int nullStatus, CheckMode mode, boolean requiredIsTypeVariable) {
+	private static Severity computeNullProblemSeverity(long requiredBits, long providedBits, int nullStatus, CheckMode mode, TypeBinding requiredType) {
 		if (requiredBits == providedBits)
 			return Severity.OK;
 		if (requiredBits == 0) { 
 			switch (mode) {
+				case EXACT:
+					if (providedBits == TagBits.AnnotationNonNull && !(requiredType instanceof TypeVariableBinding))
+						return Severity.UNCHECKED_TO_UNANNOTATED;
+					return Severity.OK;
 				case COMPATIBLE:
 				case BOUND_CHECK:
 				case BOUND_SUPER_CHECK:
-				case EXACT:
 					return Severity.OK;
 				case OVERRIDE_RETURN:
 					if (providedBits == TagBits.AnnotationNonNull)
 						return Severity.OK; // covariant redefinition to nonnull is good
-					if (!requiredIsTypeVariable)
+					if (!(requiredType instanceof TypeVariableBinding))
 						return Severity.OK; // refining an unconstrained non-TVB return to nullable is also legal
 					return Severity.UNCHECKED;
 				case OVERRIDE:
 					return Severity.UNCHECKED; // warn about dropped annotation
 			}
 		} else if (requiredBits == TagBits.AnnotationNullMASK) {
+			if (mode == CheckMode.EXACT && providedBits == TagBits.AnnotationNonNull) {
+				if (requiredType instanceof WildcardBinding) {
+					WildcardBinding wildcard = (WildcardBinding) requiredType;
+					// passing '@NonNull X' into '? super Y' risks pollution with null
+					if (wildcard.boundKind == Wildcard.SUPER && providedBits == TagBits.AnnotationNonNull) {
+						TypeBinding bound = wildcard.bound;
+						if (bound != null && (bound.tagBits & TagBits.AnnotationNullMASK) != 0)
+							return Severity.OK; // when the wildcard is annotated via its bound, there is not annotated->unannotated conversion
+						return Severity.UNCHECKED_TO_UNANNOTATED;
+					}
+				}
+			}
 			return Severity.OK; // OK since LHS accepts either
 		} else if (requiredBits == TagBits.AnnotationNonNull) {
 			switch (mode) {
