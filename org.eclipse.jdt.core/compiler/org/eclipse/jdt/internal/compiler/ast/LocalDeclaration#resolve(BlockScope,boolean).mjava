@@ -1,0 +1,187 @@
+	public void resolve(BlockScope scope, boolean isPatternVariable) {
+		// prescan NNBD
+		handleNonNullByDefault(scope, this.annotations, this);
+
+		TypeBinding variableType = null;
+		boolean variableTypeInferenceError = false;
+		boolean isTypeNameVar = isTypeNameVar(scope);
+		if (isTypeNameVar) {
+			if ((this.bits & ASTNode.IsForeachElementVariable) == 0) {
+				// infer a type from the initializer
+				if (this.initialization != null) {
+					variableType = checkInferredLocalVariableInitializer(scope);
+					variableTypeInferenceError = variableType != null;
+				} else {
+					// That's always an error
+					scope.problemReporter().varLocalWithoutInitizalier(this);
+					variableType = scope.getJavaLangObject();
+					variableTypeInferenceError = true;
+				}
+			}
+		} else {
+			variableType = this.type.resolveType(scope, true /* check bounds*/);
+		}
+
+		this.bits |= (this.type.bits & ASTNode.HasTypeAnnotations);
+		checkModifiers();
+		if (variableType != null) {
+			if (variableType == TypeBinding.VOID) {
+				scope.problemReporter().variableTypeCannotBeVoid(this);
+				return;
+			}
+			if (variableType.isArrayType() && ((ArrayBinding) variableType).leafComponentType == TypeBinding.VOID) {
+				scope.problemReporter().variableTypeCannotBeVoidArray(this);
+				return;
+			}
+		}
+
+		Binding existingVariable = scope.getBinding(this.name, Binding.VARIABLE, this, false /*do not resolve hidden field*/);
+		if (existingVariable != null && existingVariable.isValidBinding()){
+			boolean localExists = existingVariable instanceof LocalVariableBinding;
+			if (localExists && isPatternVariable
+					&& (((LocalVariableBinding) existingVariable).modifiers & ExtraCompilerModifiers.AccPatterVariable) != 0)
+			{
+				this.duplicateCheckObligation = (flowInfo) -> {
+					if (flowInfo.isDefinitelyAssigned((LocalVariableBinding) existingVariable)) {
+						scope.problemReporter().redefineLocal(this);
+					}
+				};
+			} else {
+				if (localExists && (this.bits & ASTNode.ShadowsOuterLocal) != 0 && scope.isLambdaSubscope() && this.hiddenVariableDepth == 0) {
+					scope.problemReporter().lambdaRedeclaresLocal(this);
+				} else if (localExists && this.hiddenVariableDepth == 0) {
+					scope.problemReporter().redefineLocal(this);
+				} else {
+					scope.problemReporter().localVariableHiding(this, existingVariable, false);
+				}
+			}
+		}
+
+		if ((this.modifiers & ClassFileConstants.AccFinal)!= 0 && this.initialization == null) {
+			this.modifiers |= ExtraCompilerModifiers.AccBlankFinal;
+		}
+		if (isTypeNameVar) {
+			// Create binding for the initializer's type
+			// In order to resolve self-referential initializers, we must declare the variable with a placeholder type (j.l.Object), and then patch it later 
+			this.binding = new LocalVariableBinding(this, variableType != null ? variableType : scope.getJavaLangObject(), this.modifiers, false) {
+				private boolean isInitialized = false;
+				
+				@Override
+				public void markReferenced() {
+					if (! this.isInitialized) {
+						scope.problemReporter().varLocalReferencesItself(LocalDeclaration.this);
+						this.type = null;
+						this.isInitialized = true; // Quell additional type errors
+					}
+				}
+				@Override
+				public void markInitialized() {
+					this.isInitialized = true;
+				}
+			};
+		} else {
+			// create a binding from the specified type
+			this.binding = new LocalVariableBinding(this, variableType, this.modifiers, false /*isArgument*/);
+		}
+		if ((this.bits & ASTNode.HasInstancePatternExpression) == 0) {
+			scope.addLocalVariable(this.binding);
+		} else {
+			((BlockScope)scope.parent).addLocalVariable(this.binding);
+		}
+		this.binding.setConstant(Constant.NotAConstant);
+		// allow to recursivelly target the binding....
+		// the correct constant is harmed if correctly computed at the end of this method
+
+		if (variableType == null) {
+			if (this.initialization != null) {
+				this.initialization.resolveType(scope); // want to report all possible errors
+				if (isTypeNameVar && this.initialization.resolvedType != null) {
+					if (TypeBinding.equalsEquals(TypeBinding.NULL, this.initialization.resolvedType)) {
+						scope.problemReporter().varLocalInitializedToNull(this);
+						variableTypeInferenceError = true;
+					} else if (TypeBinding.equalsEquals(TypeBinding.VOID, this.initialization.resolvedType)) {
+						scope.problemReporter().varLocalInitializedToVoid(this);
+						variableTypeInferenceError = true;
+					}
+					variableType = patchType(this.initialization.resolvedType);
+				} else {
+					variableTypeInferenceError = true;
+				}
+			}
+		}
+		this.binding.markInitialized();
+		if (variableTypeInferenceError) {
+			return;
+		}
+		boolean resolveAnnotationsEarly = false;
+		if (scope.environment().usesNullTypeAnnotations() 
+				&& !isTypeNameVar // 'var' does not provide a target type
+				&& variableType != null && variableType.isValidBinding()) { 
+			resolveAnnotationsEarly = this.initialization instanceof Invocation
+					|| this.initialization instanceof ConditionalExpression
+					|| this.initialization instanceof SwitchExpression
+					|| this.initialization instanceof ArrayInitializer;
+		}
+		if (resolveAnnotationsEarly) {
+			// these are definitely no constants, so resolving annotations early should be safe
+			resolveAnnotations(scope, this.annotations, this.binding, true);
+			// for type inference having null annotations upfront gives better results
+			variableType = this.type.resolvedType;
+		}
+		if (this.initialization != null) {
+			if (this.initialization instanceof ArrayInitializer) {
+				TypeBinding initializationType = this.initialization.resolveTypeExpecting(scope, variableType);
+				if (initializationType != null) {
+					((ArrayInitializer) this.initialization).binding = (ArrayBinding) initializationType;
+					this.initialization.computeConversion(scope, variableType, initializationType);
+				}
+			} else {
+				this.initialization.setExpressionContext(isTypeNameVar ? VANILLA_CONTEXT : ASSIGNMENT_CONTEXT);
+				this.initialization.setExpectedType(variableType);
+				TypeBinding initializationType = this.initialization.resolvedType != null ? this.initialization.resolvedType : this.initialization.resolveType(scope);
+				if (initializationType != null) {
+					if (TypeBinding.notEquals(variableType, initializationType)) // must call before computeConversion() and typeMismatchError()
+						scope.compilationUnitScope().recordTypeConversion(variableType, initializationType);
+					if (this.initialization.isConstantValueOfTypeAssignableToType(initializationType, variableType)
+						|| initializationType.isCompatibleWith(variableType, scope)) {
+						this.initialization.computeConversion(scope, variableType, initializationType);
+						if (initializationType.needsUncheckedConversion(variableType)) {
+						    scope.problemReporter().unsafeTypeConversion(this.initialization, initializationType, variableType);
+						}
+						if (this.initialization instanceof CastExpression
+								&& (this.initialization.bits & ASTNode.UnnecessaryCast) == 0) {
+							CastExpression.checkNeedForAssignedCast(scope, variableType, (CastExpression) this.initialization);
+						}
+					} else if (isBoxingCompatible(initializationType, variableType, this.initialization, scope)) {
+						this.initialization.computeConversion(scope, variableType, initializationType);
+						if (this.initialization instanceof CastExpression
+								&& (this.initialization.bits & ASTNode.UnnecessaryCast) == 0) {
+							CastExpression.checkNeedForAssignedCast(scope, variableType, (CastExpression) this.initialization);
+						}
+					} else {
+						if ((variableType.tagBits & TagBits.HasMissingType) == 0) {
+							// if problem already got signaled on type, do not report secondary problem
+							scope.problemReporter().typeMismatchError(initializationType, variableType, this.initialization, null);
+						}
+					}
+				}
+			}
+			// check for assignment with no effect
+			if (this.binding == Expression.getDirectBinding(this.initialization)) {
+				scope.problemReporter().assignmentHasNoEffect(this, this.name);
+			}
+			// change the constant in the binding when it is final
+			// (the optimization of the constant propagation will be done later on)
+			// cast from constant actual type to variable type
+			this.binding.setConstant(
+				this.binding.isFinal()
+					? this.initialization.constant.castTo((variableType.id << 4) + this.initialization.constant.typeID())
+					: Constant.NotAConstant);
+		}
+		// if init could be a constant only resolve annotation at the end, for constant to be positioned before (96991)
+		if (!resolveAnnotationsEarly)
+			resolveAnnotations(scope, this.annotations, this.binding, true);
+		Annotation.isTypeUseCompatible(this.type, scope, this.annotations);
+		validateNullAnnotations(scope);
+	}
+
