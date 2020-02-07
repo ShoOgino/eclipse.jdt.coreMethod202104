@@ -1,0 +1,56 @@
+	@SuppressWarnings("rawtypes")
+	public void test001() throws Exception {
+		if (this.apiLevel != 14) {
+			System.err.println("Test "+getName()+" requires a JRE 14");
+			return;
+		}
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class X {\n");
+		buf.append("    void foo(Object o) {\n");
+		buf.append(" 	}\n");
+		buf.append("}\n");
+		ICompilationUnit cu= pack1.createCompilationUnit("X.java", buf.toString(), false, null);
+
+		CompilationUnit astRoot= createAST(cu);
+		ASTRewrite rewrite= ASTRewrite.create(astRoot.getAST());
+
+		AST ast= astRoot.getAST();
+
+		assertTrue("Parse errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		TypeDeclaration type= findTypeDeclaration(astRoot, "X");
+		MethodDeclaration methodDecl= findMethodDeclaration(type, "foo");
+		Block block= methodDecl.getBody();
+		List blockStatements= block.statements();
+		assertTrue("Number of statements not 0", blockStatements.size() == 0);
+		{ // add InstanceOfPattern expression
+			IfStatement ifStatement= ast.newIfStatement();
+			InstanceofExpression instanceOfExpression = ast.newInstanceofExpression();
+			instanceOfExpression.setLeftOperand(ast.newSimpleName("o"));//$NON-NLS-1$
+			SimpleType simpleType = ast.newSimpleType(ast.newSimpleName("String"));//$NON-NLS-1$
+			instanceOfExpression.setRightOperand(simpleType);
+			SingleVariableDeclaration patternVariable = ast.newSingleVariableDeclaration();
+			patternVariable.setName(ast.newSimpleName("s"));
+			patternVariable.setType(ast.newSimpleType(ast.newSimpleName("String")));//$NON-NLS-1$
+			instanceOfExpression.setPatternVariable(patternVariable);
+			ifStatement.setExpression(instanceOfExpression);
+			ifStatement.setThenStatement(ast.newEmptyStatement());
+			rewrite.getListRewrite(block, Block.STATEMENTS_PROPERTY).insertLast(ifStatement, null);
+		}
+		
+		String preview= evaluateRewrite(cu, rewrite);
+
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public class X {\n");
+		buf.append("    void foo(Object o) {\n");
+		buf.append("        if (o instanceof String s)\n");
+		buf.append("            ;\n");
+		buf.append(" 	}\n");
+		buf.append("}\n");
+
+		assertEqualString(preview, buf.toString());
+		
+	}
+
