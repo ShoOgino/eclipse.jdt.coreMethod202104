@@ -1,0 +1,59 @@
+	private int generateBootstrapMethods(List functionalExpressionList, List<TypeBinding> recordBootstrapMethods2) {
+		/* See JVM spec 4.7.21
+		   The BootstrapMethods attribute has the following format:
+		   BootstrapMethods_attribute {
+		      u2 attribute_name_index;
+		      u4 attribute_length;
+		      u2 num_bootstrap_methods;
+		      {   u2 bootstrap_method_ref;
+		          u2 num_bootstrap_arguments;
+		          u2 bootstrap_arguments[num_bootstrap_arguments];
+		      } bootstrap_methods[num_bootstrap_methods];
+		 }
+		*/
+		// Record inner classes for MethodHandles$Lookup
+		ReferenceBinding methodHandlesLookup = this.referenceBinding.scope.getJavaLangInvokeMethodHandlesLookup();
+		if (methodHandlesLookup == null) return 0; // skip bootstrap section, class path problem already reported, just avoid NPE.
+		recordInnerClasses(methodHandlesLookup); // Should be done, it's what javac does also
+
+		int nfunctionalExpressions = functionalExpressionList != null ? functionalExpressionList.size() : 0;
+		int nRecordBootStraps = recordBootstrapMethods2 != null ? recordBootstrapMethods2.size() : 0;
+		int numberOfBootstraps = nfunctionalExpressions + nRecordBootStraps;
+		int localContentsOffset = this.contentsOffset;
+		// Generate the boot strap attribute - since we are only making lambdas and
+		// functional expressions, we know the size ahead of time - this less general
+		// than the full invokedynamic scope, but fine for Java 8
+		
+		final int contentsEntries = 10;
+		int exSize = contentsEntries * numberOfBootstraps + 8;
+		if (exSize + localContentsOffset >= this.contents.length) {
+			resizeContents(exSize);
+		}
+		
+		int attributeNameIndex =
+			this.constantPool.literalIndex(AttributeNamesConstants.BootstrapMethodsName);
+		this.contents[localContentsOffset++] = (byte) (attributeNameIndex >> 8);
+		this.contents[localContentsOffset++] = (byte) attributeNameIndex;
+		// leave space for attribute_length and remember where to insert it
+		int attributeLengthPosition = localContentsOffset;
+		localContentsOffset += 4;
+
+		this.contents[localContentsOffset++] = (byte) (numberOfBootstraps >> 8);
+		this.contents[localContentsOffset++] = (byte) numberOfBootstraps;
+
+		if (nfunctionalExpressions > 0)
+			localContentsOffset = generateLambdaMetaFactoryBootStrapMethods(functionalExpressionList,
+					localContentsOffset, contentsEntries);
+		if (nRecordBootStraps > 0)
+			localContentsOffset = generateObjectMethodsBootStrapMethods(recordBootstrapMethods2, localContentsOffset,
+					contentsEntries);
+
+		int attributeLength = localContentsOffset - attributeLengthPosition - 4;
+		this.contents[attributeLengthPosition++] = (byte) (attributeLength >> 24);
+		this.contents[attributeLengthPosition++] = (byte) (attributeLength >> 16);
+		this.contents[attributeLengthPosition++] = (byte) (attributeLength >> 8);
+		this.contents[attributeLengthPosition++] = (byte) attributeLength;
+		this.contentsOffset = localContentsOffset;
+		return 1;
+	}
+

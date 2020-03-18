@@ -1,0 +1,68 @@
+	private int addFieldAttributes(FieldBinding fieldBinding, int fieldAttributeOffset, boolean isComponent) {
+		int attributesNumber = 0;
+		// 4.7.2 only static constant fields get a ConstantAttribute
+		// Generate the constantValueAttribute
+		Constant fieldConstant = fieldBinding.constant();
+		if (fieldConstant != Constant.NotAConstant && !isComponent){
+			attributesNumber += generateConstantValueAttribute(fieldConstant, fieldBinding, fieldAttributeOffset);
+		}
+		if (this.targetJDK < ClassFileConstants.JDK1_5 && fieldBinding.isSynthetic() && !isComponent) {
+			attributesNumber += generateSyntheticAttribute();
+		}
+		if (fieldBinding.isDeprecated() && !isComponent) {
+			attributesNumber += generateDeprecatedAttribute();
+		}
+		// add signature attribute
+		char[] genericSignature = fieldBinding.genericSignature();
+		if (genericSignature != null) {
+			attributesNumber += generateSignatureAttribute(genericSignature);
+		}
+		if (this.targetJDK >= ClassFileConstants.JDK1_4) {
+			FieldDeclaration fieldDeclaration = fieldBinding.sourceField();
+			if (fieldDeclaration != null) {
+				Annotation[] annotations = fieldDeclaration.annotations;
+				if (annotations != null) {
+					long allowedTargets = TagBits.AnnotationForField | (fieldDeclaration.isARecordComponent ?
+							TagBits.AnnotationForRecordComponent : 0);
+					attributesNumber += generateRuntimeAnnotations(annotations, allowedTargets);
+				}
+
+				if ((this.produceAttributes & ClassFileConstants.ATTR_TYPE_ANNOTATION) != 0) {
+					List allTypeAnnotationContexts = new ArrayList();
+					if (annotations != null && (fieldDeclaration.bits & ASTNode.HasTypeAnnotations) != 0) {
+						fieldDeclaration.getAllAnnotationContexts(AnnotationTargetTypeConstants.FIELD, allTypeAnnotationContexts);
+					}
+					int invisibleTypeAnnotationsCounter = 0;
+					int visibleTypeAnnotationsCounter = 0;
+					TypeReference fieldType = fieldDeclaration.type;
+					if (fieldType != null && ((fieldType.bits & ASTNode.HasTypeAnnotations) != 0)) {
+						fieldType.getAllAnnotationContexts(AnnotationTargetTypeConstants.FIELD, allTypeAnnotationContexts);
+					}
+					int size = allTypeAnnotationContexts.size();
+					if (size != 0) {
+						AnnotationContext[] allTypeAnnotationContextsArray = new AnnotationContext[size];
+						allTypeAnnotationContexts.toArray(allTypeAnnotationContextsArray);
+						for (int i = 0, max = allTypeAnnotationContextsArray.length; i < max; i++) {
+							AnnotationContext annotationContext = allTypeAnnotationContextsArray[i];
+							if ((annotationContext.visibility & AnnotationContext.INVISIBLE) != 0) {
+								invisibleTypeAnnotationsCounter++;
+								allTypeAnnotationContexts.add(annotationContext);
+							} else {
+								visibleTypeAnnotationsCounter++;
+								allTypeAnnotationContexts.add(annotationContext);
+							}
+						}
+						attributesNumber += generateRuntimeTypeAnnotations(
+								allTypeAnnotationContextsArray,
+								visibleTypeAnnotationsCounter,
+								invisibleTypeAnnotationsCounter);
+					}
+				}
+			}
+		}
+		if ((fieldBinding.tagBits & TagBits.HasMissingType) != 0) {
+			this.missingTypes = fieldBinding.type.collectMissingTypes(this.missingTypes);
+		}
+		return attributesNumber;
+	}
+

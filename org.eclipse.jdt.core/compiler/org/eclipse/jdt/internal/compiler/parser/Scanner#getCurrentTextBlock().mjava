@@ -9,6 +9,7 @@ public char[] getCurrentTextBlock() {
 			all = new char[0];
 		}
 	}
+	all = normalize(all);
 	// 2. Split into lines. Consider both \n and \r as line separators
 	char[][] lines = CharOperation.splitOn('\n', all);
 	int size = lines.length;
@@ -20,8 +21,10 @@ public char[] getCurrentTextBlock() {
 			break;
 		}
 		char[][] sub = CharOperation.splitOn('\r', line);
-		for (char[] cs : sub) {
-			if (cs.length > 0) {
+		if (sub.length == 0) {
+			list.add(line);
+		} else {
+			for (char[] cs : sub) {
 				list.add(cs);
 			}
 		}
@@ -45,6 +48,8 @@ public char[] getCurrentTextBlock() {
 				}
 			}
 		}
+ 		// The last line with closing delimiter is part of the 
+ 		// determining line list even if empty
 		if (!blank || (i+1 == size)) {
 			if (prefix < 0 || whitespaces < prefix) {
  				prefix = whitespaces;
@@ -52,41 +57,42 @@ public char[] getCurrentTextBlock() {
 		}
 	}
 	// 3.2. Remove the common white space prefix
-	// 4. Handle escape sequences (already done while processing
+	// 4. Handle escape sequences  that are not already done in getNextToken0()
 	if (prefix == -1)
 		prefix = 0;
-	char[] result = new char[0];
+	StringBuilder result = new StringBuilder();
+	boolean newLine = false;
 	for(int i = 0; i < lines.length; i++) {
 		char[] l  = lines[i];
 		// Remove the common prefix from each line
 		// And remove all trailing whitespace
 		// Finally append the \n at the end of the line (except the last line)
 		int length = l.length;
-		int trail = length - 1;
-		for(int j = trail; j>0; j--) {
-			if (!ScannerHelper.isWhitespace(l[j])) {
-				trail = j;
+		int trail = length;
+		for(;trail > 0;) {
+			if (!ScannerHelper.isWhitespace(l[trail-1])) {
 				break;
 			}
+			trail--;
 		}
-		int newSize = (length == 0 || prefix > trail) ? 0 : (trail - prefix + 1);
-		char[] nl;
-		if (i >= (size - 1)) {
-			if (trail <= 0 || newSize == 0)
+		if (i >= (size -1)) {
+			if (newLine) result.append('\n');
+			if (trail < prefix)
 				continue;
-			nl = new char[newSize];
-			System.arraycopy(l, prefix, nl, 0, newSize); 
+			newLine = getLineContent(result, l, prefix, trail-1, false, true);
 		} else {
-			newSize += 1;
-			nl = new char[newSize];
-			nl[newSize - 1] = '\n';
-			if (newSize > 1)
-				System.arraycopy(l, prefix, nl, 0, newSize - 1);
+			if (i > 0 && newLine)
+				result.append('\n');
+			if (trail <= prefix) {
+				newLine = true;
+			} else {
+				boolean merge = length > 0 && l[length - 1] == '\\';
+				newLine = getLineContent(result, l, prefix, trail-1, merge, false);
+			}
 		}
-		result = CharOperation.concat(result, nl);
 	}
 	//	get rid of all the cached values
 	this.rawStart = -1;
-	return result;
+	return result.toString().toCharArray();
 }
 

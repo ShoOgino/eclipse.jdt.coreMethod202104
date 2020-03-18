@@ -1,0 +1,83 @@
+// TODO: merge consumeFormalParameter and this method once record becomes a standard feature
+protected void consumeRecordComponent(boolean isVarArgs) {
+// RecordComponent ::= Modifiersopt Type VariableDeclaratorId
+//	VariableArityRecordComponent ::= Modifiersopt Type PushZeroTypeAnnotations '...' VariableDeclaratorId
+//	VariableArityRecordComponent ::= Modifiersopt Type @308... TypeAnnotations '...' VariableDeclaratorId
+// Note that there is a difference wrt VariableDeclaratorId wrt to the JLS 8.10.1 specification which specifies
+// 'identifier' - however this is identical to consumeFormalParameter where this error is caught and reported.
+	this.identifierLengthPtr--;
+	char[] identifierName = this.identifierStack[this.identifierPtr];
+	long namePositions = this.identifierPositionStack[this.identifierPtr--];
+	int extendedDimensions = this.intStack[this.intPtr--];
+	Annotation [][] annotationsOnExtendedDimensions = extendedDimensions == 0 ? null : getAnnotationsOnDimensions(extendedDimensions);
+	Annotation [] varArgsAnnotations = null;
+	int endOfEllipsis = 0;
+	int length;
+	int firstDimensions = 0;
+	if (isVarArgs) {
+		endOfEllipsis = this.intStack[this.intPtr--];
+		if ((length = this.typeAnnotationLengthStack[this.typeAnnotationLengthPtr--]) != 0) {
+			System.arraycopy(
+				this.typeAnnotationStack,
+				(this.typeAnnotationPtr -= length) + 1,
+				varArgsAnnotations = new Annotation[length],
+				0,
+				length);
+		} 
+	}
+	firstDimensions = this.intStack[this.intPtr--];
+	TypeReference type = getTypeReference(firstDimensions);
+	if (isVarArgs || extendedDimensions != 0) {
+		if (isVarArgs) {
+			type = augmentTypeWithAdditionalDimensions(type, 1, varArgsAnnotations != null ? new Annotation[][] { varArgsAnnotations } : null, true);	
+		} 
+		if (extendedDimensions != 0) {
+			type = augmentTypeWithAdditionalDimensions(type, extendedDimensions, annotationsOnExtendedDimensions, false);
+		}
+		type.sourceEnd = type.isParameterizedTypeReference() ? this.endStatementPosition : this.endPosition;
+	}
+	if (isVarArgs) {
+		if (extendedDimensions == 0) {
+			type.sourceEnd = endOfEllipsis;
+		}
+		type.bits |= ASTNode.IsVarArgs; // set isVarArgs
+	}
+	int modifierPositions = this.intStack[this.intPtr--];
+	Argument arg;
+	arg = new Argument(
+			identifierName,
+			namePositions,
+			type,
+			this.intStack[this.intPtr--] & ~ClassFileConstants.AccDeprecated); // modifiers
+	arg.declarationSourceStart = modifierPositions;
+	arg.bits |= (type.bits & ASTNode.HasTypeAnnotations);
+	// consume annotations
+	if ((length = this.expressionLengthStack[this.expressionLengthPtr--]) != 0) {
+		System.arraycopy(
+			this.expressionStack,
+			(this.expressionPtr -= length) + 1,
+			arg.annotations = new Annotation[length],
+			0,
+			length);
+		arg.bits |= ASTNode.HasTypeAnnotations;
+		RecoveredType currentRecoveryType = this.currentRecoveryType();
+		if (currentRecoveryType != null)
+			currentRecoveryType.annotationsConsumed(arg.annotations);
+	}
+	pushOnAstStack(arg);
+
+	/* if incomplete record header, this.listLength counter will not have been reset,
+		indicating that some arguments are available on the stack */
+	this.listLength++;
+	if(isVarArgs) {
+		if (!this.statementRecoveryActivated &&
+				this.options.sourceLevel < ClassFileConstants.JDK1_5 &&
+				this.lastErrorEndPositionBeforeRecovery < this.scanner.currentPosition) {
+				problemReporter().invalidUsageOfVarargs(arg);
+		} else if (!this.statementRecoveryActivated &&
+				extendedDimensions > 0) {
+			problemReporter().illegalExtendedDimensions(arg);
+		}
+	}
+}
+

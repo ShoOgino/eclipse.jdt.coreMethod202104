@@ -1,6 +1,10 @@
 	private void checkAndSetModifiers() {
 		SourceTypeBinding sourceType = this.referenceContext.binding;
 		int modifiers = sourceType.modifiers;
+		if (sourceType.isRecord()) {
+			/* JLS 14 Records Sec 8.10 - A record declaration is implicitly final. */
+			modifiers |= ClassFileConstants.AccFinal;
+		}
 		if ((modifiers & ExtraCompilerModifiers.AccAlternateModifierProblem) != 0)
 			problemReporter().duplicateModifierForType(sourceType);
 		ReferenceBinding enclosingType = sourceType.enclosingType();
@@ -19,6 +23,9 @@
 					modifiers |= ClassFileConstants.AccStatic;
 			} else if (sourceType.isInterface()) {
 				modifiers |= ClassFileConstants.AccStatic; // 8.5.1
+			} else if (sourceType.isRecord()) {
+				/* JLS 14 Records Sec 8.10 A nested record type is implicitly static */
+				modifiers |= ClassFileConstants.AccStatic;
 			}
 		} else if (sourceType.isLocalType()) {
 			if (sourceType.isEnum()) {
@@ -186,6 +193,37 @@
 					modifiers |= ClassFileConstants.AccFinal;
 				}
 			}
+		} else if (sourceType.isRecord()) {
+			if (isMemberType) {
+				final int UNEXPECTED_MODIFIERS = ~(ClassFileConstants.AccPublic | ClassFileConstants.AccPrivate | ClassFileConstants.AccProtected | ClassFileConstants.AccStatic | ClassFileConstants.AccFinal | ClassFileConstants.AccStrictfp);
+				if ((realModifiers & UNEXPECTED_MODIFIERS) != 0)
+					problemReporter().illegalModifierForInnerRecord(sourceType);
+			} else if (sourceType.isLocalType()) {
+				final int UNEXPECTED_MODIFIERS = ~(ClassFileConstants.AccAbstract | ClassFileConstants.AccFinal | ClassFileConstants.AccStrictfp | ClassFileConstants.AccStatic);
+				if ((realModifiers & UNEXPECTED_MODIFIERS) != 0)
+					problemReporter().illegalModifierForLocalClass(sourceType);
+			} else {
+				final int UNEXPECTED_MODIFIERS = ~(ClassFileConstants.AccPublic |  ClassFileConstants.AccFinal | ClassFileConstants.AccStrictfp);
+				if ((realModifiers & UNEXPECTED_MODIFIERS) != 0)
+					problemReporter().illegalModifierForRecord(sourceType);
+			}
+			// JLS 14 8.10 : It is a compile-time error if a record declaration has the modifier abstract.
+			
+			/* Section 8.10 http://cr.openjdk.java.net/~gbierman/8222777/8222777-20190823/specs/records-jls.html#jls-8.10
+			 * It is a compile-time error if a record declaration has the modifier abstract.
+			 * 
+			 * A record declaration is implicitly final. It is permitted for the declaration of a record type
+			 * to redundantly specify the final modifier.
+			 * 
+			 * A nested record type is implicitly static. It is permitted for the declaration of a nested record
+			 * type to redundantly specify the static modifier.
+			 * 
+			 * This implies that it is impossible to declare a record type in the body of an inner class (8.1.3),
+			 * because an inner class cannot have static members except for constant variables.
+			 * 
+			 * It is a compile-time error if the same keyword appears more than once as a modifier for a record declaration,
+			 * or if a record declaration has more than one of the access modifiers public, protected, and private (6.6).
+			 */
 		} else {
 			// detect abnormal cases for classes
 			if (isMemberType) { // includes member types defined inside local types
@@ -241,8 +279,11 @@
 				if (enclosingType.isInterface())
 					modifiers |= ClassFileConstants.AccStatic;
 			} else if (!enclosingType.isStatic()) {
-				// error the enclosing type of a static field must be static or a top-level type
-				problemReporter().illegalStaticModifierForMemberType(sourceType);
+				if (sourceType.isRecord())
+					problemReporter().recordNestedRecordInherentlyStatic(sourceType);
+				else
+					// error the enclosing type of a static field must be static or a top-level type
+					problemReporter().illegalStaticModifierForMemberType(sourceType);
 			}
 		}
 
