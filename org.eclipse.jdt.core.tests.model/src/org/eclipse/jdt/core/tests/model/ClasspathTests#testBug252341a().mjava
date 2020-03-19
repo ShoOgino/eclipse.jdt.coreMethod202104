@@ -3,16 +3,16 @@
  * Test that 1) referenced libraries are added to the resolved classpath in the right order
  * 			 2) referenced libraries are added to the appropriate referencing library in the correct order
  * 			 3) referenced libraries and top-level libraries retain the source attachment and source attachment root path
- * 			 4) referenced libraries point to the correct entry as their referencingEntry. 
+ * 			 4) referenced libraries point to the correct entry as their referencingEntry.
  * 			 5) referenced libraries and their attributes are persisted in the .classpath file
- * 
+ *
  * @see "https://bugs.eclipse.org/bugs/show_bug.cgi?id=252431"
  * @throws Exception
- */ 
+ */
 public void testBug252341a() throws Exception {
 	try {
 		IJavaProject p = createJavaProject("P");
-		addLibrary(p, "lib1.jar", "abc.zip", new String[0], 
+		addLibrary(p, "lib1.jar", "abc.zip", new String[0],
 			new String[] {
 				"META-INF/MANIFEST.MF",
 				"Manifest-Version: 1.0\n" +
@@ -21,42 +21,42 @@ public void testBug252341a() throws Exception {
 			JavaCore.VERSION_1_4);
 		createFile("/P/lib2.jar", "");
 		createFile("/P/lib3.jar", "");
-		
+
 		// Test referenced entries are included in the right order in the resolved classpath
 		IClasspathEntry[] resolvedClasspath = p.getResolvedClasspath(true);
-		assertClasspathEquals(resolvedClasspath, 
-				"/P[CPE_SOURCE][K_SOURCE][isExported:false]\n" + 
-				""+ getExternalJCLPathString() + "[CPE_LIBRARY][K_BINARY][isExported:false]\n" + 
-				"/P/lib2.jar[CPE_LIBRARY][K_BINARY][isExported:true]\n" + 
-				"/P/lib3.jar[CPE_LIBRARY][K_BINARY][isExported:true]\n" + 
+		assertClasspathEquals(resolvedClasspath,
+				"/P[CPE_SOURCE][K_SOURCE][isExported:false]\n" +
+				""+ getExternalJCLPathString() + "[CPE_LIBRARY][K_BINARY][isExported:false]\n" +
+				"/P/lib2.jar[CPE_LIBRARY][K_BINARY][isExported:true]\n" +
+				"/P/lib3.jar[CPE_LIBRARY][K_BINARY][isExported:true]\n" +
 				"/P/lib1.jar[CPE_LIBRARY][K_BINARY][sourcePath:/P/abc.zip][isExported:true]");
-		
+
 		IClasspathEntry[] rawClasspath = p.getRawClasspath();
 		assertClasspathEquals(rawClasspath,
-				"/P[CPE_SOURCE][K_SOURCE][isExported:false]\n" + 
-				"JCL_LIB[CPE_VARIABLE][K_SOURCE][isExported:false]\n" + 
+				"/P[CPE_SOURCE][K_SOURCE][isExported:false]\n" +
+				"JCL_LIB[CPE_VARIABLE][K_SOURCE][isExported:false]\n" +
 				"/P/lib1.jar[CPE_LIBRARY][K_BINARY][sourcePath:/P/abc.zip][isExported:true]");
 
 		// Test referenced entries for a particular entry appear in the right order and the referencingEntry
 		// attribute has the correct value
 		IClasspathEntry[] chains = JavaCore.getReferencedClasspathEntries(rawClasspath[2], null);
-		assertClasspathEquals(chains, 
-				"/P/lib2.jar[CPE_LIBRARY][K_BINARY][isExported:true]\n" + 
+		assertClasspathEquals(chains,
+				"/P/lib2.jar[CPE_LIBRARY][K_BINARY][isExported:true]\n" +
 				"/P/lib3.jar[CPE_LIBRARY][K_BINARY][isExported:true]");
 
 		chains = JavaCore.getReferencedClasspathEntries(rawClasspath[2], p);
-		assertClasspathEquals(chains, 
-				"/P/lib2.jar[CPE_LIBRARY][K_BINARY][isExported:true]\n" + 
+		assertClasspathEquals(chains,
+				"/P/lib2.jar[CPE_LIBRARY][K_BINARY][isExported:true]\n" +
 				"/P/lib3.jar[CPE_LIBRARY][K_BINARY][isExported:true]");
 
 		assertSame("Referencing Entry", rawClasspath[2], chains[0].getReferencingEntry());
 		assertSame("Referencing Entry", rawClasspath[2], chains[1].getReferencingEntry());
-		
-		// Test a newly created library entry with similar attributes but without any referencing entry is equal to 
+
+		// Test a newly created library entry with similar attributes but without any referencing entry is equal to
 		// the original referenced entry
 		IClasspathEntry tempLibEntry = JavaCore.newLibraryEntry(chains[0].getPath(), chains[0].getSourceAttachmentPath(), chains[0].getSourceAttachmentRootPath(), true);
 		assertEquals("Library Entry", tempLibEntry, chains[0]);
-		
+
 		// Test the source attachment and other attributes added to the referenced entries are stored and retrieved properly
 		assertEquals("source attachment", resolvedClasspath[4].getSourceAttachmentPath().toPortableString(), "/P/abc.zip");
 		assertNull("source attachment", chains[0].getSourceAttachmentPath());
@@ -71,45 +71,45 @@ public void testBug252341a() throws Exception {
 
 		IClasspathAttribute javadocLoc = JavaCore.newClasspathAttribute("javadoc_location", "/P/efg.zip");
 		((ClasspathEntry)chains[0]).extraAttributes = new IClasspathAttribute[]{javadocLoc};
-		
+
 		p.setRawClasspath(rawClasspath, chains, p.getOutputLocation(), null);
-		
+
 		// Test the .classpath file contains all the referenced entries and their attributes
 		String contents = new String (org.eclipse.jdt.internal.core.util.Util.getResourceContentsAsCharArray(getFile("/P/.classpath")));
 		assertSourceEquals(
 			"Unexpected content",
-			"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + 
-			"<classpath>\n" + 
-			"	<classpathentry kind=\"src\" path=\"\"/>\n" + 
-			"	<classpathentry kind=\"var\" path=\"JCL_LIB\"/>\n" + 
-			"	<classpathentry exported=\"true\" kind=\"lib\" path=\"lib1.jar\" sourcepath=\"abc.zip\"/>\n" + 
-			"	<classpathentry kind=\"output\" path=\"\"/>\n" + 
-			"	<referencedentry exported=\"true\" kind=\"lib\" path=\"lib2.jar\" rootpath=\"/src2\" sourcepath=\"efg.zip\">\n" + 
-			"		<attributes>\n" + 
-			"			<attribute name=\"javadoc_location\" value=\"/P/efg.zip\"/>\n" + 
-			"		</attributes>\n" + 
-			"	</referencedentry>\n" + 
-			"	<referencedentry exported=\"true\" kind=\"lib\" path=\"lib3.jar\" rootpath=\"/src3\" sourcepath=\"xyz.zip\"/>\n" + 
+			"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+			"<classpath>\n" +
+			"	<classpathentry kind=\"src\" path=\"\"/>\n" +
+			"	<classpathentry kind=\"var\" path=\"JCL_LIB\"/>\n" +
+			"	<classpathentry exported=\"true\" kind=\"lib\" path=\"lib1.jar\" sourcepath=\"abc.zip\"/>\n" +
+			"	<classpathentry kind=\"output\" path=\"\"/>\n" +
+			"	<referencedentry exported=\"true\" kind=\"lib\" path=\"lib2.jar\" rootpath=\"/src2\" sourcepath=\"efg.zip\">\n" +
+			"		<attributes>\n" +
+			"			<attribute name=\"javadoc_location\" value=\"/P/efg.zip\"/>\n" +
+			"		</attributes>\n" +
+			"	</referencedentry>\n" +
+			"	<referencedentry exported=\"true\" kind=\"lib\" path=\"lib3.jar\" rootpath=\"/src3\" sourcepath=\"xyz.zip\"/>\n" +
 			"</classpath>\n",
 			contents);
-		
+
 		p.close();
 		p.open(null);
 		rawClasspath = p.getRawClasspath();
 		resolvedClasspath = p.getResolvedClasspath(true);
 
 		assertClasspathEquals(rawClasspath,
-				"/P[CPE_SOURCE][K_SOURCE][isExported:false]\n" + 
-				"JCL_LIB[CPE_VARIABLE][K_SOURCE][isExported:false]\n" + 
+				"/P[CPE_SOURCE][K_SOURCE][isExported:false]\n" +
+				"JCL_LIB[CPE_VARIABLE][K_SOURCE][isExported:false]\n" +
 				"/P/lib1.jar[CPE_LIBRARY][K_BINARY][sourcePath:/P/abc.zip][isExported:true]");
 
-		assertClasspathEquals(resolvedClasspath, 
-				"/P[CPE_SOURCE][K_SOURCE][isExported:false]\n" + 
-				""+ getExternalJCLPathString() + "[CPE_LIBRARY][K_BINARY][isExported:false]\n" + 
-				"/P/lib2.jar[CPE_LIBRARY][K_BINARY][sourcePath:/P/efg.zip][rootPath:/src2][isExported:true][attributes:javadoc_location=/P/efg.zip]\n" + 
-				"/P/lib3.jar[CPE_LIBRARY][K_BINARY][sourcePath:/P/xyz.zip][rootPath:/src3][isExported:true]\n" + 
+		assertClasspathEquals(resolvedClasspath,
+				"/P[CPE_SOURCE][K_SOURCE][isExported:false]\n" +
+				""+ getExternalJCLPathString() + "[CPE_LIBRARY][K_BINARY][isExported:false]\n" +
+				"/P/lib2.jar[CPE_LIBRARY][K_BINARY][sourcePath:/P/efg.zip][rootPath:/src2][isExported:true][attributes:javadoc_location=/P/efg.zip]\n" +
+				"/P/lib3.jar[CPE_LIBRARY][K_BINARY][sourcePath:/P/xyz.zip][rootPath:/src3][isExported:true]\n" +
 				"/P/lib1.jar[CPE_LIBRARY][K_BINARY][sourcePath:/P/abc.zip][isExported:true]");
-		
+
 	} finally {
 		deleteProject("P");
 	}
