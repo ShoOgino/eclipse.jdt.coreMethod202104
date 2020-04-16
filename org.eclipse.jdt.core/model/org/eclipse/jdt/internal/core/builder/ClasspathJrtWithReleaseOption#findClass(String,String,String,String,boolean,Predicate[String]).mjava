@@ -6,51 +6,31 @@
 			return super.findClass(binaryFileName, qualifiedPackageName, moduleName, qualifiedBinaryFileName,
 					asBinaryOnly, moduleNameFilter);
 		}
-		if (!isPackage(qualifiedPackageName, moduleName))
+		if (!isPackage(qualifiedPackageName, moduleName)) {
 			return null; // most common case
-
+		}
+		List<Path> releaseRoots = this.ctSym.releaseRoots(this.releaseInHex);
 		try {
 			IBinaryType reader = null;
 			byte[] content = null;
 			String fileNameWithoutExtension = qualifiedBinaryFileName.substring(0,
 												qualifiedBinaryFileName.length() - SuffixConstants.SUFFIX_CLASS.length);
-			if (this.subReleases != null && this.subReleases.length > 0) {
+			if (!releaseRoots.isEmpty()) {
 				qualifiedBinaryFileName = qualifiedBinaryFileName.replace(".class", ".sig"); //$NON-NLS-1$ //$NON-NLS-2$
-				outer: for (String rel : this.subReleases) {
-					Path p = null;
-					inner: if (this.isJRE12Plus) {
+				Path fullPath = this.ctSym.getFullPath(this.releaseInHex, qualifiedBinaryFileName, moduleName);
+				// If file is known, read it from ct.sym
+				if (fullPath != null) {
+					content = this.ctSym.getFileBytes(fullPath);
+					if (content != null) {
+						reader = new ClassFileReader(content, qualifiedBinaryFileName.toCharArray());
 						if (moduleName != null) {
-							p = this.fs.getPath(rel, moduleName, qualifiedBinaryFileName);
-						}
-						else {
-							try (DirectoryStream<java.nio.file.Path> stream = Files
-									.newDirectoryStream(this.fs.getPath(rel))) {
-								for (final java.nio.file.Path subdir : stream) {
-									p = subdir.resolve(qualifiedBinaryFileName);
-									if (Files.exists(p)) {
-										if (subdir.getNameCount() == 2 ) {
-											moduleName = subdir.getName(1).toString();
-										}
-										break inner;
-									}
-								}
-							}
-						}
-					} else {
-						p = this.fs.getPath(rel, qualifiedBinaryFileName);
-					}
-					if (Files.exists(p)) {
-						content = JRTUtil.safeReadBytes(p);
-						if (content != null) {
-							reader = new ClassFileReader(content, qualifiedBinaryFileName.toCharArray());
-							if (moduleName != null)
-								((ClassFileReader) reader).moduleName = moduleName.toCharArray();
-							break outer;
+							((ClassFileReader) reader).moduleName = moduleName.toCharArray();
 						}
 					}
 				}
 			} else {
-				reader = ClassFileReader.readFromModule(new File(this.zipFilename), moduleName, qualifiedBinaryFileName,
+				// Read the file in a "classic" way from the JDK itself
+				reader = ClassFileReader.readFromModule(this.jrtFile, moduleName, qualifiedBinaryFileName,
 						moduleNameFilter);
 			}
 			return createAnswer(fileNameWithoutExtension, reader);

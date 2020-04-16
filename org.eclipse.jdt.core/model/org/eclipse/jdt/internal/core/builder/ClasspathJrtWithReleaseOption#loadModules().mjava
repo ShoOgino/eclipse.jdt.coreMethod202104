@@ -1,18 +1,17 @@
-	public static void loadModules(final ClasspathJrtWithReleaseOption jrt) {
-		if (jrt.fs == null || !jrt.isJRE12Plus) {
-			ClasspathJrt.loadModules(jrt);
+	public void loadModules() {
+		if (this.fs == null || !this.ctSym.isJRE12Plus()) {
+			ClasspathJrt.loadModules(this);
 			return;
 		}
-		if (jrt.modPathString == null)
+		if (this.modPathString == null) {
 			return;
-		Set<IModule> cache = ModulesCache.get(jrt.modPathString);
+		}
+		HashMap<String, IModule> cache = ModulesCache.get(this.modPathString);
 		if (cache == null) {
-			try (DirectoryStream<java.nio.file.Path> stream = Files.newDirectoryStream(jrt.releasePath)) {
-				for (final java.nio.file.Path subdir : stream) {
-					if (!subdir.getFileName().toString().contains(jrt.releaseInHex)) {
-						continue;
-					}
-					Files.walkFileTree(subdir, Collections.EMPTY_SET, 2, new FileVisitor<java.nio.file.Path>() {
+			List<Path> releaseRoots = this.ctSym.releaseRoots(this.releaseInHex);
+			for (Path root : releaseRoots) {
+				try {
+					Files.walkFileTree(root, Collections.EMPTY_SET, 2, new FileVisitor<java.nio.file.Path>() {
 						@Override
 						public FileVisitResult preVisitDirectory(java.nio.file.Path dir, BasicFileAttributes attrs)
 								throws IOException {
@@ -26,10 +25,11 @@
 								return FileVisitResult.CONTINUE;
 							}
 							if (f.getFileName().toString().equals(MODULE_INFO)) {
-								byte[] content = JRTUtil.safeReadBytes(f);
-								if (content == null)
+								byte[] content = ClasspathJrtWithReleaseOption.this.ctSym.getFileBytes(f);
+								if (content == null) {
 									return FileVisitResult.CONTINUE;
-								jrt.acceptModule(content);
+								}
+								ClasspathJrtWithReleaseOption.this.acceptModule(content, f.getParent().getFileName().toString());
 							}
 							return FileVisitResult.SKIP_SIBLINGS;
 						}
@@ -46,9 +46,9 @@
 							return FileVisitResult.CONTINUE;
 						}
 					});
+				} catch (IOException e) {
+					// Nothing much to do
 				}
-			} catch (IOException e) {
-				// Nothing much to do
 			}
 		}
 	}

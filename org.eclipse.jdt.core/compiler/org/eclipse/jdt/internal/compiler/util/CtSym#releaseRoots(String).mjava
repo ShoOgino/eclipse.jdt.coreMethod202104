@@ -1,0 +1,39 @@
+	/**
+	 * @param releaseInHex
+	 *            major JDK version segment as hex number (8, 9, A, etc)
+	 * @return set with all root paths related to given release in ct.sym file
+	 */
+	public List<Path> releaseRoots(String releaseInHex) {
+		if (!exists()) {
+			return Collections.emptyList();
+		}
+		List<Path> list = this.releaseRootPaths.computeIfAbsent(releaseInHex, x -> {
+			List<Path> rootDirs = new ArrayList<>();
+			try (DirectoryStream<Path> stream = Files.newDirectoryStream(this.root)) {
+				for (final Path subdir : stream) {
+					String rel = subdir.getFileName().toString();
+					if (rel.contains("-")) { //$NON-NLS-1$
+						// Ignore META-INF etc. We are only interested in A-F 0-9
+						continue;
+					}
+					// Line below looks crazy. Latest with release 24 (hex 18)
+					// we will find "8" release paths inside all release 24 related
+					// directories and with release 26 (hex 1A) we will match "10" release
+					// paths inside release 24 directories. I can't believe this is sane.
+					// But looks like similar code is in
+					// com.sun.tools.javac.platform.JDKPlatformProvider.PlatformDescriptionImpl.getFileManager()
+					// https://github.com/openjdk/jdk/blob/master/src/jdk.compiler/share/classes/com/sun/tools/javac/platform/JDKPlatformProvider.java
+					if (rel.contains(releaseInHex)) {
+						rootDirs.add(subdir);
+					} else {
+						continue;
+					}
+				}
+			} catch (IOException e) {
+				return Collections.emptyList();
+			}
+			return Collections.unmodifiableList(rootDirs);
+		});
+		return list;
+	}
+
