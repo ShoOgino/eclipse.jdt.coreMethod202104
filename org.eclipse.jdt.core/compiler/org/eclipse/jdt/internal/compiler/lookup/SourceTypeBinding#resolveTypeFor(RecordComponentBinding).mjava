@@ -1,0 +1,74 @@
+private Object resolveTypeFor(RecordComponentBinding component) {
+	if (!isPrototype())
+		return this.prototype.resolveTypeFor(component);
+
+	if ((component.modifiers & ExtraCompilerModifiers.AccUnresolved) == 0)
+		return component;
+
+	component.getAnnotationTagBits();
+	if ((component.getAnnotationTagBits() & TagBits.AnnotationDeprecated) != 0)  // TODO: Watch out the spec changes
+		component.modifiers |= ClassFileConstants.AccDeprecated;  // expected to be available soon.
+
+	if (isViewedAsDeprecated() && !component.isDeprecated()) {
+		component.modifiers |= ExtraCompilerModifiers.AccDeprecatedImplicitly;
+		component.tagBits |= this.tagBits & TagBits.AnnotationTerminallyDeprecated;
+	}
+	if (hasRestrictedAccess())
+		component.modifiers |= ExtraCompilerModifiers.AccRestrictedAccess;
+	RecordComponent[] componentDecls = this.scope.referenceContext.recordComponents;
+	int length = componentDecls == null ? 0 : componentDecls.length;
+	for (int f = 0; f < length; f++) {
+		if (componentDecls[f].binding != component)
+			continue;
+
+		// component cannot be static, hence no static initializer scope
+		MethodScope initializationScope = this.scope.referenceContext.initializerScope;
+		RecordComponent componentDecl = componentDecls[f];
+		TypeBinding componentType = componentDecl.type.resolveType(initializationScope, true /* check bounds*/);
+		component.type = componentType;
+		component.modifiers &= ~ExtraCompilerModifiers.AccUnresolved;
+		if (componentType == null) {
+			componentDecl.binding = null;
+			return null;
+		}
+		if (componentType == TypeBinding.VOID) {
+			this.scope.problemReporter().recordComponentCannotBeVoid(componentDecl);
+			componentDecl.binding = null;
+			return null;
+		}
+		if (componentType.isArrayType() && ((ArrayBinding) componentType).leafComponentType == TypeBinding.VOID) {
+			this.scope.problemReporter().variableTypeCannotBeVoidArray(componentDecl);
+			componentDecl.binding = null;
+			return null;
+		}
+		if ((componentType.tagBits & TagBits.HasMissingType) != 0) {
+			component.tagBits |= TagBits.HasMissingType;
+		}
+		TypeBinding leafType = componentType.leafComponentType();
+		if (leafType instanceof ReferenceBinding && (((ReferenceBinding)leafType).modifiers & ExtraCompilerModifiers.AccGenericSignature) != 0) {
+			component.modifiers |= ExtraCompilerModifiers.AccGenericSignature;
+		}
+
+		long sourceLevel = this.scope.compilerOptions().sourceLevel;
+		if (sourceLevel >= ClassFileConstants.JDK1_8) {
+			Annotation [] annotations = componentDecl.annotations;
+			if (annotations != null && annotations.length != 0) {
+				// piggybacking on an existing method to move type_use annotations to type in record component
+				ASTNode.copySE8AnnotationsToType(initializationScope, component, annotations, false);
+			}
+			Annotation.isTypeUseCompatible(componentDecl.type, this.scope, annotations);
+		}
+		// TODO Bug 562478: apply null default: - to check anything to be done? - SH
+//		if (this.environment.globalOptions.isAnnotationBasedNullAnalysisEnabled) {}
+
+		if (initializationScope.shouldCheckAPILeaks(this, component.isPublic()) && componentDecl.type != null) // fieldDecl.type is null for enum constants
+			initializationScope.detectAPILeaks(componentDecl.type, componentType);
+
+		if (this.externalAnnotationProvider != null) {
+			ExternalAnnotationSuperimposer.annotateComponentBinding(component, this.externalAnnotationProvider, this.environment);
+		}
+		return component;
+	}
+	return null; // should never reach this point
+}
+
