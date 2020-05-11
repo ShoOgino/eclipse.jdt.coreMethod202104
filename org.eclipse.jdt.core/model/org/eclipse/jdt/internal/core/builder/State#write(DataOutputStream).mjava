@@ -220,14 +220,13 @@ void write(DataOutputStream out) throws IOException {
 /*
  * String[]	Interned type locators
  */
-	out.writeInt(length = this.references.elementSize);
+	out.writeInt(length = this.references.size());
 	SimpleLookupTable internedTypeLocators = new SimpleLookupTable(length);
 	if (length > 0) {
-		keyTable = this.references.keyTable;
-		for (int i = 0, l = keyTable.length; i < l; i++) {
-			if (keyTable[i] != null) {
+		Set<String> keys = this.references.keySet();
+		for (String key : keys) {
+			if (key != null) {
 				length--;
-				String key = (String) keyTable[i];
 				out.writeUTF(key);
 				internedTypeLocators.put(key, Integer.valueOf(internedTypeLocators.elementSize));
 			}
@@ -241,15 +240,16 @@ void write(DataOutputStream out) throws IOException {
  * String		type name
  * int			interned locator id
  */
-	out.writeInt(length = this.typeLocators.elementSize);
+	out.writeInt(length = this.typeLocators.size());
 	if (length > 0) {
-		keyTable = this.typeLocators.keyTable;
-		valueTable = this.typeLocators.valueTable;
-		for (int i = 0, l = keyTable.length; i < l; i++) {
-			if (keyTable[i] != null) {
+		Set<Entry<String, String>> entries = this.typeLocators.entrySet();
+		for (Entry<String, String> entry : entries) {
+			String key = entry.getKey();
+			String value = entry.getValue();
+			if (key != null) {
 				length--;
-				out.writeUTF((String) keyTable[i]);
-				Integer index = (Integer) internedTypeLocators.get(valueTable[i]);
+				out.writeUTF(value);
+				Integer index = (Integer) internedTypeLocators.get(value);
 				out.writeInt(index.intValue());
 			}
 		}
@@ -265,34 +265,30 @@ void write(DataOutputStream out) throws IOException {
 	SimpleLookupTable internedRootNames = new SimpleLookupTable(3);
 	SimpleLookupTable internedQualifiedNames = new SimpleLookupTable(31);
 	SimpleLookupTable internedSimpleNames = new SimpleLookupTable(31);
-	valueTable = this.references.valueTable;
-	for (int i = 0, l = valueTable.length; i < l; i++) {
-		if (valueTable[i] != null) {
-			ReferenceCollection collection = (ReferenceCollection) valueTable[i];
-			char[][] rNames = collection.rootReferences;
-			for (int j = 0, m = rNames.length; j < m; j++) {
-				char[] rName = rNames[j];
-				if (!internedRootNames.containsKey(rName)) // remember the names have been interned
-					internedRootNames.put(rName, Integer.valueOf(internedRootNames.elementSize));
-			}
-			char[][][] qNames = collection.qualifiedNameReferences;
-			for (int j = 0, m = qNames.length; j < m; j++) {
-				char[][] qName = qNames[j];
-				if (!internedQualifiedNames.containsKey(qName)) { // remember the names have been interned
-					internedQualifiedNames.put(qName, Integer.valueOf(internedQualifiedNames.elementSize));
-					for (int k = 0, n = qName.length; k < n; k++) {
-						char[] sName = qName[k];
-						if (!internedSimpleNames.containsKey(sName)) // remember the names have been interned
-							internedSimpleNames.put(sName, Integer.valueOf(internedSimpleNames.elementSize));
-					}
+	for (ReferenceCollection collection : this.references.values()) {
+		char[][] rNames = collection.rootReferences;
+		for (int j = 0, m = rNames.length; j < m; j++) {
+			char[] rName = rNames[j];
+			if (!internedRootNames.containsKey(rName)) // remember the names have been interned
+				internedRootNames.put(rName, Integer.valueOf(internedRootNames.elementSize));
+		}
+		char[][][] qNames = collection.qualifiedNameReferences;
+		for (int j = 0, m = qNames.length; j < m; j++) {
+			char[][] qName = qNames[j];
+			if (!internedQualifiedNames.containsKey(qName)) { // remember the names have been interned
+				internedQualifiedNames.put(qName, Integer.valueOf(internedQualifiedNames.elementSize));
+				for (int k = 0, n = qName.length; k < n; k++) {
+					char[] sName = qName[k];
+					if (!internedSimpleNames.containsKey(sName)) // remember the names have been interned
+						internedSimpleNames.put(sName, Integer.valueOf(internedSimpleNames.elementSize));
 				}
 			}
-			char[][] sNames = collection.simpleNameReferences;
-			for (int j = 0, m = sNames.length; j < m; j++) {
-				char[] sName = sNames[j];
-				if (!internedSimpleNames.containsKey(sName)) // remember the names have been interned
-					internedSimpleNames.put(sName, Integer.valueOf(internedSimpleNames.elementSize));
-			}
+		}
+		char[][] sNames = collection.simpleNameReferences;
+		for (int j = 0, m = sNames.length; j < m; j++) {
+			char[] sName = sNames[j];
+			if (!internedSimpleNames.containsKey(sName)) // remember the names have been interned
+				internedSimpleNames.put(sName, Integer.valueOf(internedSimpleNames.elementSize));
 		}
 	}
 	char[][] internedArray = new char[internedRootNames.elementSize][];
@@ -342,43 +338,41 @@ void write(DataOutputStream out) throws IOException {
  * int		interned locator id
  * ReferenceCollection
 */
-	out.writeInt(length = this.references.elementSize);
+	out.writeInt(length = this.references.size());
 	if (length > 0) {
-		keyTable = this.references.keyTable;
-		for (int i = 0, l = keyTable.length; i < l; i++) {
-			if (keyTable[i] != null) {
-				length--;
-				Integer index = (Integer) internedTypeLocators.get(keyTable[i]);
+		for (Entry<String, ReferenceCollection> entry : this.references.entrySet()) {
+			String key = entry.getKey();
+			length--;
+			Integer index = (Integer) internedTypeLocators.get(key);
+			out.writeInt(index.intValue());
+			ReferenceCollection collection = entry.getValue();
+			if (collection instanceof AdditionalTypeCollection) {
+				out.writeByte(1);
+				AdditionalTypeCollection atc = (AdditionalTypeCollection) collection;
+				writeNames(atc.definedTypeNames, out);
+			} else {
+				out.writeByte(2);
+			}
+			char[][][] qNames = collection.qualifiedNameReferences;
+			int qLength = qNames.length;
+			out.writeInt(qLength);
+			for (int j = 0; j < qLength; j++) {
+				index = (Integer) internedQualifiedNames.get(qNames[j]);
 				out.writeInt(index.intValue());
-				ReferenceCollection collection = (ReferenceCollection) valueTable[i];
-				if (collection instanceof AdditionalTypeCollection) {
-					out.writeByte(1);
-					AdditionalTypeCollection atc = (AdditionalTypeCollection) collection;
-					writeNames(atc.definedTypeNames, out);
-				} else {
-					out.writeByte(2);
-				}
-				char[][][] qNames = collection.qualifiedNameReferences;
-				int qLength = qNames.length;
-				out.writeInt(qLength);
-				for (int j = 0; j < qLength; j++) {
-					index = (Integer) internedQualifiedNames.get(qNames[j]);
-					out.writeInt(index.intValue());
-				}
-				char[][] sNames = collection.simpleNameReferences;
-				int sLength = sNames.length;
-				out.writeInt(sLength);
-				for (int j = 0; j < sLength; j++) {
-					index = (Integer) internedSimpleNames.get(sNames[j]);
-					out.writeInt(index.intValue());
-				}
-				char[][] rNames = collection.rootReferences;
-				int rLength = rNames.length;
-				out.writeInt(rLength);
-				for (int j = 0; j < rLength; j++) {
-					index = (Integer) internedRootNames.get(rNames[j]);
-					out.writeInt(index.intValue());
-				}
+			}
+			char[][] sNames = collection.simpleNameReferences;
+			int sLength = sNames.length;
+			out.writeInt(sLength);
+			for (int j = 0; j < sLength; j++) {
+				index = (Integer) internedSimpleNames.get(sNames[j]);
+				out.writeInt(index.intValue());
+			}
+			char[][] rNames = collection.rootReferences;
+			int rLength = rNames.length;
+			out.writeInt(rLength);
+			for (int j = 0; j < rLength; j++) {
+				index = (Integer) internedRootNames.get(rNames[j]);
+				out.writeInt(index.intValue());
 			}
 		}
 		if (JavaBuilder.DEBUG && length != 0)
