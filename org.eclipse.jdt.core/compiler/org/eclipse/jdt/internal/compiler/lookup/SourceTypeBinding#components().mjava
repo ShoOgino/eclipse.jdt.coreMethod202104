@@ -1,0 +1,75 @@
+public RecordComponentBinding[] components() {
+
+	if (!this.isRecordDeclaration)
+		return null;
+	if (!isPrototype()) {
+		if ((this.extendedTagBits & ExtendedTagBits.AreRecordComponentsComplete) != 0)
+			return this.components;
+		this.extendedTagBits |= ExtendedTagBits.AreRecordComponentsComplete;
+		return this.components = this.prototype.components();
+	}
+
+	if ((this.extendedTagBits & ExtendedTagBits.AreRecordComponentsComplete) != 0)
+		return this.components;
+
+	if (!areComponentsInitialized()) {
+		this.scope.buildComponents();
+	}
+	int failed = 0;
+	RecordComponentBinding[] resolvedComponents = this.components;
+	try {
+		// Note: do not sort the components
+		RecordComponentBinding[] componentsSnapshot = this.components;
+		for (int i = 0, length = componentsSnapshot.length; i < length; i++) {
+			if (resolveTypeFor(componentsSnapshot[i]) == null) {
+				// do not alter original component array until resolution is over, due to reentrance (143259)
+				// TODO: to check for relevance
+				if (resolvedComponents == componentsSnapshot) {
+					System.arraycopy(componentsSnapshot, 0, resolvedComponents = new RecordComponentBinding[length], 0, length);
+				}
+				resolvedComponents[i] = null;
+				failed++;
+			} else {
+				// we need to complete some unfinished work here - find the synthetic accessor method
+				// and fill in the blanks
+				RecordComponentBinding rcb = resolvedComponents[i];
+				MethodBinding accessor = getRecordComponentAccessor(rcb.name);
+				if (accessor instanceof SyntheticMethodBinding) { // double checking
+					SyntheticMethodBinding smb = (SyntheticMethodBinding) accessor;
+					if (rcb.type instanceof TypeVariableBinding ||
+					rcb.type instanceof ParameterizedTypeBinding)
+						smb.modifiers |= ExtraCompilerModifiers.AccGenericSignature;
+					smb.returnType = rcb.type;
+					// add code for implicit canonical constructor argument annotations also
+					for (FieldBinding f : this.fields) {
+						if (f.isRecordComponent() && CharOperation.equals(f.name, rcb.name)) {
+							smb.targetReadField = f;
+							ASTNode.copyRecordComponentAnnotations(this.scope, smb,
+									rcb.sourceRecordComponent().annotations);
+							// Note: a) type use bit set above and b) reusing rcb type, so
+							// copySE8Annot already done for rcb.type, hence not
+							// required here (tricky on an SMB without ast)
+							break;
+						}
+					}
+				}
+			}
+		}
+	} finally {
+		if (failed > 0) {
+			int newSize = resolvedComponents.length - failed;
+			if (newSize == 0)
+				return setComponents(Binding.NO_COMPONENTS);
+
+			RecordComponentBinding[] newComponents = new RecordComponentBinding[newSize];
+			for (int i = 0, j = 0, length = resolvedComponents.length; i < length; i++) {
+				if (resolvedComponents[i] != null)
+					newComponents[j++] = resolvedComponents[i];
+			}
+			setComponents(newComponents);
+		}
+	}
+	this.extendedTagBits |= ExtendedTagBits.AreRecordComponentsComplete;
+	return this.components;
+}
+

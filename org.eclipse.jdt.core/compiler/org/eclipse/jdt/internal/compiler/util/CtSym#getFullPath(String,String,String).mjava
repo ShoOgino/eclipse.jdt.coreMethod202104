@@ -1,0 +1,64 @@
+	/**
+	 * Retrieves the full path in ct.sym file fro given signature file in given release
+	 * <p>
+	 * 12+: something like
+	 * <p>
+	 * java/io/Reader.sig -> /879/java.base/java/io/Reader.sig
+	 * <p>
+	 * before 12:
+	 * <p>
+	 * java/io/Reader.sig -> /8769/java/io/Reader.sig
+	 *
+	 * @param releaseInHex release number in hex
+	 * @param qualifiedSignatureFileName signature file name (without module)
+	 * @param moduleName
+	 * @return corresponding path in ct.sym file system or null if not found
+	 */
+	public Path getFullPath(String releaseInHex, String qualifiedSignatureFileName, String moduleName) {
+		String sep = this.fs.getSeparator();
+		if (DISABLE_CACHE) {
+			List<Path> releaseRoots = releaseRoots(releaseInHex);
+			for (Path rroot : releaseRoots) {
+				// Calculate file path
+				Path p = null;
+				if (isJRE12Plus()) {
+					if (moduleName == null) {
+						moduleName = getModuleInJre12plus(releaseInHex, qualifiedSignatureFileName);
+					}
+					p = rroot.resolve(moduleName + sep + qualifiedSignatureFileName);
+				} else {
+					p = rroot.resolve(qualifiedSignatureFileName);
+				}
+
+				// If file is known, read it from ct.sym
+				if (Files.exists(p)) {
+					if (VERBOSE) {
+						System.out.println("exists: " + qualifiedSignatureFileName + "\n"); //$NON-NLS-1$ //$NON-NLS-2$
+						System.out.println("not found: " + qualifiedSignatureFileName); //$NON-NLS-1$
+					}
+					return p;
+				}
+			}
+			if (VERBOSE) {
+				System.out.println("not found: " + qualifiedSignatureFileName); //$NON-NLS-1$
+			}
+			return null;
+		}
+		Map<String, Path> releasePaths = getCachedReleasePaths(releaseInHex);
+		Path path;
+		if(moduleName != null) {
+			// Without this, org.eclipse.jdt.core.tests.model.ModuleBuilderTests.testConvertToModule() fails on 12+ JRE
+			path = releasePaths.get(moduleName + sep + qualifiedSignatureFileName);
+		} else {
+			path = releasePaths.get(qualifiedSignatureFileName);
+		}
+		if (VERBOSE) {
+			if (path != null) {
+				System.out.println("exists: " + qualifiedSignatureFileName + "\n"); //$NON-NLS-1$ //$NON-NLS-2$
+			} else {
+				System.out.println("not found: " + qualifiedSignatureFileName); //$NON-NLS-1$
+			}
+		}
+		return path;
+	}
+

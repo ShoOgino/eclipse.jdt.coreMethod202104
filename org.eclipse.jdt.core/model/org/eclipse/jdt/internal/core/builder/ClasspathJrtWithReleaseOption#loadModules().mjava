@@ -1,0 +1,55 @@
+	public void loadModules() {
+		if (this.fs == null || !this.ctSym.isJRE12Plus()) {
+			ClasspathJrt.loadModules(this);
+			return;
+		}
+		if (this.modPathString == null) {
+			return;
+		}
+		HashMap<String, IModule> cache = ModulesCache.get(this.modPathString);
+		if (cache == null) {
+			List<Path> releaseRoots = this.ctSym.releaseRoots(this.releaseInHex);
+			for (Path root : releaseRoots) {
+				try {
+					Files.walkFileTree(root, Collections.EMPTY_SET, 2, new FileVisitor<java.nio.file.Path>() {
+						@Override
+						public FileVisitResult preVisitDirectory(java.nio.file.Path dir, BasicFileAttributes attrs)
+								throws IOException {
+							return FileVisitResult.CONTINUE;
+						}
+
+						@Override
+						public FileVisitResult visitFile(java.nio.file.Path f, BasicFileAttributes attrs)
+								throws IOException {
+							if (attrs.isDirectory() || f.getNameCount() < 3) {
+								return FileVisitResult.CONTINUE;
+							}
+							if (f.getFileName().toString().equals(MODULE_INFO)) {
+								byte[] content = ClasspathJrtWithReleaseOption.this.ctSym.getFileBytes(f);
+								if (content == null) {
+									return FileVisitResult.CONTINUE;
+								}
+								ClasspathJrtWithReleaseOption.this.acceptModule(content, f.getParent().getFileName().toString());
+							}
+							return FileVisitResult.SKIP_SIBLINGS;
+						}
+
+						@Override
+						public FileVisitResult visitFileFailed(java.nio.file.Path f, IOException exc)
+								throws IOException {
+							return FileVisitResult.CONTINUE;
+						}
+
+						@Override
+						public FileVisitResult postVisitDirectory(java.nio.file.Path dir, IOException exc)
+								throws IOException {
+							return FileVisitResult.CONTINUE;
+						}
+					});
+				} catch (IOException e) {
+					// Nothing much to do
+				}
+			}
+		}
+	}
+

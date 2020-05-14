@@ -16,7 +16,21 @@ public TypeBinding resolveType(BlockScope scope) {
 		return null;
 
 	if (!checkedType.isReifiable()) {
-		scope.problemReporter().illegalInstanceOfGenericType(checkedType, this);
+		CompilerOptions options = scope.compilerOptions();
+		// If preview is disabled, report same as before, even at Java 14
+		if (options.complianceLevel < ClassFileConstants.JDK14 || !options.enablePreviewFeatures) {
+			scope.problemReporter().illegalInstanceOfGenericType(checkedType, this);
+		} else {
+			if (options.isAnyEnabled(IrritantSet.PREVIEW)) {
+				scope.problemReporter().previewFeatureUsed(this.type.sourceStart, this.type.sourceEnd);
+			}
+			if (expressionType != TypeBinding.NULL) {
+				boolean isLegal = checkCastTypesCompatibility(scope, checkedType, expressionType, this.expression, true);
+				if (!isLegal || (this.bits & ASTNode.UnsafeCast) != 0) {
+					scope.problemReporter().unsafeCastInInstanceof(this.expression, checkedType, expressionType);
+				}
+			}
+		}
 	} else if (checkedType.isValidBinding()) {
 		// if not a valid binding, an error has already been reported for unresolved type
 		if ((expressionType != TypeBinding.NULL && expressionType.isBaseType()) // disallow autoboxing

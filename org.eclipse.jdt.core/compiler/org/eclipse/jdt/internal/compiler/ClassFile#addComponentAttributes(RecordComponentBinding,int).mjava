@@ -1,0 +1,53 @@
+	private int addComponentAttributes(RecordComponentBinding recordComponentBinding, int componetAttributeOffset) {
+		// See JVMS 14 Table 4.7-C - Record Preview for allowed attributes
+		int attributesNumber = 0;
+		// add signature attribute
+		char[] genericSignature = recordComponentBinding.genericSignature();
+		if (genericSignature != null) {
+			attributesNumber += generateSignatureAttribute(genericSignature);
+		}
+		RecordComponent recordComponent = recordComponentBinding.sourceRecordComponent();
+		if (recordComponent != null) {
+			Annotation[] annotations = recordComponent.annotations;
+			if (annotations != null) {
+				attributesNumber += generateRuntimeAnnotations(annotations, TagBits.AnnotationForRecordComponent);
+			}
+
+			if ((this.produceAttributes & ClassFileConstants.ATTR_TYPE_ANNOTATION) != 0) {
+				List allTypeAnnotationContexts = new ArrayList();
+				if (annotations != null && (recordComponent.bits & ASTNode.HasTypeAnnotations) != 0) {
+					recordComponent.getAllAnnotationContexts(AnnotationTargetTypeConstants.FIELD, allTypeAnnotationContexts);
+				}
+				int invisibleTypeAnnotationsCounter = 0;
+				int visibleTypeAnnotationsCounter = 0;
+				TypeReference recordComponentType = recordComponent.type;
+				if (recordComponentType != null && ((recordComponentType.bits & ASTNode.HasTypeAnnotations) != 0)) {
+					recordComponentType.getAllAnnotationContexts(AnnotationTargetTypeConstants.RECORD_COMPONENT, allTypeAnnotationContexts);
+				}
+				int size = allTypeAnnotationContexts.size();
+				if (size != 0) {
+					AnnotationContext[] allTypeAnnotationContextsArray = new AnnotationContext[size];
+					allTypeAnnotationContexts.toArray(allTypeAnnotationContextsArray);
+					for (int i = 0, max = allTypeAnnotationContextsArray.length; i < max; i++) {
+						AnnotationContext annotationContext = allTypeAnnotationContextsArray[i];
+						if ((annotationContext.visibility & AnnotationContext.INVISIBLE) != 0) {
+							invisibleTypeAnnotationsCounter++;
+							allTypeAnnotationContexts.add(annotationContext);
+						} else {
+							visibleTypeAnnotationsCounter++;
+							allTypeAnnotationContexts.add(annotationContext);
+						}
+					}
+					attributesNumber += generateRuntimeTypeAnnotations(
+							allTypeAnnotationContextsArray,
+							visibleTypeAnnotationsCounter,
+							invisibleTypeAnnotationsCounter);
+				}
+			}
+		}
+		if ((recordComponentBinding.tagBits & TagBits.HasMissingType) != 0) {
+			this.missingTypes = recordComponentBinding.type.collectMissingTypes(this.missingTypes);
+		}
+		return attributesNumber;
+	}
+

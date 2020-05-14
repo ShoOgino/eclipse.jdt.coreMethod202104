@@ -1,0 +1,42 @@
+	/**
+	 * Populates {@link #allReleasesPaths} with the paths of all files within each matching release directory in ct.sym.
+	 * This cache is an optimization to avoid excessive calls into the zip filesystem in
+	 * {@code ClasspathJrtWithReleaseOption#findClass(String, String, String, String, boolean, Predicate)}.
+	 * <p>
+	 * 12+: something like
+	 * <p>
+	 * java.base/javax/net/ssl/SSLSocketFactory.sig -> /89ABC/java.base/javax/net/ssl/SSLSocketFactory.sig
+	 * <p> or
+	 * javax/net/ssl/SSLSocketFactory.sig -> /89ABC/java.base/javax/net/ssl/SSLSocketFactory.sig
+	 * <p>
+	 * before 12: javax/net/ssl/SSLSocketFactory.sig -> /89ABC/java.base/javax/net/ssl/SSLSocketFactory.sig
+	 */
+	private Map<String, Path> getCachedReleasePaths(String releaseInHex) {
+		Map<String, Path> result = this.allReleasesPaths.computeIfAbsent(releaseInHex, x -> {
+			List<Path> roots = releaseRoots(releaseInHex);
+			Map<String, Path> allReleaseFiles = new HashMap<>(4999);
+			for (Path start : roots) {
+				try {
+					Files.walk(start).filter(Files::isRegularFile).forEach(p -> {
+						if (isJRE12Plus()) {
+							// Don't use module name as part of the key
+							String binaryNameWithoutModule = p.subpath(2, p.getNameCount()).toString();
+							allReleaseFiles.put(binaryNameWithoutModule, p);
+							// Cache extra key with module added, see getFullPath().
+							String binaryNameWithModule = p.subpath(1, p.getNameCount()).toString();
+							allReleaseFiles.put(binaryNameWithModule, p);
+						} else {
+							String binaryNameWithoutModule = p.subpath(1, p.getNameCount()).toString();
+							allReleaseFiles.put(binaryNameWithoutModule, p);
+						}
+					});
+				} catch (IOException e) {
+					// Not much do to if we can't list the dir; anything in there will be treated
+					// as if it were missing.
+				}
+			}
+			return Collections.unmodifiableMap(allReleaseFiles);
+		});
+		return result;
+	}
+

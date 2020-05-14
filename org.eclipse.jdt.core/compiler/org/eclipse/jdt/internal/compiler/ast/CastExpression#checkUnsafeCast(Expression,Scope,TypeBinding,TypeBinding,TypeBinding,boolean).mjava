@@ -1,0 +1,110 @@
+public static boolean checkUnsafeCast(Expression expression, Scope scope, TypeBinding castType, TypeBinding expressionType, TypeBinding match, boolean isNarrowing) {
+	// In case of expression being a InstanceOfExpression, this.resolvedType is null
+	// hence use the type of RHS of the instanceof operator
+	TypeBinding resolvedType = expression.resolvedType != null ? expression.resolvedType : castType;
+	if (TypeBinding.equalsEquals(match, castType)) {
+		if (!isNarrowing && TypeBinding.equalsEquals(match, resolvedType.leafComponentType()) // do not tag as unnecessary when recursing through upper bounds
+				&& !(expressionType.isParameterizedType() && expressionType.isProvablyDistinct(castType))) {
+			expression.tagAsUnnecessaryCast(scope, castType);
+		}
+		return true;
+	}
+	if (match != null) {
+		if (isNarrowing
+				? match.isProvablyDistinct(expressionType)
+				: castType.isProvablyDistinct(match)) {
+			return false;
+		}
+	}
+	switch (castType.kind()) {
+		case Binding.PARAMETERIZED_TYPE :
+			if (!castType.isReifiable()) {
+				if (match == null) { // unrelated types
+					expression.bits |= ASTNode.UnsafeCast;
+					return true;
+				}
+				switch (match.kind()) {
+					case Binding.PARAMETERIZED_TYPE :
+						if (isNarrowing) {
+							// [JLS 5.5] T <: S
+							if (expressionType.isRawType() || !expressionType.isEquivalentTo(match)) {
+								expression.bits |= ASTNode.UnsafeCast;
+								return true;
+							}
+							// [JLS 5.5] S has no subtype X != T, such that |X| == |T|
+							// if I2<T,U> extends I1<T>, then cast from I1<T> to I2<T,U> is unchecked
+							ParameterizedTypeBinding paramCastType = (ParameterizedTypeBinding) castType;
+							ParameterizedTypeBinding paramMatch = (ParameterizedTypeBinding) match;
+							// easy case if less parameters on match
+							TypeBinding[] castArguments = paramCastType.arguments;
+							int length = castArguments == null ? 0 : castArguments.length;
+							if (paramMatch.arguments == null || length > paramMatch.arguments.length) {
+								expression.bits |= ASTNode.UnsafeCast;
+							} else if ((paramCastType.tagBits & (TagBits.HasDirectWildcard|TagBits.HasTypeVariable)) != 0) {
+								// verify alternate cast type, substituting different type arguments
+								nextAlternateArgument: for (int i = 0; i < length; i++) {
+									switch (castArguments[i].kind()) {
+										case Binding.WILDCARD_TYPE :
+										case Binding.TYPE_PARAMETER :
+											break; // check substituting with other
+										default:
+											continue nextAlternateArgument; // no alternative possible
+									}
+									TypeBinding[] alternateArguments;
+									// need to clone for each iteration to avoid env paramtype cache interference
+									System.arraycopy(paramCastType.arguments, 0, alternateArguments = new TypeBinding[length], 0, length);
+									alternateArguments[i] = scope.getJavaLangObject();
+									LookupEnvironment environment = scope.environment();
+									ParameterizedTypeBinding alternateCastType = environment.createParameterizedType((ReferenceBinding)castType.erasure(), alternateArguments, castType.enclosingType());
+									if (TypeBinding.equalsEquals(alternateCastType.findSuperTypeOriginatingFrom(expressionType), match)) {
+										expression.bits |= ASTNode.UnsafeCast;
+										break;
+									}
+								}
+							}
+							return true;
+						} else {
+							// [JLS 5.5] T >: S
+							if (!match.isEquivalentTo(castType)) {
+								expression.bits |= ASTNode.UnsafeCast;
+								return true;
+							}
+						}
+						break;
+					case Binding.RAW_TYPE :
+						expression.bits |= ASTNode.UnsafeCast; // upcast since castType is known to be bound paramType
+						return true;
+					default :
+						if (isNarrowing){
+							// match is not parameterized or raw, then any other subtype of match will erase  to |T|
+							expression.bits |= ASTNode.UnsafeCast;
+							return true;
+						}
+						break;
+				}
+			}
+			break;
+		case Binding.ARRAY_TYPE :
+			TypeBinding leafType = castType.leafComponentType();
+			if (isNarrowing && (!leafType.isReifiable() || leafType.isTypeVariable())) {
+				expression.bits |= ASTNode.UnsafeCast;
+				return true;
+			}
+			break;
+		case Binding.TYPE_PARAMETER :
+			expression.bits |= ASTNode.UnsafeCast;
+			return true;
+//		(disabled) https://bugs.eclipse.org/bugs/show_bug.cgi?id=240807
+//		case Binding.TYPE :
+//			if (isNarrowing && match == null && expressionType.isParameterizedType()) {
+//				this.bits |= ASTNode.UnsafeCast;
+//				return true;
+//			}
+//			break;
+	}
+	if (!isNarrowing && TypeBinding.equalsEquals(match, resolvedType.leafComponentType())) { // do not tag as unnecessary when recursing through upper bounds
+		expression.tagAsUnnecessaryCast(scope, castType);
+	}
+	return true;
+}
+
