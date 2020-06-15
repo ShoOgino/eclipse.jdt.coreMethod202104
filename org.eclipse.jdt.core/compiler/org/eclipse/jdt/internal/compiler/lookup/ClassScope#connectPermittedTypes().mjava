@@ -1,13 +1,50 @@
-	private boolean connectPermittedTypes() {
+	void connectPermittedTypes() {
 		SourceTypeBinding sourceType = this.referenceContext.binding;
 		sourceType.setPermittedTypes(Binding.NO_PERMITTEDTYPES);
-		if (this.referenceContext.permittedTypes == null) {
-			return true;
-		}
-		if (sourceType.id == TypeIds.T_JavaLangObject) // already handled the case of redefining java.lang.Object
-			return true;
+		if (sourceType.id == TypeIds.T_JavaLangObject || sourceType.isEnum()) // already handled
+			return;
 
-		boolean noProblems = true;
+		if (this.referenceContext.permittedTypes == null) {
+			// When both sealed and non-sealed are used, an error is reported further
+			// down the line. Let's ignore it here and move on.
+			if (sourceType.isSealed()) {
+				// First top level types
+				SourceTypeBinding[] topLevelTypes = compilationUnitScope().topLevelTypes;
+				List<ReferenceBinding> permitted = null;
+				if (topLevelTypes != null) {
+					for (SourceTypeBinding subtype : topLevelTypes) {
+						if (!TypeBinding.equalsEquals(subtype, sourceType)) {
+							if (subtype.findSuperTypeOriginatingFrom(sourceType) != null) {
+								if (permitted == null)
+									permitted = new ArrayList<>();
+								permitted.add(subtype);
+							}
+						}
+					}
+				}
+				// And nested types
+				if (sourceType.memberTypes != null) {
+					for (ReferenceBinding subtype : sourceType.memberTypes) {
+						if (!TypeBinding.equalsEquals(subtype, sourceType))
+							if (subtype.findSuperTypeOriginatingFrom(sourceType) != null) {
+								if (permitted == null)
+									permitted = new ArrayList<>();
+								permitted.add(subtype);
+							}
+					}
+				}
+				if (permitted == null || permitted.size() == 0) {
+					problemReporter().sealedSealedTypeMissingPermits(sourceType, this.referenceContext);
+				} else {
+					ReferenceBinding[] permittedTypeBindings = new ReferenceBinding[permitted.size()];
+					permitted.toArray(permittedTypeBindings);
+					sourceType.setPermittedTypes(permittedTypeBindings);
+					return;
+				}
+			}
+			sourceType.setPermittedTypes(Binding.NO_PERMITTEDTYPES);
+			return;
+		}
 		int length = this.referenceContext.permittedTypes.length;
 		ReferenceBinding[] permittedTypeBindings = new ReferenceBinding[length];
 		int count = 0;
@@ -15,8 +52,6 @@
 		    TypeReference permittedTypeRef = this.referenceContext.permittedTypes[i];
 			ReferenceBinding permittedType = findPermittedtype(permittedTypeRef);
 			if (permittedType == null) { // detected cycle
-				sourceType.tagBits |= TagBits.HierarchyHasProblems;
-				noProblems = false;
 				continue nextPermittedType;
 			}
 			// check for simple interface collisions
@@ -24,15 +59,8 @@
 			for (int j = 0; j < i; j++) {
 				if (TypeBinding.equalsEquals(permittedTypeBindings[j], permittedType)) {
 					problemReporter().sealedDuplicateTypeInPermits(sourceType, permittedTypeRef, permittedType);
-					sourceType.tagBits |= TagBits.HierarchyHasProblems;
-					noProblems = false;
 					continue nextPermittedType;
 				}
-			}
-			if ((permittedType.tagBits & TagBits.HierarchyHasProblems) != 0
-					|| !permittedTypeRef.resolvedType.isValidBinding()) {
-				sourceType.tagBits |= TagBits.HierarchyHasProblems; // propagate if missing supertype
-				noProblems &= permittedTypeRef.resolvedType.isValidBinding();
 			}
 			// only want to reach here when no errors are reported
 			permittedTypeBindings[count++] = permittedType;
@@ -42,7 +70,8 @@
 			if (count != length)
 				System.arraycopy(permittedTypeBindings, 0, permittedTypeBindings = new ReferenceBinding[count], 0, count);
 			sourceType.setPermittedTypes(permittedTypeBindings);
+		} else {
+			sourceType.setPermittedTypes(Binding.NO_PERMITTEDTYPES);
 		}
-		return noProblems;
 	}
 
