@@ -5,6 +5,7 @@ void cachePartsFrom(IBinaryType binaryType, boolean needFieldsAndMethods) {
 		// and still want to use binaries passed that point (e.g. type hierarchy resolver, see bug 63748).
 		this.typeVariables = Binding.NO_TYPE_VARIABLES;
 		this.superInterfaces = Binding.NO_SUPERINTERFACES;
+		this.permittedSubtypes = Binding.NO_PERMITTEDTYPES;
 
 		// must retrieve member types in case superclass/interfaces need them
 		this.memberTypes = Binding.NO_MEMBER_TYPES;
@@ -89,6 +90,19 @@ void cachePartsFrom(IBinaryType binaryType, boolean needFieldsAndMethods) {
 					this.tagBits |= TagBits.HasUnresolvedSuperinterfaces;
 				}
 			}
+
+			this.permittedSubtypes = Binding.NO_PERMITTEDTYPES;
+			char[][] permittedSubtypeNames = binaryType.getPermittedSubtypeNames();
+			if (permittedSubtypeNames != null) {
+				int size = permittedSubtypeNames.length;
+				if (size > 0) {
+					this.permittedSubtypes = new ReferenceBinding[size];
+					for (short i = 0; i < size; i++)
+						// attempt to find each superinterface if it exists in the cache (otherwise - resolve it when requested)
+						this.permittedSubtypes[i] = this.environment.getTypeFromConstantPoolName(permittedSubtypeNames[i], 0, -1, false, missingTypeNames, toplevelWalker.toSupertype(i, superclassName));
+					this.extendedTagBits |= ExtendedTagBits.HasUnresolvedPermittedSubtypes;
+				}
+			}
 		} else {
 			// attempt to find the superclass if it exists in the cache (otherwise - resolve it when requested)
 			this.superclass = (ReferenceBinding) this.environment.getTypeFromTypeSignature(wrapper, typeVars, this, missingTypeNames,
@@ -107,6 +121,20 @@ void cachePartsFrom(IBinaryType binaryType, boolean needFieldsAndMethods) {
 				types.toArray(this.superInterfaces);
 				this.tagBits |= TagBits.HasUnresolvedSuperinterfaces;
 			}
+
+			this.permittedSubtypes = Binding.NO_PERMITTEDTYPES;
+			if (!wrapper.atEnd()) {
+				// attempt to find each permitted type if it exists in the cache (otherwise - resolve it when requested)
+				java.util.ArrayList types = new java.util.ArrayList(2);
+				short rank = 0;
+				do {
+					types.add(this.environment.getTypeFromTypeSignature(wrapper, typeVars, this, missingTypeNames, toplevelWalker.toSupertype(rank++, wrapper.peekFullType())));
+				} while (!wrapper.atEnd());
+				this.permittedSubtypes = new ReferenceBinding[types.size()];
+				types.toArray(this.permittedSubtypes);
+				this.extendedTagBits |= ExtendedTagBits.HasUnresolvedPermittedSubtypes;
+			}
+
 		}
 		boolean canUseNullTypeAnnotations = this.environment.globalOptions.isAnnotationBasedNullAnalysisEnabled && this.environment.globalOptions.sourceLevel >= ClassFileConstants.JDK1_8;
 		if (canUseNullTypeAnnotations && this.externalAnnotationStatus.isPotentiallyUnannotatedLib()) {
@@ -115,6 +143,12 @@ void cachePartsFrom(IBinaryType binaryType, boolean needFieldsAndMethods) {
 			} else {
 				for (TypeBinding ifc : this.superInterfaces) {
 					if (ifc.hasNullTypeAnnotations()) {
+						this.externalAnnotationStatus = ExternalAnnotationStatus.TYPE_IS_ANNOTATED;
+						break;
+					}
+				}
+				for (TypeBinding permsub : this.permittedSubtypes) {
+					if (permsub.hasNullTypeAnnotations()) {
 						this.externalAnnotationStatus = ExternalAnnotationStatus.TYPE_IS_ANNOTATED;
 						break;
 					}
