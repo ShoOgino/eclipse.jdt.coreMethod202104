@@ -23,7 +23,9 @@
 				try {
 					if (fieldDeclaration.isARecordComponent) {
 						long rcMask = TagBits.AnnotationForField | TagBits.AnnotationForTypeUse;
-						fieldDeclaration.annotations = getAnnotationsFromAssociatedRecordComponent(fieldBinding.declaringClass, fieldBinding.name, rcMask);
+						RecordComponent comp = getRecordComponent(fieldBinding.declaringClass, fieldBinding.name);
+						assert comp != null;
+						fieldDeclaration.annotations = ASTNode.getRelevantAnnotations(comp.annotations, rcMask, null);
 					}
 					Annotation[] annotations = fieldDeclaration.annotations;
 					if (annotations != null) {
@@ -31,35 +33,19 @@
 					}
 
 					if ((this.produceAttributes & ClassFileConstants.ATTR_TYPE_ANNOTATION) != 0) {
-						List allTypeAnnotationContexts = new ArrayList();
+						List<AnnotationContext> allTypeAnnotationContexts = new ArrayList<>();
 						if (annotations != null && (fieldDeclaration.bits & ASTNode.HasTypeAnnotations) != 0) {
 							fieldDeclaration.getAllAnnotationContexts(AnnotationTargetTypeConstants.FIELD, allTypeAnnotationContexts);
 						}
-						int invisibleTypeAnnotationsCounter = 0;
-						int visibleTypeAnnotationsCounter = 0;
 						TypeReference fieldType = fieldDeclaration.type;
 						if (fieldType != null && ((fieldType.bits & ASTNode.HasTypeAnnotations) != 0)) {
 							fieldType.getAllAnnotationContexts(AnnotationTargetTypeConstants.FIELD, allTypeAnnotationContexts);
 						}
 						int size = allTypeAnnotationContexts.size();
-						if (size != 0) {
-							AnnotationContext[] allTypeAnnotationContextsArray = new AnnotationContext[size];
-							allTypeAnnotationContexts.toArray(allTypeAnnotationContextsArray);
-							for (int i = 0, max = allTypeAnnotationContextsArray.length; i < max; i++) {
-								AnnotationContext annotationContext = allTypeAnnotationContextsArray[i];
-								if ((annotationContext.visibility & AnnotationContext.INVISIBLE) != 0) {
-									invisibleTypeAnnotationsCounter++;
-									allTypeAnnotationContexts.add(annotationContext);
-								} else {
-									visibleTypeAnnotationsCounter++;
-									allTypeAnnotationContexts.add(annotationContext);
-								}
-							}
-							attributesNumber += generateRuntimeTypeAnnotations(
-									allTypeAnnotationContextsArray,
-									visibleTypeAnnotationsCounter,
-									invisibleTypeAnnotationsCounter);
-						}
+						attributesNumber = completeRuntimeTypeAnnotations(attributesNumber,
+								null,
+								(node) -> size > 0,
+								() -> allTypeAnnotationContexts);
 					}
 				} finally {
 					if (fieldDeclaration.isARecordComponent) {
