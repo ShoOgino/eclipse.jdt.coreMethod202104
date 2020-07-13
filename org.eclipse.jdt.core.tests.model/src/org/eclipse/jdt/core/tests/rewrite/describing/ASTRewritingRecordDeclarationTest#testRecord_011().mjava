@@ -1,0 +1,51 @@
+	public void testRecord_011() throws Exception {
+		if (checkAPILevel()) {
+			return;
+		}
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("/** javadoc comment */\n");
+		buf.append("public record C() {\n");
+		buf.append("\n");
+		buf.append("}\n");
+		ICompilationUnit cu= pack1.createCompilationUnit("C.java", buf.toString(), false, null);
+
+		CompilationUnit astRoot= createAST(cu);
+		ASTRewrite rewrite= ASTRewrite.create(astRoot.getAST());
+
+		AST ast= astRoot.getAST();
+
+		assertTrue("Parse errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		AbstractTypeDeclaration type= findAbstractTypeDeclaration(astRoot, "C");
+		assertTrue("Not a record", type instanceof RecordDeclaration);
+		{ // replace java doc
+			Javadoc javadoc= ast.newJavadoc();
+			TextElement textElem= ast.newTextElement();
+			textElem.setText("Hello");
+			TagElement tagElement= ast.newTagElement();
+			tagElement.fragments().add(textElem);
+			javadoc.tags().add(tagElement);
+			rewrite.replace(type.getJavadoc(), javadoc, null);
+		}
+
+		{ // add modifier
+			ListRewrite listRewrite= rewrite.getListRewrite(type, RecordDeclaration.MODIFIERS2_PROPERTY);
+			listRewrite.insertLast(ast.newModifier(Modifier.ModifierKeyword.FINAL_KEYWORD), null);
+		}
+
+		String preview= evaluateRewrite(cu, rewrite);
+
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("/**\n");
+		buf.append(" * Hello\n");
+		buf.append(" */\n");
+		buf.append("public final record C() {\n");
+		buf.append("\n");
+		buf.append("}\n");
+
+		assertEqualString(preview, buf.toString());
+
+	}
+

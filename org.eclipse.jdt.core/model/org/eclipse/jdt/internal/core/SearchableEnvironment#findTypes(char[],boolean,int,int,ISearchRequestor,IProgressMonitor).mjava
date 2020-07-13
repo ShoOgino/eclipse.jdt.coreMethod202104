@@ -1,0 +1,178 @@
+	/**
+	 * Must be used only by CompletionEngine.
+	 * The progress monitor is used to be able to cancel completion operations
+	 *
+	 * Find the top-level types that are defined
+	 * in the current environment and whose name starts with the
+	 * given prefix. The prefix is a qualified name separated by periods
+	 * or a simple name (ex. java.util.V or V).
+	 *
+	 * The types found are passed to one of the following methods (if additional
+	 * information is known about the types):
+	 *    ISearchRequestor.acceptType(char[][] packageName, char[] typeName)
+	 *    ISearchRequestor.acceptClass(char[][] packageName, char[] typeName, int modifiers)
+	 *    ISearchRequestor.acceptInterface(char[][] packageName, char[] typeName, int modifiers)
+	 *
+	 * This method can not be used to find member types... member
+	 * types are found relative to their enclosing type.
+	 */
+	public void findTypes(char[] prefix, final boolean findMembers, int matchRule, int searchFor, final ISearchRequestor storage, IProgressMonitor monitor) {
+		boolean camelCaseMatch = (matchRule & SearchPattern.R_CAMELCASE_MATCH) != 0;
+		/*
+			if (true){
+				findTypes(new String(prefix), storage, NameLookup.ACCEPT_CLASSES | NameLookup.ACCEPT_INTERFACES);
+				return;
+			}
+		*/
+		try {
+			final String excludePath;
+			if (this.unitToSkip != null) {
+				if (!(this.unitToSkip instanceof IJavaElement)) {
+					// revert to model investigation
+					findTypes(
+						new String(prefix),
+						storage,
+						convertSearchFilterToModelFilter(searchFor));
+					return;
+				}
+				excludePath = ((IJavaElement) this.unitToSkip).getPath().toString();
+			} else {
+				excludePath = null;
+			}
+			int lastDotIndex = CharOperation.lastIndexOf('.', prefix);
+			char[] qualification, simpleName;
+			if (lastDotIndex < 0) {
+				qualification = null;
+				if (camelCaseMatch) {
+					simpleName = prefix;
+				} else {
+					simpleName = CharOperation.toLowerCase(prefix);
+				}
+			} else {
+				qualification = CharOperation.subarray(prefix, 0, lastDotIndex);
+				if (camelCaseMatch) {
+					simpleName = CharOperation.subarray(prefix, lastDotIndex + 1, prefix.length);
+				} else {
+					simpleName =
+						CharOperation.toLowerCase(
+							CharOperation.subarray(prefix, lastDotIndex + 1, prefix.length));
+				}
+			}
+
+			IProgressMonitor progressMonitor = new IProgressMonitor() {
+				boolean isCanceled = false;
+				@Override
+				public void beginTask(String name, int totalWork) {
+					// implements interface method
+				}
+				@Override
+				public void done() {
+					// implements interface method
+				}
+				@Override
+				public void internalWorked(double work) {
+					// implements interface method
+				}
+				@Override
+				public boolean isCanceled() {
+					return this.isCanceled;
+				}
+				@Override
+				public void setCanceled(boolean value) {
+					this.isCanceled = value;
+				}
+				@Override
+				public void setTaskName(String name) {
+					// implements interface method
+				}
+				@Override
+				public void subTask(String name) {
+					// implements interface method
+				}
+				@Override
+				public void worked(int work) {
+					// implements interface method
+				}
+			};
+			IRestrictedAccessTypeRequestor typeRequestor = new IRestrictedAccessTypeRequestor() {
+				@Override
+				public void acceptType(int modifiers, char[] packageName, char[] simpleTypeName, char[][] enclosingTypeNames, String path, AccessRestriction access) {
+					if (excludePath != null && excludePath.equals(path))
+						return;
+					if (!findMembers && enclosingTypeNames != null && enclosingTypeNames.length > 0)
+						return; // accept only top level types
+					storage.acceptType(packageName, simpleTypeName, enclosingTypeNames, modifiers, access);
+				}
+			};
+
+			if (monitor != null) {
+				IndexManager indexManager = JavaModelManager.getIndexManager();
+				if (indexManager.awaitingJobsCount() == 0) {
+					// indexes were already there, so perform an immediate search to avoid any index rebuilt
+					new BasicSearchEngine(this.workingCopies).searchAllTypeNames(
+						qualification,
+						SearchPattern.R_EXACT_MATCH,
+						simpleName,
+						matchRule, // not case sensitive
+						searchFor,
+						getSearchScope(),
+						typeRequestor,
+						FORCE_IMMEDIATE_SEARCH,
+						progressMonitor);
+				} else {
+					// indexes were not ready, give the indexing a chance to finish small jobs by sleeping 100ms...
+					try {
+						Thread.sleep(100);
+					} catch (InterruptedException e) {
+						// Do nothing
+					}
+					if (monitor.isCanceled()) {
+						throw new OperationCanceledException();
+					}
+					if (indexManager.awaitingJobsCount() == 0) {
+						// indexes are now ready, so perform an immediate search to avoid any index rebuilt
+						new BasicSearchEngine(this.workingCopies).searchAllTypeNames(
+							qualification,
+							SearchPattern.R_EXACT_MATCH,
+							simpleName,
+							matchRule,
+							searchFor,
+							getSearchScope(),
+							typeRequestor,
+							FORCE_IMMEDIATE_SEARCH,
+							progressMonitor);
+					} else {
+						// Indexes are still not ready, so look for types in the model instead of a search request
+						findTypes(
+							new String(prefix),
+							storage,
+							convertSearchFilterToModelFilter(searchFor));
+					}
+				}
+			} else {
+				try {
+					new BasicSearchEngine(this.workingCopies).searchAllTypeNames(
+						qualification,
+						SearchPattern.R_EXACT_MATCH,
+						simpleName,
+						matchRule, // not case sensitive
+						searchFor,
+						getSearchScope(),
+						typeRequestor,
+						CANCEL_IF_NOT_READY_TO_SEARCH,
+						progressMonitor);
+				} catch (OperationCanceledException e) {
+					findTypes(
+						new String(prefix),
+						storage,
+						convertSearchFilterToModelFilter(searchFor));
+				}
+			}
+		} catch (JavaModelException e) {
+			findTypes(
+				new String(prefix),
+				storage,
+				convertSearchFilterToModelFilter(searchFor));
+		}
+	}
+
