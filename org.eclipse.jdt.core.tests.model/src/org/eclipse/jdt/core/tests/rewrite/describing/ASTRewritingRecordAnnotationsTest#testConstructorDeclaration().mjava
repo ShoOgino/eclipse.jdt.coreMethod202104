@@ -1,0 +1,61 @@
+	public void testConstructorDeclaration() throws Exception {
+		if (checkAPILevel()) {
+			return;
+		}
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("import java.lang.annotation.ElementType;\n");
+		buf.append("\n");
+		buf.append("public record X() {\n");
+		buf.append("	@Annot X {\n");
+		buf.append("	}\n");
+		buf.append("	@Annot @Annot1 X (int x) {\n");
+		buf.append("	}\n");
+		buf.append("}\n");
+		buf.append("\n");
+		buf.append("@java.lang.annotation.Target (ElementType.TYPE_USE)\n");
+		buf.append("@interface Annot {}\n");
+		buf.append("\n");
+		buf.append("@java.lang.annotation.Target (ElementType.TYPE_USE)\n");
+		buf.append("@interface Annot1 {}\n");
+
+		ICompilationUnit cu= pack1.createCompilationUnit("X.java", buf.toString(), false, null);
+		CompilationUnit astRoot= createAST(cu);
+		ASTRewrite rewrite= ASTRewrite.create(astRoot.getAST());
+		AST ast= astRoot.getAST();
+		RecordDeclaration type= (RecordDeclaration)findAbstractTypeDeclaration(astRoot, "X");
+		{//Add the use of annotation
+			MethodDeclaration methodDeclaration= (MethodDeclaration) type.bodyDeclarations().get(0);
+			MarkerAnnotation markerAnnotation= ast.newMarkerAnnotation();
+			markerAnnotation.setTypeName(ast.newSimpleName("Annot2"));
+			rewrite.getListRewrite(methodDeclaration, MethodDeclaration.MODIFIERS2_PROPERTY).insertLast(markerAnnotation, null);
+		}
+		{
+			//Remove the use of annotation
+			MethodDeclaration methodDeclaration= (MethodDeclaration) type.bodyDeclarations().get(1);
+			rewrite.remove((MarkerAnnotation) methodDeclaration.modifiers().get(1), null);
+			//Replace the use of annotation
+			MarkerAnnotation markerAnnotation= ast.newMarkerAnnotation();
+			markerAnnotation.setTypeName(ast.newSimpleName("Annot2"));
+			rewrite.replace((MarkerAnnotation) methodDeclaration.modifiers().get(0), markerAnnotation, null);
+		}
+		String preview= evaluateRewrite(cu, rewrite);
+		buf = new StringBuffer();
+		buf.append("import java.lang.annotation.ElementType;\n");
+		buf.append("\n");
+		buf.append("public record X() {\n");
+		buf.append("	@Annot\n");
+		buf.append("    @Annot2 X {\n");
+		buf.append("	}\n");
+		buf.append("	@Annot2 X (int x) {\n");
+		buf.append("	}\n");
+		buf.append("}\n");
+		buf.append("\n");
+		buf.append("@java.lang.annotation.Target (ElementType.TYPE_USE)\n");
+		buf.append("@interface Annot {}\n");
+		buf.append("\n");
+		buf.append("@java.lang.annotation.Target (ElementType.TYPE_USE)\n");
+		buf.append("@interface Annot1 {}\n");
+		assertEqualString(preview, buf.toString());
+	}
+

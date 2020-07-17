@@ -1,0 +1,69 @@
+	public void testTypeArgumentsParameterizedClassesAnnotations() throws Exception {
+		if (checkAPILevel()) {
+			return;
+		}
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+
+		buf.append("import java.lang.annotation.ElementType;\n");
+		buf.append("\n");
+		buf.append("public record X() {\n");
+		buf.append("	public record Helper <T1, T2>() {\n");
+		buf.append("	}\n");
+		buf.append("	public void foo() {\n");
+		buf.append("		Helper<@Annot String, @Annot @Annot1 String> x;\n");
+		buf.append("	}\n");
+		buf.append("}\n");
+		buf.append("\n");
+		buf.append("@java.lang.annotation.Target (ElementType.TYPE_USE) \n");
+		buf.append("@interface Annot {}\n");
+		buf.append("\n");
+		buf.append("@java.lang.annotation.Target (ElementType.TYPE_USE) \n");
+		buf.append("@interface Annot1 {}\n");
+
+		ICompilationUnit cu= pack1.createCompilationUnit("X.java", buf.toString(), false, null);
+		CompilationUnit astRoot= createAST(cu);
+		ASTRewrite rewrite= ASTRewrite.create(astRoot.getAST());
+		AST ast= astRoot.getAST();
+		RecordDeclaration type= (RecordDeclaration)findAbstractTypeDeclaration(astRoot, "X");
+		MethodDeclaration methodDeclaration= findMethodDeclaration(type, "foo");
+		List statements= methodDeclaration.getBody().statements();
+		VariableDeclarationStatement  variableDeclarationStatement= (VariableDeclarationStatement) statements.get(0);
+		ParameterizedType parameterizedType= (ParameterizedType) variableDeclarationStatement.getType();
+		{// Add an use of annotation
+			SimpleType simpleType= (SimpleType) parameterizedType.typeArguments().get(0);
+			MarkerAnnotation markerAnnotation= ast.newMarkerAnnotation();
+			markerAnnotation.setTypeName(ast.newSimpleName("Annot2"));
+			rewrite.getListRewrite(simpleType, SimpleType.ANNOTATIONS_PROPERTY).insertLast(markerAnnotation, null);
+			//Replace an use of an annotation
+			markerAnnotation= ast.newMarkerAnnotation();
+			markerAnnotation.setTypeName(ast.newSimpleName("Annot3"));
+			rewrite.replace((ASTNode) simpleType.annotations().get(0), markerAnnotation, null);
+		}
+		{
+			SimpleType simpleType= (SimpleType) parameterizedType.typeArguments().get(1);
+			//Remove an use of an annotation
+			rewrite.remove((ASTNode) simpleType.annotations().get(1), null);
+			//Empty annotations list
+			rewrite.remove((ASTNode) simpleType.annotations().get(0), null);
+		}
+		String preview= evaluateRewrite(cu, rewrite);
+		buf = new StringBuffer();
+		buf.append("import java.lang.annotation.ElementType;\n");
+		buf.append("\n");
+		buf.append("public record X() {\n");
+		buf.append("	public record Helper <T1, T2>() {\n");
+		buf.append("	}\n");
+		buf.append("	public void foo() {\n");
+		buf.append("		Helper<@Annot3 @Annot2 String, String> x;\n");
+		buf.append("	}\n");
+		buf.append("}\n");
+		buf.append("\n");
+		buf.append("@java.lang.annotation.Target (ElementType.TYPE_USE) \n");
+		buf.append("@interface Annot {}\n");
+		buf.append("\n");
+		buf.append("@java.lang.annotation.Target (ElementType.TYPE_USE) \n");
+		buf.append("@interface Annot1 {}\n");
+		assertEqualString(preview, buf.toString());
+	}
+

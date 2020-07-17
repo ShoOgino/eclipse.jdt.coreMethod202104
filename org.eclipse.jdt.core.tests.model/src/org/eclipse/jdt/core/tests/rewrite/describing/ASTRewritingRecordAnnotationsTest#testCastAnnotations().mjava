@@ -1,0 +1,68 @@
+	public void testCastAnnotations() throws Exception {
+		if (checkAPILevel()) {
+			return;
+		}
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("import java.lang.annotation.ElementType;\n");
+		buf.append("public record X() {\n");
+		buf.append("	static String myObject = \"Foo\";\n");
+		buf.append("	public void foo() {\n");
+		buf.append("		String myString = (@Annot String) myObject;\n");
+		buf.append("		String myString1 = (@Annot1 @Annot String) myObject;\n");
+		buf.append("	}\n");
+		buf.append("}\n");
+		buf.append("@java.lang.annotation.Target(value = {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot {}\n");
+		buf.append("@java.lang.annotation.Target(value = {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot1 {}\n");
+
+		ICompilationUnit cu= pack1.createCompilationUnit("X.java", buf.toString(), false, null);
+		CompilationUnit astRoot= createAST(cu);
+		ASTRewrite rewrite= ASTRewrite.create(astRoot.getAST());
+		AST ast= astRoot.getAST();
+		assertTrue("Parse errors", (astRoot.getFlags() & ASTNode.MALFORMED) == 0);
+		RecordDeclaration type= (RecordDeclaration)findAbstractTypeDeclaration(astRoot, "X");
+		MethodDeclaration methodDeclaration= findMethodDeclaration(type, "foo");
+		List statements= methodDeclaration.getBody().statements();
+		{//Add an use of annotation.
+			VariableDeclarationStatement  variableDeclarationStatement= (VariableDeclarationStatement) statements.get(0);
+			VariableDeclarationFragment variableDeclarationFragment= (VariableDeclarationFragment) variableDeclarationStatement.fragments().get(0);
+			CastExpression castExpression= (CastExpression) variableDeclarationFragment.getInitializer();
+			SimpleType simpleType= (SimpleType) castExpression.getType();
+			MarkerAnnotation markerAnnotation= ast.newMarkerAnnotation();
+			markerAnnotation.setTypeName(ast.newSimpleName("Annot2"));
+			rewrite.getListRewrite(simpleType, SimpleType.ANNOTATIONS_PROPERTY).insertLast(markerAnnotation, null);
+		}
+		{
+			VariableDeclarationStatement  variableDeclarationStatement= (VariableDeclarationStatement) statements.get(1);
+			VariableDeclarationFragment variableDeclarationFragment= (VariableDeclarationFragment) variableDeclarationStatement.fragments().get(0);
+			CastExpression castExpression= (CastExpression) variableDeclarationFragment.getInitializer();
+			SimpleType simpleType= (SimpleType) castExpression.getType();
+			List annotations = simpleType.annotations();
+			//Remove the use of an Annotation
+			rewrite.remove((ASTNode)annotations.get(1), null);
+			//Replace the use of an Annotation
+			MarkerAnnotation markerAnnotation= ast.newMarkerAnnotation();
+			markerAnnotation.setTypeName(ast.newSimpleName("Annot2"));
+			rewrite.replace((ASTNode)annotations.get(0), markerAnnotation, null);
+		}
+		String preview= evaluateRewrite(cu, rewrite);
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("import java.lang.annotation.ElementType;\n");
+		buf.append("public record X() {\n");
+		buf.append("	static String myObject = \"Foo\";\n");
+		buf.append("	public void foo() {\n");
+		buf.append("		String myString = (@Annot @Annot2 String) myObject;\n");
+		buf.append("		String myString1 = (@Annot2 String) myObject;\n");
+		buf.append("	}\n");
+		buf.append("}\n");
+		buf.append("@java.lang.annotation.Target(value = {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot {}\n");
+		buf.append("@java.lang.annotation.Target(value = {ElementType.TYPE_USE})\n");
+		buf.append("@interface Annot1 {}\n");
+		assertEqualString(preview, buf.toString());
+	}
+

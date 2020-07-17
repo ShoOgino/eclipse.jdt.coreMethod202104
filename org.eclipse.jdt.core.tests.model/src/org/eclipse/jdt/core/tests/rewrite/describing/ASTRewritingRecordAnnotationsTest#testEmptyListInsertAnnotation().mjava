@@ -1,0 +1,42 @@
+	public void testEmptyListInsertAnnotation() throws Exception {
+		if (checkAPILevel()) {
+			return;
+		}
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public record X() {\n");
+		buf.append("	static String myObject = \"Foo\";\n");
+		buf.append("	public void foo() {\n");
+		buf.append("		String myString = (String) myObject;\n");
+		buf.append("	}\n");
+		buf.append("}\n");
+
+		ICompilationUnit cu= pack1.createCompilationUnit("X.java", buf.toString(), false, null);
+		CompilationUnit astRoot= createAST(cu);
+		ASTRewrite rewrite= ASTRewrite.create(astRoot.getAST());
+		AST ast= astRoot.getAST();
+		RecordDeclaration type= (RecordDeclaration)findAbstractTypeDeclaration(astRoot, "X");
+		MethodDeclaration methodDeclaration= findMethodDeclaration(type, "foo");
+		List statements= methodDeclaration.getBody().statements();
+		{//Add an use of annotation.
+			VariableDeclarationStatement  variableDeclarationStatement= (VariableDeclarationStatement) statements.get(0);
+			VariableDeclarationFragment variableDeclarationFragment= (VariableDeclarationFragment) variableDeclarationStatement.fragments().get(0);
+			CastExpression castExpression= (CastExpression) variableDeclarationFragment.getInitializer();
+			SimpleType simpleType= (SimpleType) castExpression.getType();
+			MarkerAnnotation markerAnnotation= ast.newMarkerAnnotation();
+			markerAnnotation.setTypeName(ast.newSimpleName("Annot"));
+			rewrite.getListRewrite(simpleType, SimpleType.ANNOTATIONS_PROPERTY).insertLast(markerAnnotation, null);
+		}
+		String preview= evaluateRewrite(cu, rewrite);
+		buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("public record X() {\n");
+		buf.append("	static String myObject = \"Foo\";\n");
+		buf.append("	public void foo() {\n");
+		buf.append("		String myString = (@Annot String) myObject;\n");
+		buf.append("	}\n");
+		buf.append("}\n");
+		assertEqualString(preview, buf.toString());
+	}
+
