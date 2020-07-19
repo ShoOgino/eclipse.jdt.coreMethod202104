@@ -1,25 +1,31 @@
-/**
- * Branch code generation
- *
- *   generate the finallyInvocationSequence.
- */
-@Override
-public void generateCode(BlockScope currentScope, CodeStream codeStream) {
-	if ((this.bits & ASTNode.IsReachable) == 0) {
-		return;
-	}
-	int pc = codeStream.position;
+protected void generateExpressionResultCodeExpanded(BlockScope currentScope, CodeStream codeStream) {
+	SwitchExpression se = this.switchExpression;
+	addSecretYieldResultValue(this.scope);
+	assert this.secretYieldResultValue != null;
+	codeStream.record(this.secretYieldResultValue);
+	SingleNameReference lhs = new SingleNameReference(this.secretYieldResultValue.name, 0);
+	lhs.binding = this.secretYieldResultValue;
+	lhs.bits &= ~ASTNode.RestrictiveFlagMASK; // clear bits
+	lhs.bits |= Binding.LOCAL;
+	lhs.bits |= ASTNode.IsSecretYieldValueUsage;
+	((LocalVariableBinding) lhs.binding).markReferenced(); // TODO : Can be skipped?
+	Assignment assignment = new Assignment(lhs, this.expression, 0);
+	assignment.generateCode(this.scope, codeStream);
 
+	int pc = codeStream.position;
 	// generation of code responsible for invoking the finally
 	// blocks in sequence
 	if (this.subroutines != null){
 		for (int i = 0, max = this.subroutines.length; i < max; i++){
 			SubRoutineStatement sub = this.subroutines[i];
-			SwitchExpression se = sub.getSwitchExpression();
+			sub.exitAnyExceptionHandler();
+			sub.exitDeclaredExceptionHandlers(codeStream);
+			SwitchExpression se1 = sub.getSwitchExpression();
 			setSubroutineSwitchExpression(sub);
 			boolean didEscape = sub.generateSubRoutineInvocation(currentScope, codeStream, this.targetLabel, this.initStateIndex, null);
-			sub.setSwitchExpression(se);
+			sub.setSwitchExpression(se1);
 			if (didEscape) {
+				codeStream.removeVariable(this.secretYieldResultValue);
 					codeStream.recordPositionsFrom(pc, this.sourceStart);
 					SubRoutineStatement.reenterAllExceptionHandlers(this.subroutines, i, codeStream);
 					if (this.initStateIndex != -1) {
@@ -31,7 +37,10 @@ public void generateCode(BlockScope currentScope, CodeStream codeStream) {
 			}
 		}
 	}
-//	checkAndLoadSyntheticVars(codeStream);
+	se.loadStoredTypesAndKeep(codeStream);
+	codeStream.load(this.secretYieldResultValue);
+	codeStream.removeVariable(this.secretYieldResultValue);
+
 	codeStream.goto_(this.targetLabel);
 	codeStream.recordPositionsFrom(pc, this.sourceStart);
 	SubRoutineStatement.reenterAllExceptionHandlers(this.subroutines, -1, codeStream);
