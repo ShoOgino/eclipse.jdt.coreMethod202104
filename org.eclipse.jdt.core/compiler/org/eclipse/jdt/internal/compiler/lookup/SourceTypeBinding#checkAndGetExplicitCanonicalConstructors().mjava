@@ -1,28 +1,34 @@
-private MethodBinding[] checkAndGetExplicitCanonicalConstructors() {
-	List<MethodBinding> ec = new ArrayList<>();
-	if (!this.isRecordDeclaration)
-		return ec.toArray(new MethodBinding[0]);
-
+private void checkAndGetExplicitCanonicalConstructors() {
 	RecordComponentBinding[] recComps = this.components;
 	int nRecordComponents = recComps.length;
-	if (this.methods != null && this.scope.compilerOptions().sourceLevel >= ClassFileConstants.JDK14) {
-		for (MethodBinding method : this.methods) {
-			if (!method.isConstructor() || (method.tagBits & TagBits.isImplicit) != 0
-					|| method.parameters.length != nRecordComponents)
-				continue;
-			boolean isEC = true;
-			for (int j = 0; j < nRecordComponents; ++j) {
-				if (TypeBinding.notEquals(method.parameters[j], recComps[j].type)) {
-					isEC = false;
-					break;
-				}
-			}
-			if (isEC) {
-				ec.add(method);
-				checkRecordCanonicalConstructor(method);
+	MethodBinding implicitCanConstr = null;
+	MethodBinding explictCanConstr = null;
+	for (MethodBinding method : this.methods) {
+		if (!method.isConstructor())
+			continue;
+		if ((method.tagBits & TagBits.isImplicit) != 0) {
+			implicitCanConstr = method;
+			continue;
+		}
+		if (method.parameters.length != nRecordComponents)
+			continue;
+		boolean isEC = true;
+		for (int j = 0; j < nRecordComponents; ++j) {
+			if (TypeBinding.notEquals(method.parameters[j], recComps[j].type)) {
+				isEC = false;
+				break;
 			}
 		}
+		if (isEC) {
+			checkRecordCanonicalConstructor(method);
+			// Just exit after sighting the first explicit canonical constructor,
+			// because there can only be one.
+			explictCanConstr = method;
+			break;
+		}
 	}
-	return ec.toArray(new MethodBinding[0]);
+	if (explictCanConstr == null && implicitCanConstr != null) {
+		checkAndFlagHeapPollution(implicitCanConstr, implicitCanConstr.sourceMethod());
+	}
 }
 
