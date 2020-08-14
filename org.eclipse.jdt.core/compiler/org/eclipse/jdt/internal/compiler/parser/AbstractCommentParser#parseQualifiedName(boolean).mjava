@@ -12,8 +12,20 @@
 		// Scan tokens
 		int primitiveToken = -1;
 		int parserKind = this.kind & PARSER_KIND;
+		int prevToken = TerminalTokens.TokenNameNotAToken;
+		int curToken = TerminalTokens.TokenNameNotAToken;
+		int moduleRefTokenCount = 0;
+		boolean lookForModule = false;
+		boolean parsingJava15Plus = this.scanner != null ? this.scanner.sourceLevel >= ClassFileConstants.JDK15 : false;
 		nextToken : for (int iToken = 0; ; iToken++) {
+			if (iToken == 0) {
+				lookForModule = false;
+				prevToken = TerminalTokens.TokenNameNotAToken;
+			} else {
+				prevToken = curToken;
+			}
 			int token = readTokenSafely();
+			curToken= token;
 			switch (token) {
 				case TerminalTokens.TokenNameIdentifier :
 					if (((iToken & 1) != 0)) { // identifiers must be odd tokens
@@ -21,6 +33,9 @@
 					}
 					pushIdentifier(iToken == 0, false);
 					consumeToken();
+					if (parsingJava15Plus && getChar() == '/' ) {
+						lookForModule = true;
+					}
 					break;
 
 				case TerminalTokens.TokenNameRestrictedIdentifierYield:
@@ -92,6 +107,18 @@
 					}
 					// Fall through default case to verify that we do not leave on a dot
 					//$FALL-THROUGH$
+				case TerminalTokens.TokenNameDIVIDE:
+					if (parsingJava15Plus && lookForModule) {
+						if (((iToken & 1) == 0) && (moduleRefTokenCount > 0)) { // '/' must be even token
+							throw new InvalidInputException();
+						}
+						moduleRefTokenCount = (iToken+1) / 2;
+						consumeToken();
+						lookForModule = false;
+						break;
+					} // else fall through
+					// Note: Add other cases before this case.
+					//$FALL-THROUGH$
 				default :
 					if (iToken == 0) {
 						if (this.identifierPtr>=0) {
@@ -99,11 +126,14 @@
 						}
 						return null;
 					}
-					if ((iToken & 1) == 0) { // cannot leave on a dot
+					if ((iToken & 1) == 0 && !isTokenModule(prevToken, moduleRefTokenCount)) { // cannot leave on a dot
 						switch (parserKind) {
 							case COMPLETION_PARSER:
 								if (this.identifierPtr>=0) {
 									this.lastIdentifierEndPosition = (int) this.identifierPositionStack[this.identifierPtr];
+								}
+								if (moduleRefTokenCount > 0) {
+									return syntaxRecoverModuleQualifiedName(primitiveToken, moduleRefTokenCount);
 								}
 								return syntaxRecoverQualifiedName(primitiveToken);
 							case DOM_PARSER:
@@ -129,6 +159,9 @@
 		}
 		if (this.identifierPtr>=0) {
 			this.lastIdentifierEndPosition = (int) this.identifierPositionStack[this.identifierPtr];
+		}
+		if (moduleRefTokenCount > 0) {
+			return createModuleTypeReference(primitiveToken, moduleRefTokenCount);
 		}
 		return createTypeReference(primitiveToken);
 	}
