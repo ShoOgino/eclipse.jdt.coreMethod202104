@@ -1,0 +1,57 @@
+	private int addBootStrapRecordEntry(int localContentsOffset, TypeDeclaration typeDecl, Map<String, Integer> fPtr) {
+		TypeBinding type = typeDecl.binding;
+		assert type.isRecord(); // sanity check
+		final int contentsEntries = 10;
+		int indexForObjectMethodBootStrap = fPtr.get(ClassFile.BOOTSTRAP_STRING);
+		if (contentsEntries + localContentsOffset >= this.contents.length) {
+			resizeContents(contentsEntries);
+		}
+		if (indexForObjectMethodBootStrap == 0) {
+			ReferenceBinding javaLangRuntimeObjectMethods = this.referenceBinding.scope.getJavaLangRuntimeObjectMethods();
+			indexForObjectMethodBootStrap = this.constantPool.literalIndexForMethodHandle(ClassFileConstants.MethodHandleRefKindInvokeStatic, javaLangRuntimeObjectMethods,
+					ConstantPool.BOOTSTRAP, ConstantPool.JAVA_LANG_RUNTIME_OBJECTMETHOD_BOOTSTRAP_SIGNATURE, false);
+			fPtr.put(ClassFile.BOOTSTRAP_STRING, indexForObjectMethodBootStrap);
+		}
+		this.contents[localContentsOffset++] = (byte) (indexForObjectMethodBootStrap >> 8);
+		this.contents[localContentsOffset++] = (byte) indexForObjectMethodBootStrap;
+
+		// u2 num_bootstrap_arguments
+		int numArgsLocation = localContentsOffset;
+		localContentsOffset += 2;
+
+		char[] recordName = type.constantPoolName();
+		int recordIndex = this.constantPool.literalIndexForType(recordName);
+		this.contents[localContentsOffset++] = (byte) (recordIndex >> 8);
+		this.contents[localContentsOffset++] = (byte) recordIndex;
+
+		assert type instanceof SourceTypeBinding;
+		SourceTypeBinding sourceType = (SourceTypeBinding) type;
+		FieldBinding[] recordComponents = sourceType.getImplicitComponentFields();
+
+		int numArgs = 2 + recordComponents.length;
+		this.contents[numArgsLocation++] = (byte) (numArgs >> 8);
+		this.contents[numArgsLocation] = (byte) numArgs;
+
+		String names =
+			Arrays.stream(recordComponents)
+			.map(f -> new String(f.name))
+			.reduce((s1, s2) -> { return s1 + ";" + s2;}) //$NON-NLS-1$
+			.orElse(Util.EMPTY_STRING);
+		int namesIndex = this.constantPool.literalIndex(names);
+		this.contents[localContentsOffset++] = (byte) (namesIndex >> 8);
+		this.contents[localContentsOffset++] = (byte) namesIndex;
+
+		if (recordComponents.length * 2 + localContentsOffset >= this.contents.length) {
+			resizeContents(recordComponents.length * 2);
+		}
+		for (FieldBinding field : recordComponents) {
+			int methodHandleIndex = this.constantPool.literalIndexForMethodHandleFieldRef(
+					ClassFileConstants.MethodHandleRefKindGetField,
+					recordName, field.name, field.type.signature());
+
+			this.contents[localContentsOffset++] = (byte) (methodHandleIndex >> 8);
+			this.contents[localContentsOffset++] = (byte) methodHandleIndex;
+		}
+		return localContentsOffset;
+	}
+

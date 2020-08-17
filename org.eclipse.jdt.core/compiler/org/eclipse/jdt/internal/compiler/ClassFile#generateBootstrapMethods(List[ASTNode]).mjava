@@ -1,4 +1,4 @@
-	private int generateBootstrapMethods(List functionalExpressionList, List<TypeBinding> recordBootstrapMethods2) {
+	private int generateBootstrapMethods(List<ASTNode> bootStrapMethodsList) {
 		/* See JVM spec 4.7.21
 		   The BootstrapMethods attribute has the following format:
 		   BootstrapMethods_attribute {
@@ -16,9 +16,7 @@
 		if (methodHandlesLookup == null) return 0; // skip bootstrap section, class path problem already reported, just avoid NPE.
 		recordInnerClasses(methodHandlesLookup); // Should be done, it's what javac does also
 
-		int nfunctionalExpressions = functionalExpressionList != null ? functionalExpressionList.size() : 0;
-		int nRecordBootStraps = recordBootstrapMethods2 != null ? recordBootstrapMethods2.size() : 0;
-		int numberOfBootstraps = nfunctionalExpressions + nRecordBootStraps;
+		int numberOfBootstraps = bootStrapMethodsList != null ? bootStrapMethodsList.size() : 0;
 		int localContentsOffset = this.contentsOffset;
 		// Generate the boot strap attribute - since we are only making lambdas and
 		// functional expressions, we know the size ahead of time - this less general
@@ -41,12 +39,15 @@
 		this.contents[localContentsOffset++] = (byte) (numberOfBootstraps >> 8);
 		this.contents[localContentsOffset++] = (byte) numberOfBootstraps;
 
-		if (nfunctionalExpressions > 0)
-			localContentsOffset = generateLambdaMetaFactoryBootStrapMethods(functionalExpressionList,
-					localContentsOffset, contentsEntries);
-		if (nRecordBootStraps > 0)
-			localContentsOffset = generateObjectMethodsBootStrapMethods(recordBootstrapMethods2, localContentsOffset,
-					contentsEntries);
+		Map<String, Integer> fPtr = createInitBootStrapMethodsMap();
+		for (int i = 0; i < numberOfBootstraps; i++) {
+			Object o = this.bootstrapMethods.get(i);
+			if (o instanceof FunctionalExpression) {
+				localContentsOffset = addBootStrapLambdaEntry(localContentsOffset, (FunctionalExpression) o, fPtr);
+			} else if (o instanceof TypeDeclaration) {
+				localContentsOffset = addBootStrapRecordEntry(localContentsOffset, (TypeDeclaration) o, fPtr);
+			}
+		}
 
 		int attributeLength = localContentsOffset - attributeLengthPosition - 4;
 		this.contents[attributeLengthPosition++] = (byte) (attributeLength >> 24);
