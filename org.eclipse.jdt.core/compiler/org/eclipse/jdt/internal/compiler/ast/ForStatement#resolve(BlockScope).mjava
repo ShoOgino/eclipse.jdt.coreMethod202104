@@ -1,15 +1,12 @@
 	@Override
 	public void resolve(BlockScope upperScope) {
+		LocalVariableBinding[] patternVariablesInTrueScope = null;
+		LocalVariableBinding[] patternVariablesInFalseScope = null;
+
 		if (this.condition != null && this.condition.containsPatternVariable()) {
-			this.condition.traverse(new ASTVisitor() {
-				@Override
-				public boolean visit(
-						InstanceOfExpression instanceOfExpression,
-						BlockScope sc) {
-					instanceOfExpression.resolvePatternVariable(upperScope);
-					return true; // We want to resolve all pattern variables if any inside the condition
-				}
-			}, upperScope);
+			this.condition.collectPatternVariablesToScope(null, upperScope);
+			patternVariablesInTrueScope = this.condition.getPatternVariablesWhenTrue();
+			patternVariablesInFalseScope = this.condition.getPatternVariablesWhenFalse();
 		}
 		// use the scope that will hold the init declarations
 		this.scope = (this.bits & ASTNode.NeededScope) != 0 ? new BlockScope(upperScope) : upperScope;
@@ -21,9 +18,14 @@
 			this.condition.computeConversion(this.scope, type, type);
 		}
 		if (this.increments != null)
-			for (int i = 0, length = this.increments.length; i < length; i++)
-				this.increments[i].resolve(this.scope);
-		if (this.action != null)
-			this.action.resolve(this.scope);
+			for (int i = 0, length = this.increments.length; i < length; i++) {
+				this.increments[i].resolveWithPatternVariablesInScope(patternVariablesInTrueScope, this.scope);
+			}
+
+		if (this.action != null) {
+			this.action.resolveWithPatternVariablesInScope(patternVariablesInTrueScope, this.scope);
+			this.action.injectPatternVariablesIfApplicable(patternVariablesInFalseScope, this.scope,
+					(statement) -> { return !statement.breaksOut(null);});
+		}
 	}
 

@@ -1,10 +1,26 @@
 @Override
 public void resolve(BlockScope scope) {
-	TypeBinding type = this.condition.resolveTypeExpecting(scope, TypeBinding.BOOLEAN);
-	this.condition.computeConversion(scope, type, type);
-	if (this.thenStatement != null)
-		this.thenStatement.resolve(scope);
-	if (this.elseStatement != null)
-		this.elseStatement.resolve(scope);
+	if (this.condition.containsPatternVariable()) {
+		this.condition.collectPatternVariablesToScope(null, scope);
+		LocalVariableBinding[] patternVariablesInTrueScope = this.condition.getPatternVariablesWhenTrue();
+		LocalVariableBinding[] patternVariablesInFalseScope = this.condition.getPatternVariablesWhenFalse();
+		TypeBinding type = this.condition.resolveTypeExpecting(scope, TypeBinding.BOOLEAN);
+		this.condition.computeConversion(scope, type, type);
+
+		if (this.thenStatement != null) {
+			this.thenStatement.resolveWithPatternVariablesInScope(patternVariablesInTrueScope, scope);
+		}
+		if (this.elseStatement != null) {
+			this.elseStatement.resolveWithPatternVariablesInScope(patternVariablesInFalseScope, scope);
+		}
+		if (this.thenStatement != null)
+			this.thenStatement.injectPatternVariablesIfApplicable(patternVariablesInFalseScope, scope,
+				(statement) -> { return statement.doesNotCompleteNormally();});
+		if (this.elseStatement != null)
+			this.elseStatement.injectPatternVariablesIfApplicable(patternVariablesInTrueScope, scope,
+				(statement) -> { return statement.doesNotCompleteNormally();});
+	} else {
+		resolveIfStatement(scope);
+	}
 }
 
