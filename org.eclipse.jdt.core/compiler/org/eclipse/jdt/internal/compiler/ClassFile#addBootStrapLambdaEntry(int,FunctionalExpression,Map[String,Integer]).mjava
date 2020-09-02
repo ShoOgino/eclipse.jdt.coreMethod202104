@@ -1,0 +1,120 @@
+	private int addBootStrapLambdaEntry(int localContentsOffset, FunctionalExpression functional, Map<String, Integer> fPtr) {
+		MethodBinding [] bridges = functional.getRequiredBridges();
+		TypeBinding[] markerInterfaces = null;
+		final int contentsEntries = 10;
+		int indexForAltMetaFactory = fPtr.get(ClassFile.ALTMETAFACTORY_STRING);
+		int indexForMetaFactory = fPtr.get(ClassFile.METAFACTORY_STRING);
+		if ((functional instanceof LambdaExpression
+				&& (((markerInterfaces = ((LambdaExpression) functional).getMarkerInterfaces()) != null))
+				|| bridges != null) || functional.isSerializable) {
+			// may need even more space
+			int extraSpace = 2; // at least 2 more than when the normal metafactory is used, for the bitflags entry
+			if (markerInterfaces != null) {
+				// 2 for the marker interface list size then 2 per marker interface index
+				extraSpace += (2 + 2 * markerInterfaces.length);
+			}
+			if (bridges != null) {
+				// 2 for bridge count then 2 per bridge method type.
+				extraSpace += (2 + 2 * bridges.length);
+			}
+			if (extraSpace + contentsEntries + localContentsOffset >= this.contents.length) {
+				resizeContents(extraSpace + contentsEntries);
+			}
+
+			if (indexForAltMetaFactory == 0) {
+				ReferenceBinding javaLangInvokeLambdaMetafactory = this.referenceBinding.scope.getJavaLangInvokeLambdaMetafactory();
+				indexForAltMetaFactory =
+					this.constantPool.literalIndexForMethodHandle(ClassFileConstants.MethodHandleRefKindInvokeStatic, javaLangInvokeLambdaMetafactory,
+					ConstantPool.ALTMETAFACTORY, ConstantPool.JAVA_LANG_INVOKE_LAMBDAMETAFACTORY_ALTMETAFACTORY_SIGNATURE, false);
+				fPtr.put(ClassFile.ALTMETAFACTORY_STRING, indexForAltMetaFactory);
+			}
+			this.contents[localContentsOffset++] = (byte) (indexForAltMetaFactory >> 8);
+			this.contents[localContentsOffset++] = (byte) indexForAltMetaFactory;
+
+			// u2 num_bootstrap_arguments
+			this.contents[localContentsOffset++] = 0;
+			this.contents[localContentsOffset++] = (byte) (4 + (markerInterfaces==null?0:1+markerInterfaces.length) +
+					                                                   (bridges == null ? 0 : 1 + bridges.length));
+
+			int functionalDescriptorIndex = this.constantPool.literalIndexForMethodType(functional.descriptor.original().signature());
+			this.contents[localContentsOffset++] = (byte) (functionalDescriptorIndex >> 8);
+			this.contents[localContentsOffset++] = (byte) functionalDescriptorIndex;
+
+			int methodHandleIndex = this.constantPool.literalIndexForMethodHandle(functional.binding.original()); // Speak of " implementation" (erased) version here, adaptations described below.
+			this.contents[localContentsOffset++] = (byte) (methodHandleIndex >> 8);
+			this.contents[localContentsOffset++] = (byte) methodHandleIndex;
+
+			char [] instantiatedSignature = functional.descriptor.signature();
+			int methodTypeIndex = this.constantPool.literalIndexForMethodType(instantiatedSignature);
+			this.contents[localContentsOffset++] = (byte) (methodTypeIndex >> 8);
+			this.contents[localContentsOffset++] = (byte) methodTypeIndex;
+
+			int bitflags = 0;
+			if (functional.isSerializable) {
+				bitflags |= ClassFileConstants.FLAG_SERIALIZABLE;
+			}
+			if (markerInterfaces!=null) {
+				bitflags |= ClassFileConstants.FLAG_MARKERS;
+			}
+			if (bridges != null) {
+				bitflags |= ClassFileConstants.FLAG_BRIDGES;
+			}
+			int indexForBitflags = this.constantPool.literalIndex(bitflags);
+
+			this.contents[localContentsOffset++] = (byte)(indexForBitflags>>8);
+			this.contents[localContentsOffset++] = (byte)(indexForBitflags);
+
+			if (markerInterfaces != null) {
+				int markerInterfaceCountIndex =  this.constantPool.literalIndex(markerInterfaces.length);
+				this.contents[localContentsOffset++] = (byte)(markerInterfaceCountIndex>>8);
+				this.contents[localContentsOffset++] = (byte)(markerInterfaceCountIndex);
+				for (int m = 0, maxm = markerInterfaces.length; m < maxm; m++) {
+					int classTypeIndex = this.constantPool.literalIndexForType(markerInterfaces[m]);
+					this.contents[localContentsOffset++] = (byte)(classTypeIndex>>8);
+					this.contents[localContentsOffset++] = (byte)(classTypeIndex);
+				}
+			}
+			if (bridges != null) {
+				int bridgeCountIndex =  this.constantPool.literalIndex(bridges.length);
+				this.contents[localContentsOffset++] = (byte) (bridgeCountIndex >> 8);
+				this.contents[localContentsOffset++] = (byte) (bridgeCountIndex);
+				for (int m = 0, maxm = bridges.length; m < maxm; m++) {
+					char [] bridgeSignature = bridges[m].signature();
+					int bridgeMethodTypeIndex = this.constantPool.literalIndexForMethodType(bridgeSignature);
+					this.contents[localContentsOffset++] = (byte) (bridgeMethodTypeIndex >> 8);
+					this.contents[localContentsOffset++] = (byte) bridgeMethodTypeIndex;
+				}
+			}
+		} else {
+			if (contentsEntries + localContentsOffset >= this.contents.length) {
+				resizeContents(contentsEntries);
+			}
+			if (indexForMetaFactory == 0) {
+				ReferenceBinding javaLangInvokeLambdaMetafactory = this.referenceBinding.scope.getJavaLangInvokeLambdaMetafactory();
+				indexForMetaFactory = this.constantPool.literalIndexForMethodHandle(ClassFileConstants.MethodHandleRefKindInvokeStatic, javaLangInvokeLambdaMetafactory,
+						ConstantPool.METAFACTORY, ConstantPool.JAVA_LANG_INVOKE_LAMBDAMETAFACTORY_METAFACTORY_SIGNATURE, false);
+				fPtr.put(ClassFile.METAFACTORY_STRING, indexForMetaFactory);
+			}
+			this.contents[localContentsOffset++] = (byte) (indexForMetaFactory >> 8);
+			this.contents[localContentsOffset++] = (byte) indexForMetaFactory;
+
+			// u2 num_bootstrap_arguments
+			this.contents[localContentsOffset++] = 0;
+			this.contents[localContentsOffset++] = (byte) 3;
+
+			int functionalDescriptorIndex = this.constantPool.literalIndexForMethodType(functional.descriptor.original().signature());
+			this.contents[localContentsOffset++] = (byte) (functionalDescriptorIndex >> 8);
+			this.contents[localContentsOffset++] = (byte) functionalDescriptorIndex;
+
+			int methodHandleIndex = this.constantPool.literalIndexForMethodHandle(functional.binding instanceof PolymorphicMethodBinding ? functional.binding : functional.binding.original()); // Speak of " implementation" (erased) version here, adaptations described below.
+			this.contents[localContentsOffset++] = (byte) (methodHandleIndex >> 8);
+			this.contents[localContentsOffset++] = (byte) methodHandleIndex;
+
+			char [] instantiatedSignature = functional.descriptor.signature();
+			int methodTypeIndex = this.constantPool.literalIndexForMethodType(instantiatedSignature);
+			this.contents[localContentsOffset++] = (byte) (methodTypeIndex >> 8);
+			this.contents[localContentsOffset++] = (byte) methodTypeIndex;
+		}
+		return localContentsOffset;
+	}
+
