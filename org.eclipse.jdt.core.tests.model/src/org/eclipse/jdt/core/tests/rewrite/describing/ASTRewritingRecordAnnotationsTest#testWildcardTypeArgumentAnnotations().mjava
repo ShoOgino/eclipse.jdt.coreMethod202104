@@ -1,0 +1,102 @@
+	public void testWildcardTypeArgumentAnnotations() throws Exception {
+		if (checkAPILevel()) {
+			return;
+		}
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("import java.lang.annotation.ElementType;\n");
+		buf.append("public record X() {\n");
+		buf.append("	public record Helper<T>() {\n");
+		buf.append("	}\n");
+		buf.append("	public record Base() {\n");
+		buf.append("	}\n");
+		buf.append("	public static void UnboundedWildcard1 (Helper<@Annot ?> x) {\n");
+		buf.append("	}\n");
+		buf.append("	public static void UnboundedWildcard2 (Helper<@Annot1 @Annot ?> x) {\n");
+		buf.append("	}\n");
+		buf.append("	public static void BoundedWildcard1 (Helper<@Annot ? extends Base> x) {\n");
+		buf.append("	}\n");
+		buf.append("	public static void BoundedWildcard2 (Helper<@Annot1 @Annot ? extends Base> x) {\n");
+		buf.append("	}\n");
+		buf.append("}\n");
+		buf.append("@java.lang.annotation.Target (ElementType.TYPE_USE)\n");
+		buf.append("@interface Annot {}\n");
+		buf.append("@java.lang.annotation.Target (ElementType.TYPE_USE)\n");
+		buf.append("@interface Annot1 {}\n");
+
+		ICompilationUnit cu= pack1.createCompilationUnit("X.java", buf.toString(), false, null);
+		CompilationUnit astRoot= createAST(cu);
+		ASTRewrite rewrite= ASTRewrite.create(astRoot.getAST());
+		AST ast= astRoot.getAST();
+		RecordDeclaration type= (RecordDeclaration)findAbstractTypeDeclaration(astRoot, "X");
+		{//Add an use of an annotation.
+			MethodDeclaration methodDeclaration= findMethodDeclaration(type, "UnboundedWildcard1");
+			List parameters= methodDeclaration.parameters();
+			SingleVariableDeclaration singleVariableDeclaration= (SingleVariableDeclaration) parameters.get(0);
+			ParameterizedType parameterizedType= (ParameterizedType) singleVariableDeclaration.getType();
+			WildcardType wildcardType= (WildcardType) parameterizedType.typeArguments().get(0);
+			MarkerAnnotation markerAnnotation= ast.newMarkerAnnotation();
+			markerAnnotation.setTypeName(ast.newSimpleName("Annot2"));
+			rewrite.getListRewrite(wildcardType, WildcardType.ANNOTATIONS_PROPERTY).insertLast(markerAnnotation, null);
+
+			methodDeclaration= findMethodDeclaration(type, "BoundedWildcard1");
+			parameters= methodDeclaration.parameters();
+			singleVariableDeclaration= (SingleVariableDeclaration) parameters.get(0);
+			parameterizedType= (ParameterizedType) singleVariableDeclaration.getType();
+			wildcardType= (WildcardType) parameterizedType.typeArguments().get(0);
+			markerAnnotation= ast.newMarkerAnnotation();
+			markerAnnotation.setTypeName(ast.newSimpleName("Annot2"));
+			rewrite.getListRewrite(wildcardType, WildcardType.ANNOTATIONS_PROPERTY).insertLast(markerAnnotation, null);
+		}
+		{
+			MethodDeclaration methodDeclaration= findMethodDeclaration(type, "UnboundedWildcard2");
+			List parameters= methodDeclaration.parameters();
+			SingleVariableDeclaration singleVariableDeclaration= (SingleVariableDeclaration) parameters.get(0);
+			ParameterizedType parameterizedType= (ParameterizedType) singleVariableDeclaration.getType();
+			WildcardType wildcardType= (WildcardType) parameterizedType.typeArguments().get(0);
+
+			methodDeclaration= findMethodDeclaration(type, "BoundedWildcard2");
+			parameters= methodDeclaration.parameters();
+			singleVariableDeclaration= (SingleVariableDeclaration) parameters.get(0);
+			parameterizedType= (ParameterizedType) singleVariableDeclaration.getType();
+			WildcardType wildcardType2= (WildcardType) parameterizedType.typeArguments().get(0);
+
+			//Remove the use of an annotation
+			rewrite.remove((MarkerAnnotation) wildcardType.annotations().get(1), null);
+			rewrite.remove((MarkerAnnotation) wildcardType2.annotations().get(1), null);
+
+			MarkerAnnotation markerAnnotation= ast.newMarkerAnnotation();
+			markerAnnotation.setTypeName(ast.newSimpleName("Annot2"));
+			MarkerAnnotation markerAnnotation2= ast.newMarkerAnnotation();
+			markerAnnotation2.setTypeName(ast.newSimpleName("Annot2"));
+
+			//Replace the use of an annotation
+			rewrite.replace((MarkerAnnotation) wildcardType.annotations().get(0), markerAnnotation, null);
+			rewrite.replace((MarkerAnnotation) wildcardType2.annotations().get(0), markerAnnotation2, null);
+		}
+		String preview= evaluateRewrite(cu, rewrite);
+		buf = new StringBuffer();
+		buf.append("package test1;\n");
+		buf.append("import java.lang.annotation.ElementType;\n");
+		buf.append("public record X() {\n");
+		buf.append("	public record Helper<T>() {\n");
+		buf.append("	}\n");
+		buf.append("	public record Base() {\n");
+		buf.append("	}\n");
+		buf.append("	public static void UnboundedWildcard1 (Helper<@Annot @Annot2 ?> x) {\n");
+		buf.append("	}\n");
+		buf.append("	public static void UnboundedWildcard2 (Helper<@Annot2 ?> x) {\n");
+		buf.append("	}\n");
+		buf.append("	public static void BoundedWildcard1 (Helper<@Annot @Annot2 ? extends Base> x) {\n");
+		buf.append("	}\n");
+		buf.append("	public static void BoundedWildcard2 (Helper<@Annot2 ? extends Base> x) {\n");
+		buf.append("	}\n");
+		buf.append("}\n");
+		buf.append("@java.lang.annotation.Target (ElementType.TYPE_USE)\n");
+		buf.append("@interface Annot {}\n");
+		buf.append("@java.lang.annotation.Target (ElementType.TYPE_USE)\n");
+		buf.append("@interface Annot1 {}\n");
+		assertEqualString(preview, buf.toString());
+	}
+

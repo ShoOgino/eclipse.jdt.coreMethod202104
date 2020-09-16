@@ -1,0 +1,83 @@
+	public void testTypeArgumentsMethodInvocation() throws Exception {
+		if (checkAPILevel()) {
+			return;
+		}
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+
+		buf.append("import java.lang.annotation.ElementType;\n");
+		buf.append("\n");
+		buf.append("public record X() {\n");
+		buf.append("	public record Bar() {\n");
+		buf.append("	}\n");
+		buf.append("	\n");
+		buf.append("	public record Helper() {\n");
+		buf.append("		public <T> void foo() {\n");
+		buf.append("		}\n");
+		buf.append("	}\n");
+		buf.append("	\n");
+		buf.append("	public void zoo() {\n");
+		buf.append("		Helper o = new Helper();\n");
+		buf.append("		o.<@Annot Bar>foo();\n");
+		buf.append("		o.<@Annot @Annot1 Bar>foo();\n");
+		buf.append("	}\n");
+		buf.append("}\n");
+		buf.append("\n");
+		buf.append("@java.lang.annotation.Target (ElementType.TYPE_USE) \n");
+		buf.append("@interface Annot {}\n");
+		buf.append("\n");
+		buf.append("@java.lang.annotation.Target (ElementType.TYPE_USE) \n");
+		buf.append("@interface Annot1 {}\n");
+
+		ICompilationUnit cu= pack1.createCompilationUnit("X.java", buf.toString(), false, null);
+		CompilationUnit astRoot= createAST(cu);
+		ASTRewrite rewrite= ASTRewrite.create(astRoot.getAST());
+		AST ast= astRoot.getAST();
+		RecordDeclaration type= (RecordDeclaration)findAbstractTypeDeclaration(astRoot, "X");
+		MethodDeclaration methodDeclaration = findMethodDeclaration(type, "zoo");
+		List statemList = methodDeclaration.getBody().statements();
+		{// Add an use of an annotation
+			ExpressionStatement expression= (ExpressionStatement) statemList.get(1);
+			MethodInvocation methodInvocation= (MethodInvocation) expression.getExpression();
+			SimpleType simpleType = (SimpleType) methodInvocation.typeArguments().get(0);
+			MarkerAnnotation markerAnnotation= ast.newMarkerAnnotation();
+			markerAnnotation.setTypeName(ast.newSimpleName("Annot2"));
+			rewrite.getListRewrite(simpleType, SimpleType.ANNOTATIONS_PROPERTY).insertLast(markerAnnotation, null);
+		}
+		{
+			ExpressionStatement expression= (ExpressionStatement) statemList.get(2);
+			MethodInvocation methodInvocation= (MethodInvocation) expression.getExpression();
+			SimpleType simpleType = (SimpleType) methodInvocation.typeArguments().get(0);
+			rewrite.remove((MarkerAnnotation)simpleType.annotations().get(1), null);
+			MarkerAnnotation markerAnnotation= ast.newMarkerAnnotation();
+			markerAnnotation.setTypeName(ast.newSimpleName("Annot2"));
+			rewrite.replace((MarkerAnnotation)simpleType.annotations().get(0), markerAnnotation, null);
+		}
+		String preview= evaluateRewrite(cu, rewrite);
+		buf = new StringBuffer();
+		buf.append("import java.lang.annotation.ElementType;\n");
+		buf.append("\n");
+		buf.append("public record X() {\n");
+		buf.append("	public record Bar() {\n");
+		buf.append("	}\n");
+		buf.append("	\n");
+		buf.append("	public record Helper() {\n");
+		buf.append("		public <T> void foo() {\n");
+		buf.append("		}\n");
+		buf.append("	}\n");
+		buf.append("	\n");
+		buf.append("	public void zoo() {\n");
+		buf.append("		Helper o = new Helper();\n");
+		buf.append("		o.<@Annot @Annot2 Bar>foo();\n");
+		buf.append("		o.<@Annot2 Bar>foo();\n");
+		buf.append("	}\n");
+		buf.append("}\n");
+		buf.append("\n");
+		buf.append("@java.lang.annotation.Target (ElementType.TYPE_USE) \n");
+		buf.append("@interface Annot {}\n");
+		buf.append("\n");
+		buf.append("@java.lang.annotation.Target (ElementType.TYPE_USE) \n");
+		buf.append("@interface Annot1 {}\n");
+		assertEqualString(preview, buf.toString());
+	}
+

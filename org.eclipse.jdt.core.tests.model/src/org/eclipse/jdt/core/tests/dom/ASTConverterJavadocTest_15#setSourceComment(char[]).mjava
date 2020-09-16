@@ -1,0 +1,195 @@
+	/*
+	 * Convert Javadoc source to match Javadoc.toString().
+	 * Store converted comments and their corresponding tags respectively
+	 * in comments and allTags fields
+	 */
+	protected void setSourceComment(char[] source) throws ArrayIndexOutOfBoundsException {
+		this.comments = new ArrayList();
+		this.allTags = new ArrayList();
+		StringBuffer buffer = null;
+		int comment = 0;
+		boolean end = false, lineStarted = false;
+		String tag = null;
+		List tags = new ArrayList();
+		int length = source.length;
+		// https://bugs.eclipse.org/bugs/show_bug.cgi?id=206345
+		// when parsing tags such as @code and @literal,
+		// any tag should be discarded and considered as plain text until
+		// properly closed with closing brace
+		boolean considerTagAsPlainText = false;
+		int openingBraces = 0;
+		char previousChar=0, currentChar=0;
+		for (int i=0; i<length;) {
+			previousChar = currentChar;
+			// get next char
+			currentChar = getNextChar(source, i);
+			i += (this.chars==null) ? 1 : this.chars.length();
+
+			switch (comment) {
+				case 0:
+					switch (currentChar) {
+						case '/':
+							comment = 1; // first char for comments...
+							buffer = new StringBuffer();
+							if (this.chars == null) buffer.append(currentChar);
+							else buffer.append(this.chars);
+							break;
+						case '\'':
+							while (i<length) {
+								// get next char
+								currentChar = getNextChar(source, i);
+								i += (this.chars==null) ? 1 : this.chars.length();
+								if (currentChar == '\\') {
+									// get next char
+									currentChar = getNextChar(source, i);
+									i += (this.chars==null) ? 1 : this.chars.length();
+								} else {
+									if (currentChar == '\'') {
+										break;
+									}
+								}
+							}
+							break;
+						case '"':
+							while (i<length) {
+								// get next char
+								currentChar = getNextChar(source, i);
+								i += (this.chars==null) ? 1 : this.chars.length();
+								if (currentChar == '\\') {
+									// get next char
+									currentChar = getNextChar(source, i);
+									i += (this.chars==null) ? 1 : this.chars.length();
+								} else {
+									if (currentChar == '"') {
+										// get next char
+										currentChar = getNextChar(source, i);
+										if (currentChar == '"') {
+											i += (this.chars==null) ? 1 : this.chars.length();
+										} else {
+											break;
+										}
+									}
+								}
+							}
+							break;
+					}
+					break;
+				case 1: // first '/' has been found...
+					switch (currentChar) {
+						case '/':
+							if (this.chars == null) buffer.append(currentChar);
+							else buffer.append(this.chars);
+							comment = LINE_COMMENT;
+							break;
+						case '*':
+							if (this.chars == null) buffer.append(currentChar);
+							else buffer.append(this.chars);
+							comment = 2; // next step
+							break;
+						default:
+							comment = 0;
+							break;
+					}
+					break;
+				case 2: // '/*' has been found...
+					if (currentChar == '*') {
+						comment = 3; // next step...
+					} else {
+						comment = BLOCK_COMMENT;
+					}
+					if (this.chars == null) buffer.append(currentChar);
+					else buffer.append(this.chars);
+					break;
+				case 3: // '/**' has bee found, verify that's not an empty block comment
+					if (currentChar == '/') { // empty block comment
+						if (this.chars == null) buffer.append(currentChar);
+						else buffer.append(this.chars);
+						this.comments.add(buffer.toString());
+						this.allTags.add(new ArrayList());
+						comment = 0;
+						break;
+					}
+					comment = DOC_COMMENT;
+					// $FALL-THROUGH$ - do not break, directly go to next case...
+				case DOC_COMMENT:
+					if (tag != null) { // a tag name is currently scanned
+						if (currentChar >= 'a' && currentChar <= 'z') {
+							tag += currentChar;
+						} else {
+							if (tag.equalsIgnoreCase(TAG_LITERAL) || tag.equalsIgnoreCase(TAG_CODE)) considerTagAsPlainText = true;
+							tags.add(tag);
+							tag = null;
+						}
+					}
+					// Some characters are special in javadoc comments
+					switch (currentChar) {
+						case '@':
+							if (!lineStarted) {
+								tag = "";
+								lineStarted = true;
+							} else if (previousChar == '{') {
+								// https://bugs.eclipse.org/bugs/show_bug.cgi?id=206345
+								if (considerTagAsPlainText) {
+									openingBraces++;
+								} else {
+									tag = "";
+									lineStarted = true;
+								}
+							}
+							break;
+						case '\r':
+						case '\n':
+							lineStarted = false;
+							break;
+						case '*':
+							break;
+						case '}':
+							// https://bugs.eclipse.org/bugs/show_bug.cgi?id=206345
+							if (considerTagAsPlainText) {
+								if (openingBraces > 0) {
+									openingBraces--;
+								} else {
+									considerTagAsPlainText = false;
+								}
+							}
+							break;
+						default:
+							if (!Character.isWhitespace(currentChar)) {
+								lineStarted = true;
+							}
+					}
+					// $FALL-THROUGH$ - common treatment for block and javadoc comments
+				case BLOCK_COMMENT:
+					if (this.chars == null) buffer.append(currentChar);
+					else buffer.append(this.chars);
+					if (end && currentChar == '/') {
+						comment = 0;
+						lineStarted = false;
+						this.comments.add(buffer.toString());
+						this.allTags.add(tags);
+						tags = new ArrayList();
+					}
+					end = currentChar == '*';
+					break;
+				case LINE_COMMENT:
+					if (currentChar == '\r' || currentChar == '\n') {
+						/*
+						if (currentChar == '\r' && source[i+1] == '\n') {
+							buffer.append(source[++i]);
+						}
+						*/
+						comment = 0;
+						this.comments.add(buffer.toString());
+						this.allTags.add(tags);
+					} else {
+						if (this.chars == null) buffer.append(currentChar);
+						else buffer.append(this.chars);
+					}
+					break;
+				default:
+					// do nothing
+					break;
+			}
+		}
+	}
+

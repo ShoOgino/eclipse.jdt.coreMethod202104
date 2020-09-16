@@ -1,0 +1,63 @@
+	public void testWildcardBoudAnnotation() throws Exception {
+		if (checkAPILevel()) {
+			return;
+		}
+		IPackageFragment pack1= this.sourceFolder.createPackageFragment("test1", false, null);
+		StringBuffer buf= new StringBuffer();
+
+		buf.append("public record X() {\n");
+		buf.append("	public record Helper<T>() {\n");
+		buf.append("	}\n");
+		buf.append("	public record Base() {\n");
+		buf.append("	}\n");
+		buf.append("	public static void foo1 (Helper<? extends @Annot Base> x) {\n");
+		buf.append("	}\n");
+		buf.append("	public static void foo2 (Helper<? extends @Annot1 @Annot Base> x) {\n");
+		buf.append("	}\n");
+		buf.append("}\n");
+
+		ICompilationUnit cu= pack1.createCompilationUnit("X.java", buf.toString(), false, null);
+		CompilationUnit astRoot= createAST(cu);
+		ASTRewrite rewrite= ASTRewrite.create(astRoot.getAST());
+		AST ast= astRoot.getAST();
+		RecordDeclaration type= (RecordDeclaration)findAbstractTypeDeclaration(astRoot, "X");
+		{
+			MethodDeclaration methodDeclaration= findMethodDeclaration(type, "foo1");
+			List parameters= methodDeclaration.parameters();
+			SingleVariableDeclaration singleVariableDeclaration= (SingleVariableDeclaration) parameters.get(0);
+			ParameterizedType parameterizedType= (ParameterizedType) singleVariableDeclaration.getType();
+			WildcardType wildcardType= (WildcardType) parameterizedType.typeArguments().get(0);
+			SimpleType simpleType= (SimpleType) wildcardType.getBound();
+			MarkerAnnotation markerAnnotation= ast.newMarkerAnnotation();
+			markerAnnotation.setTypeName(ast.newSimpleName("Annot2"));
+			rewrite.getListRewrite(simpleType, SimpleType.ANNOTATIONS_PROPERTY).insertLast(markerAnnotation, null);
+		}
+		{
+			MethodDeclaration methodDeclaration= findMethodDeclaration(type, "foo2");
+			List parameters= methodDeclaration.parameters();
+			SingleVariableDeclaration singleVariableDeclaration= (SingleVariableDeclaration) parameters.get(0);
+			ParameterizedType parameterizedType= (ParameterizedType) singleVariableDeclaration.getType();
+			WildcardType wildcardType= (WildcardType) parameterizedType.typeArguments().get(0);
+			SimpleType simpleType= (SimpleType) wildcardType.getBound();
+			//Remove the use of annotation
+			rewrite.remove((MarkerAnnotation) simpleType.annotations().get(1), null);
+			//Replace the use of annotation
+			MarkerAnnotation markerAnnotation= ast.newMarkerAnnotation();
+			markerAnnotation.setTypeName(ast.newSimpleName("Annot2"));
+			rewrite.replace((MarkerAnnotation) simpleType.annotations().get(0), markerAnnotation, null);
+		}
+		String preview= evaluateRewrite(cu, rewrite);
+		buf = new StringBuffer();
+		buf.append("public record X() {\n");
+		buf.append("	public record Helper<T>() {\n");
+		buf.append("	}\n");
+		buf.append("	public record Base() {\n");
+		buf.append("	}\n");
+		buf.append("	public static void foo1 (Helper<? extends @Annot @Annot2 Base> x) {\n");
+		buf.append("	}\n");
+		buf.append("	public static void foo2 (Helper<? extends @Annot2 Base> x) {\n");
+		buf.append("	}\n");
+		buf.append("}\n");
+		assertEqualString(preview, buf.toString());
+	}
+
