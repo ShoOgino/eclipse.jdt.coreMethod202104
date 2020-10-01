@@ -8,41 +8,49 @@
 			bestEntryPosition = this.sourceEntryPosition;
 		}
 
-		char[] fieldDescriptor = JavaNames.binaryNameToFieldDescriptor(binaryName);
-		JavaIndex index = JavaIndex.getIndex();
-		Nd nd = index.getNd();
-		try (IReader lock = nd.acquireReadLock()) {
-			NdTypeId typeId = index.findType(fieldDescriptor);
+		long start = -1;
+		if (NameLookup.VERBOSE)
+			start = System.currentTimeMillis();
+		try {
+			char[] fieldDescriptor = JavaNames.binaryNameToFieldDescriptor(binaryName);
+			JavaIndex index = JavaIndex.getIndex();
+			Nd nd = index.getNd();
+			try (IReader lock = nd.acquireReadLock()) {
+				NdTypeId typeId = index.findType(fieldDescriptor);
 
-			if (typeId != null) {
-				List<NdType> types = typeId.getTypes();
-				for (NdType next : types) {
-					NdResourceFile resource = next.getFile();
+				if (typeId != null) {
+					List<NdType> types = typeId.getTypes();
+					for (NdType next : types) {
+						NdResourceFile resource = next.getFile();
 
-					IPath path = resource.getPath();
-					Integer nextRoot = this.mapPathsToRoots.getMostSpecific(path);
-					if (nextRoot != null) {
-						IPackageFragmentRoot root = this.roots[nextRoot];
+						IPath path = resource.getPath();
+						Integer nextRoot = this.mapPathsToRoots.getMostSpecific(path);
+						if (nextRoot != null) {
+							IPackageFragmentRoot root = this.roots[nextRoot];
 
-						ClasspathEntry classpathEntry = (ClasspathEntry)root.getRawClasspathEntry();
-						AccessRuleSet ruleSet = classpathEntry.getAccessRuleSet();
-						AccessRestriction accessRestriction = ruleSet == null? null : ruleSet.getViolatedRestriction(binaryName);
-						TypeRef typeRef = TypeRef.create(next);
-						String fileName = new String(binaryName) + ".class"; //$NON-NLS-1$
-						IBinaryType binaryType = new IndexBinaryType(typeRef, fileName.toCharArray());
-						NameEnvironmentAnswer nextAnswer = new NameEnvironmentAnswer(binaryType, accessRestriction);
+							ClasspathEntry classpathEntry = (ClasspathEntry)root.getRawClasspathEntry();
+							AccessRuleSet ruleSet = classpathEntry.getAccessRuleSet();
+							AccessRestriction accessRestriction = ruleSet == null? null : ruleSet.getViolatedRestriction(binaryName);
+							TypeRef typeRef = TypeRef.create(next);
+							String fileName = new String(binaryName) + ".class"; //$NON-NLS-1$
+							IBinaryType binaryType = new IndexBinaryType(typeRef, fileName.toCharArray());
+							NameEnvironmentAnswer nextAnswer = new NameEnvironmentAnswer(binaryType, accessRestriction);
 
-						boolean useNewAnswer = isBetter(result, bestEntryPosition, nextAnswer, nextRoot);
+							boolean useNewAnswer = isBetter(result, bestEntryPosition, nextAnswer, nextRoot);
 
-						if (useNewAnswer) {
-							bestEntryPosition = nextRoot;
-							result = nextAnswer;
+							if (useNewAnswer) {
+								bestEntryPosition = nextRoot;
+								result = nextAnswer;
+							}
 						}
 					}
 				}
+			} catch (JavaModelException e) {
+				// project doesn't exist
 			}
-		} catch (JavaModelException e) {
-			// project doesn't exist
+		} finally {
+			if (NameLookup.VERBOSE)
+				this.timeSpentInFindType += System.currentTimeMillis()-start;
 		}
 
 		return result;

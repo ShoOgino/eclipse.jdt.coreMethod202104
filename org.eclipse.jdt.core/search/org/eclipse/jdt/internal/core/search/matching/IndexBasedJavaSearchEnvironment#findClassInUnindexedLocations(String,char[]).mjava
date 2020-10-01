@@ -2,70 +2,78 @@
 	 * Search unindexed locations on the classpath for the given class
 	 */
 	private NameEnvironmentAnswer findClassInUnindexedLocations(String qualifiedTypeName, char[] typeName) {
-		String
-			binaryFileName = null, qBinaryFileName = null,
-			sourceFileName = null, qSourceFileName = null,
-			qPackageName = null;
-		NameEnvironmentAnswer suggestedAnswer = null;
-		Iterator <ClasspathLocation> iter = this.unindexedEntries.iterator();
-		while (iter.hasNext()) {
-			ClasspathLocation location = iter.next();
-			NameEnvironmentAnswer answer;
-			if (location instanceof ClasspathSourceDirectory) {
-				if (sourceFileName == null) {
-					qSourceFileName = qualifiedTypeName; // doesn't include the file extension
-					sourceFileName = qSourceFileName;
-					qPackageName =  ""; //$NON-NLS-1$
-					if (qualifiedTypeName.length() > typeName.length) {
-						int typeNameStart = qSourceFileName.length() - typeName.length;
-						qPackageName =  qSourceFileName.substring(0, typeNameStart - 1);
-						sourceFileName = qSourceFileName.substring(typeNameStart);
+		long start = -1;
+		if (NameLookup.VERBOSE)
+			start = System.currentTimeMillis();
+		try {
+			String
+				binaryFileName = null, qBinaryFileName = null,
+				sourceFileName = null, qSourceFileName = null,
+				qPackageName = null;
+			NameEnvironmentAnswer suggestedAnswer = null;
+			Iterator <ClasspathLocation> iter = this.unindexedEntries.iterator();
+			while (iter.hasNext()) {
+				ClasspathLocation location = iter.next();
+				NameEnvironmentAnswer answer;
+				if (location instanceof ClasspathSourceDirectory) {
+					if (sourceFileName == null) {
+						qSourceFileName = qualifiedTypeName; // doesn't include the file extension
+						sourceFileName = qSourceFileName;
+						qPackageName =  ""; //$NON-NLS-1$
+						if (qualifiedTypeName.length() > typeName.length) {
+							int typeNameStart = qSourceFileName.length() - typeName.length;
+							qPackageName =  qSourceFileName.substring(0, typeNameStart - 1);
+							sourceFileName = qSourceFileName.substring(typeNameStart);
+						}
 					}
-				}
-				org.eclipse.jdt.internal.compiler.env.ICompilationUnit workingCopy = (org.eclipse.jdt.internal.compiler.env.ICompilationUnit) this.workingCopies.get(qualifiedTypeName);
-				if (workingCopy != null) {
-					answer = new NameEnvironmentAnswer(workingCopy, null /*no access restriction*/);
+					org.eclipse.jdt.internal.compiler.env.ICompilationUnit workingCopy = (org.eclipse.jdt.internal.compiler.env.ICompilationUnit) this.workingCopies.get(qualifiedTypeName);
+					if (workingCopy != null) {
+						answer = new NameEnvironmentAnswer(workingCopy, null /*no access restriction*/);
+					} else {
+						answer = location.findClass(
+							sourceFileName, // doesn't include the file extension
+							qPackageName,
+							null, // TODO(SHMOD): don't have a module name, but while looking in unindexed classpath locations, this is probably OK
+							qSourceFileName,  // doesn't include the file extension
+							false,
+							null /*no module filtering on source dir*/);
+					}
 				} else {
-					answer = location.findClass(
-						sourceFileName, // doesn't include the file extension
-						qPackageName,
-						null, // TODO(SHMOD): don't have a module name, but while looking in unindexed classpath locations, this is probably OK
-						qSourceFileName,  // doesn't include the file extension
-						false,
-						null /*no module filtering on source dir*/);
-				}
-			} else {
-				if (binaryFileName == null) {
-					qBinaryFileName = qualifiedTypeName + SUFFIX_STRING_class;
-					binaryFileName = qBinaryFileName;
-					qPackageName =  ""; //$NON-NLS-1$
-					if (qualifiedTypeName.length() > typeName.length) {
-						int typeNameStart = qBinaryFileName.length() - typeName.length - 6; // size of ".class"
-						qPackageName =  qBinaryFileName.substring(0, typeNameStart - 1);
-						binaryFileName = qBinaryFileName.substring(typeNameStart);
+					if (binaryFileName == null) {
+						qBinaryFileName = qualifiedTypeName + SUFFIX_STRING_class;
+						binaryFileName = qBinaryFileName;
+						qPackageName =  ""; //$NON-NLS-1$
+						if (qualifiedTypeName.length() > typeName.length) {
+							int typeNameStart = qBinaryFileName.length() - typeName.length - 6; // size of ".class"
+							qPackageName =  qBinaryFileName.substring(0, typeNameStart - 1);
+							binaryFileName = qBinaryFileName.substring(typeNameStart);
+						}
 					}
+					answer =
+						location.findClass(
+							binaryFileName,
+							qPackageName,
+							null,  // TODO(SHMOD): don't have a module name, but while looking in unindexed classpath locations, this is probably OK
+							qBinaryFileName,
+							false,
+							null /*no module filtering, this env is not module aware*/);
 				}
-				answer =
-					location.findClass(
-						binaryFileName,
-						qPackageName,
-						null,  // TODO(SHMOD): don't have a module name, but while looking in unindexed classpath locations, this is probably OK
-						qBinaryFileName,
-						false,
-						null /*no module filtering, this env is not module aware*/);
+				if (answer != null) {
+					if (!answer.ignoreIfBetter()) {
+						if (answer.isBetter(suggestedAnswer))
+							return answer;
+					} else if (answer.isBetter(suggestedAnswer))
+						// remember suggestion and keep looking
+						suggestedAnswer = answer;
+				}
 			}
-			if (answer != null) {
-				if (!answer.ignoreIfBetter()) {
-					if (answer.isBetter(suggestedAnswer))
-						return answer;
-				} else if (answer.isBetter(suggestedAnswer))
-					// remember suggestion and keep looking
-					suggestedAnswer = answer;
-			}
+			if (suggestedAnswer != null)
+				// no better answer was found
+				return suggestedAnswer;
+			return null;
+		} finally {
+			if (NameLookup.VERBOSE)
+				this.timeSpentInFindClassInUnindexedLocations += System.currentTimeMillis()-start;
 		}
-		if (suggestedAnswer != null)
-			// no better answer was found
-			return suggestedAnswer;
-		return null;
 	}
 
