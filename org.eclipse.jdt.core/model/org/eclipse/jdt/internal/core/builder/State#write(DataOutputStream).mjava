@@ -195,6 +195,55 @@ void write(DataOutputStream out) throws IOException {
 				else
 					out.writeUTF(""); //$NON-NLS-1$
 			}
+			char[] patchName = c.patchModuleName == null ? CharOperation.NO_CHAR : c.patchModuleName.toCharArray();
+			writeName(patchName, out);
+			if (c.limitModuleNames != null) {
+				out.writeInt(c.limitModuleNames.size());
+				for (String name : c.limitModuleNames) {
+					out.writeUTF(name);
+				}
+			} else {
+				out.writeInt(0);
+			}
+			if (c.updates != null) {
+				List<Consumer<IUpdatableModule>> pu = c.updates.getList(UpdateKind.PACKAGE, false);
+				if (pu != null) {
+					Map<String, List<Consumer<IUpdatableModule>>> map = pu.stream().
+							collect(Collectors.groupingBy(
+									update -> CharOperation.charToString(((IUpdatableModule.AddExports)update).getName())));
+					out.writeInt(map.size());
+					map.entrySet().stream().forEach(entry -> {
+						String pkgName = entry.getKey();
+						try {
+							writeName(pkgName.toCharArray(), out);
+							char[][] targetModules = entry.getValue().stream()
+									.map(consumer -> ((IUpdatableModule.AddExports) consumer).getTargetModules())
+									.filter(targets -> targets != null)
+									.reduce((f,s) -> CharOperation.arrayConcat(f,s))
+									.orElse(null);
+							writeNames(targetModules, out);
+						} catch (IOException e) {
+							// ignore
+						}
+
+					});
+				} else {
+					out.writeInt(0);
+				}
+				List<Consumer<IUpdatableModule>> mu = c.updates.getList(UpdateKind.MODULE, false);
+				if (mu != null) {
+					out.writeInt(mu.size());
+					for (Consumer<IUpdatableModule> cons : mu) {
+						AddReads m = (AddReads) cons;
+						writeName(m.getTarget(), out);
+					}
+				} else {
+					out.writeInt(0);
+				}
+			} else {
+				out.writeInt(0);
+				out.writeInt(0);
+			}
 		}
 
 /*
