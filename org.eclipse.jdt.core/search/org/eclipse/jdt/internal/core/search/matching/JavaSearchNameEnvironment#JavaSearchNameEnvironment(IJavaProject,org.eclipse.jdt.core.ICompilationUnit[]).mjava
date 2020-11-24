@@ -4,7 +4,53 @@ public JavaSearchNameEnvironment(IJavaProject javaProject, org.eclipse.jdt.core.
 		this.moduleToClassPathLocations = new HashMap<>();
 	}
 	this.modules = new HashMap<>();
+	this.packageNameToClassPathLocations = new HashMap<>();
+
+	long start = 0;
+	if (NameLookup.VERBOSE) {
+		Util.verbose(" BUILDING JavaSearchNameEnvironment");  //$NON-NLS-1$
+		Util.verbose(" -> project: " + javaProject);  //$NON-NLS-1$
+		Util.verbose(" -> working copy size: " + (copies == null ? 0 : copies.length));  //$NON-NLS-1$
+		start = System.currentTimeMillis();
+	}
+
 	this.locationSet = computeClasspathLocations((JavaProject) javaProject);
 	this.workingCopies = getWorkingCopyMap(copies);
+
+	// if there are working copies, we need to index their packages too
+	if(this.workingCopies.size() > 0) {
+		Optional<ClasspathLocation> firstSrcLocation = this.locationSet.stream().filter(cp -> cp instanceof ClasspathSourceDirectory).findFirst();
+		if(!firstSrcLocation.isPresent()) {
+			/*
+			 * Specifying working copies but not providing a project with a source folder is not supported by the current implementation.
+			 * I'm not sure if this is valid use case, though.
+			 *
+			 * However, there is one test that (potentially) relies on this behavior. At lease it expects this constructor to NOT fail.
+			 *
+			 * org.eclipse.jdt.core.tests.model.ClassFileTests.testWorkingCopy11()
+			 */
+			//throw new IllegalArgumentException("Missing source folder for searching working copies: " + javaProject); //$NON-NLS-1$
+		    if (NameLookup.VERBOSE) {
+				Util.verbose(" -> ignoring working copies; no ClasspathSourceDirectory on project classpath ");  //$NON-NLS-1$
+		    }
+		} else {
+			for (String qualifiedMainTypeName : this.workingCopies.keySet()) {
+				int typeNameStart = qualifiedMainTypeName.lastIndexOf('/');
+				if(typeNameStart > 0) {
+					String pkgName = qualifiedMainTypeName.substring(0, typeNameStart);
+					addPackageNameToIndex(firstSrcLocation.get(), pkgName);
+				} else {
+					addPackageNameToIndex(firstSrcLocation.get(), IPackageFragment.DEFAULT_PACKAGE_NAME);
+				}
+			}
+		}
+	}
+
+
+    if (NameLookup.VERBOSE) {
+		Util.verbose(" -> pkg roots size: " + (this.locationSet == null ? 0 : this.locationSet.size()));  //$NON-NLS-1$
+		Util.verbose(" -> pkgs size: " + this.packageNameToClassPathLocations.size());  //$NON-NLS-1$
+        Util.verbose(" -> spent: " + (System.currentTimeMillis() - start) + "ms");  //$NON-NLS-1$ //$NON-NLS-2$
+    }
 }
 

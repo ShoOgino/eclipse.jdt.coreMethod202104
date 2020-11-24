@@ -1,0 +1,67 @@
+private static ClasspathLocation[] readBinaryLocations(IProject project, DataInputStream in, ClasspathMultiDirectory[] sourceLocations) throws IOException, CoreException {
+	int length = in.readInt();
+	ClasspathLocation[] locations = new ClasspathLocation[length];
+	IWorkspaceRoot root = project.getWorkspace().getRoot();
+	for (int i = 0; i < length; i++) {
+		switch (in.readByte()) {
+			case SOURCE_FOLDER :
+				locations[i] = sourceLocations[in.readInt()];
+				break;
+			case BINARY_FOLDER :
+				IPath path = new Path(in.readUTF());
+				IContainer outputFolder = path.segmentCount() == 1
+					? (IContainer) root.getProject(path.toString())
+					: (IContainer) root.getFolder(path);
+					locations[i] = ClasspathLocation.forBinaryFolder(outputFolder, in.readBoolean(),
+							readRestriction(in), new Path(in.readUTF()), in.readBoolean());
+				break;
+			case EXTERNAL_JAR :
+				String jarPath = in.readUTF();
+				if (Util.isJrt(jarPath)) {
+					locations[i] = ClasspathLocation.forJrtSystem(jarPath, readRestriction(in), new Path(in.readUTF()), in.readUTF());
+				} else {
+					locations[i] = ClasspathLocation.forLibrary(jarPath, in.readLong(),
+							readRestriction(in), new Path(in.readUTF()), in.readBoolean(), in.readUTF());
+				}
+				break;
+			case INTERNAL_JAR :
+					locations[i] = ClasspathLocation.forLibrary(root.getFile(new Path(in.readUTF())),
+							readRestriction(in), new Path(in.readUTF()), in.readBoolean(), in.readUTF());
+					break;
+		}
+		ClasspathLocation loc = locations[i];
+		char[] patchName = readName(in);
+		loc.patchModuleName = patchName.length > 0 ? new String(patchName) : null;
+		int limitSize = in.readInt();
+		if (limitSize != 0) {
+			loc.limitModuleNames = new LinkedHashSet<>(limitSize);
+			for (int j = 0; j < limitSize; j++) {
+				loc.limitModuleNames.add(in.readUTF());
+			}
+		} else {
+			loc.limitModuleNames = null;
+		}
+		IUpdatableModule.UpdatesByKind updates = new IUpdatableModule.UpdatesByKind();
+		List<Consumer<IUpdatableModule>> packageUpdates = null;
+		int packageUpdatesSize = in.readInt();
+		if (packageUpdatesSize != 0) {
+			packageUpdates = updates.getList(UpdateKind.PACKAGE, true);
+			for (int j = 0; j < packageUpdatesSize; j++) {
+				char[] pkgName = readName(in);
+				char[][] targets = readNames(in);
+				packageUpdates.add(new AddExports(pkgName, targets));
+			}
+		}
+		List<Consumer<IUpdatableModule>> moduleUpdates = null;
+		int moduleUpdatesSize = in.readInt();
+		if (moduleUpdatesSize != 0) {
+			moduleUpdates = updates.getList(UpdateKind.MODULE, true);
+			char[] modName = readName(in);
+			moduleUpdates.add(new AddReads(modName));
+		}
+		if (packageUpdates != null || moduleUpdates != null)
+			loc.updates = updates;
+	}
+	return locations;
+}
+
