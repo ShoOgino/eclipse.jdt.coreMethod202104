@@ -3,16 +3,32 @@ public boolean execute(IProgressMonitor progressMonitor) {
 	SubMonitor subMonitor = SubMonitor.convert(progressMonitor, 3);
 
 	boolean isComplete = COMPLETE;
-	this.executionTime = 0;
+	this.executionTime.set(0);
+	long startTime = System.currentTimeMillis();
+
 	Index[] indexes = getIndexes(subMonitor.split(1));
 	try {
 		int max = indexes.length;
 		SubMonitor loopMonitor = subMonitor.split(2).setWorkRemaining(max);
-		for (int i = 0; i < max; i++) {
-			isComplete &= search(indexes[i], loopMonitor.split(1));
+		this.parallel = canRunInParallel();
+		if(this.parallel) {
+			isComplete = performParallelSearch(indexes, loopMonitor);
+		} else {
+			for (int i = 0; i < max; i++) {
+				isComplete &= search(indexes[i], this.requestor, loopMonitor.split(1));
+			}
 		}
-		if (JobManager.VERBOSE)
-			Util.verbose("-> execution time: " + this.executionTime + "ms - " + this);//$NON-NLS-1$//$NON-NLS-2$
+
+		if (JobManager.VERBOSE) {
+			if (this.parallel) {
+				long wallClockTime = System.currentTimeMillis() - startTime;
+				Util.verbose("-> execution time: " + wallClockTime + "ms - " + this);//$NON-NLS-1$//$NON-NLS-2$
+				Util.verbose("-> cumulative execution time (" + ForkJoinPool.getCommonPoolParallelism() + "): " //$NON-NLS-1$//$NON-NLS-2$
+						+ this.executionTime.get() + "ms - " + this);//$NON-NLS-1$
+			} else {
+				Util.verbose("-> execution time: " + this.executionTime.get() + "ms - " + this);//$NON-NLS-1$//$NON-NLS-2$
+			}
+		}
 		return isComplete;
 	} finally {
 		SubMonitor.done(progressMonitor);
