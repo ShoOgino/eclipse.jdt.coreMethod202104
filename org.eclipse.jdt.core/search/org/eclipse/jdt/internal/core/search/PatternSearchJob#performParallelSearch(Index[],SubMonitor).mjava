@@ -1,0 +1,45 @@
+private boolean performParallelSearch(Index[] indexes, SubMonitor loopMonitor) {
+	boolean isComplete = true;
+	List<Future<IndexResult>> futures = new ArrayList<>(indexes.length);
+	ForkJoinPool commonPool = ForkJoinPool.commonPool();
+	ParallelSearchMonitor monitor = new ParallelSearchMonitor(loopMonitor);
+
+	try {
+		if (this.scope instanceof IParallelizable) {
+			((IParallelizable) this.scope).initBeforeSearch(monitor);
+		}
+		for (Index index : indexes) {
+			futures.add(commonPool.submit(() -> search(index, monitor)));
+		}
+
+		for (Future<IndexResult> future : futures) {
+			loopMonitor.split(1);
+			try {
+				IndexResult result = future.get();
+				isComplete &= result.complete;
+				result.matches.forEach(m -> {
+					boolean continueSearch = this.requestor.acceptIndexMatch(m.documentPath, m.indexRecord, this.participant, m.access);
+					if(!continueSearch) {
+						throw new OperationCanceledException();
+					}
+				});
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+				throw new OperationCanceledException();
+			} catch (ExecutionException e) {
+				if(e.getCause() instanceof RuntimeException) {
+					throw (RuntimeException) e.getCause();
+				}
+				throw new RuntimeException(e);
+			}
+		}
+	} catch (JavaModelException e) {
+		monitor.setCanceled(true);
+		throw new RuntimeException("Error initializing scope: " + this.scope, e); //$NON-NLS-1$
+	} catch (Exception e) {
+		monitor.setCanceled(true);
+		throw e;
+	}
+	return isComplete;
+}
+
