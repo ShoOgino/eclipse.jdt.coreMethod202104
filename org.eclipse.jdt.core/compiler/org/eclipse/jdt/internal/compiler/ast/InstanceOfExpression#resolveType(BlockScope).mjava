@@ -2,7 +2,7 @@
 public TypeBinding resolveType(BlockScope scope) {
 	this.constant = Constant.NotAConstant;
 	if (this.elementVariable != null)
-		addSecretInstanceOfPatternExpressionValue(scope);
+	addSecretInstanceOfPatternExpressionValue(scope);
 	resolvePatternVariable(scope);
 	TypeBinding checkedType = this.type.resolveType(scope, true /* check bounds*/);
 	if (this.expression instanceof CastExpression) {
@@ -20,12 +20,15 @@ public TypeBinding resolveType(BlockScope scope) {
 	if (this.secretInstanceOfPatternExpressionValue != null && expressionType != TypeBinding.NULL)
 		this.secretInstanceOfPatternExpressionValue.type = expressionType;
 
-	if (!checkedType.isReifiable()) {
+		if (!checkedType.isReifiable()) {
 		CompilerOptions options = scope.compilerOptions();
-		// Report same as before for older compliances
-		if (options.complianceLevel < ClassFileConstants.JDK16) {
+		// If preview is disabled, report same as before, even at Java 14
+		if (options.complianceLevel < ClassFileConstants.JDK14 || !options.enablePreviewFeatures) {
 			scope.problemReporter().illegalInstanceOfGenericType(checkedType, this);
 		} else {
+			if (options.isAnyEnabled(IrritantSet.PREVIEW)) {
+				scope.problemReporter().previewFeatureUsed(this.type.sourceStart, this.type.sourceEnd);
+			}
 			if (expressionType != TypeBinding.NULL) {
 				boolean isLegal = checkCastTypesCompatibility(scope, checkedType, expressionType, this.expression, true);
 				if (!isLegal || (this.bits & ASTNode.UnsafeCast) != 0) {
@@ -40,11 +43,6 @@ public TypeBinding resolveType(BlockScope scope) {
 				|| !checkCastTypesCompatibility(scope, checkedType, expressionType, null, true)) {
 			scope.problemReporter().notCompatibleTypesError(this, expressionType, checkedType);
 		}
-	}
-	// finally, the subtype check
-	if (this.secretInstanceOfPatternExpressionValue != null &&
-			expressionType.isSubtypeOf(checkedType, false)) {
-		scope.problemReporter().patternCannotBeSubtypeOfExpression(this.elementVariable.binding, this);
 	}
 	return this.resolvedType = TypeBinding.BOOLEAN;
 }
