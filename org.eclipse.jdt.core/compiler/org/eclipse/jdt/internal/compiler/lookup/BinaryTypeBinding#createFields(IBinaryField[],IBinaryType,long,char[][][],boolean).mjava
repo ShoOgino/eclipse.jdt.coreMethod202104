@@ -1,13 +1,13 @@
-private void createFields(IBinaryField[] iFields, IBinaryType binaryType, long sourceLevel, char[][][] missingTypeNames) {
+private VariableBinding[] createFields(IBinaryField[] iFields, IBinaryType binaryType, long sourceLevel, char[][][] missingTypeNames, boolean isComponent) {
 	if (!isPrototype()) throw new IllegalStateException();
 	boolean save = this.environment.mayTolerateMissingType;
 	this.environment.mayTolerateMissingType = true;
+	VariableBinding[] tFields = isComponent ? Binding.NO_COMPONENTS : Binding.NO_FIELDS;
 	try {
-		this.fields = Binding.NO_FIELDS;
 		if (iFields != null) {
 			int size = iFields.length;
 			if (size > 0) {
-				FieldBinding[] fields1 = new FieldBinding[size];
+				VariableBinding[] fields1 = isComponent ? new RecordComponentBinding[size] : new FieldBinding[size];
 				boolean use15specifics = sourceLevel >= ClassFileConstants.JDK1_5;
 				boolean hasRestrictedAccess = hasRestrictedAccess();
 				int firstAnnotatedFieldIndex = -1;
@@ -23,13 +23,19 @@ private void createFields(IBinaryField[] iFields, IBinaryType binaryType, long s
 					TypeBinding type = fieldSignature == null
 						? this.environment.getTypeFromSignature(binaryField.getTypeName(), 0, -1, false, this, missingTypeNames, walker)
 						: this.environment.getTypeFromTypeSignature(new SignatureWrapper(fieldSignature), Binding.NO_TYPE_VARIABLES, this, missingTypeNames, walker);
-					FieldBinding field =
-						new FieldBinding(
-							binaryField.getName(),
-							type,
-							binaryField.getModifiers() | ExtraCompilerModifiers.AccUnresolved,
-							this,
-							binaryField.getConstant());
+					VariableBinding field =
+							isComponent ?
+									new RecordComponentBinding(
+										binaryField.getName(),
+										type,
+										binaryField.getModifiers() | ExtraCompilerModifiers.AccUnresolved,
+										this) :
+									new FieldBinding(
+										binaryField.getName(),
+										type,
+										binaryField.getModifiers() | ExtraCompilerModifiers.AccUnresolved,
+										this,
+										binaryField.getConstant());
 					if (declAnnotations != null) {
 						for (IBinaryAnnotation annotation : declAnnotations) {
 							char[] typeName = annotation.getTypeName();
@@ -59,12 +65,12 @@ private void createFields(IBinaryField[] iFields, IBinaryType binaryType, long s
 						field.modifiers |= ExtraCompilerModifiers.AccGenericSignature;
 					fields1[i] = field;
 				}
-				this.fields = fields1;
+				tFields = fields1;
 				// second pass for reifying annotations, since may refer to fields being constructed (147875)
 				if (firstAnnotatedFieldIndex >= 0) {
 					for (int i = firstAnnotatedFieldIndex; i <size; i++) {
 						IBinaryField binaryField = iFields[i];
-						this.fields[i].setAnnotations(createAnnotations(binaryField.getAnnotations(), this.environment, missingTypeNames), false);
+						tFields[i].setAnnotations(createAnnotations(binaryField.getAnnotations(), this.environment, missingTypeNames), false);
 					}
 				}
 			}
@@ -72,5 +78,6 @@ private void createFields(IBinaryField[] iFields, IBinaryType binaryType, long s
 	} finally {
 		this.environment.mayTolerateMissingType = save;
 	}
+	return tFields;
 }
 

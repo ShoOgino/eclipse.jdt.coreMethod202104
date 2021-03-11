@@ -156,8 +156,17 @@ void cachePartsFrom(IBinaryType binaryType, boolean needFieldsAndMethods) {
 		}
 
 		if (needFieldsAndMethods) {
+			IRecordComponent[] iComponents = null;
+			if (binaryType.isRecord()) {
+				iComponents = binaryType.getRecordComponents();
+				if (iComponents != null) {
+					VariableBinding[] createFields = createFields(iComponents, binaryType, sourceLevel, missingTypeNames, true);
+					this.components = (RecordComponentBinding[]) createFields;
+				}
+			}
 			IBinaryField[] iFields = binaryType.getFields();
-			createFields(iFields, binaryType, sourceLevel, missingTypeNames);
+			VariableBinding[] createdFields = createFields(iFields, binaryType, sourceLevel, missingTypeNames, false);
+			this.fields = (FieldBinding[]) createdFields;
 			IBinaryMethod[] iMethods = createMethods(binaryType.getMethods(), binaryType, sourceLevel, missingTypeNames);
 			boolean isViewedAsDeprecated = isViewedAsDeprecated();
 			if (isViewedAsDeprecated) {
@@ -175,6 +184,15 @@ void cachePartsFrom(IBinaryType binaryType, boolean needFieldsAndMethods) {
 				}
 			}
 			if (this.environment.globalOptions.isAnnotationBasedNullAnalysisEnabled) {
+				if (iComponents != null) {
+					for (int i = 0; i < iComponents.length; i++) {
+						// below 1.8 we still might use an annotation walker to discover external annotations:
+						ITypeAnnotationWalker fieldWalker = ITypeAnnotationWalker.EMPTY_ANNOTATION_WALKER;
+						if (sourceLevel < ClassFileConstants.JDK1_8)
+							fieldWalker = binaryType.enrichWithExternalAnnotationsFor(walker, iFields[i], this.environment);
+						scanFieldForNullAnnotation(iComponents[i], this.components[i], this.isEnum(), fieldWalker);
+					}
+				}
 				if (iFields != null) {
 					for (int i = 0; i < iFields.length; i++) {
 						// below 1.8 we still might use an annotation walker to discover external annotations:
@@ -230,6 +248,8 @@ void cachePartsFrom(IBinaryType binaryType, boolean needFieldsAndMethods) {
 			scanTypeForContainerAnnotation(binaryType, missingTypeNames);
 	} finally {
 		// protect against incorrect use of the needFieldsAndMethods flag, see 48459
+		if (this.components == null)
+			this.components = Binding.NO_COMPONENTS;
 		if (this.fields == null)
 			this.fields = Binding.NO_FIELDS;
 		if (this.methods == null)
